@@ -38,7 +38,7 @@ ON public.tenant_onboarding_progress
 FOR SELECT 
 USING (
   tenant_id IN (
-    SELECT tenant_id FROM public.staff WHERE auth_user_id = auth.uid() AND is_owner = true
+    SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin')
   )
 );
 
@@ -47,7 +47,7 @@ ON public.tenant_onboarding_progress
 FOR UPDATE 
 USING (
   tenant_id IN (
-    SELECT tenant_id FROM public.staff WHERE auth_user_id = auth.uid() AND is_owner = true
+    SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin')
   )
 );
 
