@@ -10,7 +10,7 @@ ADD COLUMN IF NOT EXISTS sales_notes TEXT;
 
 -- Part 2: Create tenant_onboarding_progress table
 CREATE TABLE IF NOT EXISTS public.tenant_onboarding_progress (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE UNIQUE NOT NULL,
     salon_info_completed BOOLEAN DEFAULT false,
     branding_completed BOOLEAN DEFAULT false,

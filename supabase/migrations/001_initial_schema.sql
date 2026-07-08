@@ -14,7 +14,7 @@ $$ language 'plpgsql';
 
 -- 1. tenants
 CREATE TABLE public.tenants (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug VARCHAR(255) UNIQUE NOT NULL,
     custom_domain VARCHAR(255) UNIQUE,
     name VARCHAR(255) NOT NULL,
@@ -26,7 +26,7 @@ CREATE TRIGGER update_tenants_modtime BEFORE UPDATE ON public.tenants FOR EACH R
 
 -- 2. tenant_branding
 CREATE TABLE public.tenant_branding (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
     logo_url VARCHAR(1024),
     primary_color VARCHAR(50),
@@ -57,7 +57,7 @@ CREATE TRIGGER update_users_profile_modtime BEFORE UPDATE ON public.users_profil
 
 -- 4. staff
 CREATE TABLE public.staff (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
     user_profile_id UUID REFERENCES public.users_profile(id) ON DELETE SET NULL,
     name VARCHAR(255) NOT NULL,
@@ -74,7 +74,7 @@ CREATE TRIGGER update_staff_modtime BEFORE UPDATE ON public.staff FOR EACH ROW E
 
 -- 5. services
 CREATE TABLE public.services (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     name_tr VARCHAR(255),
@@ -90,7 +90,7 @@ CREATE TRIGGER update_services_modtime BEFORE UPDATE ON public.services FOR EACH
 
 -- 6. customers
 CREATE TABLE public.customers (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
     user_profile_id UUID REFERENCES public.users_profile(id) ON DELETE SET NULL,
     name VARCHAR(255) NOT NULL,
@@ -103,7 +103,7 @@ CREATE TRIGGER update_customers_modtime BEFORE UPDATE ON public.customers FOR EA
 
 -- 7. appointments
 CREATE TABLE public.appointments (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
     customer_id UUID REFERENCES public.customers(id) ON DELETE SET NULL,
     staff_id UUID REFERENCES public.staff(id) ON DELETE SET NULL,
@@ -123,7 +123,7 @@ CREATE TRIGGER update_appointments_modtime BEFORE UPDATE ON public.appointments 
 
 -- 8. campaigns
 CREATE TABLE public.campaigns (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     status VARCHAR(50) DEFAULT 'draft',
@@ -132,7 +132,7 @@ CREATE TABLE public.campaigns (
 
 -- 9. reminders
 CREATE TABLE public.reminders (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
     appointment_id UUID REFERENCES public.appointments(id) ON DELETE CASCADE,
     status VARCHAR(50) DEFAULT 'pending',
@@ -142,7 +142,7 @@ CREATE TABLE public.reminders (
 
 -- 10. whatsapp_logs
 CREATE TABLE public.whatsapp_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
     to_number VARCHAR(50),
     message TEXT,
@@ -152,7 +152,7 @@ CREATE TABLE public.whatsapp_logs (
 
 -- 11. calendar_integrations
 CREATE TABLE public.calendar_integrations (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
     staff_id UUID REFERENCES public.staff(id) ON DELETE CASCADE,
     provider VARCHAR(50) DEFAULT 'google',
@@ -166,7 +166,7 @@ CREATE TRIGGER update_calendar_integrations_modtime BEFORE UPDATE ON public.cale
 
 -- 12. ai_recommendations
 CREATE TABLE public.ai_recommendations (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
     context TEXT,
     recommendation TEXT,
@@ -175,7 +175,7 @@ CREATE TABLE public.ai_recommendations (
 
 -- 13. customer_segments
 CREATE TABLE public.customer_segments (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
     name VARCHAR(255),
     criteria JSONB,
@@ -184,7 +184,7 @@ CREATE TABLE public.customer_segments (
 
 -- 14. subscriptions
 CREATE TABLE public.subscriptions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
     plan_id VARCHAR(50),
     status VARCHAR(50) DEFAULT 'active',
@@ -196,7 +196,7 @@ CREATE TRIGGER update_subscriptions_modtime BEFORE UPDATE ON public.subscription
 
 -- 15. payments
 CREATE TABLE public.payments (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
     amount INTEGER NOT NULL,
     currency VARCHAR(10) DEFAULT 'TRY',
@@ -207,7 +207,7 @@ CREATE TABLE public.payments (
 
 -- 16. audit_logs
 CREATE TABLE public.audit_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
     user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
     action VARCHAR(255),

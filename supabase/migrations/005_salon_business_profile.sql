@@ -2,7 +2,7 @@
 -- Description: Adds tenant_business_profiles table for salon websites
 
 CREATE TABLE IF NOT EXISTS public.tenant_business_profiles (
-    id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
+    id uuid NOT NULL DEFAULT gen_random_uuid(),
     tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
     short_description text,
     about_text text,

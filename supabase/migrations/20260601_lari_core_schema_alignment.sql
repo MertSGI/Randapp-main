@@ -49,7 +49,7 @@ ALTER TABLE public.staff_services ENABLE ROW LEVEL SECURITY;
 
 -- Create availability_rules
 CREATE TABLE IF NOT EXISTS public.availability_rules (
-    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id uuid REFERENCES public.tenants(id) ON DELETE CASCADE,
     staff_id uuid REFERENCES public.staff(id) ON DELETE CASCADE,
     weekday integer NOT NULL, -- 0-6 (Sun-Sat)
@@ -70,7 +70,7 @@ ADD COLUMN IF NOT EXISTS source text;
 
 -- Create customer_memory
 CREATE TABLE IF NOT EXISTS public.customer_memory (
-    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id uuid REFERENCES public.tenants(id) ON DELETE CASCADE,
     customer_id uuid REFERENCES public.customers(id) ON DELETE CASCADE,
     preferences jsonb DEFAULT '{}'::jsonb,
@@ -85,7 +85,7 @@ ALTER TABLE public.customer_memory ENABLE ROW LEVEL SECURITY;
 
 -- Create payment_events
 CREATE TABLE IF NOT EXISTS public.payment_events (
-    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     provider text NOT NULL,
     event_type text NOT NULL,
     provider_event_id text UNIQUE,
@@ -101,7 +101,7 @@ ALTER TABLE public.payment_events ENABLE ROW LEVEL SECURITY;
 
 -- Create business_verification_reviews
 CREATE TABLE IF NOT EXISTS public.business_verification_reviews (
-    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id uuid REFERENCES public.tenants(id) ON DELETE CASCADE,
     status text NOT NULL,
     risk_status text,
@@ -137,7 +137,7 @@ ALTER TABLE public.notification_templates ENABLE ROW LEVEL SECURITY;
 
 -- Create notification_logs
 CREATE TABLE IF NOT EXISTS public.notification_logs (
-    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id uuid REFERENCES public.tenants(id) ON DELETE CASCADE,
     template_id text REFERENCES public.notification_templates(id) ON DELETE SET NULL,
     channel text,
