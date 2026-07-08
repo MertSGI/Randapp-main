@@ -136,7 +136,7 @@ To ensure that the LARİ multi-tenant architecture remains secure and leak-proof
     *   `SELECT / INSERT / UPDATE`: Owner-restricted. No public leaks.
 
 ### Supabase Storage Bucket Policies
-To enforce folder-level access restrictions directly inside our bucket objects:
+To enforce folder-level access restrictions directly inside our bucket objects (`storage.objects`):
 
 #### 1. Public Bucket (`lari-public-media`)
 *   **SELECT**: `true` (universal reading access on Edge CDNs for mock/published merchant reservation layout).

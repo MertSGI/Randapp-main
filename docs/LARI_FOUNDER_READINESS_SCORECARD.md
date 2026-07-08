@@ -13,9 +13,9 @@ Dear Founder: The LARİ core SaaS layer is structurally robust. This document tr
 | **Can I onboard a pilot manually today?** | **YES**. Salons can use their local system console to set branches, create catalogues, and manage client lists. Follow the operational guide: `docs/FIRST_MANUAL_PILOT_OPERATING_PACK.md`. | **Staging Ready** |
 | **Can a customer self-register today?** | **YES**. The self-service `/register` page runs perfectly, instantly creating tenant profiles and directing owners to the setup console. | **Structurally Ready**|
 | **Can real payments be charged today?** | **NO**. Live Iyzico API keys are isolated to prevent unsafe card exposure. Staging checkouts use secure mock environments. | **Needs External Setup** |
-| **Can subdomains open on the public internet?** | **NO**. Dynamic subdomains are calculated correctly in code, but require a Wildcard DNS (`*.randevulari.com`) record to resolve dynamically. | **Needs External Setup** |
+| **Can subdomains open on the public internet today?** | **NO**. Dynamic subdomains are calculated correctly in code, but require a Wildcard DNS (`*.randevulari.com`) record to resolve dynamically. | **Needs External Setup** |
 | **Can custom domains go live today?** | **NO**. Domains requested are tracked, but DNS pointers require real server-side proxy config. | **Needs Implementation** |
-| **Can real emails/WhatsApp/SMS go out?** | **NO**. To prevent stray charges and spam during pre-live staging, all notifications are stored in LARİ's local communication outbox panel. | **Needs External Setup** |
+| **Can real emails/WhatsApp messages be sent today?** | **NO**. To prevent stray charges and spam during pre-live staging, all notifications are stored in LARİ's local communication outbox panel. | **Needs External Setup** |
 | **Can we migrate to Supabase today?** | **YES**. Connect custom environment strings to transition data storage to your external Postgres DB securely. | **Structurally Ready** |
 
 ---

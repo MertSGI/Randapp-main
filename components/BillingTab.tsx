@@ -281,8 +281,8 @@ const BillingTab: React.FC = () => {
             </h3>
             <p className="text-indigo-700 dark:text-indigo-400 text-xs md:text-sm mt-1">
               {language === 'tr' 
-                ? 'Hesabınız Super Admin tarafından özel bir anlaşma veya manuel ödeme yöntemiyle aktif edilmiştir.' 
-                : 'Your account has been manually activated by the Super Admin.'}
+                ? 'Hesabınız Super Admin tarafından özel bir anlaşma veya manuel ödeme yöntemiyle (offline_payment) aktif edilmiştir.' 
+                : 'Your account has been manually activated by the Super Admin (offline_payment).'}
             </p>
           </div>
         )}
@@ -294,7 +294,7 @@ const BillingTab: React.FC = () => {
             </h3>
             <p className="text-purple-700 dark:text-purple-400 text-xs md:text-sm mt-1">
               {language === 'tr' 
-                ? 'İşletmeniz destek programımız, pilot ortaklık veya hediye lisans kapsamında değerlendirilmiştir. Tüm paket imkanlarından sınırsızca yararlanabilirsiniz.' 
+                ? 'İşletmeniz destek programımız, pilot ortaklık veya hediye lisans (complimentary) kapsamında değerlendirilmiştir. Tüm paket imkanlarından sınırsızca yararlanabilirsiniz.' 
                 : 'Your business has been designated for our complimentary or pilot group.'}
             </p>
           </div>

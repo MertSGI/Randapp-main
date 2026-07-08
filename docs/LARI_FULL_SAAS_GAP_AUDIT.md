@@ -83,7 +83,7 @@ Currently, LARİ leverages a robust, simulated **Local Sandbox Mode** backed by 
 |:---|:---|:---|:---|
 | **Outbox Queue Layout** | Multi-channel communication events logged securely in outbox database. | Missing live external routing handlers connecting `queued`/`rendered` events to Twilio, NetbGSM, InfoBip, WhatsApp Business API, or Resend SMTP. | **P0** — SMS/Email Delivery. |
 | **Delivery Status & Retries** | Status flags exist (`queued`, `sent`, `failed`). | Real webhook endpoints from SMS/Email providers must update status trackers to handle temporary delivery blocks. | **P2** — Operational visibility. |
-| **Localized Communication Guard**| Dynamic Turkish-to-English translation mapping is fully established. | Missing granular frequency control (e.g., ensure no customer gets more than 2 SMS notifications per hour to prevent spam). | **P2** — Abuse prevention. |
+| **Localized Communication Guard**| Dynamic Turkish-to-English language translation mapping is fully established. | Missing granular frequency control (e.g., ensure no customer gets more than 2 SMS notifications per hour to prevent spam). | **P2** — Abuse prevention. |
 
 ---
 

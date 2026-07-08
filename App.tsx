@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+// Target Turkey market domain: randevulari.com / brand: LARİ / lari
 
 // Layouts
 import MarketingLayout from './components/layouts/MarketingLayout';

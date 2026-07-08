@@ -6,7 +6,7 @@ An operational playbook guiding the commercial and technical scaling of LARİ fr
 
 ## Part 1 — Staged Operational Rollout
 
-### Phase A — First Manual Pilot Readiness
+### Phase A — first manual pilot readiness
 *   **Goal**: Ensure platform flows (manual registration, onboarding tutorials, and basic schedules) are ready for physical demoing on a tablet inside a friendly local beauty salon.
 *   **Prerequisites**: Core QA scripts run green.
 *   **Exact Deliverables**:
@@ -23,7 +23,7 @@ An operational playbook guiding the commercial and technical scaling of LARİ fr
 
 ---
 
-### Phase B — Supabase Staging Cutover
+### Phase B — Supabase staging cutover
 *   **Goal**: Transition database storage from client-side `localStorage` to a reliable remote cloud PostgreSQL instance on Supabase.
 *   **Prerequisites**: Active Supabase Developer account created by founder.
 *   **Exact Deliverables**:
@@ -36,7 +36,7 @@ An operational playbook guiding the commercial and technical scaling of LARİ fr
 
 ---
 
-### Phase C — Iyzico Sandbox Payment Rehearsal
+### Phase C — Iyzico sandbox payment rehearsal
 *   **Goal**: Rigorously test subscriptions, downgrades, and trial grace collections using Iyzico's isolated merchant test environment.
 *   **Prerequisites**: Dynamic Express server running on staging container.
 *   **Exact Deliverables**:
@@ -49,7 +49,7 @@ An operational playbook guiding the commercial and technical scaling of LARİ fr
 
 ---
 
-### Phase D — DNS & Wildcard Subdomain Rehearsal
+### Phase D — DNS/wildcard subdomain rehearsal
 *   **Goal**: Establish wildcard routing, mapping paths like `sacvemakyaj.randevulari.com` natively to separate salon tenants on the internet.
 *   **Prerequisites**: Purchased domain `randevulari.com` on Cloudflare or public Registrar.
 *   **Exact Deliverables**:
@@ -62,7 +62,7 @@ An operational playbook guiding the commercial and technical scaling of LARİ fr
 
 ---
 
-### Phase E — Transactional Email & SMS Provider Rehearsal
+### Phase E — transactional email provider rehearsal
 *   **Goal**: Transition outbox logging tasks to actual mobile delivery networks (WhatsApp/SMS APIs).
 *   **Prerequisites**: Approved business credentials from Turkish SMS gateway provider (e.g., NetbGSM, VATANSMS) or Resend SMTP.
 *   **Exact Deliverables**:
@@ -75,7 +75,7 @@ An operational playbook guiding the commercial and technical scaling of LARİ fr
 
 ---
 
-### Phase F — First Real Salon Onboarding
+### Phase F — first real salon onboarding
 *   **Goal**: Handover a live, cloud-connected LARİ account to a real beauty center or salon for active daily customer booking management.
 *   **Prerequisites**: Staging Supabase migrations validated; support pathways fully online.
 *   **Exact Deliverables**:
@@ -88,7 +88,7 @@ An operational playbook guiding the commercial and technical scaling of LARİ fr
 
 ---
 
-### Phase G — Production Launch
+### Phase G — production launch
 *   **Goal**: Enable public registration and payment gateway processing on `randevulari.com`.
 *   **Prerequisites**: Dynamic automated billing workers operational; legal KVKK/ToS rules approved.
 *   **Exact Deliverables**:
@@ -101,7 +101,7 @@ An operational playbook guiding the commercial and technical scaling of LARİ fr
 
 ---
 
-### Phase H — Global & LARİ Expansion
+### Phase H — global/LARİ expansion
 *   **Goal**: Scale the system to multi-lingual regions (EN) and support other service fields (e.g., medical spas, clinical consults).
 *   **Prerequisites**: Market config engines enabled.
 *   **Exact Deliverables**:

@@ -545,7 +545,7 @@ Platformun güvenliğini sarsacak, veri sızıntısına veya aşırı yüklenmey
 Sisteme yeni kaydolan işletmeler 14 günlük ücretsiz deneme süresi kazanırlar. Deneme süresinin sonunda aboneliğin devam edebilmesi için bir ödeme planı seçilmesi gereklidir.
 
 2. ÜCRET VE FATURALANDIRMA
-Seçilen plana ait aylık ücretler, fatura kesim tarihinde tanımlı karttan tahsil edilir. İptal talebi fatura tarihinden en geç 3 gün önce yapılmalıdır. Ödemesi başarısız olan hesaplar 7 günlük dunning süresinden sonra kısıtlanabilir.`
+Seçilen plana ait aylık ücretler, fatura kesim tarihinde tanımlı karttan tahsil edilir. İptal talebi fatura tarihinden en geç 3 gün önce yapılmalıdır. Ödemesi başarısız olan hesaplar yedi günlük dunning süresinden sonra kısıtlanabilir.`
       }
     ];
 
