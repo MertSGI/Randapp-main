@@ -228,6 +228,7 @@ const STAGING_DOCS = [
   'docs/REAL_SUPABASE_STAGING_EXECUTION_OPERATOR_GUIDE.md',
   'docs/SUPABASE_STAGING_AUTH_SEED_PLAN.md',
   'docs/SUPABASE_RLS_IDENTITY_MODEL_DECISION.md',
+  'supabase/migrations/20260619_lari_rls_policy_draft.sql',
 ];
 
 for (const filePath of STAGING_DOCS) {

@@ -52,10 +52,19 @@ Follow these exact steps when launching a fresh Supabase staging database:
 4. Execute the following SQL in the **Supabase SQL Editor** to insert the corresponding Super Admin profile:
    ```sql
    -- Paste the Copied UUID as the id parameter
-   INSERT INTO public.users_profile (id, tenant_id, name, role, active)
-   VALUES ('<PASTED-SUPER-ADMIN-UUID>', NULL, 'Lari Staging Super Admin', 'super_admin', true)
-   ON CONFLICT (id) DO UPDATE SET role = 'super_admin';
-   ```
+    INSERT INTO public.users_profile (id, tenant_id, name, role, active)
+    VALUES (
+      '<SUPER-ADMIN-AUTH-UUID>',
+      NULL,
+      'LARİ Super Admin',
+      'super_admin',
+      true
+    )
+    ON CONFLICT (id) DO UPDATE
+    SET tenant_id = NULL,
+        role = 'super_admin',
+        active = true;
+    ```
 
 ### Step 2.4: Creating the Tenant Owner Auth User
 1. Go to **Supabase Dashboard > Authentication > Users > Add User**.
@@ -70,8 +79,17 @@ Follow these exact steps when launching a fresh Supabase staging database:
 
    -- Link owner UUID to Tenant ID
    INSERT INTO public.users_profile (id, tenant_id, name, role, active)
-   VALUES ('<PASTED-TENANT-OWNER-UUID>', 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', 'Melis Owner', 'tenant_owner', true)
-   ON CONFLICT (id) DO UPDATE SET tenant_id = 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', role = 'tenant_owner';
+   VALUES (
+     '<TENANT-OWNER-AUTH-UUID>',
+     'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa',
+     'Melis Owner',
+     'tenant_owner',
+     true
+   )
+   ON CONFLICT (id) DO UPDATE
+   SET tenant_id = 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa',
+       role = 'tenant_owner',
+       active = true;
    ```
 
 ---

@@ -39,6 +39,7 @@ const filesToAudit = [
   'supabase/tests/rls_tenant_isolation_scenarios.sql',
   'supabase/migrations/001_initial_schema.sql',
   'supabase/migrations/005_salon_business_profile.sql',
+  'supabase/migrations/20260619_lari_rls_policy_draft.sql',
   'supabase/migrations/20260622_paymentless_production_rls_identity_alignment.sql',
   'supabase/migrations/20260601_lari_core_schema_alignment.sql',
   'docs/SUPABASE_AUTH_RLS_BOOTSTRAP_RUNBOOK.md',
