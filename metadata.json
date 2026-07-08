@@ -1,0 +1,6 @@
+{
+  "name": "Mustafa Ali Yılmaz Hair Design",
+  "description": "Premium hair design, epilation, and manicure services with AI-powered appointment scheduling and WhatsApp notifications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

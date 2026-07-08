@@ -1,0 +1,9 @@
+{
+  "merchantId": "sandbox-merchant-123",
+  "eventType": "subscription.created",
+  "subscriptionReferenceCode": "59a7f3ec-sub",
+  "orderReferenceCode": "74b6s-order",
+  "customerReferenceCode": "tenant-001",
+  "createdDate": 1690000000000,
+  "status": "ACTIVE"
+}

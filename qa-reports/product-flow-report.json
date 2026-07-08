@@ -1,0 +1,97 @@
+{
+  "metadata": {
+    "timestamp": "2026-06-02T13:29:27.047Z",
+    "baseUrl": "http://localhost:4040",
+    "viewports": "Mobile(390), Desktop(1440)",
+    "roles": [
+      "guest",
+      "admin",
+      "superadmin"
+    ],
+    "status": "fail"
+  },
+  "routeMatrix": [
+    {
+      "path": "/#/",
+      "pass": true,
+      "note": "Found expected text"
+    },
+    {
+      "path": "/#/features",
+      "pass": true,
+      "note": "Found expected text"
+    },
+    {
+      "path": "/#/pricing",
+      "pass": true,
+      "note": "Found expected text"
+    },
+    {
+      "path": "/#/register?planId=professional",
+      "pass": true,
+      "note": "Found expected text"
+    },
+    {
+      "path": "/#/book",
+      "pass": true,
+      "note": "Found expected text"
+    },
+    {
+      "path": "/#/super-admin/go-live",
+      "pass": false,
+      "note": "Missing typical terms"
+    },
+    {
+      "path": "/#/tenant_pilot_demo",
+      "pass": false,
+      "note": "Missing typical terms"
+    },
+    {
+      "path": "/#/pilot/customer",
+      "pass": false,
+      "note": "Missing typical terms"
+    }
+  ],
+  "flowMatrix": [
+    {
+      "flow": "Registration → tenant shell created → checkout handoff",
+      "pass": true,
+      "evidence": "Checkout handoff invoked. Current URL: http://localhost:4040/#/login",
+      "risk": "None"
+    },
+    {
+      "flow": "admin setup -> site preview consistency",
+      "pass": true,
+      "evidence": "TenantService resolves mock registration to active_tenant",
+      "risk": "Relies on local browser storage temporarily"
+    }
+  ],
+  "mobileMatrix": [
+    {
+      "viewport": "390x844",
+      "noHorizontalOverflow": true,
+      "heroVisible": true
+    }
+  ],
+  "securityMatrix": [
+    {
+      "test": "No raw card inputs",
+      "pass": true
+    },
+    {
+      "test": "No secrets exposed",
+      "pass": true,
+      "notes": "[]"
+    },
+    {
+      "test": "No old brand in UI",
+      "pass": true,
+      "notes": "[]"
+    },
+    {
+      "test": "No forbidden wording in UI",
+      "pass": false,
+      "notes": "[\"/#/book: hesap askıda\"]"
+    }
+  ]
+}

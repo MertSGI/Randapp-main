@@ -1,0 +1,293 @@
+1:import React, { useState, useEffect } from 'react';
+2:import { useTenant } from '../contexts/TenantContext';
+3:import { subscriptionService, TenantSubscription, TenantUsage } from '../services/subscriptionService';
+4:import { planService, PricingPlan } from '../services/planService';
+5:import { resolvePaymentCta } from '../utils/paymentCtaResolver';
+7:const BillingTab: React.FC = () => {
+8:  const { tenant } = useTenant();
+9:  const [subscription, setSubscription] = useState<TenantSubscription | null>(null);
+10:  const [currentPlan, setCurrentPlan] = useState<PricingPlan | null>(null);
+11:  const [usage, setUsage] = useState<TenantUsage | null>(null);
+12:  const [plans, setPlans] = useState<PricingPlan[]>([]);
+13:  const [loading, setLoading] = useState(true);
+14:  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+16:  useEffect(() => {
+17:    if (tenant) {
+18:      loadBillingData();
+19:    }
+20:  }, [tenant]);
+22:  const loadBillingData = async () => {
+23:    if (!tenant) return;
+24:    setLoading(true);
+25:    
+26:    const sub = await subscriptionService.getCurrentSubscription(tenant.id);
+27:    setSubscription(sub);
+28:    
+29:    const plan = await subscriptionService.getPlanForTenant(tenant.id);
+30:    setCurrentPlan(plan);
+31:    
+32:    const currentUsage = await subscriptionService.getTenantUsage(tenant.id);
+33:    setUsage(currentUsage);
+34:    
+35:    setPlans(planService.getActivePlans());
+36:    
+37:    setLoading(false);
+38:  };
+40:  const handleCheckout = async (planId: string) => {
+41:    if (!tenant) return;
+42:    setCheckoutError(null);
+44:    const isMock = (import.meta as any).env.VITE_PAYMENT_PROVIDER === 'mock' || !(import.meta as any).env.VITE_PAYMENT_PROVIDER;
+46:    // Presentation mode block
+47:    if (isMock) {
+48:        window.alert('Ödeme entegrasyonu henüz yapılandırılmadı. iyzico ve Supabase Edge Functions aktif edildiğinde bu buton güvenli ödeme akışını başlatacaktır.');
+49:        return;
+50:    }
+52:    const testValidation = (await import('../services/paymentSandboxTestService')).paymentSandboxTestService.validatePlanReferenceCodes(planId);
+53:    if (!testValidation.valid) {
+54:        setCheckoutError('Bu paket için ödeme sağlayıcı referans kodları eksik.');
+55:        return;
+56:    }
+58:    try {
+59:      const url = await subscriptionService.startCheckout(tenant.id, planId);
+60:      if (url) {
+61:        window.location.href = url;
+62:      }
+63:    } catch (err: any) {
+64:       console.error("Checkout failed", err);
+65:       setCheckoutError(err.message || 'Ödeme oturumu başlatılırken bir hata oluştu.');
+66:    }
+67:  };
+69:  const handleBillingPortal = async () => {
+70:    if (!tenant) return;
+71:    await subscriptionService.openBillingPortal(tenant.id);
+72:  };
+74:  if (loading) {
+75:    return <div className="p-8 text-center text-gray-500">Yükleniyor...</div>;
+76:  }
+78:  return (
+79:    <div className="space-y-8">
+80:      {/* Dev Only Status Control */}
+81:      {(import.meta as any).env.VITE_DATA_MODE !== 'supabase' && (
+82:        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 flex items-center justify-between">
+83:          <div className="text-purple-800 text-sm font-medium">
+84:             [Dev Only] Test Mock Subscription Status
+85:          </div>
+86:          <select 
+87:            value={subscription?.status || 'active'}
+88:            onChange={(e) => setSubscription(prev => prev ? {...prev, status: e.target.value as any} : null)}
+89:            className="text-sm bg-white border border-purple-300 rounded px-2 py-1 outline-none text-gray-800"
+90:          >
+91:            <option value="trialing">Trialing</option>
+92:            <option value="active">Active</option>
+93:            <option value="past_due">Past Due</option>
+94:            <option value="cancelled">Cancelled</option>
+95:            <option value="expired">Expired</option>
+96:            <option value="none">None</option>
+97:          </select>
+98:        </div>
+99:      )}
+101:      {/* Current Status */}
+102:      <div className="bg-white dark:bg-slate-800 shadow-sm rounded-lg border border-gray-200 dark:border-slate-700 p-6">
+103:        <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6">Mevcut Abonelik Durumu</h2>
+104:        
+105:        {(import.meta as any).env.VITE_PAYMENT_PROVIDER === 'mock' && (
+106:          <div className="mb-6 bg-yellow-50 border border-yellow-500 text-yellow-800 p-4 rounded-md text-sm">
+107:            <strong>Bilgi:</strong> Ödeme altyapısı test modundadır. Canlı ödeme henüz aktif değildir. Kart bilgisi alınmaz.
+108:          </div>
+109:        )}
+111:        {checkoutError && (
+112:          <div className="mb-6 bg-red-50 border border-red-500 p-4 rounded-md">
+113:            <h3 className="text-red-900 font-bold">İşlem Başarısız</h3>
+114:            <p className="text-red-800 text-sm mt-1">{checkoutError}</p>
+115:          </div>
+116:        )}
+118:        {subscription?.status === 'past_due' && (
+119:          <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-md">
+120:            <h3 className="text-red-800 font-medium">Ödeme Gecikmesi</h3>
+121:            <p className="text-red-700 text-sm mt-1">Son ödemeniz gerçekleştirilemedi. Hizmetinizin kesintiye uğramaması için lütfen ödeme bilgilerinizi güncelleyin.</p>
+122:          </div>
+123:        )}
+125:        {subscription?.status === 'expired' && (
+126:          <div className="mb-6 bg-red-100 border border-red-500 p-4 rounded-md">
+127:            <h3 className="text-red-900 font-bold">Abonelik Süresi Doldu</h3>
+128:            <p className="text-red-800 text-sm mt-1">Süreniz dolduğu için hesabınız askıya alınmıştır. Hizmetinize devam etmek için yeni bir plan seçin.</p>
+129:          </div>
+130:        )}
+132:        {subscription?.status === 'cancelled' && (
+133:          <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-md">
+134:            <h3 className="text-red-800 font-medium">Abonelik İptal Edildi</h3>
+135:            <p className="text-red-700 text-sm mt-1">Aboneliğiniz sonlandırılmıştır. Sistem erişiminiz kısıtlanmıştır, hizmetinize devam etmek için lütfen yeni bir plan seçin.</p>
+136:          </div>
+137:        )}
+139:        {subscription?.status === 'trialing' && subscription?.trialEnd && (
+140:          <div className="mb-6 bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-md">
+141:            <h3 className="text-blue-800 font-medium">Deneme Süresi Aktif</h3>
+142:            <p className="text-blue-700 text-sm mt-1">{new Date(subscription.trialEnd).toLocaleDateString('tr-TR')} tarihine kadar ücretsiz deneme süreniz devam etmektedir.</p>
+143:          </div>
+144:        )}
+146:        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+147:          <div>
+148:            <div className="mb-4">
+149:              <p className="text-sm text-gray-500 dark:text-gray-400">Aktif Plan</p>
+150:              <p className="text-lg font-bold text-gray-900 dark:text-white">{currentPlan?.name || 'Ücretsiz / Deneme'}</p>
+151:            </div>
+152:            <div className="mb-4">
+153:              <p className="text-sm text-gray-500 dark:text-gray-400">Durum</p>
+154:              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium uppercase ${
+155:                subscription?.status === 'active' ? 'bg-green-100 text-green-800' :
+156:                subscription?.status === 'trialing' ? 'bg-blue-100 text-blue-800' :
+157:                subscription?.status === 'past_due' ? 'bg-yellow-100 text-yellow-800' :
+158:                'bg-gray-100 text-gray-800'
+159:              }`}>
+160:                {subscription?.status || 'Bilinmiyor'}
+161:              </span>
+162:            </div>
+163:            <div className="mb-4">
+164:              <p className="text-sm text-gray-500 dark:text-gray-400">Aylık Tutar</p>
+165:              <p className="text-lg font-semibold text-gray-900 dark:text-white">₺{currentPlan?.monthlyPrice || 0}</p>
+166:              <p className="text-xs text-gray-500">Kurulum ücreti ({currentPlan?.setupFee} ₺) tek seferliktir.</p>
+167:            </div>
+168:            
+169:            <div className="flex gap-4 mt-6">
+170:              <button 
+171:                onClick={handleBillingPortal}
+172:                className="bg-white text-gray-700 border border-gray-300 dark:bg-slate-700 dark:text-white dark:border-slate-600 px-4 py-2 rounded-md font-medium text-sm hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors"
+173:              >
+174:                Fatura / Ödeme Yönetimi
+175:              </button>
+176:              <button 
+177:                onClick={() => window.open(`https://wa.me/${(import.meta as any).env.VITE_SALES_WHATSAPP_NUMBER || ''}`, '_blank')}
+178:                className="bg-white text-gray-700 border border-gray-300 dark:bg-slate-700 dark:text-white dark:border-slate-600 px-4 py-2 rounded-md font-medium text-sm hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors"
+179:              >
+180:                Satış Ekibiyle Görüş
+181:              </button>
+182:            </div>
+183:          </div>
+184:          
+185:          <div className="bg-gray-50 dark:bg-slate-900 p-4 rounded-lg border border-gray-200 dark:border-slate-700">
+186:             <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Kullanım Limitleri</h3>
+187:             
+188:             <div className="mb-4">
+189:               <div className="flex justify-between text-sm mb-1">
+190:                 <span className="text-gray-600 dark:text-gray-400">Çalışanlar</span>
+191:                 <span className="text-gray-900 dark:text-white">{usage?.staffCount} / {currentPlan?.maxStaff}</span>
+192:               </div>
+193:               <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2">
+194:                 <div className="bg-accent h-2 rounded-full" style={{ width: `${Math.min(100, ((usage?.staffCount || 0) / (currentPlan?.maxStaff || 1)) * 100)}%` }}></div>
+195:               </div>
+196:             </div>
+198:             <div className="mb-4">
+199:               <div className="flex justify-between text-sm mb-1">
+200:                 <span className="text-gray-600 dark:text-gray-400">Hizmetler</span>
+201:                 <span className="text-gray-900 dark:text-white">{usage?.serviceCount} / {currentPlan?.maxServices}</span>
+202:               </div>
+203:               <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2">
+204:                 <div className="bg-accent h-2 rounded-full" style={{ width: `${Math.min(100, ((usage?.serviceCount || 0) / (currentPlan?.maxServices || 1)) * 100)}%` }}></div>
+205:               </div>
+206:             </div>
+208:             <div className="mb-4">
+209:               <div className="flex justify-between text-sm mb-1">
+210:                 <span className="text-gray-600 dark:text-gray-400">Aylık Randevu (Bu Ay)</span>
+211:                 <span className="text-gray-900 dark:text-white">{usage?.monthlyAppointmentsCount} / {currentPlan?.maxMonthlyAppointments}</span>
+212:               </div>
+213:               <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2">
+214:                 <div className="bg-green-500 h-2 rounded-full" style={{ width: `${Math.min(100, ((usage?.monthlyAppointmentsCount || 0) / (currentPlan?.maxMonthlyAppointments || 1)) * 100)}%` }}></div>
+215:               </div>
+216:             </div>
+218:             {currentPlan?.aiRecommendationsEnabled && (
+219:               <div className="mb-4">
+220:                 <div className="flex justify-between text-sm mb-1">
+221:                   <span className="text-gray-600 dark:text-gray-400">AI İstek Kotası</span>
+222:                   <span className="text-gray-900 dark:text-white">{usage?.aiUsageCount} / {currentPlan?.aiMonthlyQuota || 'Sınırsız'}</span>
+223:                 </div>
+224:                 <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2">
+225:                   <div className="bg-purple-500 h-2 rounded-full" style={{ width: `${currentPlan?.aiMonthlyQuota ? Math.min(100, ((usage?.aiUsageCount || 0) / currentPlan.aiMonthlyQuota) * 100) : 0}%` }}></div>
+226:                 </div>
+227:               </div>
+228:             )}
+229:          </div>
+230:        </div>
+231:      </div>
+233:      {/* Pricing Plans */}
+234:      <div className="mt-8">
+235:        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">Planınızı Yükseltin</h2>
+236:        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+237:          {plans.map(plan => (
+238:            <div key={plan.id} className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border p-6 flex flex-col ${currentPlan?.id === plan.id ? 'border-accent shadow-md relative' : 'border-gray-200 dark:border-slate-700'}`}>
+239:              
+240:              {currentPlan?.id === plan.id && (
+241:                 <span className="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-accent text-white text-xs font-bold px-3 py-1 rounded-full uppercase">
+242:                   Mevcut Plan
+243:                 </span>
+244:              )}
+246:              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{plan.name}</h3>
+247:              <div className="mb-4">
+248:                <span className="text-3xl font-extrabold text-gray-900 dark:text-white">₺{plan.monthlyPrice}</span>
+249:                <span className="text-gray-500 dark:text-gray-400">/ay</span>
+250:              </div>
+251:              <p className="text-sm text-gray-500 mb-6">+{plan.setupFee} ₺ Kurulum Ücreti (Tek Seferlik)</p>
+252:              
+253:              <ul className="space-y-3 mb-8 flex-1">
+254:                <li className="flex items-center text-sm text-gray-700 dark:text-gray-300">
+255:                  <svg className="w-5 h-5 text-green-500 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
+256:                  {plan.maxStaff === 999 ? 'Sınırsız' : plan.maxStaff} Uzman / Çalışan
+257:                </li>
+258:                <li className="flex items-center text-sm text-gray-700 dark:text-gray-300">
+259:                  <svg className="w-5 h-5 text-green-500 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
+260:                  {plan.maxServices === 999 ? 'Sınırsız' : plan.maxServices} Hizmet
+261:                </li>
+262:                <li className="flex items-center text-sm text-gray-700 dark:text-gray-300">
+263:                  <svg className="w-5 h-5 text-green-500 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
+264:                  Aylık {plan.maxMonthlyAppointments === 99999 ? 'Sınırsız' : plan.maxMonthlyAppointments} Randevu
+265:                </li>
+266:                {plan.customDomainEnabled && (
+267:                  <li className="flex items-center text-sm text-gray-700 dark:text-gray-300">
+268:                    <svg className="w-5 h-5 text-green-500 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
+269:                    Manuel özel domain desteği
+270:                  </li>
+271:                )}
+272:                <li className="flex items-center text-sm text-gray-700 dark:text-gray-300">
+273:                  <svg className={`w-5 h-5 mr-2 flex-shrink-0 ${plan.aiRecommendationsEnabled ? 'text-green-500' : 'text-gray-300'}`} fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
+274:                  Yapay Zeka Analizleri
+275:                </li>
+276:              </ul>
+277:              
+278:              {(() => {
+279:                const ctaConfig = resolvePaymentCta({
+280:                  paymentMode: ((import.meta as any).env.VITE_PAYMENT_PROVIDER as any) || 'mock',
+281:                  plan,
+282:                  currentSubscriptionPlanId: currentPlan?.id,
+283:                  subscriptionStatus: subscription?.status as any,
+284:                  language: 'tr'
+285:                });
+287:                return (
+288:                  <div className="mt-auto space-y-3">
+289:                    {ctaConfig.safetyMessage && (
+290:                      <p className="text-xs text-yellow-600 dark:text-yellow-500 text-center">{ctaConfig.safetyMessage}</p>
+291:                    )}
+292:                    <button 
+293:                      onClick={
+294:                        ctaConfig.actionType === 'talk_to_sales' 
+295:                          ? () => window.open(`https://wa.me/${(import.meta as any).env.VITE_SALES_WHATSAPP_NUMBER || ''}?text=Merhaba, ${plan.name} planına geçmek / abonelik başlatmak istiyorum.`, '_blank')
+296:                          : () => handleCheckout(plan.id)
+297:                      }
+298:                      disabled={ctaConfig.disabled}
+299:                      className={`w-full py-3 px-4 rounded-md font-bold text-center transition-colors ${
+300:                        ctaConfig.disabled
+301:                          ? 'bg-gray-100 dark:bg-slate-700 text-gray-400 cursor-not-allowed' 
+302:                          : 'bg-accent text-white hover:bg-blue-600'
+303:                      }`}
+304:                    >
+305:                      {ctaConfig.label}
+306:                    </button>
+307:                  </div>
+308:                );
+309:              })()}
+310:            </div>
+311:          ))}
+312:        </div>
+313:      </div>
+314:    </div>
+315:  );
+316:};
+318:export default BillingTab;
