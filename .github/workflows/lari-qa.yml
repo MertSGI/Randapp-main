@@ -1,0 +1,53 @@
+name: LARI QA
+
+on:
+  push:
+    branches:
+      - "staging/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  qa:
+    name: Build and QA
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Build
+        run: npm run build
+
+      - name: Supabase staging consistency QA
+        run: npm run qa:supabase-staging-consistency
+
+      - name: Supabase Auth/RLS bootstrap QA
+        run: npm run qa:supabase-auth-rls-bootstrap
+
+      - name: Supabase migration integrity QA
+        run: npm run qa:supabase-migration-integrity
+
+      - name: Supabase active migration path QA
+        run: npm run qa:supabase-active-migration-path
+
+      - name: Supabase Priority 1 core QA
+        run: npm run qa:supabase-priority1-core
+
+      - name: Full QA
+        run: npm run qa:all
