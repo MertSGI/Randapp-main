@@ -23,7 +23,7 @@ const MOCK_SUPER_ADMIN_USER: User = {
 export const authService = {
   async login(email: string, passwordHash: string): Promise<User | null> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password: passwordHash, // In real impl, Supabase expects plain password here. We map it to password field.
@@ -67,7 +67,7 @@ export const authService = {
 
   async logout(): Promise<void> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       await supabase.auth.signOut();
       return;
     }
@@ -79,7 +79,7 @@ export const authService = {
 
   async getCurrentUser(): Promise<User | null> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       const { data, error } = await supabase.auth.getUser();
       if (error || !data.user) return null;
       

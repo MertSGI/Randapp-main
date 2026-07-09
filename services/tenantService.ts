@@ -21,7 +21,7 @@ const DEMO_TENANT: Tenant = {
 export const tenantService = {
   async resolveTenantFromHost(hostname: string): Promise<Tenant | null> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       // If local dev, we could fallback, but let's strictly attempt resolution.
       if (hostname === 'localhost' || hostname.startsWith('127.0.0.1')) {
         console.warn('Local environment detected, falling back to demo tenant for testability.');
@@ -80,7 +80,7 @@ export const tenantService = {
 
   async getTenantBySlug(slug: string): Promise<Tenant | null> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       const { data, error } = await supabase
         .from('tenants')
         .select('*')
@@ -182,7 +182,7 @@ export const tenantService = {
     }
     
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       const { data: branding, error } = await supabase
         .from('tenant_branding')
         .select('*')
@@ -212,7 +212,7 @@ export const tenantService = {
 
   async updateTenant(tenantId: string, updates: Partial<Tenant>): Promise<void> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       const { error } = await supabase
         .from('tenants')
         .update({
@@ -272,7 +272,7 @@ export const tenantService = {
     const current = await this.getTenantBranding(tenantId) || { tenantId } as TenantBranding;
     const next = { ...current, ...updates };
 
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       const { data, error } = await supabase
         .from('tenant_branding')
         .upsert({

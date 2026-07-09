@@ -15,7 +15,7 @@ export const getDataProvider = (): DataProvider => {
   } catch(e) {
     // Expected in Node harness
   }
-  if (mode === 'supabase') {
+  if (mode.startsWith('supabase')) {
     return supabaseProvider;
   }
   return mockProvider;

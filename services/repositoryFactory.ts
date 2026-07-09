@@ -121,7 +121,7 @@ export const repositoryFactory = {
     const launchMode = launchModeService.getCurrentLaunchMode();
     const dataMode = getDataSourceMode();
 
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode === 'supabase') {
+    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
       if (dataMode !== 'supabase') {
         throw new Error('Supabase repository required for paymentless production: businessProfile');
       }
@@ -134,7 +134,7 @@ export const repositoryFactory = {
     const launchMode = launchModeService.getCurrentLaunchMode();
     const dataMode = getDataSourceMode();
 
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode === 'supabase') {
+    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
       if (dataMode !== 'supabase') {
         throw new Error('Supabase repository required for paymentless production: catalog');
       }
@@ -147,7 +147,7 @@ export const repositoryFactory = {
     const launchMode = launchModeService.getCurrentLaunchMode();
     const dataMode = getDataSourceMode();
 
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode === 'supabase') {
+    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
       if (dataMode !== 'supabase') {
         throw new Error('Supabase repository required for paymentless production: booking');
       }
@@ -176,7 +176,7 @@ export const repositoryFactory = {
     const launchMode = launchModeService.getCurrentLaunchMode();
     const dataMode = getDataSourceMode();
 
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode === 'supabase') {
+    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
       if (dataMode !== 'supabase') {
         throw new Error('Supabase repository required for paymentless production: campaign');
       }
@@ -189,7 +189,7 @@ export const repositoryFactory = {
     const launchMode = launchModeService.getCurrentLaunchMode();
     const dataMode = getDataSourceMode();
 
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode === 'supabase') {
+    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
       if (dataMode !== 'supabase') {
         throw new Error('Supabase repository required for paymentless production: tenant');
       }
@@ -202,7 +202,7 @@ export const repositoryFactory = {
     const launchMode = launchModeService.getCurrentLaunchMode();
     const dataMode = getDataSourceMode();
 
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode === 'supabase') {
+    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
       if (dataMode !== 'supabase') {
         throw new Error('Supabase repository required for paymentless production: subscription');
       }
@@ -215,7 +215,7 @@ export const repositoryFactory = {
     const launchMode = launchModeService.getCurrentLaunchMode();
     const dataMode = getDataSourceMode();
 
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode === 'supabase') {
+    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
       if (dataMode !== 'supabase') {
         throw new Error('Supabase repository required for paymentless production: manualProvisioning');
       }
@@ -228,7 +228,7 @@ export const repositoryFactory = {
     const launchMode = launchModeService.getCurrentLaunchMode();
     const dataMode = getDataSourceMode();
 
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode === 'supabase') {
+    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
       if (dataMode !== 'supabase') {
         throw new Error('Supabase repository required for paymentless production: selfService');
       }
@@ -241,7 +241,7 @@ export const repositoryFactory = {
     const launchMode = launchModeService.getCurrentLaunchMode();
     const dataMode = getDataSourceMode();
 
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode === 'supabase') {
+    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
       if (dataMode !== 'supabase') {
         throw new Error('Supabase repository required for paymentless production: communicationOutbox');
       }
@@ -254,7 +254,7 @@ export const repositoryFactory = {
     const launchMode = launchModeService.getCurrentLaunchMode();
     const dataMode = getDataSourceMode();
 
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode === 'supabase') {
+    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
       if (dataMode !== 'supabase') {
         throw new Error('Supabase repository required for paymentless production: auditEvent');
       }
@@ -267,7 +267,7 @@ export const repositoryFactory = {
     const launchMode = launchModeService.getCurrentLaunchMode();
     const dataMode = getDataSourceMode();
 
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode === 'supabase') {
+    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
       if (dataMode !== 'supabase') {
         throw new Error('Supabase repository required for paymentless production: supportTicket');
       }
@@ -280,7 +280,7 @@ export const repositoryFactory = {
     const launchMode = launchModeService.getCurrentLaunchMode();
     const dataMode = getDataSourceMode();
 
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode === 'supabase') {
+    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
       if (dataMode !== 'supabase') {
         throw new Error('Supabase repository required for paymentless production: policyAndConsent');
       }

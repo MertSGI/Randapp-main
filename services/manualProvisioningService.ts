@@ -45,7 +45,7 @@ export const manualProvisioningService = {
         setupComplete: setupComplete,
       };
 
-      if (mode === 'supabase') {
+      if (mode.startsWith('supabase')) {
          console.warn("Manual provisioning in Supabase is not fully implemented in frontend. Requires Edge function.");
          return { success: false, error: 'Supabase mode requires backend API for manual provisioning to ensure safety.' };
       }

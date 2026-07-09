@@ -22,7 +22,7 @@ export const provisioningService = {
   async createTenantFromCheckout(payload: ProvisioningPayload): Promise<{ tenantId: string } | null> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
 
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       console.warn("createTenantFromCheckout MUST be called server-side inside an Edge Function after verified webhook.");
       // Edge Function handles creating tenant, subscription record, owner profile, etc.
       return { tenantId: 'mock-edge-tenant' };
@@ -35,7 +35,7 @@ export const provisioningService = {
 
   async createDefaultTenantBranding(tenantId: string, data: any): Promise<void> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       console.warn("createDefaultTenantBranding should ideally be handled via Edge Function or RLS policy during provisioning.");
       return;
     }
@@ -44,7 +44,7 @@ export const provisioningService = {
 
   async createSalonOwnerProfile(tenantId: string, userId: string, email: string): Promise<void> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       console.warn("createSalonOwnerProfile MUST be called server-side inside an Edge Function.");
       return;
     }
@@ -61,7 +61,7 @@ export const provisioningService = {
 
   async markTenantProvisioningStatus(tenantId: string, status: ProvisioningStatus): Promise<void> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       // In a real app, salon owner might update to 'setup_in_progress', 'ready_for_review'.
       // Usually done via standard Supabase update if RLS permits.
       const { error } = await supabase
@@ -78,7 +78,7 @@ export const provisioningService = {
 
   async getProvisioningStatus(tenantId: string): Promise<ProvisioningStatus> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       const { data, error } = await supabase
         .from('tenants')
         .select('provisioning_status')

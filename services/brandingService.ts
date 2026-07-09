@@ -5,7 +5,10 @@ import { tenantService } from './tenantService';
 
 const getBrandingKey = (tenantId: string) => `randapp:${tenantId}:branding`;
 
-const isSupabaseMode = () => ((import.meta as any).env.VITE_DATA_MODE || 'mock') === 'supabase';
+const isSupabaseMode = () => {
+  const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+  return mode.startsWith('supabase');
+};
 
 export const getBranding = async (tenantId: string): Promise<TenantBranding | null> => {
   return tenantService.getTenantBranding(tenantId);

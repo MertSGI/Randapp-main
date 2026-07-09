@@ -52,7 +52,7 @@ export const subscriptionService = {
   async getCurrentSubscription(tenantId: string): Promise<TenantSubscription | null> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
     
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       const { data, error } = await supabase
         .from('subscriptions')
         .select('*')
@@ -110,7 +110,7 @@ export const subscriptionService = {
   async getTenantUsage(tenantId: string): Promise<TenantUsage> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
 
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       return {
         staffCount: 2,
         serviceCount: 5,

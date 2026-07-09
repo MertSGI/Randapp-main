@@ -16,7 +16,7 @@ export const productionReadinessGateService = {
     // Check if persistent database parameters are present and data mode is not local
     const dataMode = env.VITE_DATA_MODE || 'local';
     const hasPersistentDb = 
-      (dataMode === 'supabase_staging' || dataMode === 'supabase_production' || dataMode === 'supabase') &&
+      (dataMode === 'supabase_staging' || dataMode === 'supabase_production' || dataMode.startsWith('supabase')) &&
       !!env.VITE_SUPABASE_URL && 
       !!env.VITE_SUPABASE_ANON_KEY;
 

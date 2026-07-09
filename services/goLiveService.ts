@@ -137,7 +137,7 @@ export const goLiveService = {
 
   async markReadyForReview(tenantId: string): Promise<void> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       await supabase.from('tenants').update({ public_site_status: 'pending_review' }).eq('id', tenantId);
       await provisioningService.markTenantProvisioningStatus(tenantId, 'ready_for_review');
     } else {
@@ -153,7 +153,7 @@ export const goLiveService = {
 
   async markTenantLive(tenantId: string): Promise<void> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       await supabase.from('tenants').update({ public_site_status: 'published' }).eq('id', tenantId);
       await provisioningService.markTenantProvisioningStatus(tenantId, 'live');
     } else {
@@ -170,7 +170,7 @@ export const goLiveService = {
 
   async markTenantPaused(tenantId: string): Promise<void> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       await supabase.from('tenants').update({ public_site_status: 'paused' }).eq('id', tenantId);
     } else {
       const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
@@ -184,7 +184,7 @@ export const goLiveService = {
 
   async markTenantNeedsChanges(tenantId: string): Promise<void> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'supabase') {
+    if (mode.startsWith('supabase')) {
       await supabase.from('tenants').update({ public_site_status: 'preview_ready', verification_status: 'rejected' }).eq('id', tenantId);
       await provisioningService.markTenantProvisioningStatus(tenantId, 'setup_in_progress');
     } else {
