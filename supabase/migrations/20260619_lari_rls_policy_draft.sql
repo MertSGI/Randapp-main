@@ -18,6 +18,26 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+CREATE OR REPLACE FUNCTION public.get_user_role(user_id uuid)
+RETURNS text AS $$
+DECLARE
+    u_role text;
+BEGIN
+    SELECT role INTO u_role FROM public.users_profile WHERE id = user_id AND active = true;
+    RETURN u_role;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.get_user_tenant_id(user_id uuid)
+RETURNS uuid AS $$
+DECLARE
+    u_tenant_id uuid;
+BEGIN
+    SELECT tenant_id INTO u_tenant_id FROM public.users_profile WHERE id = user_id AND active = true;
+    RETURN u_tenant_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- =========================================================================
 -- Part 1: RLS Enablement Commands
 -- =========================================================================
@@ -149,13 +169,8 @@ WITH CHECK (id = auth.uid());
 CREATE POLICY "Tenant Admin - SELECT employee/customer profiles" 
 ON public.users_profile FOR SELECT TO authenticated 
 USING (
-    EXISTS (
-      SELECT 1 FROM public.users_profile up
-      WHERE up.id = auth.uid()
-        AND up.active = true
-        AND up.role = 'tenant_owner'
-        AND up.tenant_id = users_profile.tenant_id
-    )
+    public.get_user_role(auth.uid()) = 'tenant_owner' 
+    AND public.get_user_tenant_id(auth.uid()) = tenant_id
 );
 
 
