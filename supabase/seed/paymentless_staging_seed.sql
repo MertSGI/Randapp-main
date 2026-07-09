@@ -117,7 +117,7 @@ INSERT INTO public.availability_rules (
   id, 
   tenant_id, 
   staff_id, 
-  day_of_week, 
+  weekday, 
   start_time, 
   end_time, 
   is_active
