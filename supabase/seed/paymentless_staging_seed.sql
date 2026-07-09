@@ -9,16 +9,18 @@ BEGIN;
 -- =========================================================================
 
 
-INSERT INTO public.tenants (id, slug, name, status)
+INSERT INTO public.tenants (id, slug, name, status, public_site_status)
 VALUES (
   'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', 
   'melis-guzellik', 
   'Melis Güzellik & Nail Art', 
-  'active'
+  'active',
+  'published'
 )
 ON CONFLICT (id) DO UPDATE SET 
   name = EXCLUDED.name, 
-  status = EXCLUDED.status;
+  status = EXCLUDED.status,
+  public_site_status = EXCLUDED.public_site_status;
 
 INSERT INTO public.tenant_business_profiles (
   tenant_id, 
