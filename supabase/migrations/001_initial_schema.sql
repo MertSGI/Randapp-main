@@ -257,30 +257,85 @@ CREATE POLICY "Only super admins can modify tenants" ON public.tenants FOR ALL U
 -- Policies for public.tenant_branding
 CREATE POLICY "Public read branding" ON public.tenant_branding FOR SELECT USING (true);
 CREATE POLICY "Tenant owners can modify branding" ON public.tenant_branding FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'super_admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND (
+          up.role = 'super_admin'
+          OR (
+            up.role = 'tenant_owner'
+            AND up.tenant_id = tenant_branding.tenant_id
+          )
+        )
+    )
 );
 
 -- Policies for public.users_profile
 CREATE POLICY "Users can read own profile" ON public.users_profile FOR SELECT USING (id = auth.uid());
 CREATE POLICY "Tenant admins can read all profiles in their tenant" ON public.users_profile FOR SELECT USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'super_admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND (
+          up.role = 'super_admin'
+          OR (
+            up.role = 'tenant_owner'
+            AND up.tenant_id = users_profile.tenant_id
+          )
+        )
+    )
 );
 
 -- Policies for public.staff
 CREATE POLICY "Public read staff" ON public.staff FOR SELECT USING (true);
 CREATE POLICY "Tenant admins can manage staff" ON public.staff FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'super_admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND (
+          up.role = 'super_admin'
+          OR (
+            up.role = 'tenant_owner'
+            AND up.tenant_id = staff.tenant_id
+          )
+        )
+    )
 );
 
 -- Policies for public.services
 CREATE POLICY "Public read services" ON public.services FOR SELECT USING (true);
 CREATE POLICY "Tenant admins can manage services" ON public.services FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'super_admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND (
+          up.role = 'super_admin'
+          OR (
+            up.role = 'tenant_owner'
+            AND up.tenant_id = services.tenant_id
+          )
+        )
+    )
 );
 
 -- Policies for public.customers
 CREATE POLICY "Tenant admins can read/manage customers" ON public.customers FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'staff', 'super_admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND (
+          up.role = 'super_admin'
+          OR (
+            up.role IN ('tenant_owner', 'staff')
+            AND up.tenant_id = customers.tenant_id
+          )
+        )
+    )
 );
 CREATE POLICY "Customers can read own customer record" ON public.customers FOR SELECT USING (
     user_profile_id = auth.uid()
@@ -289,7 +344,18 @@ CREATE POLICY "Customers can read own customer record" ON public.customers FOR S
 -- Policies for public.appointments
 CREATE POLICY "Public can insert new appointments (guest booking)" ON public.appointments FOR INSERT WITH CHECK (true);
 CREATE POLICY "Tenant staff can read/manage appointments" ON public.appointments FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'staff', 'super_admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND (
+          up.role = 'super_admin'
+          OR (
+            up.role IN ('tenant_owner', 'staff')
+            AND up.tenant_id = appointments.tenant_id
+          )
+        )
+    )
 );
 CREATE POLICY "Customers can view own appointments" ON public.appointments FOR SELECT USING (
     customer_id IN (SELECT id FROM public.customers WHERE user_profile_id = auth.uid())
@@ -297,17 +363,50 @@ CREATE POLICY "Customers can view own appointments" ON public.appointments FOR S
 
 -- Policies for public.subscriptions
 CREATE POLICY "Tenant admins can view subscriptions" ON public.subscriptions FOR SELECT USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'super_admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND (
+          up.role = 'super_admin'
+          OR (
+            up.role = 'tenant_owner'
+            AND up.tenant_id = subscriptions.tenant_id
+          )
+        )
+    )
 );
 
 -- Policies for public.payments
 CREATE POLICY "Tenant admins can view payments" ON public.payments FOR SELECT USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'super_admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND (
+          up.role = 'super_admin'
+          OR (
+            up.role = 'tenant_owner'
+            AND up.tenant_id = payments.tenant_id
+          )
+        )
+    )
 );
 
 -- Policies for public.audit_logs
 CREATE POLICY "Tenant admins can view audit logs" ON public.audit_logs FOR SELECT USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'super_admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND (
+          up.role = 'super_admin'
+          OR (
+            up.role = 'tenant_owner'
+            AND up.tenant_id = audit_logs.tenant_id
+          )
+        )
+    )
 );
 CREATE POLICY "Super admins can manage audit logs" ON public.audit_logs FOR ALL USING (
     EXISTS (SELECT 1 FROM public.users_profile WHERE id = auth.uid() AND role = 'super_admin')

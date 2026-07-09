@@ -90,19 +90,34 @@ WITH CHECK (public.is_super_admin(auth.uid()));
 CREATE POLICY "Tenant Owner/Admin SELECT own tenant" 
 ON public.tenants FOR SELECT TO authenticated 
 USING (
-    id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid()) OR
-    owner_user_id = auth.uid()
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role IN ('tenant_owner', 'staff')
+        AND up.tenant_id = tenants.id
+    ) OR owner_user_id = auth.uid()
 );
 
 CREATE POLICY "Tenant Owner UPDATE own tenant" 
 ON public.tenants FOR UPDATE TO authenticated 
 USING (
-    id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin')) OR
-    owner_user_id = auth.uid()
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = tenants.id
+    ) OR owner_user_id = auth.uid()
 )
 WITH CHECK (
-    id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin')) OR
-    owner_user_id = auth.uid()
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = tenants.id
+    ) OR owner_user_id = auth.uid()
 );
 
 -- Public layout reading (required for slug routing mapping inside randevulari.com lookup)
@@ -134,7 +149,13 @@ WITH CHECK (id = auth.uid());
 CREATE POLICY "Tenant Admin - SELECT employee/customer profiles" 
 ON public.users_profile FOR SELECT TO authenticated 
 USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = users_profile.tenant_id
+    )
 );
 
 
@@ -151,10 +172,22 @@ WITH CHECK (public.is_super_admin(auth.uid()));
 CREATE POLICY "Tenant Admin - Manage own business profile" 
 ON public.tenant_business_profiles FOR ALL TO authenticated 
 USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = tenant_business_profiles.tenant_id
+    )
 )
 WITH CHECK (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = tenant_business_profiles.tenant_id
+    )
 );
 
 -- Public clients view profiles if enabled
@@ -176,10 +209,22 @@ WITH CHECK (public.is_super_admin(auth.uid()));
 CREATE POLICY "Tenant Admin - Manage services" 
 ON public.services FOR ALL TO authenticated 
 USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = services.tenant_id
+    )
 )
 WITH CHECK (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = services.tenant_id
+    )
 );
 
 -- Public layout reading active treatment choices
@@ -201,10 +246,22 @@ WITH CHECK (public.is_super_admin(auth.uid()));
 CREATE POLICY "Tenant Admin - Manage staff" 
 ON public.staff FOR ALL TO authenticated 
 USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = staff.tenant_id
+    )
 )
 WITH CHECK (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = staff.tenant_id
+    )
 );
 
 -- Public layout reading practitioner availability selection
@@ -227,16 +284,28 @@ CREATE POLICY "Tenant Admin - Manage staff_services"
 ON public.staff_services FOR ALL TO authenticated 
 USING (
     EXISTS (
-        SELECT 1 FROM public.services s
-        JOIN public.users_profile up ON up.tenant_id = s.tenant_id
-        WHERE up.id = auth.uid() AND up.role IN ('tenant_owner', 'admin') AND s.id = staff_services.service_id
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND EXISTS (
+          SELECT 1 FROM public.services s
+          WHERE s.id = staff_services.service_id
+            AND s.tenant_id = up.tenant_id
+        )
     )
 )
 WITH CHECK (
     EXISTS (
-        SELECT 1 FROM public.services s
-        JOIN public.users_profile up ON up.tenant_id = s.tenant_id
-        WHERE up.id = auth.uid() AND up.role IN ('tenant_owner', 'admin') AND s.id = staff_services.service_id
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND EXISTS (
+          SELECT 1 FROM public.services s
+          WHERE s.id = staff_services.service_id
+            AND s.tenant_id = up.tenant_id
+        )
     )
 );
 
@@ -259,10 +328,22 @@ WITH CHECK (public.is_super_admin(auth.uid()));
 CREATE POLICY "Tenant Staff - Manage availability_rules" 
 ON public.availability_rules FOR ALL TO authenticated 
 USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'staff'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role IN ('tenant_owner', 'staff')
+        AND up.tenant_id = availability_rules.tenant_id
+    )
 )
 WITH CHECK (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'staff'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role IN ('tenant_owner', 'staff')
+        AND up.tenant_id = availability_rules.tenant_id
+    )
 );
 
 -- Public SELECT to check calendar slots/exceptions during reservation
@@ -284,10 +365,22 @@ WITH CHECK (public.is_super_admin(auth.uid()));
 CREATE POLICY "Tenant Staff - Manage own appointments" 
 ON public.appointments FOR ALL TO authenticated 
 USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'staff'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role IN ('tenant_owner', 'staff')
+        AND up.tenant_id = appointments.tenant_id
+    )
 )
 WITH CHECK (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'staff'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role IN ('tenant_owner', 'staff')
+        AND up.tenant_id = appointments.tenant_id
+    )
 );
 
 -- Authenticated customers can see their OWN appointments
@@ -320,10 +413,22 @@ WITH CHECK (public.is_super_admin(auth.uid()));
 CREATE POLICY "Tenant Staff - Manage customers index" 
 ON public.customers FOR ALL TO authenticated 
 USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'staff'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role IN ('tenant_owner', 'staff')
+        AND up.tenant_id = customers.tenant_id
+    )
 )
 WITH CHECK (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'staff'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role IN ('tenant_owner', 'staff')
+        AND up.tenant_id = customers.tenant_id
+    )
 );
 
 -- Registered customer can view/update their own CRM record
@@ -353,10 +458,22 @@ WITH CHECK (public.is_super_admin(auth.uid()));
 CREATE POLICY "Tenant Staff - Manage customer_memory" 
 ON public.customer_memory FOR ALL TO authenticated 
 USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'staff'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role IN ('tenant_owner', 'staff')
+        AND up.tenant_id = customer_memory.tenant_id
+    )
 )
 WITH CHECK (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'staff'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role IN ('tenant_owner', 'staff')
+        AND up.tenant_id = customer_memory.tenant_id
+    )
 );
 
 -- Standard customers and public CANNOT read, insert or alter these records!
@@ -376,7 +493,13 @@ WITH CHECK (public.is_super_admin(auth.uid()));
 CREATE POLICY "Tenant Admin - View own subscription" 
 ON public.subscriptions FOR SELECT TO authenticated 
 USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = subscriptions.tenant_id
+    )
 );
 
 -- Standard WRITE commands (INSERT/UPDATE/DELETE) are denied to all tenants.
@@ -401,13 +524,25 @@ WITH CHECK (public.is_super_admin(auth.uid()));
 CREATE POLICY "Tenant Owner - View own payments" 
 ON public.payments FOR SELECT TO authenticated 
 USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = payments.tenant_id
+    )
 );
 
 CREATE POLICY "Tenant Owner - View own payment_events" 
 ON public.payment_events FOR SELECT TO authenticated 
 USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = payment_events.tenant_id
+    )
 );
 
 -- INSERT/UPDATE are strictly restricted. Live writing only happens via iyzico/payment outbox in modern backends.
@@ -426,7 +561,13 @@ WITH CHECK (public.is_super_admin(auth.uid()));
 CREATE POLICY "Tenant Staff - Read own communication logs" 
 ON public.notification_logs FOR SELECT TO authenticated 
 USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin', 'staff'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role IN ('tenant_owner', 'staff')
+        AND up.tenant_id = notification_logs.tenant_id
+    )
 );
 
 -- Public cannot view SMS queue items to protect customer variables (e.g. otp tokens, booking names).
@@ -446,10 +587,22 @@ WITH CHECK (public.is_super_admin(auth.uid()));
 CREATE POLICY "Tenant Admin - Manage campaigns" 
 ON public.campaigns FOR ALL TO authenticated 
 USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = campaigns.tenant_id
+    )
 )
 WITH CHECK (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = campaigns.tenant_id
+    )
 );
 
 -- Public SELECT campaigns to display localized discount incentives on landing page
@@ -473,7 +626,7 @@ ON public.branches FOR ALL TO authenticated USING (public.is_super_admin(auth.ui
 
 CREATE POLICY "Tenant Admin - Manage own branches" 
 ON public.branches FOR ALL TO authenticated USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role = 'tenant_owner')
 );
 
 CREATE POLICY "Public - SELECT published branches" 
@@ -506,10 +659,10 @@ ON public.custom_domain_requests FOR ALL TO authenticated USING (public.is_super
 
 CREATE POLICY "Tenant Owners - Initiate and read own vanity request" 
 ON public.custom_domain_requests FOR ALL TO authenticated USING (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role = 'tenant_owner')
 )
 WITH CHECK (
-    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin'))
+    tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role = 'tenant_owner')
 );
 */
 
