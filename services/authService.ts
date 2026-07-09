@@ -33,11 +33,13 @@ export const authService = {
         return null;
       }
       
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from('users_profile')
         .select('*')
         .eq('id', data.user.id)
         .single();
+      
+      console.log('Diagnostic Profile Query:', { profile, profileError, userId: data.user.id });
         
       return {
         id: data.user.id,
