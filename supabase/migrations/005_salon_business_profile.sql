@@ -44,7 +44,14 @@ CREATE POLICY "Super Admins can manage all business profiles"
     ON public.tenant_business_profiles
     AS PERMISSIVE FOR ALL
     TO authenticated
-    USING (public.is_super_admin((select auth.uid())));
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.users_profile up
+            WHERE up.id = auth.uid()
+              AND up.active = true
+              AND up.role = 'super_admin'
+        )
+    );
 
 -- Salon Owner: Read/Write own profile
 CREATE POLICY "Salon owners can read own business profile"
