@@ -7,7 +7,7 @@ BEGIN;
 -- =========================================================================
 -- 1. SEED TENANT & BUSINESS PROFILE
 -- =========================================================================
-RAISE NOTICE '🎬 Seeding pilot tenant...';
+
 
 INSERT INTO public.tenants (id, slug, name, status)
 VALUES (
@@ -38,7 +38,7 @@ ON CONFLICT (tenant_id) DO UPDATE SET
 -- =========================================================================
 -- 2. SEED MANUAL SUBSCRIPTION
 -- =========================================================================
-RAISE NOTICE '🎬 Seeding manual billing structures...';
+
 
 INSERT INTO public.subscriptions (
   id, 
@@ -66,7 +66,7 @@ ON CONFLICT (id) DO UPDATE SET
 -- =========================================================================
 -- 3. SEED SERVICES CATALOG
 -- =========================================================================
-RAISE NOTICE '🎬 Seeding services catalog...';
+
 
 INSERT INTO public.services (id, tenant_id, name, duration, price, active, category)
 VALUES 
@@ -83,7 +83,7 @@ ON CONFLICT (id) DO UPDATE SET
 -- =========================================================================
 -- 4. SEED STAFF
 -- =========================================================================
-RAISE NOTICE '🎬 Seeding salon staff...';
+
 
 INSERT INTO public.staff (id, tenant_id, name, title, active, is_owner)
 VALUES 
@@ -110,7 +110,7 @@ ON CONFLICT DO NOTHING;
 -- =========================================================================
 -- 6. SEED AVAILABILITY RULES
 -- =========================================================================
-RAISE NOTICE '🎬 Seeding staff availability hours...';
+
 
 -- Weekday business hours (Mon-Sat, 09:00 - 19:00)
 INSERT INTO public.availability_rules (
@@ -141,6 +141,6 @@ ON CONFLICT (id) DO UPDATE SET
   end_time = EXCLUDED.end_time,
   is_active = EXCLUDED.is_active;
 
-RAISE NOTICE '✅ Seeding completed. To hook up Owner Auth mappings, please refer to SUPABASE_AUTH_RLS_BOOTSTRAP_RUNBOOK.md.';
+
 
 COMMIT;
