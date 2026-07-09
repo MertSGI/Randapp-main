@@ -37,8 +37,18 @@ CREATE POLICY "Salon owners can read own onboarding progress"
 ON public.tenant_onboarding_progress 
 FOR SELECT 
 USING (
-  tenant_id IN (
-    SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin')
+  EXISTS (
+    SELECT 1
+    FROM public.users_profile up
+    WHERE up.id = auth.uid()
+      AND up.active = true
+      AND (
+        up.role = 'super_admin'
+        OR (
+          up.role = 'tenant_owner'
+          AND up.tenant_id = tenant_onboarding_progress.tenant_id
+        )
+      )
   )
 );
 
@@ -46,8 +56,18 @@ CREATE POLICY "Salon owners can update own onboarding progress"
 ON public.tenant_onboarding_progress 
 FOR UPDATE 
 USING (
-  tenant_id IN (
-    SELECT tenant_id FROM public.users_profile WHERE id = auth.uid() AND role IN ('tenant_owner', 'admin')
+  EXISTS (
+    SELECT 1
+    FROM public.users_profile up
+    WHERE up.id = auth.uid()
+      AND up.active = true
+      AND (
+        up.role = 'super_admin'
+        OR (
+          up.role = 'tenant_owner'
+          AND up.tenant_id = tenant_onboarding_progress.tenant_id
+        )
+      )
   )
 );
 
