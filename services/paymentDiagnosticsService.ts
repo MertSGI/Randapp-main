@@ -1,5 +1,4 @@
 export interface DiagnosticResponse {
-  // IMPORTANT: Do not put Service Role keys in frontend code!
   functionName?: string;
   mode: string;
   requiredEnvPresent?: Record<string, boolean>;
