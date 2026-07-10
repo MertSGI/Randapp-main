@@ -22,10 +22,11 @@ export const tenantService = {
   async resolveTenantFromHost(hostname: string): Promise<Tenant | null> {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
-      // If local dev, we could fallback, but let's strictly attempt resolution.
+      // In supabase mode (including staging), always resolve from DB regardless of hostname.
+      // Localhost is a valid dev environment for real supabase testing.
       if (hostname === 'localhost' || hostname.startsWith('127.0.0.1')) {
-        console.warn('Local environment detected, falling back to demo tenant for testability.');
-        return DEMO_TENANT;
+        console.info('Supabase staging mode on localhost — resolving tenant from authenticated user profile.');
+        // Fall through to DB resolution
       }
 
       const baseDomain = (import.meta as any).env.VITE_APP_BASE_DOMAIN;
@@ -165,6 +166,47 @@ export const tenantService = {
              } as Tenant;
           }
        }
+    }
+    
+    if (mode.startsWith('supabase')) {
+      // In supabase mode, resolve tenant from the authenticated user's profile.
+      // This is the correct approach for admin panels where user is already signed in.
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: profile } = await supabase
+            .from('users_profile')
+            .select('tenant_id')
+            .eq('id', user.id)
+            .single();
+          
+          if (profile?.tenant_id) {
+            const { data: tenantRow } = await supabase
+              .from('tenants')
+              .select('*')
+              .eq('id', profile.tenant_id)
+              .single();
+            
+            if (tenantRow) {
+              return {
+                id: tenantRow.id,
+                slug: tenantRow.slug,
+                name: tenantRow.name,
+                status: tenantRow.status,
+                createdAt: tenantRow.created_at || new Date().toISOString(),
+                updatedAt: tenantRow.updated_at || new Date().toISOString(),
+                verificationStatus: tenantRow.verification_status || 'approved',
+                publicSiteStatus: tenantRow.public_site_status || 'draft',
+                businessRiskStatus: tenantRow.business_risk_status || 'normal',
+              } as Tenant;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Could not resolve tenant from user profile:', e);
+      }
+      // Fallback to host-based resolution for public/booking pages
+      return this.resolveTenantFromHost(hostname);
     }
     
     return this.resolveTenantFromHost(hostname);

@@ -29,14 +29,23 @@ export const fetchSupabase = async (path: string, options: RequestInit = {}) => 
   const url = `${supabaseUrl}${path}`;
   const headers = {
     'apikey': supabaseKey,
-    'Authorization': `Bearer ${supabaseKey}`, // Overridden below if token exists
-    ...(options.headers || {})
+    'Authorization': `Bearer ${supabaseKey}`, // Default: anon key; overridden if session exists
+    ...(options.headers || {}),
   } as Record<string, string>;
 
-  // Basic attempt to get a local auth session token if exists
-  const localToken = localStorage.getItem('sb-access-token');
-  if (localToken) {
-    headers['Authorization'] = `Bearer ${localToken}`;
+  // Read auth session from Supabase's project-specific localStorage key
+  try {
+    const projectRef = supabaseUrl.replace('https://', '').split('.')[0];
+    const sessionRaw = localStorage.getItem(`sb-${projectRef}-auth-token`);
+    if (sessionRaw) {
+      const session = JSON.parse(sessionRaw);
+      const accessToken = session?.access_token;
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+    }
+  } catch (_) {
+    // Ignore session read failures; proceed with anon key
   }
 
   return fetch(url, { ...options, headers });
