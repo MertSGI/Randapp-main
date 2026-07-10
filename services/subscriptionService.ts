@@ -111,12 +111,24 @@ export const subscriptionService = {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
 
     if (mode.startsWith('supabase')) {
-      return {
-        staffCount: 2,
-        serviceCount: 5,
-        monthlyAppointmentsCount: 120,
-        aiUsageCount: 42
-      };
+      try {
+        const [
+          { count: serviceCount },
+          { count: staffCount },
+        ] = await Promise.all([
+          supabase.from('services').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+          supabase.from('staff').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+        ]);
+        return {
+          staffCount: staffCount ?? 0,
+          serviceCount: serviceCount ?? 0,
+          monthlyAppointmentsCount: 0,
+          aiUsageCount: 0,
+        };
+      } catch (e) {
+        console.warn('getTenantUsage: supabase query failed, falling back to zero counts', e);
+        return { staffCount: 0, serviceCount: 0, monthlyAppointmentsCount: 0, aiUsageCount: 0 };
+      }
     }
 
     // Mock Mode
