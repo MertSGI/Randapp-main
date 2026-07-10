@@ -6,9 +6,8 @@ import { getDataSourceMode } from '../dataSourceConfig';
 // Actual operations should only run if VITE_LARI_DATA_SOURCE=supabase.
 
 export const getSupabaseClientConfig = () => {
-  const meta = import.meta as any;
-  const supabaseUrl = (meta.env?.VITE_SUPABASE_URL as string) || '';
-  const supabaseKey = (meta.env?.VITE_SUPABASE_ANON_KEY as string) || '';
+  const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL || '';
+  const supabaseKey = import.meta.env?.VITE_SUPABASE_ANON_KEY || '';
   
   if (getDataSourceMode() === 'supabase' && (!supabaseUrl || !supabaseKey)) {
     console.warn('Supabase mode active but credentials missing. Will fallback to local/mock operations where possible.');

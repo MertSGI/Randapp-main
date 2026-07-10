@@ -9,18 +9,18 @@ export interface DiagnosticResponse {
   error?: string;
 }
 
-const EDGE_FUNCTION_BASE = (import.meta as any).env.VITE_SUPABASE_URL
-  ? `${(import.meta as any).env.VITE_SUPABASE_URL}/functions/v1`
+const EDGE_FUNCTION_BASE = import.meta.env.VITE_SUPABASE_URL
+  ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
   : null;
 
 export const paymentDiagnosticsService = {
   getFrontendEnvironmentInfo() {
     return {
-      paymentProvider: (import.meta as any).env.VITE_PAYMENT_PROVIDER || 'mock',
-      dataMode: (import.meta as any).env.VITE_DATA_MODE || 'mock',
-      supabaseUrlConfigured: !!(import.meta as any).env.VITE_SUPABASE_URL,
+      paymentProvider: import.meta.env.VITE_PAYMENT_PROVIDER || 'mock',
+      dataMode: import.meta.env.VITE_DATA_MODE || 'mock',
+      supabaseUrlConfigured: !!import.meta.env.VITE_SUPABASE_URL,
       edgeFunctionBase: EDGE_FUNCTION_BASE,
-      noFrontendSecretsExposed: !(import.meta as any).env['VITE_IYZICO_SEC' + 'RET_KEY'] && !(import.meta as any).env['VITE_SUPABASE_SEC' + 'RET_ROLE_KEY'] && !(import.meta as any).env['VITE_SUPA' + 'BASE_SER' + 'VICE_ROLE_KEY']
+      noFrontendSecretsExposed: !import.meta.env['VITE_IYZICO_SECRET_KEY'] && !import.meta.env['VITE_SUPABASE_SECRET_ROLE_KEY'] && !import.meta.env['VITE_SUPABASE_SERVICE_ROLE_KEY']
     };
   },
 
