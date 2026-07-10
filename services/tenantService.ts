@@ -172,21 +172,24 @@ export const tenantService = {
       // In supabase mode, resolve tenant from the authenticated user's profile.
       // This is the correct approach for admin panels where user is already signed in.
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        console.log('getCurrentTenant: auth.getUser() result:', { userEmail: user?.email, userId: user?.id, userError });
         if (user) {
-          const { data: profile } = await supabase
+          const { data: profile, error: profileError } = await supabase
             .from('users_profile')
             .select('tenant_id')
             .eq('id', user.id)
             .single();
           
+          console.log('getCurrentTenant: users_profile result:', { profile, profileError });
           if (profile?.tenant_id) {
-            const { data: tenantRow } = await supabase
+            const { data: tenantRow, error: tenantError } = await supabase
               .from('tenants')
               .select('*')
               .eq('id', profile.tenant_id)
               .single();
             
+            console.log('getCurrentTenant: tenants result:', { tenantRow, tenantError });
             if (tenantRow) {
               return {
                 id: tenantRow.id,
@@ -206,6 +209,7 @@ export const tenantService = {
         console.warn('Could not resolve tenant from user profile:', e);
       }
       // Fallback to host-based resolution for public/booking pages
+      console.log('getCurrentTenant: falling back to resolveTenantFromHost for hostname:', hostname);
       return this.resolveTenantFromHost(hostname);
     }
     
