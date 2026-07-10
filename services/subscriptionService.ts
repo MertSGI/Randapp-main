@@ -4,17 +4,17 @@ import { planService, PricingPlan } from './planService';
 import { communicationEventService } from './communicationEventService';
 
 
-export type SubscriptionStatus = 
-  | 'pending_checkout' 
-  | 'trialing' 
-  | 'active' 
-  | 'past_due' 
-  | 'cancelled' 
-  | 'paused' 
-  | 'suspended' 
-  | 'comped' 
-  | 'manual_active' 
-  | 'expired' 
+export type SubscriptionStatus =
+  | 'pending_checkout'
+  | 'trialing'
+  | 'active'
+  | 'past_due'
+  | 'cancelled'
+  | 'paused'
+  | 'suspended'
+  | 'comped'
+  | 'manual_active'
+  | 'expired'
   | 'none';
 
 export interface TenantSubscription {
@@ -51,7 +51,7 @@ export interface TenantUsage {
 export const subscriptionService = {
   async getCurrentSubscription(tenantId: string): Promise<TenantSubscription | null> {
     const mode = import.meta.env.VITE_DATA_MODE || 'mock';
-    
+
     if (mode.startsWith('supabase')) {
       const { data, error } = await supabase
         .from('subscriptions')
@@ -86,9 +86,9 @@ export const subscriptionService = {
     }
     const dataProvSaved = await dataProvider.get<any>(`randapp:${tenantId}:subscription`);
     if (dataProvSaved) {
-       return dataProvSaved;
+      return dataProvSaved;
     }
-    
+
     return {
       tenantId,
       planId: 'professional',
@@ -103,7 +103,7 @@ export const subscriptionService = {
   async getPlanForTenant(tenantId: string): Promise<PricingPlan | null> {
     const sub = await this.getCurrentSubscription(tenantId);
     let planId = sub ? sub.planId : 'baslangic';
-    
+
     // Sanitize and map planId to frontend canonical plan IDs
     if (planId === 'starter' || planId === 'free') {
       planId = 'baslangic';
@@ -151,7 +151,7 @@ export const subscriptionService = {
     const staffList = (await dataProvider.get<any[]>(`randapp:${tenantId}:staff`)) || [];
     const servicesList = (await dataProvider.get<any[]>(`randapp:${tenantId}:services`)) || [];
     const aiUsage = parseInt(localStorage.getItem('mock_ai_usage') || '0', 10);
-    
+
     return {
       staffCount: staffList.length,
       serviceCount: servicesList.length,
@@ -198,39 +198,39 @@ export const subscriptionService = {
   async startCheckout(tenantId: string, planId: string, customer?: any): Promise<string> {
     const { paymentRunModeService } = await import('./paymentRunModeService');
     const runModeStatus = paymentRunModeService.getStatus();
-    
+
     if (runModeStatus.mode === 'local_dry_run') {
-        const simUrl = paymentRunModeService.simulateCheckoutHandoff(tenantId, planId, '');
-        
-        // Before returning the URL, let's also seed the mock state appropriately if no UI action is taken
-        const plan = planService.getPlan(planId);
-        if (plan) {
-            const mockSub: TenantSubscription = {
-                tenantId,
-                planId,
-                status: 'trialing',
-                trialStart: new Date().toISOString(),
-                trialEnd: plan.trialDays ? new Date(new Date().setDate(new Date().getDate() + plan.trialDays)).toISOString() : new Date().toISOString(),
-                currentPeriodStart: new Date().toISOString(),
-                currentPeriodEnd: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString(),
-                cancelAtPeriodEnd: false,
-                paymentProvider: 'local_dry_run'
-            };
-            localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(mockSub));
-            await dataProvider.set(`randapp:${tenantId}:subscription`, mockSub);
-        }
-        
-        return simUrl;
+      const simUrl = paymentRunModeService.simulateCheckoutHandoff(tenantId, planId, '');
+
+      // Before returning the URL, let's also seed the mock state appropriately if no UI action is taken
+      const plan = planService.getPlan(planId);
+      if (plan) {
+        const mockSub: TenantSubscription = {
+          tenantId,
+          planId,
+          status: 'trialing',
+          trialStart: new Date().toISOString(),
+          trialEnd: plan.trialDays ? new Date(new Date().setDate(new Date().getDate() + plan.trialDays)).toISOString() : new Date().toISOString(),
+          currentPeriodStart: new Date().toISOString(),
+          currentPeriodEnd: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString(),
+          cancelAtPeriodEnd: false,
+          paymentProvider: 'local_dry_run'
+        };
+        localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(mockSub));
+        await dataProvider.set(`randapp:${tenantId}:subscription`, mockSub);
+      }
+
+      return simUrl;
     }
 
     if (runModeStatus.mode === 'sandbox_live' || runModeStatus.mode === 'production_live') {
       if (runModeStatus.mode === 'sandbox_live' && !runModeStatus.canRunCheckout) {
-          throw {
-              isSafeStructure: true,
-              message: 'Sistem sandbox testine hazır değil (eksik yapılandırmalar var). Lütfen Super Admin panelini kontrol edin.',
-              errorCode: 'SANDBOX_NOT_CONFIGURED',
-              raw: { blockers: runModeStatus.missingBlockers }
-          };
+        throw {
+          isSafeStructure: true,
+          message: 'Sistem sandbox testine hazır değil (eksik yapılandırmalar var). Lütfen Super Admin panelini kontrol edin.',
+          errorCode: 'SANDBOX_NOT_CONFIGURED',
+          raw: { blockers: runModeStatus.missingBlockers }
+        };
       }
 
       try {
@@ -247,38 +247,38 @@ export const subscriptionService = {
         });
 
         if (error) {
-           let parsedError = error;
-           try {
-             if (error.context && typeof error.context.json === 'function') {
-                const body = await error.context.json();
-                parsedError = body;
-             }
-           } catch(e) {}
-           
-           throw {
-             isSafeStructure: true,
-             message: parsedError?.message || error.message || 'Ödeme oturumu oluşturulamadı. Lütfen sistem yöneticisiyle iletişime geçin.',
-             errorCode: parsedError?.errorCode || 'UNKNOWN_CHECKOUT_ERROR',
-             raw: parsedError
-           };
+          let parsedError = error;
+          try {
+            if (error.context && typeof error.context.json === 'function') {
+              const body = await error.context.json();
+              parsedError = body;
+            }
+          } catch (e) { }
+
+          throw {
+            isSafeStructure: true,
+            message: parsedError?.message || error.message || 'Ödeme oturumu oluşturulamadı. Lütfen sistem yöneticisiyle iletişime geçin.',
+            errorCode: parsedError?.errorCode || 'UNKNOWN_CHECKOUT_ERROR',
+            raw: parsedError
+          };
         }
-        
+
         if (data?.error) {
           throw {
-             isSafeStructure: true,
-             message: data.message || data.error || 'Ödeme oturumu oluşturulamadı. Lütfen sistem yöneticisiyle iletişime geçin.',
-             errorCode: data.errorCode || 'UNKNOWN_CHECKOUT_ERROR',
-             raw: data
+            isSafeStructure: true,
+            message: data.message || data.error || 'Ödeme oturumu oluşturulamadı. Lütfen sistem yöneticisiyle iletişime geçin.',
+            errorCode: data.errorCode || 'UNKNOWN_CHECKOUT_ERROR',
+            raw: data
           };
         }
 
         if (data?.mode === 'sandbox_not_configured') {
-           throw {
-             isSafeStructure: true,
-             message: data.message || 'Payment provider sandbox is not configured.',
-             errorCode: 'SANDBOX_NOT_CONFIGURED',
-             raw: data
-           };
+          throw {
+            isSafeStructure: true,
+            message: data.message || 'Payment provider sandbox is not configured.',
+            errorCode: 'SANDBOX_NOT_CONFIGURED',
+            raw: data
+          };
         }
 
         if (data?.checkoutUrl) {
@@ -304,13 +304,13 @@ export const subscriptionService = {
         };
       }
     }
-    
+
     return '';
   },
 
   async openBillingPortal(tenantId: string): Promise<void> {
     const paymentProvider = (import.meta as any).env.VITE_PAYMENT_PROVIDER || 'mock';
-    
+
     if (paymentProvider !== 'mock') {
       try {
         console.log(`[${paymentProvider} Mode] Calling POST /functions/v1/create-billing-portal-session`);
@@ -322,11 +322,11 @@ export const subscriptionService = {
         });
 
         if (error) throw error;
-        
+
         if (data?.portalUrl) {
           if (data.note) alert(data.note);
           if (data.portalUrl.startsWith('http') || data.portalUrl.startsWith('/')) {
-              window.location.href = data.portalUrl;
+            window.location.href = data.portalUrl;
           }
         } else {
           alert('Portal olusturulamadi.');
