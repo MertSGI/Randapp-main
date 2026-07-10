@@ -50,7 +50,7 @@ export interface TenantUsage {
 
 export const subscriptionService = {
   async getCurrentSubscription(tenantId: string): Promise<TenantSubscription | null> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = import.meta.env.VITE_DATA_MODE || 'mock';
     
     if (mode.startsWith('supabase')) {
       const { data, error } = await supabase
@@ -102,13 +102,29 @@ export const subscriptionService = {
 
   async getPlanForTenant(tenantId: string): Promise<PricingPlan | null> {
     const sub = await this.getCurrentSubscription(tenantId);
-    let planId = sub ? sub.planId : 'starter';
-    const plan = planService.getPlan(planId) || planService.getPlan('starter');
+    let planId = sub ? sub.planId : 'baslangic';
+    
+    // Sanitize and map planId to frontend canonical plan IDs
+    if (planId === 'starter' || planId === 'free') {
+      planId = 'baslangic';
+    } else if (planId.includes('premium')) {
+      planId = 'premium';
+    } else if (planId.includes('professional')) {
+      planId = 'professional';
+    } else if (planId.includes('standart')) {
+      planId = 'standart';
+    } else if (planId.includes('baslangic')) {
+      planId = 'baslangic';
+    } else if (planId.includes('kurumsal')) {
+      planId = 'kurumsal';
+    }
+
+    const plan = planService.getPlan(planId) || planService.getPlan('baslangic');
     return plan as PricingPlan;
   },
 
   async getTenantUsage(tenantId: string): Promise<TenantUsage> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = import.meta.env.VITE_DATA_MODE || 'mock';
 
     if (mode.startsWith('supabase')) {
       try {
