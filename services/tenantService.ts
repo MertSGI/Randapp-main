@@ -20,7 +20,7 @@ const DEMO_TENANT: Tenant = {
 
 export const tenantService = {
   async resolveTenantFromHost(hostname: string): Promise<Tenant | null> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = import.meta.env.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
       // In supabase mode (including staging), always resolve from DB regardless of hostname.
       // Localhost is a valid dev environment for real supabase testing.
@@ -29,7 +29,7 @@ export const tenantService = {
         // Fall through to DB resolution
       }
 
-      const baseDomain = (import.meta as any).env.VITE_APP_BASE_DOMAIN;
+      const baseDomain = import.meta.env.VITE_APP_BASE_DOMAIN;
       let querySlug = '';
       let isSubdomain = false;
       
@@ -146,8 +146,7 @@ export const tenantService = {
         } as Tenant;
     }
 
-    // In mock mode, allow local overrides
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = import.meta.env.VITE_DATA_MODE || 'mock';
     if (mode === 'mock') {
        if (activeTenantId && activeTenantId !== 'tenant_pilot_demo') {
           const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || localStorage.getItem('randapp_registered_tenants') || '[]');
@@ -227,7 +226,7 @@ export const tenantService = {
       } as TenantBranding;
     }
     
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = import.meta.env.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
       const { data: branding, error } = await supabase
         .from('tenant_branding')
@@ -257,7 +256,7 @@ export const tenantService = {
   },
 
   async updateTenant(tenantId: string, updates: Partial<Tenant>): Promise<void> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = import.meta.env.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
       const { error } = await supabase
         .from('tenants')
@@ -312,7 +311,7 @@ export const tenantService = {
   },
 
   async updateTenantBranding(tenantId: string, updates: Partial<TenantBranding>): Promise<TenantBranding | null> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = import.meta.env.VITE_DATA_MODE || 'mock';
     
     // Get existing to merge
     const current = await this.getTenantBranding(tenantId) || { tenantId } as TenantBranding;
