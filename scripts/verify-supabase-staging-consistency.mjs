@@ -282,8 +282,28 @@ const walkFiles = (dirPath) => {
                          fullPath === join(ROOT, 'index.tsx');
 
       if (isFrontend) {
-        // 1. service_role / SUPABASE_SERVICE_ROLE_KEY check
-        if (content.includes('service_role') || content.includes('SUPABASE_SERVICE_ROLE_KEY')) {
+        // 1. service_role / SUPABASE_SERVICE_ROLE_KEY / secret checks
+        const forbiddenTerms = [
+          'service_role',
+          'SERVICE_ROLE_KEY',
+          'SECRET_ROLE_KEY',
+          'SUPABASE_SERVICE_ROLE_KEY',
+          'VITE_SUPABASE_SERVICE_ROLE_KEY',
+          'VITE_SUPABASE_SECRET_ROLE_KEY',
+          'VITE_IYZICO_SECRET_KEY',
+          'IYZICO_SECRET_KEY'
+        ];
+        
+        const hasDirectForbidden = forbiddenTerms.some(t => content.includes(t));
+        
+        // Dynamic construction patterns
+        const hasConcatPattern1 = content.includes('VITE_SUPABASE') && content.includes('SERVICE_ROLE_KEY');
+        const hasConcatPattern2 = content.includes('SUPABASE_') && content.includes('SERVICE_ROLE_KEY');
+        const hasConcatPattern3 = /['"`]SUPABASE_['"`]\s*\+\s*['"`]SERVICE_ROLE_KEY['"`]/i.test(content);
+        const hasTemplatePattern = /VITE_SUPABASE_.*\$\{.*service_role.*\}|VITE_SUPABASE_.*\$\{.*SERVICE_ROLE_KEY.*\}/i.test(content);
+        const hasJoinPattern = /join\(['"`]_['"`]\)/i.test(content) && content.includes('SERVICE_ROLE_KEY');
+        
+        if (hasDirectForbidden || hasConcatPattern1 || hasConcatPattern2 || hasConcatPattern3 || hasTemplatePattern || hasJoinPattern) {
           serviceRoleLeakFound = true;
         }
 

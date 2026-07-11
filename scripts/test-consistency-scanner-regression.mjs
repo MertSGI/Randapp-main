@@ -20,81 +20,69 @@ const cleanFixtures = () => {
 };
 
 try {
-  console.log('🧪 Starting Advanced Regression Test for Staging Consistency Scanner...');
+  console.log('🧪 Starting Comprehensive Staging Consistency Scanner Regression Test...');
 
-  // ────────────────────────────────────────────────────────────────────────
-  // Case A: A project frontend file contains `service_role`
-  // ────────────────────────────────────────────────────────────────────────
-  console.log('Case A: service_role in project frontend file...');
+  // Helper to run scanner and assert expected outcome
+  const assertScannerResult = (label, content, writeToNodeModules = false, expectPass = false) => {
+    cleanFixtures();
+    const targetPath = writeToNodeModules ? nodeModulesFixturePath : srcFixturePath;
+    writeFileSync(targetPath, content);
+    
+    let passed = false;
+    try {
+      execSync('node scripts/verify-supabase-staging-consistency.mjs', { stdio: 'pipe' });
+      passed = true;
+    } catch (e) {
+      passed = false;
+    }
+
+    if (expectPass && !passed) {
+      throw new Error(`FAIL: ${label} (Expected PASS, but scanner FAILED)`);
+    } else if (!expectPass && passed) {
+      throw new Error(`FAIL: ${label} (Expected FAIL, but scanner PASSED)`);
+    }
+    console.log(`  ✅ ${label}: Passed assertion (${expectPass ? 'PASSED' : 'FAILED'} as expected)`);
+  };
+
+  // Case A: service_role in project frontend file
+  assertScannerResult('Case A', 'const key = "service_role";', false, false);
+
+  // Case B: service_role with warning comments
+  assertScannerResult('Case B', 'const key = "service_role";\n// IMPORTANT: Do not put Service Role in frontend', false, false);
+
+  // Case C: SUPABASE_SERVICE_ROLE_KEY with NEVER comments
+  assertScannerResult('Case C', 'const key = "SUPABASE_SERVICE_ROLE_KEY";\n// NEVER expose this', false, false);
+
+  // Case D: service_role inside node_modules/.vite/deps
+  assertScannerResult('Case D', 'const key = "service_role";', true, true);
+
+  // Case E: Join pattern
+  assertScannerResult('Case E', "import.meta.env[['VITE_SUPABASE', 'SERVICE_ROLE_KEY'].join('_')]", false, false);
+
+  // Case F: Concatenation pattern
+  assertScannerResult('Case F', "import.meta.env['SUPABASE_' + 'SERVICE_ROLE_KEY']", false, false);
+
+  // Case G: Template literal suffix suffix pattern
+  assertScannerResult('Case G', "const suffix = 'SERVICE_ROLE_KEY';\nimport.meta.env[`VITE_SUPABASE_${suffix}`]", false, false);
+
+  // Case H: VITE_SUPABASE_SERVICE_ROLE_KEY literal check
+  assertScannerResult('Case H', "import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY", false, false);
+
+  // Case I: VITE_IYZICO_SECRET_KEY literal check
+  assertScannerResult('Case I', "import.meta.env.VITE_IYZICO_SECRET_KEY", false, false);
+
+  // Case J: Safe frontend public keys check
+  assertScannerResult('Case J', "const url = import.meta.env.VITE_SUPABASE_URL;\nconst key = import.meta.env.VITE_SUPABASE_ANON_KEY;\nconst mode = import.meta.env.VITE_PAYMENT_MODE;", false, true);
+
+  // Case K: Forbidden strings only inside node_modules/.vite/deps
+  assertScannerResult('Case K', "import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY\nimport.meta.env.VITE_IYZICO_SECRET_KEY", true, true);
+
   cleanFixtures();
-  writeFileSync(srcFixturePath, 'const key = "service_role";');
-  
-  let failedA = false;
-  try {
-    execSync('node scripts/verify-supabase-staging-consistency.mjs', { stdio: 'pipe' });
-  } catch (e) {
-    failedA = true;
-    console.log('  ✅ Expected FAIL achieved.');
-  }
-  if (!failedA) throw new Error('Case A FAILED: scanner did not block "service_role" in project code.');
-
-  // ────────────────────────────────────────────────────────────────────────
-  // Case B: A project frontend file contains `service_role` and safety comments
-  // ────────────────────────────────────────────────────────────────────────
-  console.log('Case B: service_role in project frontend file with safety comments...');
-  cleanFixtures();
-  writeFileSync(srcFixturePath, 'const key = "service_role";\n// IMPORTANT: Do not put Service Role in frontend');
-  
-  let failedB = false;
-  try {
-    execSync('node scripts/verify-supabase-staging-consistency.mjs', { stdio: 'pipe' });
-  } catch (e) {
-    failedB = true;
-    console.log('  ✅ Expected FAIL achieved.');
-  }
-  if (!failedB) throw new Error('Case B FAILED: scanner was bypassed by safety comments.');
-
-  // ────────────────────────────────────────────────────────────────────────
-  // Case C: A project frontend file contains `SUPABASE_SERVICE_ROLE_KEY`
-  // ────────────────────────────────────────────────────────────────────────
-  console.log('Case C: SUPABASE_SERVICE_ROLE_KEY in project frontend file...');
-  cleanFixtures();
-  writeFileSync(srcFixturePath, 'const key = "SUPABASE_SERVICE_ROLE_KEY";\n// NEVER expose this');
-  
-  let failedC = false;
-  try {
-    execSync('node scripts/verify-supabase-staging-consistency.mjs', { stdio: 'pipe' });
-  } catch (e) {
-    failedC = true;
-    console.log('  ✅ Expected FAIL achieved.');
-  }
-  if (!failedC) throw new Error('Case C FAILED: scanner was bypassed by "NEVER" comments.');
-
-  // ────────────────────────────────────────────────────────────────────────
-  // Case D: The same strings exist only under node_modules/.vite/deps
-  // ────────────────────────────────────────────────────────────────────────
-  console.log('Case D: service_role only inside node_modules/.vite/deps...');
-  cleanFixtures();
-  writeFileSync(nodeModulesFixturePath, 'const key = "service_role";\nconst key2 = "SUPABASE_SERVICE_ROLE_KEY";');
-  
-  let passedD = false;
-  try {
-    execSync('node scripts/verify-supabase-staging-consistency.mjs', { stdio: 'pipe' });
-    passedD = true;
-    console.log('  ✅ Expected PASS achieved.');
-  } catch (e) {
-    console.error(e.stdout ? e.stdout.toString() : '');
-    throw new Error('Case D FAILED: scanner flagged files in node_modules.');
-  }
-
-  // Final cleanup
-  cleanFixtures();
-
-  console.log('🎉 ALL REGRESSION CASES A–D PASSED PERFECTLY!');
+  console.log('\n🎉 ALL REGRESSION CASES A–K PASSED PERFECTLY!\n');
   process.exit(0);
 
 } catch (error) {
-  console.error('❌ Regression Test Failed:', error.message);
+  console.error('\n❌ Regression Test Failed:', error.message);
   cleanFixtures();
   process.exit(1);
 }

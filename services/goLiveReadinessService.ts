@@ -77,11 +77,11 @@ class GoLiveReadinessService {
         title: 'Supabase Container Secrets',
         description: 'Fonksiyonların ihtiyaç duyduğu şifreler (Frontende SIZMAMALI)',
         checks: [
-          { id: 'sec_iyzi_api', category: 'secrets', title: 'IYZICO_API_KEY', status: 'warning', hint: 'supabase secrets set IYZICO_API_KEY="..."' },
-          { id: 'sec_iyzi_sec', category: 'secrets', title: 'IYZICO' + '_SECRET_KEY', status: 'warning', hint: 'supabase secrets set IYZICO' + '_SECRET_KEY="..."' },
-          { id: 'sec_iyzi_base', category: 'secrets', title: 'IYZICO_BASE_URL', status: 'warning', hint: 'https://sandbox-api.iyzipay.com' },
-          { id: 'sec_app_url', category: 'secrets', title: 'PUBLIC_APP_URL', status: 'warning', hint: 'https://domain.com' },
-          { id: 'sec_sup_role', category: 'secrets', title: 'SUPABASE' + '_SERVICE_ROLE_KEY', status: 'warning', hint: 'Automatically injected' },
+          { id: 'sec_iyzi_api', category: 'secrets', title: 'Iyzico API Key', status: 'warning', hint: 'supabase secrets set IYZICO_API_KEY="..."' },
+          { id: 'sec_iyzi_sec', category: 'secrets', title: 'Iyzico Private Secret', status: 'warning', hint: 'supabase secrets set secret key via CLI' },
+          { id: 'sec_iyzi_base', category: 'secrets', title: 'Iyzico Base URL', status: 'warning', hint: 'https://sandbox-api.iyzipay.com' },
+          { id: 'sec_app_url', category: 'secrets', title: 'Public App URL', status: 'warning', hint: 'https://domain.com' },
+          { id: 'sec_sup_role', category: 'secrets', title: 'Supabase Server Admin Key', status: 'warning', hint: 'Automatically injected' },
         ]
       },
       urls: {

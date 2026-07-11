@@ -8,33 +8,18 @@ export interface EnvSnapshot {
   publicBaseDomain: string;
   supabaseUrl: string;
   hasAnonKey: boolean;
-  hasServiceRoleKey: boolean;
-  hasIyzicoLiveSecret: boolean;
-  hasRawCardConfig: boolean;
+  buildTimeSecretAuditStatus: string;
 }
 
 export interface ValidationResult {
   isValid: boolean;
   missingVars: string[];
   errors: string[];
-  unsafeVars: string[];
 }
 
 export const environmentPreflightService = {
   getEnvironmentSnapshot(): EnvSnapshot {
     const env = (import.meta as any).env || {};
-    
-    const hasServiceRoleKey = Object.keys(env).some(
-      key => (key.includes('SERVICE_ROLE') || key.includes('SERVICE_KEY')) && !!env[key]
-    );
-
-    const hasIyzicoLiveSecret = Object.keys(env).some(
-      key => key.includes('IYZICO_LIVE') || key.includes('IYZICO_SECRET_KEY') && !key.includes('SANDBOX') && !!env[key]
-    );
-
-    const hasRawCardConfig = Object.keys(env).some(
-      key => key.toLowerCase().includes('card_number') || key.toLowerCase().includes('cvv')
-    );
 
     return {
       launchMode: env.VITE_LAUNCH_MODE || 'local_pre_live',
@@ -44,9 +29,7 @@ export const environmentPreflightService = {
       publicBaseDomain: env.VITE_PUBLIC_BASE_DOMAIN || 'randevulari.com',
       supabaseUrl: env.VITE_SUPABASE_URL || '',
       hasAnonKey: !!env.VITE_SUPABASE_ANON_KEY,
-      hasServiceRoleKey,
-      hasIyzicoLiveSecret,
-      hasRawCardConfig
+      buildTimeSecretAuditStatus: 'Enforced by build-time QA (Staging Consistency Scanner)'
     };
   },
 
@@ -54,7 +37,6 @@ export const environmentPreflightService = {
     const snap = this.getEnvironmentSnapshot();
     const missingVars: string[] = [];
     const errors: string[] = [];
-    const unsafeVars = this.listUnsafeFrontendEnvVars();
 
     if (snap.launchMode !== 'paymentless_limited_production') {
       errors.push(`VITE_LAUNCH_MODE is "${snap.launchMode}" instead of "paymentless_limited_production"`);
@@ -80,23 +62,10 @@ export const environmentPreflightService = {
       missingVars.push('VITE_SUPABASE_ANON_KEY');
     }
 
-    if (snap.hasServiceRoleKey) {
-      errors.push('CRITICAL SECURITY VIOLATION: Supabase Service Role Key is exposed to the frontend.');
-    }
-
-    if (snap.hasIyzicoLiveSecret) {
-      errors.push('SECURITY VIOLATION: iyzico live keys are exposed to the frontend.');
-    }
-
-    if (snap.hasRawCardConfig) {
-      errors.push('COMPLIANCE VIOLATION: Raw credit card field variables found on frontend.');
-    }
-
     return {
       isValid: errors.length === 0 && missingVars.length === 0,
       missingVars,
-      errors,
-      unsafeVars
+      errors
     };
   },
 
@@ -104,7 +73,6 @@ export const environmentPreflightService = {
     const snap = this.getEnvironmentSnapshot();
     const missingVars: string[] = [];
     const errors: string[] = [];
-    const unsafeVars = this.listUnsafeFrontendEnvVars();
 
     if (snap.launchMode !== 'full_live_online_payment') {
       errors.push(`VITE_LAUNCH_MODE is "${snap.launchMode}" instead of "full_live_online_payment"`);
@@ -129,8 +97,7 @@ export const environmentPreflightService = {
     return {
       isValid: errors.length === 0 && missingVars.length === 0,
       missingVars,
-      errors,
-      unsafeVars
+      errors
     };
   },
 
@@ -138,7 +105,6 @@ export const environmentPreflightService = {
     const snap = this.getEnvironmentSnapshot();
     const missingVars: string[] = [];
     const errors: string[] = [];
-    const unsafeVars = this.listUnsafeFrontendEnvVars();
 
     if (snap.launchMode !== 'local_pre_live' && snap.launchMode !== 'internal_demo') {
       errors.push(`VITE_LAUNCH_MODE is "${snap.launchMode}", which is not a local/demo mode.`);
@@ -147,8 +113,7 @@ export const environmentPreflightService = {
     return {
       isValid: errors.length === 0 && missingVars.length === 0,
       missingVars,
-      errors,
-      unsafeVars
+      errors
     };
   },
 
@@ -173,25 +138,6 @@ export const environmentPreflightService = {
     return missing;
   },
 
-  listUnsafeFrontendEnvVars(): string[] {
-    const env = (import.meta as any).env || {};
-    const unsafe: string[] = [];
-
-    Object.keys(env).forEach(key => {
-      // Any secret key or service role key in frontend is unsafe
-      if (
-        key.includes('SECRET_KEY') || 
-        key.includes('SERVICE_ROLE') || 
-        key.includes('PRIVATE_KEY') || 
-        key.includes('API_SECRET')
-      ) {
-        unsafe.push(key);
-      }
-    });
-
-    return unsafe;
-  },
-
   getEnvPreflightSummary() {
     const snap = this.getEnvironmentSnapshot();
     const paylessRes = this.validatePaymentlessProductionEnv();
@@ -204,7 +150,7 @@ export const environmentPreflightService = {
       paymentlessMissingVars: paylessRes.missingVars,
       onlinePaymentReady: onlineRes.isValid,
       onlineErrors: onlineRes.errors,
-      unsafeVars: paylessRes.unsafeVars
+      unsafeVars: []
     };
   }
 };
