@@ -256,33 +256,58 @@ check(
 // =========================================================================
 console.log('\n── 5. Security Checks ──');
 
-// Check frontend files for service_role key leaks
-const FRONTEND_DIRS = ['components', 'pages', 'contexts', 'services'];
+// Check frontend files for service_role key leaks and raw card captures recursively
+const EXCLUDED_DIRS = ['node_modules', 'dist', 'build', 'coverage', '.git', '.temp'];
 let serviceRoleLeakFound = false;
+let rawCardFieldFound = false;
 
-for (const dir of FRONTEND_DIRS) {
-  const dirPath = join(ROOT, dir);
-  if (!existsSync(dirPath)) continue;
-  
-  const scanDir = (dirPath) => {
-    const entries = readdirSync(dirPath, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = join(dirPath, entry.name);
-      if (entry.isDirectory()) {
-        scanDir(fullPath);
-      } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
-        const content = readFileSync(fullPath, 'utf8');
+const walkFiles = (dirPath) => {
+  const entries = readdirSync(dirPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      if (EXCLUDED_DIRS.includes(entry.name)) {
+        continue;
+      }
+      walkFiles(fullPath);
+    } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx') || entry.name.endsWith('.js') || entry.name.endsWith('.jsx') || entry.name.endsWith('.mjs') || entry.name.endsWith('.cjs')) {
+      const content = readFileSync(fullPath, 'utf8');
+      
+      const isFrontend = fullPath.includes(join(ROOT, 'components')) || 
+                         fullPath.includes(join(ROOT, 'pages')) || 
+                         fullPath.includes(join(ROOT, 'contexts')) || 
+                         fullPath.includes(join(ROOT, 'services')) || 
+                         fullPath.includes(join(ROOT, 'utils')) ||
+                         fullPath === join(ROOT, 'App.tsx') ||
+                         fullPath === join(ROOT, 'index.tsx');
+
+      if (isFrontend) {
+        // 1. service_role / SUPABASE_SERVICE_ROLE_KEY check
         if (content.includes('service_role') || content.includes('SUPABASE_SERVICE_ROLE_KEY')) {
           if (!content.includes('// IMPORTANT: Do not put Service Role') && 
               !content.includes('NEVER')) {
             serviceRoleLeakFound = true;
           }
         }
+
+        // 2. card_number / card_cvv capture check
+        const isStagingScannerCheckFile = [
+          'auditLogService.ts',
+          'environmentPreflightService.ts',
+          'migrationDryRunService.ts'
+        ].includes(entry.name);
+        
+        if (!isStagingScannerCheckFile) {
+          if (/card_number|card_cvv|cardNumber|cardCvv/i.test(content)) {
+            rawCardFieldFound = true;
+          }
+        }
       }
     }
-  };
-  scanDir(dirPath);
-}
+  }
+};
+
+walkFiles(ROOT);
 
 check(
   'No service_role key references in frontend source files',
@@ -298,37 +323,6 @@ if (envExample) {
     !envExample.includes('eyJ') && !envExample.includes('.supabase.co'),
     'Found what looks like real credentials in .env.example'
   );
-}
-
-// Check for raw card fields in frontend
-let rawCardFieldFound = false;
-for (const dir of FRONTEND_DIRS) {
-  const dirPath = join(ROOT, dir);
-  if (!existsSync(dirPath)) continue;
-  
-  const scanDir = (dirPath) => {
-    const entries = readdirSync(dirPath, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = join(dirPath, entry.name);
-      if (entry.isDirectory()) {
-        scanDir(fullPath);
-      } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
-        const isStagingScannerCheckFile = [
-          'auditLogService.ts',
-          'environmentPreflightService.ts',
-          'migrationDryRunService.ts'
-        ].includes(entry.name);
-        
-        if (!isStagingScannerCheckFile) {
-          const content = readFileSync(fullPath, 'utf8');
-          if (/card_number|card_cvv|cardNumber|cardCvv/i.test(content)) {
-            rawCardFieldFound = true;
-          }
-        }
-      }
-    }
-  };
-  scanDir(dirPath);
 }
 
 check(

@@ -102,22 +102,20 @@ export const subscriptionService = {
 
   async getPlanForTenant(tenantId: string): Promise<PricingPlan | null> {
     const sub = await this.getCurrentSubscription(tenantId);
-    let planId = sub ? sub.planId : 'baslangic';
+    const planMapping: Record<string, string> = {
+      'starter': 'baslangic',
+      'free': 'baslangic',
+      'baslangic': 'baslangic',
+      'standart': 'standart',
+      'professional': 'professional',
+      'premium': 'premium',
+      'premium_monthly': 'premium',
+      'premium_annual': 'premium',
+      'kurumsal': 'kurumsal'
+    };
 
-    // Sanitize and map planId to frontend canonical plan IDs
-    if (planId === 'starter' || planId === 'free') {
-      planId = 'baslangic';
-    } else if (planId.includes('premium')) {
-      planId = 'premium';
-    } else if (planId.includes('professional')) {
-      planId = 'professional';
-    } else if (planId.includes('standart')) {
-      planId = 'standart';
-    } else if (planId.includes('baslangic')) {
-      planId = 'baslangic';
-    } else if (planId.includes('kurumsal')) {
-      planId = 'kurumsal';
-    }
+    let planId = sub ? sub.planId : 'baslangic';
+    planId = planMapping[planId] || 'baslangic';
 
     const plan = planService.getPlan(planId) || planService.getPlan('baslangic');
     return plan as PricingPlan;

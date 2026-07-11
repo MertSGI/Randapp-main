@@ -70,12 +70,33 @@ const runTests = () => {
     }
 
     output += `\n## 4. Secret & Card Data Check\n`;
-    const grepEnv = execSync('grep -r "process.env.VITE_" components/ pages/ services/ || true').toString();
-    const grepCards = execSync('grep -r -i "cardNumber" components/ pages/ services/ || true').toString();
-    if (grepCards === '') {
+    
+    let hasCardNumber = false;
+    const searchDirs = ['components', 'pages', 'services'];
+    const walkSearch = (dir) => {
+        const fullDir = path.join(rootDir, dir);
+        if (!fs.existsSync(fullDir)) return;
+        const entries = fs.readdirSync(fullDir, { withFileTypes: true });
+        for (const entry of entries) {
+            const entryPath = path.join(dir, entry.name);
+            const fullPath = path.join(rootDir, entryPath);
+            if (entry.isDirectory()) {
+                walkSearch(entryPath);
+            } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx') || entry.name.endsWith('.js') || entry.name.endsWith('.jsx')) {
+                const content = fs.readFileSync(fullPath, 'utf8');
+                if (/cardNumber/i.test(content)) {
+                    hasCardNumber = true;
+                }
+            }
+        }
+    };
+    for (const d of searchDirs) {
+        walkSearch(d);
+    }
+
+    if (!hasCardNumber) {
        output += `- ✅ No raw card fields text (cardNumber) found.\n`;
     }
-    // we also rely on backend for secret checks generally but a brief visual confirmation 
 
     output += `\n## Summary\n`;
     if (passed) {
