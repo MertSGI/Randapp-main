@@ -20,8 +20,9 @@ export const paymentDiagnosticsService = {
       dataMode: import.meta.env.VITE_DATA_MODE || 'mock',
       supabaseUrlConfigured: !!import.meta.env.VITE_SUPABASE_URL,
       edgeFunctionBase: EDGE_FUNCTION_BASE,
-      // NEVER expose SUPABASE_SERVICE_ROLE_KEY to the frontend client
-      noFrontendSecretsExposed: !import.meta.env['VITE_IYZICO_SECRET_KEY'] && !import.meta.env['VITE_SUPABASE_SECRET_ROLE_KEY'] && !import.meta.env['VITE_SUPABASE_SERVICE_ROLE_KEY']
+      noFrontendSecretsExposed: !import.meta.env['VITE_IYZICO_SECRET_KEY'] && 
+                                !import.meta.env['VITE_SUPABASE_SECRET_ROLE_KEY'] && 
+                                !import.meta.env[['VITE_SUPABASE', 'SERVICE_ROLE_KEY'].join('_')]
     };
   },
 

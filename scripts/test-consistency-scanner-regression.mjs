@@ -14,53 +14,87 @@ if (!existsSync(mockNodeModulesDir)) mkdirSync(mockNodeModulesDir, { recursive: 
 const srcFixturePath = join(srcDir, 'dummy_test_leak_file.tsx');
 const nodeModulesFixturePath = join(mockNodeModulesDir, 'dummy_test_leak_file.tsx');
 
+const cleanFixtures = () => {
+  try { if (existsSync(srcFixturePath)) unlinkSync(srcFixturePath); } catch {}
+  try { if (existsSync(nodeModulesFixturePath)) unlinkSync(nodeModulesFixturePath); } catch {}
+};
+
 try {
-  console.log('🧪 Starting Regression Test for Staging Consistency Scanner...');
+  console.log('🧪 Starting Advanced Regression Test for Staging Consistency Scanner...');
 
-  // 1. Verify service_role inside project source fails the scanner
-  console.log('Step 1: Writing synthetic service_role leak to components...');
-  writeFileSync(srcFixturePath, 'const myKey = "service_role";');
-
-  let failedAsExpected = false;
+  // ────────────────────────────────────────────────────────────────────────
+  // Case A: A project frontend file contains `service_role`
+  // ────────────────────────────────────────────────────────────────────────
+  console.log('Case A: service_role in project frontend file...');
+  cleanFixtures();
+  writeFileSync(srcFixturePath, 'const key = "service_role";');
+  
+  let failedA = false;
   try {
     execSync('node scripts/verify-supabase-staging-consistency.mjs', { stdio: 'pipe' });
   } catch (e) {
-    failedAsExpected = true;
-    console.log('✅ Success: Scanner correctly failed with exit code 1 when project leak exists.');
+    failedA = true;
+    console.log('  ✅ Expected FAIL achieved.');
   }
+  if (!failedA) throw new Error('Case A FAILED: scanner did not block "service_role" in project code.');
 
-  if (!failedAsExpected) {
-    throw new Error('FAIL: Scanner should have failed, but exited with code 0!');
-  }
-
-  // Cleanup project leak file
-  unlinkSync(srcFixturePath);
-
-  // 2. Verify service_role inside node_modules is ignored
-  console.log('Step 2: Writing synthetic service_role to node_modules/.vite/deps...');
-  writeFileSync(nodeModulesFixturePath, 'const myKey = "service_role";');
-
-  let passedAsExpected = false;
+  // ────────────────────────────────────────────────────────────────────────
+  // Case B: A project frontend file contains `service_role` and safety comments
+  // ────────────────────────────────────────────────────────────────────────
+  console.log('Case B: service_role in project frontend file with safety comments...');
+  cleanFixtures();
+  writeFileSync(srcFixturePath, 'const key = "service_role";\n// IMPORTANT: Do not put Service Role in frontend');
+  
+  let failedB = false;
   try {
     execSync('node scripts/verify-supabase-staging-consistency.mjs', { stdio: 'pipe' });
-    passedAsExpected = true;
-    console.log('✅ Success: Scanner ignored the file in node_modules and passed.');
+  } catch (e) {
+    failedB = true;
+    console.log('  ✅ Expected FAIL achieved.');
+  }
+  if (!failedB) throw new Error('Case B FAILED: scanner was bypassed by safety comments.');
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Case C: A project frontend file contains `SUPABASE_SERVICE_ROLE_KEY`
+  // ────────────────────────────────────────────────────────────────────────
+  console.log('Case C: SUPABASE_SERVICE_ROLE_KEY in project frontend file...');
+  cleanFixtures();
+  writeFileSync(srcFixturePath, 'const key = "SUPABASE_SERVICE_ROLE_KEY";\n// NEVER expose this');
+  
+  let failedC = false;
+  try {
+    execSync('node scripts/verify-supabase-staging-consistency.mjs', { stdio: 'pipe' });
+  } catch (e) {
+    failedC = true;
+    console.log('  ✅ Expected FAIL achieved.');
+  }
+  if (!failedC) throw new Error('Case C FAILED: scanner was bypassed by "NEVER" comments.');
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Case D: The same strings exist only under node_modules/.vite/deps
+  // ────────────────────────────────────────────────────────────────────────
+  console.log('Case D: service_role only inside node_modules/.vite/deps...');
+  cleanFixtures();
+  writeFileSync(nodeModulesFixturePath, 'const key = "service_role";\nconst key2 = "SUPABASE_SERVICE_ROLE_KEY";');
+  
+  let passedD = false;
+  try {
+    execSync('node scripts/verify-supabase-staging-consistency.mjs', { stdio: 'pipe' });
+    passedD = true;
+    console.log('  ✅ Expected PASS achieved.');
   } catch (e) {
     console.error(e.stdout ? e.stdout.toString() : '');
-    throw new Error('FAIL: Scanner failed when service_role was only in node_modules.');
+    throw new Error('Case D FAILED: scanner flagged files in node_modules.');
   }
 
-  // Cleanup node_modules file
-  unlinkSync(nodeModulesFixturePath);
+  // Final cleanup
+  cleanFixtures();
 
-  console.log('🎉 REGRESSION TEST PASSED SUCCESSFULLY!');
+  console.log('🎉 ALL REGRESSION CASES A–D PASSED PERFECTLY!');
   process.exit(0);
 
 } catch (error) {
   console.error('❌ Regression Test Failed:', error.message);
-  
-  // Final cleanup attempt
-  try { if (existsSync(srcFixturePath)) unlinkSync(srcFixturePath); } catch {}
-  try { if (existsSync(nodeModulesFixturePath)) unlinkSync(nodeModulesFixturePath); } catch {}
+  cleanFixtures();
   process.exit(1);
 }

@@ -284,10 +284,7 @@ const walkFiles = (dirPath) => {
       if (isFrontend) {
         // 1. service_role / SUPABASE_SERVICE_ROLE_KEY check
         if (content.includes('service_role') || content.includes('SUPABASE_SERVICE_ROLE_KEY')) {
-          if (!content.includes('// IMPORTANT: Do not put Service Role') && 
-              !content.includes('NEVER')) {
-            serviceRoleLeakFound = true;
-          }
+          serviceRoleLeakFound = true;
         }
 
         // 2. card_number / card_cvv capture check
