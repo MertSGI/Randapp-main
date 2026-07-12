@@ -42,20 +42,20 @@ function inspectDirForExposedSecrets(dirPath) {
       }
     } else if (file.endsWith('.tsx') || file.endsWith('.ts')) {
       const code = fs.readFileSync(fullPath, 'utf8');
-      
+
       // Let's audit for raw payment card inputs in client
-      if (code.includes('card-number-input' ) || code.includes('cvc-field-raw')) {
+      if (code.includes('card-number-input') || code.includes('cvc-field-raw')) {
         console.error(`❌ QA ERROR: Unsafe card entry fields detected: ${file}`);
         process.exit(1);
       }
-      
+
       // Look for SERVICE_ROLE key ingestion in browser context
       if (file !== 'supabaseClient.ts' && (code.includes('SERVICE_ROLE') || code.includes('service_role'))) {
-         // Some repository files can refer to it in comments, but prevent client-side use
-         if (code.includes('supabaseAdmin') && file.endsWith('.tsx')) {
-           console.error(`❌ QA ERROR: frontend components must never handle elevated Service Role privileges: ${file}`);
-           process.exit(1);
-         }
+        // Some repository files can refer to it in comments, but prevent client-side use
+        if (code.includes('supabaseAdmin') && file.endsWith('.tsx')) {
+          console.error(`❌ QA ERROR: frontend components must never handle elevated Service Role privileges: ${file}`);
+          process.exit(1);
+        }
       }
     }
   }
