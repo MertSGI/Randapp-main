@@ -16,18 +16,18 @@
  */
 
 const RESERVED_WORDS = new Set([
-  'admin', 'api', 'app', 'www', 'lari', 'randevulari', 'randapp', 'radapp', 'super-admin', 
-  'login', 'pricing', 'checkout', 'support', 'help', 
+  'admin', 'api', 'app', 'www', 'lari', 'randevulari', 'randapp', 'radapp', 'super-admin',
+  'login', 'pricing', 'checkout', 'support', 'help',
   'contact', 'static', 'assets', 'demo', 'book', 'booking', 'tenant'
 ]);
 
 export function isValidSlug(slug: string): boolean {
   if (!slug || slug.length < 3 || slug.length > 50) return false;
   if (RESERVED_WORDS.has(slug.toLowerCase())) return false;
-  
+
   // Must start and end with alphanumeric, only allow hyphens in between
   if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(slug)) return false;
-  
+
   // Check no consecutive hyphens
   if (slug.includes('--')) return false;
 
@@ -70,7 +70,7 @@ export function generateSlugFromName(name: string): string {
   slug = slug.replace(/^-+|-+$/g, '');
 
   if (slug.length < 3) return ''; // invalid base
-  
+
   return slug.substring(0, 50);
 }
 
