@@ -1,4 +1,4 @@
-﻿import { isValidSlug, generateSlugFromName } from '../utils/slugUtils.js';
+import { isValidSlug, generateSlugFromName } from '../utils/slugUtils.js';
 
 console.log('🏁 Running slug validation and normalization regression tests...');
 
@@ -20,6 +20,9 @@ assertEqual('radapp reserved', isValidSlug('radapp'), false);
 assertEqual('admin reserved', isValidSlug('admin'), false);
 assertEqual('super-admin reserved', isValidSlug('super-admin'), false);
 assertEqual('book reserved', isValidSlug('book'), false);
+assertEqual('booking reserved', isValidSlug('booking'), false);
+assertEqual('login reserved', isValidSlug('login'), false);
+assertEqual('checkout reserved', isValidSlug('checkout'), false);
 
 assertEqual('melis-guzellik valid', isValidSlug('melis-guzellik'), true);
 assertEqual('valid business slug', isValidSlug('valid-normal-business-slug'), true);

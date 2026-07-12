@@ -18,7 +18,7 @@
 const RESERVED_WORDS = new Set([
   'admin', 'api', 'app', 'www', 'lari', 'randevulari', 'randapp', 'radapp', 'super-admin', 
   'login', 'pricing', 'checkout', 'support', 'help', 
-  'contact', 'static', 'assets', 'demo', 'book', 'tenant'
+  'contact', 'static', 'assets', 'demo', 'book', 'booking', 'tenant'
 ]);
 
 export function isValidSlug(slug: string): boolean {

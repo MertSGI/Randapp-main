@@ -3,7 +3,7 @@
 At LARİ, we are committed to maintaining a safe, compliant, and trustworthy platform. All tenants creating a public booking website must adhere to this policy.
 
 ## 1. Strictly Prohibited Services
-The following services are strictly prohibited from using lari:
+The following services are strictly prohibited from using LARİ:
 - Illegal services of any kind.
 - Adult sexual services, escort services, prostitution, or sexual massage.
 - Gambling, betting, and lottery services.

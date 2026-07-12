@@ -9,7 +9,7 @@ The application uses multiple distinct layouts depending on the user context and
 ## 1. Marketing / Public LARİ Site
 
 **Expected Layout:** `MarketingLayout`
-**Expected Nav:** lari Logo, Özellikler, Fiyatlar, Demo Oluştur, İletişim, Giriş Yap, Abonelik Talep Et (CTA). NO tenant booking/admin links.
+**Expected Nav:** LARİ logo, Özellikler, Fiyatlar, Demo Oluştur, İletişim, Giriş Yap, Abonelik Talep Et (CTA). NO tenant booking/admin links.
 **Expected Role:** Public / Unauthenticated
 
 - [ ] `/#/` -> Renders Marketing Home Page

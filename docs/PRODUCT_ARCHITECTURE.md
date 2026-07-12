@@ -22,7 +22,7 @@ The application follows a strict separation of concerns regarding user experienc
 - **Navigation:** Admin header with quick navigation back to the booking site, showing the logged-in user email. Contains tabs for Kurulum (Setup), Randevular, Hizmetler, Çalışanlar, Raporlar, and Abonelik.
 
 ## 4. Super Admin Platform Panel (`SuperAdminLayout`)
-- **Target Audience:** The platform owner (lari founders/operators).
+- **Target Audience:** LARİ platform operators.
 - **Routes:** `/super-admin/*`.
 - **Navigation:** A robust structural sidebar detailing platform metrics (Tenants, Subscriptions, Payments).
 - **Role Guard:** Protected exclusively for users with the `super_admin` role. Returns a Forbidden or Redirects if accessed by a standard user or salon owner.
