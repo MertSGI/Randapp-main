@@ -1,16 +1,24 @@
 export type DataSourceMode = 'local' | 'supabase';
 
+const ALLOWED_MODES = ['local', 'mock', 'demo', 'supabase_staging', 'supabase_production'] as const;
+
 export const getDataSourceMode = (): DataSourceMode => {
-  const envMode = import.meta.env?.VITE_LARI_DATA_SOURCE || import.meta.env?.VITE_DATA_MODE || 'local';
+  const envMode = (import.meta.env?.VITE_LARI_DATA_SOURCE || import.meta.env?.VITE_DATA_MODE || '').trim();
   
-  if (envMode === 'supabase' || envMode.startsWith('supabase_')) {
-    // If Supabase config is missing, fallback to local
+  if (!envMode) {
+    throw new Error('Configuration Error: VITE_DATA_MODE is missing. Please set VITE_DATA_MODE to one of the recognized values.');
+  }
+
+  if (!ALLOWED_MODES.includes(envMode as any)) {
+    throw new Error(`Configuration Error: Unrecognized VITE_DATA_MODE value: "${envMode}". Recognized values are: ${ALLOWED_MODES.join(', ')}.`);
+  }
+
+  if (envMode === 'supabase_staging' || envMode === 'supabase_production') {
     const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY;
     
     if (!supabaseUrl || !supabaseAnonKey) {
-      console.warn('Data mode is configured for Supabase, but VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY is missing. Falling back to local mode.');
-      return 'local';
+      throw new Error(`Configuration Error: Data mode is configured for "${envMode}", but VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY is missing.`);
     }
     return 'supabase';
   }
@@ -19,5 +27,8 @@ export const getDataSourceMode = (): DataSourceMode => {
 };
 
 export const dataSourceConfig = {
-  mode: getDataSourceMode()
+  get mode(): DataSourceMode {
+    return getDataSourceMode();
+  }
 };
+
