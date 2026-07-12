@@ -1,7 +1,7 @@
 # LARİ Marketing Website QA Guide
 
 ## Overview
-This document outlines the testing requirements for the public-facing Randapp marketing site.
+This document outlines the testing requirements for the public-facing lari marketing site.
 
 ## Accessing the Marketing Homepage for Testing
 To view the marketing homepage depending on your environment:

@@ -1,7 +1,7 @@
 import { DataSourceMode } from './dataSourceConfig';
 
 /**
- * Pure configuration resolver for LARI / Randapp data source mode.
+ * Pure configuration resolver for LARI data source mode.
  * Enforces canonical resolution rules, validates allowed values, and catches conflicts.
  */
 export function resolveDataSourceMode(params: {

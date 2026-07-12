@@ -15,7 +15,7 @@ This runbook is an execution checklist for integrating and testing the real iyzi
 
 ## Phase 3: Configuration
 - [ ] Retrieve Provider Reference Codes from iyzico sandbox dashboard.
-- [ ] Add Reference Codes via Randapp Super Admin Plans page.
+- [ ] Add Reference Codes via lari Super Admin Plans page.
 - [ ] Add the webhook URL to iyzico dashboard (`https://<project-ref>.supabase.co/functions/v1/payment-webhook`).
 
 ## Phase 4: UI Behavior Tests

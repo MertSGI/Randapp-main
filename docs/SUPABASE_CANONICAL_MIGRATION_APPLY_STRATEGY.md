@@ -16,7 +16,7 @@ During early phases of development, multiple "initial schema" files were drafted
 ## 2. Chosen Canonical Path: Option B (Archived Redundant Migration)
 
 We have formally selected **Option B (Archived Redundant Migration)** to isolate the conflict cleanly:
-* **The Archived Draft**: `20260526_initial_schema.sql` is identified as a redundant initial draft for Randapp. It has been moved out of `supabase/migrations/` and into `supabase/archive/`.
+* **The Archived Draft**: `20260526_initial_schema.sql` is identified as a redundant initial draft for lari. It has been moved out of `supabase/migrations/` and into `supabase/archive/`.
 * **The Canonical Baseline**: `001_initial_schema.sql` remains the single source of truth for the core tables of the application (`tenants`, `services`, `customers`, `appointments`, etc.).
 * **Result**: Fresh staging or production environments running standard Supabase CLI migrations will run a clean, single-pass chain without any schema conflicts.
 

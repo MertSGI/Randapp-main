@@ -26,4 +26,4 @@ Before conducting a live demo with a prospect, run through this checklist to ens
 ## 4. Environment Safety
 - [x] Exiting the demo cleanly restores previous testing tenants if applicable
 - [x] No `IYZICO_API_KEY` or other sensitive real secrets leak to the frontend
-- [x] No deprecated branding (e.g., Randapp) leaks onto demo screens
+- [x] No deprecated branding (e.g., lari) leaks onto demo screens

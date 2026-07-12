@@ -14,7 +14,7 @@ All functions are isolated and securely hold secrets like `GEMINI_API_KEY` and `
   - Supports `diagnostic: true` parameter for safe integration readiness checks (Phase 9 test harness).
   - Price and reference codes must be evaluated server-side.
   - In a real iyzico subscription flow, trial plans are configured directly in provider via product/plan endpoints.
-  - Randapp frontend NEVER signs iyzico requests directly or stores checkout keys.
+  - lari frontend NEVER signs iyzico requests directly or stores checkout keys.
 
 ## 2. payment-webhook
 * **Path**: `/functions/v1/payment-webhook`
