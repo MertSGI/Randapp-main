@@ -28,9 +28,9 @@ assert(typesContent.includes('assignServiceToStaff'), 'CatalogRepository must ha
 const localRepoPath = path.join(rootDir, 'services', 'repositories', 'localCatalogRepository.ts');
 if (fs.existsSync(localRepoPath)) {
   const content = fs.readFileSync(localRepoPath, 'utf8');
-  assert(content.includes('randapp:${tenantId}:services'), 'Local repo should use the randapp tenant keys for services');
-  assert(content.includes('randapp:${tenantId}:staff'), 'Local repo should use the randapp tenant keys for staff');
-  assert(content.includes('randapp:${tenantId}:staff_services'), 'Local repo should support staff_services mapping');
+  assert(content.includes('lari:${tenantId}:services'), 'Local repo should use the lari tenant keys for services');
+  assert(content.includes('lari:${tenantId}:staff'), 'Local repo should use the lari tenant keys for staff');
+  assert(content.includes('lari:${tenantId}:staff_services'), 'Local repo should support staff_services mapping');
 } else {
   assert(false, 'LocalCatalogRepository not found');
 }

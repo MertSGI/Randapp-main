@@ -201,7 +201,7 @@ export const DEFAULT_PLANS: Record<string, PricingPlan> = {
 
 export const planService = {
   getStoredPlans(): Record<string, PricingPlan> {
-    const raw = localStorage.getItem('randapp_plans');
+    const raw = localStorage.getItem('lari_plans');
     if (raw) {
       try {
         return JSON.parse(raw);
@@ -210,7 +210,7 @@ export const planService = {
     return JSON.parse(JSON.stringify(DEFAULT_PLANS));
   },
   savePlanInfos(plans: Record<string, PricingPlan>) {
-    localStorage.setItem('randapp_plans', JSON.stringify(plans));
+    localStorage.setItem('lari_plans', JSON.stringify(plans));
   },
   getAllPlans(): PricingPlan[] {
     return Object.values(this.getStoredPlans());

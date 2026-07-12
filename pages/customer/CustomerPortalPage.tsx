@@ -25,7 +25,7 @@ const CustomerPortalPage: React.FC = () => {
   const [cancelReason, setCancelReason] = useState('');
 
   useEffect(() => {
-    const authData = localStorage.getItem('randapp_customer_auth');
+    const authData = localStorage.getItem('lari_customer_auth');
     if (!authData || !tenant) {
       navigate('/customer/login');
       return;
@@ -34,13 +34,13 @@ const CustomerPortalPage: React.FC = () => {
     try {
       const auth = JSON.parse(authData);
       if (auth.tenantId !== tenant.id) {
-        localStorage.removeItem('randapp_customer_auth');
+        localStorage.removeItem('lari_customer_auth');
         navigate('/customer/login');
         return;
       }
       loadData(auth);
     } catch {
-      localStorage.removeItem('randapp_customer_auth');
+      localStorage.removeItem('lari_customer_auth');
       navigate('/customer/login');
     }
   }, [tenant, navigate]);
@@ -70,7 +70,7 @@ const CustomerPortalPage: React.FC = () => {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('randapp_customer_auth');
+    localStorage.removeItem('lari_customer_auth');
     navigate('/customer/login');
   };
 
@@ -103,7 +103,7 @@ const CustomerPortalPage: React.FC = () => {
         'customer'
       );
       
-      const authData = localStorage.getItem('randapp_customer_auth');
+      const authData = localStorage.getItem('lari_customer_auth');
       if (authData) {
         const auth = JSON.parse(authData);
         loadData(auth);

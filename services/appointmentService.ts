@@ -8,7 +8,7 @@ import { appointmentSelfServiceService } from './appointmentSelfServiceService';
 import { bookingAbuseProtectionService } from './bookingAbuseProtectionService';
 import { auditLogService } from './auditLogService';
 
-export const getAppointmentsKey = (tenantId: string) => `randapp:${tenantId}:appointments`;
+export const getAppointmentsKey = (tenantId: string) => `lari:${tenantId}:appointments`;
 
 export const getAppointments = async (tenantId: string): Promise<Appointment[]> => {
   return getBookingRepository().listAppointments(tenantId);

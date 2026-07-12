@@ -9,8 +9,8 @@ export class LocalCampaignRepository implements CampaignRepository {
 
   private setCampaigns(campaigns: BusinessCustomerCampaign[]) {
     localStorage.setItem('lari_customer_campaigns_by_tenant', JSON.stringify(campaigns));
-    // Also sync to randapp_business_campaigns for compatibility
-    localStorage.setItem('randapp_business_campaigns', JSON.stringify(campaigns));
+    // Also sync to lari_business_campaigns for compatibility
+    localStorage.setItem('lari_business_campaigns', JSON.stringify(campaigns));
   }
 
   private getReferrals(): BusinessCustomerReferral[] {
@@ -20,8 +20,8 @@ export class LocalCampaignRepository implements CampaignRepository {
 
   private setReferrals(referrals: BusinessCustomerReferral[]) {
     localStorage.setItem('lari_customer_referrals_by_tenant', JSON.stringify(referrals));
-    // Also sync to randapp_business_referrals
-    localStorage.setItem('randapp_business_referrals', JSON.stringify(referrals));
+    // Also sync to lari_business_referrals
+    localStorage.setItem('lari_business_referrals', JSON.stringify(referrals));
   }
 
   private getRewards(): CustomerCampaignReward[] {
@@ -32,7 +32,7 @@ export class LocalCampaignRepository implements CampaignRepository {
   private setRewards(rewards: CustomerCampaignReward[]) {
     localStorage.setItem('lari_customer_campaign_rewards_by_tenant', JSON.stringify(rewards));
     // Also sync for compatibility if needed
-    localStorage.setItem('randapp_customer_rewards', JSON.stringify(rewards));
+    localStorage.setItem('lari_customer_rewards', JSON.stringify(rewards));
   }
 
   async listCampaigns(tenantId: string): Promise<BusinessCustomerCampaign[]> {

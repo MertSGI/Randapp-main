@@ -1,6 +1,6 @@
-import { CustomerProfile } from '../types';
+﻿import { CustomerProfile } from '../types';
 
-const getLocalStorageKey = (tenantId: string) => `randapp_customer_profile_${tenantId}`;
+const getLocalStorageKey = (tenantId: string) => `lari_customer_profile_${tenantId}`;
 
 export const customerService = {
   getSavedCustomerProfile(tenantId: string): CustomerProfile | null {
@@ -50,3 +50,4 @@ export const customerService = {
     }
   }
 };
+

@@ -29,7 +29,7 @@ Bu proje, bir kuaför, güzellik salonu veya herhangi bir randevulu sistem için
 ---
 
 ## 🎯 Hedef Kitle (Target Market)
-Randapp öncelikli olarak randevu bazlı hizmet veren yerel işletmelere odaklanmaktadır:
+LARİ öncelikli olarak randevu bazlı hizmet veren yerel işletmelere odaklanmaktadır:
 - **Kuaförler ve Berberler**
 - **Güzellik ve Bakım Salonları**
 - **Nail Art ve Tırnak Stüdyoları**
@@ -61,7 +61,7 @@ Satış sunumları için uygulamaya hızlıca geçiş yapıp veri ekleten demo y
 
 ### 3️⃣ Automated QA & Screenshots
 We have a GitHub Actions based screenshot automation workflow. This captures full-page scenarios (Desktop & Mobile) across the entire product.
-- **Using GitHub Actions:** Go to the **Actions** tab in GitHub, select **QA Screenshots Capture**, run it manually via `workflow_dispatch`, and download the generated `randapp-qa-screenshots` artifact.
+- **Using GitHub Actions:** Go to the **Actions** tab in GitHub, select **QA Screenshots Capture**, run it manually via `workflow_dispatch`, and download the generated `lari-qa-screenshots` artifact.
 - **Locally:** You can run `npm run qa:screenshots` locally after starting Vite. See `docs/SCREENSHOT_QA_CHECKLIST.md` for more details. 
 
 ## Feature Status: Current MVP vs Sandbox vs Roadmap
@@ -95,11 +95,11 @@ Yerel (Mock) Mod (`VITE_DATA_MODE=mock`) ile çalışırken, tüm özellik testl
 
 **1. Salon Sahibi (Tenant Admin):**
 - **Sorumluluk:** Kendi salonunu yönetme, kurulum yapma, Müşteri Hafızası (Customer Memory) kontrolleri. Sadece `/admin` rotasına erişebilir.
-- **E-posta:** `admin@randapp.com` / **Şifre:** `admin123`
+- **E-posta:** `admin@randevulari.com` / **Şifre:** `admin123`
 
 **2. Süper Yönetici (Super Admin):**
 - **Sorumluluk:** Tüm tenant'ları listeleme, metrikleri görüntüleme, mock abonelik durumunu tetikleme ve onboarding süreçleri.
-- **E-posta:** `superadmin@randapp.com` / **Şifre:** `superadmin123`
+- **E-posta:** `superadmin@randevulari.com` / **Şifre:** `superadmin123`
 
 Eğer gelecekte VITE_DATA_MODE `supabase` olarak değiştirilirse, kimlik doğrulama devrede olacaktır ve mock şifreler çalışmayacaktır.
 

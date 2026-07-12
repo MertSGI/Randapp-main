@@ -4,7 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 const SuperAdminAISettingsPage: React.FC = () => {
     const { language } = useLanguage();
     const [settings, setSettings] = useState(() => {
-        const stored = localStorage.getItem('randapp_ai_settings');
+        const stored = localStorage.getItem('lari_ai_settings');
         return stored ? JSON.parse(stored) : {
             aiProvider: 'mock',
             systemPrompt: 'You are an AI Style Advisor. Maintain a professional, polite tone. Recommend suitable salon services based on user requests.',
@@ -21,7 +21,7 @@ const SuperAdminAISettingsPage: React.FC = () => {
     const [saved, setSaved] = useState(false);
 
     const handleSave = () => {
-        localStorage.setItem('randapp_ai_settings', JSON.stringify(settings));
+        localStorage.setItem('lari_ai_settings', JSON.stringify(settings));
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
     };

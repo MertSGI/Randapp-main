@@ -1,4 +1,4 @@
-# End-to-End Flow QA
+﻿# End-to-End Flow QA
 
 ## Playwright Integrations
 A script (`scripts/verify-product-flow.mjs`) actively tests the core product workflows end-to-end to ensure that new builds don't break the registration, onboarding, booking, or session architecture. Another script (`scripts/verify-publish-gate.mjs`) asserts publishing access rules.
@@ -12,12 +12,12 @@ A script (`scripts/verify-product-flow.mjs`) actively tests the core product wor
 
 **2. Publish & Verification Gate (`scripts/verify-publish-gate.mjs`)**
 - Intercepts requests to the public `/book` page.
-- Verifies that sites with `draft`, `pending_review`, or `suspended` status return a neutral fallback screen ("Hizmet Geçici Olarak Kapalı").
+- Verifies that sites with `draft`, `pending_review`, or `suspended` status return a neutral fallback screen ("Hizmet GeÃ§ici Olarak KapalÄ±").
 - Validates that checking out or trialing does NOT immediately expose a site unless verified.
 - Confirms that unauthorized roles cannot view incomplete profiles.
 
 **3. Routing & Branding Matrix**
-- Checks that old branding (`randapp`) and weak wording (`roadmap`, `sandbox`, `demo payment`) DO NOT appear on customer-facing routes:
+- Checks that old branding (`LAR\u0130`) and weak wording (`roadmap`, `sandbox`, `demo payment`) DO NOT appear on customer-facing routes:
   - `/#/`
   - `/#/features`
   - `/#/pricing`
@@ -56,3 +56,4 @@ Run `npx --yes node scripts/verify-pilot-admin-preview.mjs`.
 
 ## Remaining Gaps
 - Currently tests run in browser UI but do not deeply examine Database state when `VITE_DATA_MODE=supabase`. E2E must be combined with unit tests against test DB credentials before production.
+

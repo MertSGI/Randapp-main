@@ -3,7 +3,7 @@
 As we migrate from the mock architecture to a real Supabase/PostgreSQL SaaS setup, the following critical steps MUST be taken before production deployment:
 
 1. **Remove Hardcoded Credentials**
-   - The mock credentials (`admin@randapp.com` / `admin123`) currently located in `authService.ts` must be destroyed.
+   - The mock credentials (`admin@randevulari.com` / `admin123`) currently located in `authService.ts` must be destroyed.
 
 2. **Backend / Edge Functions for Secrets**
    - Gemini API calls requiring `VITE_GEMINI_API_KEY` MUST be moved to a secure backend endpoint or edge function. Gemini image/text calls should go through backend/Edge Function in production.

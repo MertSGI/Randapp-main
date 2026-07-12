@@ -14,18 +14,18 @@ export const generateGoogleCalendarLink = (appointment: Appointment, service: Se
   const serviceName = language === 'tr' ? service.name_tr : service.name;
   
   const title = language === 'tr' 
-    ? `Randevu: ${serviceName} - MA Yılmaz Hair Design (Uzman: ${staff?.name || 'Bilinmiyor'})`
-    : `Appointment: ${serviceName} at MA Yılmaz Hair Design (Staff: ${staff?.name || 'Unknown'})`;
+    ? `Randevu: ${serviceName} - LARİ (Uzman: ${staff?.name || 'Bilinmiyor'})`
+    : `Appointment: ${serviceName} at LARİ (Staff: ${staff?.name || 'Unknown'})`;
   
   const details = language === 'tr'
-    ? `Hizmet: ${serviceName}\nUzman: ${staff?.name || ''}\nMüşteri: ${appointment.user_name}\nNot: MA Yılmaz Hair Design üzerinden rezerve edildi.`
-    : `Service: ${serviceName}\nStaff: ${staff?.name || ''}\nCustomer: ${appointment.user_name}\nNote: Booked via MA Yılmaz Hair Design`;
+    ? `Hizmet: ${serviceName}\nUzman: ${staff?.name || ''}\nMüşteri: ${appointment.user_name}\nNot: LARİ üzerinden rezerve edildi.`
+    : `Service: ${serviceName}\nStaff: ${staff?.name || ''}\nCustomer: ${appointment.user_name}\nNote: Booked via LARİ`;
 
   const params = new URLSearchParams({
     action: 'TEMPLATE',
     text: title,
     details: details,
-    location: 'Mustafa Ali Yılmaz Hair Design',
+    location: 'LARİ',
     dates: `${formatTime(startTime)}/${formatTime(endTime)}`
   });
 

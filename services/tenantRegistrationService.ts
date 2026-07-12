@@ -31,7 +31,7 @@ export const tenantRegistrationService = {
       
       // 2. Initialize a local tenant profile (or via Supabase if active)
       // Since we don't have full database setup guaranteed, store metadata securely in data provider
-      await dataProvider.set(`randapp:${tenantId}:is_seeded`, 'false');
+      await dataProvider.set(`lari:${tenantId}:is_seeded`, 'false');
       
       if (data.referralCode) {
         const { referralProgramService } = await import('./referralProgramService');
@@ -52,7 +52,7 @@ export const tenantRegistrationService = {
         email: data.ownerEmail,
         website_url: ''
       };
-      await dataProvider.set(`randapp:${tenantId}:branding`, {
+      await dataProvider.set(`lari:${tenantId}:branding`, {
         theme_color: '#4f46e5',
         business_name: data.businessDisplayName,
         logo_url: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80&w=200&h=200',
@@ -64,7 +64,7 @@ export const tenantRegistrationService = {
       const plans = planService.getActivePlans();
       const plan = plans.find(p => p.id === data.planId) || plans[0];
       
-      await dataProvider.set(`randapp:${tenantId}:subscription`, {
+      await dataProvider.set(`lari:${tenantId}:subscription`, {
         planId: data.planId,
         billingPeriod: data.billingPeriod,
         status: 'pending_checkout',
@@ -89,12 +89,12 @@ export const tenantRegistrationService = {
       localStorage.setItem('lari_selected_plan', data.planId);
       localStorage.setItem('lari_registration_context', JSON.stringify(data));
       // Fallback
-      localStorage.setItem('randapp_mock_user', JSON.stringify(authPayload));
+      localStorage.setItem('lari_mock_user', JSON.stringify(authPayload));
       
       const { publicLinkService } = await import('./publicLinkService');
       const initialSlug = publicLinkService.generateTenantSlug(data.businessDisplayName);
 
-      const registered = JSON.parse(localStorage.getItem('lari_registered_tenants') || localStorage.getItem('randapp_registered_tenants') || '[]');
+      const registered = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
       registered.push({
          id: tenantId,
          slug: initialSlug,
@@ -108,10 +108,9 @@ export const tenantRegistrationService = {
          businessRiskStatus: 'normal'
       });
       localStorage.setItem('lari_registered_tenants', JSON.stringify(registered));
-      localStorage.setItem('randapp_registered_tenants', JSON.stringify(registered));
       
-      await dataProvider.set(`randapp:${tenantId}:provisioning_status`, 'setup_in_progress');
-      await dataProvider.set(`randapp:${tenantId}:go_live_status`, 'paused');
+      await dataProvider.set(`lari:${tenantId}:provisioning_status`, 'setup_in_progress');
+      await dataProvider.set(`lari:${tenantId}:go_live_status`, 'paused');
 
       return { success: true, tenantId };
     } catch (err: any) {

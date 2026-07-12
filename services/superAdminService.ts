@@ -41,8 +41,8 @@ export const superAdminService = {
 
     if (mode === 'mock') {
       const { dataProvider } = await import('./dataProvider');
-      const provStatus1 = await dataProvider.get<string>(`randapp:mock_tenant_1:provisioning_status`) || 'live';
-      const provStatus2 = await dataProvider.get<string>(`randapp:tenant_demo:provisioning_status`) || 'setup_in_progress';
+      const provStatus1 = await dataProvider.get<string>(`lari:mock_tenant_1:provisioning_status`) || 'live';
+      const provStatus2 = await dataProvider.get<string>(`lari:tenant_demo:provisioning_status`) || 'setup_in_progress';
       
       const tenants = [
           {
@@ -50,7 +50,7 @@ export const superAdminService = {
               id: 'mock_tenant_1',
               businessName: 'Vibes Hair Studio',
               ownerEmail: 'owner@vibes.com',
-              domain: 'vibes.randapp.com',
+              domain: 'vibes.randevulari.com',
               created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
             },
             subscriptionStatus: 'active',
@@ -65,7 +65,7 @@ export const superAdminService = {
               id: 'tenant_demo',
               businessName: 'Nexus Studio',
               ownerEmail: 'admin@nexus.com',
-              domain: 'nexus.randapp.com',
+              domain: 'nexus.randevulari.com',
               created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
             },
             subscriptionStatus: 'trialing',
@@ -80,7 +80,7 @@ export const superAdminService = {
               id: 'mock_tenant_3',
               businessName: 'Luxe Beauty Clinic',
               ownerEmail: 'contact@luxe.com',
-              domain: 'luxe.randapp.com',
+              domain: 'luxe.randevulari.com',
               created_at: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString()
             },
             subscriptionStatus: 'active',
@@ -95,7 +95,7 @@ export const superAdminService = {
               id: 'mock_tenant_4',
               businessName: 'Barber Bros',
               ownerEmail: 'hi@barberbros.com',
-              domain: 'barberbros.randapp.com',
+              domain: 'barberbros.randevulari.com',
               created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
             },
             subscriptionStatus: 'past_due',
@@ -107,7 +107,7 @@ export const superAdminService = {
           }
         ];
         
-      const localTenantsRaw = localStorage.getItem('lari_registered_tenants') || localStorage.getItem('randapp_registered_tenants');
+      const localTenantsRaw = localStorage.getItem('lari_registered_tenants') || localStorage.getItem('lari_registered_tenants');
       const localTenants = localTenantsRaw ? JSON.parse(localTenantsRaw) : [];
       
       const dynamicTenants = localTenants.map((rt: any) => ({
@@ -153,7 +153,7 @@ export const superAdminService = {
     
     if (tErr || sErr) {
       console.error("Error fetching super admin data", tErr, sErr);
-      throw new Error("Veri çekilemedi.");
+      throw new Error("Veri Ã§ekilemedi.");
     }
 
     const tenantList: TenantFullData[] = (tenants || []).map(t => {
@@ -196,8 +196,8 @@ export const superAdminService = {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
     if (mode === 'mock') {
        const { dataProvider } = await import('./dataProvider');
-       await dataProvider.set(`randapp:${tenantId}:go_live_status`, 'live');
-       await dataProvider.set(`randapp:${tenantId}:provisioning_status`, 'live');
+       await dataProvider.set(`lari:${tenantId}:go_live_status`, 'live');
+       await dataProvider.set(`lari:${tenantId}:provisioning_status`, 'live');
        
        const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
        const index = registeredArr.findIndex((t: any) => t.id === tenantId);
@@ -225,8 +225,8 @@ export const superAdminService = {
      const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
      if (mode === 'mock') {
        const { dataProvider } = await import('./dataProvider');
-       await dataProvider.set(`randapp:${tenantId}:go_live_status`, 'needs_changes');
-       await dataProvider.set(`randapp:${tenantId}:provisioning_status`, 'setup_in_progress');
+       await dataProvider.set(`lari:${tenantId}:go_live_status`, 'needs_changes');
+       await dataProvider.set(`lari:${tenantId}:provisioning_status`, 'setup_in_progress');
        
        const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
        const index = registeredArr.findIndex((t: any) => t.id === tenantId);
@@ -251,7 +251,7 @@ export const superAdminService = {
     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
      if (mode === 'mock') {
        const { dataProvider } = await import('./dataProvider');
-       await dataProvider.set(`randapp:${tenantId}:go_live_status`, 'paused');
+       await dataProvider.set(`lari:${tenantId}:go_live_status`, 'paused');
        return new Promise(resolve => setTimeout(() => resolve(true), 500));
      }
      const { error } = await supabase.from('tenants').update({ 
@@ -287,3 +287,4 @@ export const superAdminService = {
      return true;
   }
 };
+

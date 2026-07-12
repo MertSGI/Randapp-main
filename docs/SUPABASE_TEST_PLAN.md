@@ -1,4 +1,4 @@
-# Supabase Test Plan
+﻿# Supabase Test Plan
 
 This document outlines how to manually test the Supabase integration and verify that domain services, branding models, and tenant isolation (RLS) function properly.
 
@@ -29,7 +29,7 @@ Create or edit your `.env` (or `.env.local`) to configure the Supabase integrati
 VITE_DATA_MODE=supabase
 VITE_SUPABASE_URL=https://<your-project-id>.supabase.co
 VITE_SUPABASE_ANON_KEY=<your-anon-key>
-VITE_APP_BASE_DOMAIN=randapp.com
+VITE_APP_BASE_DOMAIN=LAR\u0130.com
 ```
 
 ### 3. Frontend Verification
@@ -49,3 +49,4 @@ To verify RLS is working:
 2. Create a second tenant and link the second user to it via `users_profile`.
 3. Log in as User 2 on the frontend.
 4. Try to query services or appointments. You should only see data for Tenant 2. Data from Tenant 1 should not be accessible, affirming that cross-tenant leakage is strictly prevented at the database level.
+

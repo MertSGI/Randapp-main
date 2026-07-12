@@ -35,7 +35,7 @@ const CustomerLoginPage: React.FC = () => {
     if (appointment) {
       // Mock login: save to local storage
       const customerId = appointment.customerId || appointment.user_email || normalizedAttempt;
-      localStorage.setItem('randapp_customer_auth', JSON.stringify({ 
+      localStorage.setItem('lari_customer_auth', JSON.stringify({ 
         id: customerId, 
         tenantId: tenant.id,
         email: appointment.user_email?.toLowerCase() || '',

@@ -1,6 +1,6 @@
-# Demo Deployment Checklist
+﻿# Demo Deployment Checklist
 
-This document outlines the steps required to deploy the mock-mode demo of LARİ on platforms like Netlify or Vercel for sales outreach purposes.
+This document outlines the steps required to deploy the mock-mode demo of LARÄ° on platforms like Netlify or Vercel for sales outreach purposes.
 
 ## 1. Environment Requirements
 
@@ -43,9 +43,10 @@ After deployment, verify the following:
 - [ ] Landing page (`/`) loads correctly.
 - [ ] The Demo Generator (`/demo`) works and logo upload previews locally without breaking.
 - [ ] Clicking "WhatsApp'tan Demo Talep Et" on the `/demo` page pre-fills a message to your specified WhatsApp number.
-- [ ] Logging in as `admin@randapp.com` / `admin` allows access to the `/admin` area.
+- [ ] Logging in as `admin@randevulari.com` / `admin` allows access to the `/admin` area.
 - [ ] The new "Kurulum" tab works, and changes are reflected locally (mock state resets on hard refresh, which is expected for the demo).
 
 ## 5. Service Worker Status
 
 Currently, the offline PWA service worker is **disabled** (`src/main.tsx`). Do not try to re-enable it during the demo phase to avoid white screen cache conflicts.
+

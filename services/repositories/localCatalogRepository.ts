@@ -1,4 +1,4 @@
-import { CatalogRepository } from './types';
+﻿import { CatalogRepository } from './types';
 import { Service, Staff, SERVICES as DEMO_SERVICES } from '../../types';
 import { dataProvider } from '../dataProvider';
 
@@ -12,14 +12,14 @@ const DEMO_STAFF: Staff[] = [
   },
   {
     id: 'staff_2',
-    name: 'Ayşe Yılmaz',
+    name: 'AyÅŸe YÄ±lmaz',
     title: 'Hair Colorist',
     image: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=200',
     isOwner: false,
   },
   {
     id: 'staff_3',
-    name: 'Burak Öz',
+    name: 'Burak Ã–z',
     title: 'Barber',
     image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200',
     isOwner: false,
@@ -27,22 +27,22 @@ const DEMO_STAFF: Staff[] = [
 ];
 
 export class LocalCatalogRepository implements CatalogRepository {
-  private getServicesKey(tenantId: string) { return `randapp:${tenantId}:services`; }
-  private getStaffKey(tenantId: string) { return `randapp:${tenantId}:staff`; }
+  private getServicesKey(tenantId: string) { return `lari:${tenantId}:services`; }
+  private getStaffKey(tenantId: string) { return `lari:${tenantId}:staff`; }
   // We'll store simple mappings as "staffId_serviceId" -> bool
-  private getStaffServiceMappingKey(tenantId: string) { return `randapp:${tenantId}:staff_services`; }
+  private getStaffServiceMappingKey(tenantId: string) { return `lari:${tenantId}:staff_services`; }
 
   async listServices(tenantId: string, options?: { activeOnly?: boolean }): Promise<Service[]> {
     const key = this.getServicesKey(tenantId);
     const existing = await dataProvider.getList<Service>(key);
     
     if (!existing || existing.length === 0) {
-      const isSeeded = localStorage.getItem(`randapp:${tenantId}:is_seeded_services`) === 'true';
+      const isSeeded = localStorage.getItem(`lari:${tenantId}:is_seeded_services`) === 'true';
       if (isSeeded) return [];
       
       const seededServices = DEMO_SERVICES.map(s => ({ ...s, tenantId }));
       await dataProvider.set(key, seededServices);
-      localStorage.setItem(`randapp:${tenantId}:is_seeded_services`, 'true');
+      localStorage.setItem(`lari:${tenantId}:is_seeded_services`, 'true');
       return options?.activeOnly ? seededServices.filter(s => s.active !== false) : seededServices;
     }
     return options?.activeOnly ? existing.filter(s => s.active !== false) : existing;
@@ -93,12 +93,12 @@ export class LocalCatalogRepository implements CatalogRepository {
     const existing = await dataProvider.getList<Staff>(key);
     
     if (!existing || existing.length === 0) {
-      const isSeeded = localStorage.getItem(`randapp:${tenantId}:is_seeded_staff`) === 'true';
+      const isSeeded = localStorage.getItem(`lari:${tenantId}:is_seeded_staff`) === 'true';
       if (isSeeded) return [];
       
       const seededStaff = DEMO_STAFF.map(s => ({ ...s, tenantId }));
       await dataProvider.set(key, seededStaff);
-      localStorage.setItem(`randapp:${tenantId}:is_seeded_staff`, 'true');
+      localStorage.setItem(`lari:${tenantId}:is_seeded_staff`, 'true');
       return options?.activeOnly ? seededStaff.filter(s => s.active !== false) : seededStaff;
     }
     return options?.activeOnly ? existing.filter(s => s.active !== false) : existing;
@@ -183,7 +183,7 @@ export class LocalCatalogRepository implements CatalogRepository {
   }
 
   async listAvailabilityRules(tenantId: string, staffId?: string): Promise<any[]> {
-    const localData = localStorage.getItem(`randapp:${tenantId}:availability_rules`);
+    const localData = localStorage.getItem(`lari:${tenantId}:availability_rules`);
     const rules = localData ? JSON.parse(localData) : [];
     if (staffId) {
       return rules.filter((r: any) => r.staffId === staffId || r.staffId == null);
@@ -199,7 +199,7 @@ export class LocalCatalogRepository implements CatalogRepository {
     const rules = await this.listAvailabilityRules(tenantId);
     const newRule = { ...input, id: `rule_${Date.now()}` };
     rules.push(newRule);
-    localStorage.setItem(`randapp:${tenantId}:availability_rules`, JSON.stringify(rules));
+    localStorage.setItem(`lari:${tenantId}:availability_rules`, JSON.stringify(rules));
     return newRule;
   }
 
@@ -234,7 +234,7 @@ export class LocalCatalogRepository implements CatalogRepository {
       const updated = { ...firstRule, ...input };
       const index = rules.findIndex((r: any) => r.id === firstRule.id);
       rules[index] = updated;
-      localStorage.setItem(`randapp:${tenantId}:availability_rules`, JSON.stringify(rules));
+      localStorage.setItem(`lari:${tenantId}:availability_rules`, JSON.stringify(rules));
       return updated;
     } else {
       return this.createAvailabilityRule(tenantId, input);
@@ -246,3 +246,4 @@ export class LocalCatalogRepository implements CatalogRepository {
     return this.getAvailability(tenantId);
   }
 }
+

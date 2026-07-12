@@ -101,7 +101,7 @@ async function run() {
         const passed = r.expected.some(e => text.includes(e) || lowerText.includes(e.toLowerCase()));
 
         // Check for old branding
-        if (lowerText.includes('randapp')) {
+        if (lowerText.includes('randapp') || lowerText.includes('radapp') || lowerText.includes('mustafa ali')) {
            oldBrandFound.push(r.path);
         }
 

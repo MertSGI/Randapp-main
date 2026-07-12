@@ -1,4 +1,4 @@
-import { SalonBusinessProfile, Appointment, BusinessBranch, CustomerConsentFlags, CustomerDataRequest } from '../types';
+﻿import { SalonBusinessProfile, Appointment, BusinessBranch, CustomerConsentFlags, CustomerDataRequest } from '../types';
 import { mediaAssetService } from './mediaAssetService';
 
 export interface TenantSnapshot {
@@ -33,12 +33,12 @@ export const dataExportService = {
   getTenantStorageKeys(tenantId: string) {
     return {
       profile: `mock_business_profile_${tenantId}`,
-      services: `randapp:${tenantId}:services`,
-      staff: `randapp:${tenantId}:staff`,
-      mappings: `randapp:${tenantId}:service_staff_mapping`,
-      availability: `randapp:${tenantId}:availability_rules`,
-      appointments: `randapp:${tenantId}:appointments`,
-      customers: `randapp:${tenantId}:customers`, // if handled separately
+      services: `lari:${tenantId}:services`,
+      staff: `lari:${tenantId}:staff`,
+      mappings: `lari:${tenantId}:service_staff_mapping`,
+      availability: `lari:${tenantId}:availability_rules`,
+      appointments: `lari:${tenantId}:appointments`,
+      customers: `lari:${tenantId}:customers`, // if handled separately
       branches: `lari_branches_${tenantId}`,
       consents: `lari_customer_consents_by_tenant_${tenantId}`,
       dataRequests: `lari_customer_data_requests_by_tenant_${tenantId}`,
@@ -48,7 +48,7 @@ export const dataExportService = {
 
   getAllLocalTenants(): any[] {
     try {
-      const raw = localStorage.getItem('lari_registered_tenants') || localStorage.getItem('randapp_registered_tenants');
+      const raw = localStorage.getItem('lari_registered_tenants') || localStorage.getItem('lari_registered_tenants');
       return raw ? JSON.parse(raw) : [];
     } catch {
       return [];
@@ -99,7 +99,7 @@ export const dataExportService = {
     return {
       snapshotVersion: 'lari-local-v1',
       sourceMode: 'local',
-      appBrand: 'LARİ',
+      appBrand: 'LARÄ°',
       exportedAt: new Date().toISOString(),
       tenantId,
       
@@ -231,3 +231,4 @@ export const dataExportService = {
     };
   }
 };
+

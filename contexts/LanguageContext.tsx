@@ -23,7 +23,7 @@ export const LanguageProvider: React.FC<{ children: ReactNode }> = ({ children }
         return langParam;
       }
       
-      const stored = localStorage.getItem('lari_selected_language') || localStorage.getItem('randapp_language');
+      const stored = localStorage.getItem('lari_selected_language') || localStorage.getItem('lari_language');
       if (stored === 'en' || stored === 'tr') return stored;
     } catch (e) {}
     
@@ -39,7 +39,7 @@ export const LanguageProvider: React.FC<{ children: ReactNode }> = ({ children }
   useEffect(() => {
     localStorage.setItem('lari_selected_language', language);
     // clean up legacy storage
-    localStorage.removeItem('randapp_language');
+    localStorage.removeItem('lari_language');
     document.documentElement.lang = language;
   }, [language]);
 

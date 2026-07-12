@@ -2,11 +2,11 @@ import { PlatformReferralProgram, PlatformReferral, ReferralRewardLedger, Busine
 
 // In-memory mock storage (simulate database)
 const STORAGE_KEYS = {
-  PROGRAMS: 'randapp_platform_programs',
-  REFERRALS: 'randapp_platform_referrals',
-  LEDGERS: 'randapp_referral_ledgers',
-  BUSINESS_CAMPAIGNS: 'randapp_business_campaigns',
-  BUSINESS_REFERRALS: 'randapp_business_referrals'
+  PROGRAMS: 'lari_platform_programs',
+  REFERRALS: 'lari_platform_referrals',
+  LEDGERS: 'lari_referral_ledgers',
+  BUSINESS_CAMPAIGNS: 'lari_business_campaigns',
+  BUSINESS_REFERRALS: 'lari_business_referrals'
 };
 
 const defaultProgram: PlatformReferralProgram = {

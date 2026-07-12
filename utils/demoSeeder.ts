@@ -17,16 +17,16 @@ export const seedDemoData = () => {
     `staff_${tenantId}`,
     `appointments_${tenantId}`,
     // Active keys
-    `randapp:${tenantId}:services`,
-    `randapp:${tenantId}:staff`,
-    `randapp:${tenantId}:appointments`,
-    `randapp:${tenantId}:branding`,
-    `randapp_customer_profile_${tenantId}`,
+    `lari:${tenantId}:services`,
+    `lari:${tenantId}:staff`,
+    `lari:${tenantId}:appointments`,
+    `lari:${tenantId}:branding`,
+    `lari_customer_profile_${tenantId}`,
     `mock_business_profile_${tenantId}`,
     `mock_tenant_customers_${tenantId}`,
     `mock_subscription_${tenantId}`,
-    `randapp:${tenantId}:go_live_status`,
-    `randapp:${tenantId}:provisioning_status`
+    `lari:${tenantId}:go_live_status`,
+    `lari:${tenantId}:provisioning_status`
   ];
 
   keysToClean.forEach(k => localStorage.removeItem(k));
@@ -43,8 +43,8 @@ export const seedDemoData = () => {
       district: 'Beşiktaş',
       phone: '+90 555 123 45 67',
       whatsapp_number: '+90 555 123 45 67',
-      instagram_url: 'https://instagram.com/randapp',
-      email: 'hello@randapp.com',
+      instagram_url: 'https://instagram.com/randevulari',
+      email: 'merhaba@randevulari.com',
       logo_url: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&w=200&q=80',
       cover_image_url: 'https://images.unsplash.com/photo-1521590832167-7bfcfaa6362f?auto=format&fit=crop&w=1600&q=80',
       is_public_profile_enabled: true,
@@ -60,15 +60,15 @@ export const seedDemoData = () => {
       { id: 'srv_3', tenantId, name: 'Manicure & Pedicure', name_tr: 'Manikür & Pedikür', duration: 60, price: 500, image: 'https://images.unsplash.com/photo-1610992015732-2449b061919c?auto=format&fit=crop&w=800&q=80', active: true },
       { id: 'srv_4', tenantId, name: 'Bridal Makeup', name_tr: 'Gelin Makyajı', duration: 90, price: 2000, image: 'https://images.unsplash.com/photo-1487412947147-3a15998a1cc2?auto=format&fit=crop&w=800&q=80', active: true }
   ];
-  localStorage.setItem(`randapp:${tenantId}:services`, JSON.stringify(services));
+  localStorage.setItem(`lari:${tenantId}:services`, JSON.stringify(services));
 
   // 3. Staff
   const staffList: Staff[] = [
-      { id: 'stf_1', tenantId, name: 'Mustafa Ali Yılmaz', title: 'Master Stylist / Owner', phone: '05551230001', active: true, isOwner: true, image: 'https://ui-avatars.com/api/?name=Mustafa+Ali+Yilmaz&background=random' },
+      { id: 'stf_1', tenantId, name: 'Elif Yıldız', title: 'Master Stylist / Owner', phone: '05551230001', active: true, isOwner: true, image: 'https://ui-avatars.com/api/?name=Elif+Yildiz&background=random' },
       { id: 'stf_2', tenantId, name: 'Ayşe Kaya', title: 'Color Expert', phone: '05551230002', active: true, image: 'https://ui-avatars.com/api/?name=Ayse+Kaya&background=random' },
       { id: 'stf_3', tenantId, name: 'Merve Demir', title: 'Nail Technician', phone: '05551230003', active: true, image: 'https://ui-avatars.com/api/?name=Merve+Demir&background=random' }
   ];
-  localStorage.setItem(`randapp:${tenantId}:staff`, JSON.stringify(staffList));
+  localStorage.setItem(`lari:${tenantId}:staff`, JSON.stringify(staffList));
 
   // 4. Appointments
   const today = new Date();
@@ -84,7 +84,7 @@ export const seedDemoData = () => {
       { id: 'apt_3', tenantId, user_name: 'Selin Gür', user_email: 'selin@example.com', phone: '05558887766', serviceId: 'srv_2', staffId: 'stf_2', date: dStr(1), time: '11:00', status: 'confirmed', createdAt: new Date().toISOString(), syncedToGoogle: false },
       { id: 'apt_4', tenantId, user_name: 'Zeynep Yılmaz', user_email: 'zeynep@example.com', phone: '05559998877', serviceId: 'srv_3', staffId: 'stf_3', date: dStr(-15), time: '15:00', status: 'completed', createdAt: new Date().toISOString(), syncedToGoogle: false },
   ];
-  localStorage.setItem(`randapp:${tenantId}:appointments`, JSON.stringify(appointments));
+  localStorage.setItem(`lari:${tenantId}:appointments`, JSON.stringify(appointments));
 
 
   // 5. Customer Profile Memory data
@@ -105,7 +105,7 @@ export const seedDemoData = () => {
         avoidNotes: 'Hates warm/brassy tones',
         careNotes: 'Sensitive scalp',
         internalNotes: [
-            { id: 'note_1', text: 'Likes to drink green tea during appointment.', createdAt: new Date().toISOString(), createdBy: 'Mustafa Ali Yılmaz' }
+            { id: 'note_1', text: 'Likes to drink green tea during appointment.', createdAt: new Date().toISOString(), createdBy: 'Elif Yıldız' }
         ],
         referencePhotos: [
             { id: 'photo_1', url: 'https://images.unsplash.com/photo-1595476108010-b4d1f10d5e43?auto=format&fit=crop&w=200&q=80', createdAt: new Date().toISOString() }
@@ -116,7 +116,7 @@ export const seedDemoData = () => {
   localStorage.setItem(`mock_tenant_customers_${tenantId}`, JSON.stringify(customerProfileData));
 
   // Mark status as seeded
-  localStorage.setItem(`randapp:${tenantId}:is_seeded`, 'true');
+  localStorage.setItem(`lari:${tenantId}:is_seeded`, 'true');
 
   alert('Demo data seeded successfully! Reloading...');
   window.location.reload();

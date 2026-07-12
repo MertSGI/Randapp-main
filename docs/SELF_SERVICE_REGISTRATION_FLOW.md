@@ -1,7 +1,7 @@
-# Self-Service Registration Flow
+﻿# Self-Service Registration Flow
 
 ## Overview
-The LARİ platform supports an end-to-end self-service registration flow that allows business owners to seamlessly sign up, select a subscription plan, and proceed to onboarding.
+The LARÄ° platform supports an end-to-end self-service registration flow that allows business owners to seamlessly sign up, select a subscription plan, and proceed to onboarding.
 
 ## Architecture & Storage
 Depending on the active environment (`VITE_DATA_MODE`), registration data rests in either:
@@ -24,4 +24,5 @@ Depending on the active environment (`VITE_DATA_MODE`), registration data rests 
    - Using the "Site Preview" correctly displays the owner's chosen business name instead of generic seeded demo data.
 
 ## Fallback Modularity
-The codebase supports falling back from `lari_*` to `randapp_*` keys dynamically for older data gracefully, but new writes use the explicit architecture to differentiate from legacy pilot hardcoded data.
+The codebase supports falling back from `lari_*` to `lari_*` keys dynamically for older data gracefully, but new writes use the explicit architecture to differentiate from legacy pilot hardcoded data.
+

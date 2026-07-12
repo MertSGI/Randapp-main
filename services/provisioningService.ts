@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient';
+﻿import { supabase } from './supabaseClient';
 import { dataProvider } from './dataProvider';
 
 export type ProvisioningStatus = 
@@ -73,7 +73,7 @@ export const provisioningService = {
       return;
     }
     console.log(`[Mock Provisioning] Marking tenant ${tenantId} as ${status}`);
-    await dataProvider.set(`randapp:${tenantId}:provisioning_status`, status);
+    await dataProvider.set(`lari:${tenantId}:provisioning_status`, status);
   },
 
   async getProvisioningStatus(tenantId: string): Promise<ProvisioningStatus> {
@@ -89,7 +89,8 @@ export const provisioningService = {
       return data?.provisioning_status || 'setup_in_progress';
     }
 
-    const status = await dataProvider.get<ProvisioningStatus>(`randapp:${tenantId}:provisioning_status`);
+    const status = await dataProvider.get<ProvisioningStatus>(`lari:${tenantId}:provisioning_status`);
     return status || 'onboarding_required';
   }
 };
+

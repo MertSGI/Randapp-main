@@ -1,4 +1,4 @@
-# LARİ Full System QA Checklist
+﻿# LARÄ° Full System QA Checklist
 
 ## Feature Status: Current MVP vs Sandbox vs Roadmap
 **Current MVP/Mock Demo:**
@@ -23,21 +23,21 @@
 ---
 
 ## Marketing Visitor (Platform Domain / Preview Root)
-- [x] **`/#/` (Homepage)**: Loads `MarketingHomePage`, shows "Kendi Salonumu Önizle" CTAs, clear product promise (Website + Booking + AI).
+- [x] **`/#/` (Homepage)**: Loads `MarketingHomePage`, shows "Kendi Salonumu Ã–nizle" CTAs, clear product promise (Website + Booking + AI).
 - [x] **`/#/features`**: Loads `FeaturesPage`, explains features logically.
 - [x] **`/#/pricing`**: Loads `PricingPage`, correct prices and plans. Checkout and trial CTAs safely show an alert explaining that secure checkout will activate in the next integration phase.
-- [x] **`/#/contact`**: Loads `ContactPage`, forms redirect to WhatsApp with proper lead data (Salon Adı, İl/İlçe, Telefon).
+- [x] **`/#/contact`**: Loads `ContactPage`, forms redirect to WhatsApp with proper lead data (Salon AdÄ±, Ä°l/Ä°lÃ§e, Telefon).
 - [x] **`/#/demo`**: Loads `DemoLandingPage` (Onboarding/Sales entry point).
 - [x] **Mobile Nav**: Hamburger menu works and closes on selection.
-- [x] **SEO & Metadata**: `index.html` contains Title, Meta Description, OG Title/Desc, Twitter Card, and clearly frames target market (Kuaför, Güzellik Salonuvb.).
+- [x] **SEO & Metadata**: `index.html` contains Title, Meta Description, OG Title/Desc, Twitter Card, and clearly frames target market (KuafÃ¶r, GÃ¼zellik Salonuvb.).
 
 ## Salon Customer (Tenant Domain / `/book`)
 - [x] **Website First, Booking Second**: Visitors land on a highly polished, mobile-first website view mirroring the interactive Demo preview exactingly. The stepper is completely hidden until a booking CTA is tapped.
 - [x] **Upload & Media Rendering**: Multi-cover image carousels and gallery popups are fully functional and respect files natively uploaded from device UI.
-- [x] **Booking Lock Before Live**: If the tenant's `setupStatus` is not `live`, visiting `/#/book` without preview permissions shows a locked "Hizmet Geçici Olarak Kapalı" screen.
+- [x] **Booking Lock Before Live**: If the tenant's `setupStatus` is not `live`, visiting `/#/book` without preview permissions shows a locked "Hizmet GeÃ§ici Olarak KapalÄ±" screen.
 - [x] **Booking Flow Unlocked After Approval**: Once Super Admin approves, customers can access the full Booking Flow.
 - [x] **Security / Preview Lock**: `?preview=true` works ONLY if the user is `super_admin` OR `tenant_owner` of the matching `tenantId`. Anonymous users remain blocked.
-- [x] **Maps Redirection**: "Yol Tarifi Al" and "Haritada Aç" generate correct Google Maps search URLs.
+- [x] **Maps Redirection**: "Yol Tarifi Al" and "Haritada AÃ§" generate correct Google Maps search URLs.
 - [x] **Contact Actions**: WhatsApp routing is functional for sending appointment confirmations and manual contact.
 - [x] **Multilingual Bookings (I18N)**: Booking widget and Customer Website accurately swap labels between Turkish and English globally, saving preferences per browser.
 - [x] **Customers View Own Appointments**: Customers can log in using their matching phone/email locally.
@@ -48,8 +48,8 @@
 - [x] **Privacy AI Governance**: Explicit copy explains that photos are not stored. No Gemini API key exists on the frontend bundle.
 
 ## Salon Owner / Tenant Admin (`/admin`)
-- [x] **Login Mechanics**: `admin@randapp.com` can log in and is securely routed to their tenant dashboard.
-- [x] **Sidebar/Navigation**: Features simple, clean left nav "Yönetim Paneli".
+- [x] **Login Mechanics**: `admin@randevulari.com` can log in and is securely routed to their tenant dashboard.
+- [x] **Sidebar/Navigation**: Features simple, clean left nav "YÃ¶netim Paneli".
 - [x] **Onboarding Wizard**: 
     - Saves properly step-by-step.
     - Quick additions (Service/Staff) function and update lists.
@@ -58,12 +58,12 @@
 - [x] **Business Website Profile**:
     - Toggle `is_public_profile_enabled` works.
     - Info updating and map link testing acts predictably.
-    - "Site Önizlemesini Aç" generates a `/#/book?preview=true` link.
+    - "Site Ã–nizlemesini AÃ§" generates a `/#/book?preview=true` link.
 - [x] **Billing Tab**: Views current plan dynamically. Uses `resolvePaymentCta` to route to "Start Mock Trial" vs "WhatsApp Demo" based on modes.
-- [x] **Customer Memory**: The "Müşteriler" / "Customers" tab exists. Entering a matching email/phone during booking automatically ties the appointment to the simulated customer record. Owners can store notes and style-preference reference photos. KVKK disclaimers are present.
+- [x] **Customer Memory**: The "MÃ¼ÅŸteriler" / "Customers" tab exists. Entering a matching email/phone during booking automatically ties the appointment to the simulated customer record. Owners can store notes and style-preference reference photos. KVKK disclaimers are present.
 
 ## Super Admin (`/super-admin`)
-- [x] **Login Mechanics**: `superadmin@randapp.com` can log in and see high-level overview.
+- [x] **Login Mechanics**: `superadmin@randevulari.com` can log in and see high-level overview.
 - [x] **Go-Live Approval**: Modifies status to `live`. Confirmed by window message.
 - [x] **Mock Subscription Toggle**: Super Admins can manually force a mock subscription toggle (Trialing / Active / Past Due) for demo purposes, with clear warnings.
 - [x] **Send-Back Flow**: "Send Back" correctly prompts for an optional note (using `window.prompt`) and sets state to `needs_changes` or `setup_in_progress` logically via backend mock service.
@@ -71,7 +71,7 @@
 - [x] **Payments & Diagnostics Test**: `SuperAdminPaymentTestPage` runs simulated sandbox responses successfully.
 
 ## State/Flow Integrity
-- [x] Clean state machine: `setup_in_progress` → `ready_for_review` → (`live` XOR `needs_changes`).
+- [x] Clean state machine: `setup_in_progress` â†’ `ready_for_review` â†’ (`live` XOR `needs_changes`).
 - [x] Reusability of states across `TenantContext`, `goLiveService`, and local components.
 - [x] `VITE_DATA_MODE=mock` robustly handles refresh/persistence across the SPA. 
 - [x] **Demo Operations**: `demoSeeder.ts` is explicitly gated and ONLY functional in mock data mode to prevent destructive execution in production environments.
@@ -139,3 +139,4 @@
 - [x] Validated mock user auth hooks properly set storage before loading protected routes.
 - [x] Established visual QA reporting dashboard (`qa-screenshots/QA_SCREENSHOT_REPORT.html`).
 - [x] Prevented explicit test framework artifacts or debug views from impacting the output UI (`?devTools=0`).
+

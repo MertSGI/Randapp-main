@@ -1,4 +1,4 @@
-# Automated Responsive & Screenshot QA Checklist (Phase 17)
+﻿# Automated Responsive & Screenshot QA Checklist (Phase 17)
 
 This checklist defines the required screenshots for final visual and responsive acceptance. A local automated Playwright script is provided to capture these systematically.
 
@@ -10,7 +10,7 @@ You can run the screenshot QA workflow securely through GitHub without setting u
 2. Select the **QA Screenshots Capture** workflow from the left sidebar.
 3. Click **Run workflow**. (This will run the build, start the preview server, and execute Playwright fully automatically in the cloud).
 4. Wait for the workflow to complete.
-5. Download the `randapp-qa-screenshots` artifact zip file generated at the bottom of the workflow run page.
+5. Download the `lari-qa-screenshots` artifact zip file generated at the bottom of the workflow run page.
 6. Extract the zip and open `QA_SCREENSHOT_REPORT.html` to review all generated captures.
 
 **Note:** No real payment or production secrets are used during this capture process. The app intentionally runs in a secure mock/presentation mode.
@@ -94,4 +94,5 @@ Ensure these exact screens are captured and reviewed:
 - Both **TR** and **EN** languages must be tested.
 - CTAs should trigger intended mock actions or present a professional validation (e.g., "Edge Functions required for payment").
 - The product must feel like a cohesive SaaS, not stitched-together generated screens.
+
 

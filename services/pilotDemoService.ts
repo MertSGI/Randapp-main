@@ -130,12 +130,12 @@ export const pilotDemoService = {
   
   async seedDemoDataOnly() {
     // Seed Data into dataprovider explicitly for `tenant_pilot_demo`
-    await dataProvider.set(`randapp:${DEMO_PILOT_TENANT_ID}:branding`, PILOT_TENANT.branding);
-    await dataProvider.set(`randapp:${DEMO_PILOT_TENANT_ID}:profile`, PILOT_BUSINESS_PROFILE);
-    await dataProvider.set(`randapp:${DEMO_PILOT_TENANT_ID}:services`, PILOT_SERVICES);
-    await dataProvider.set(`randapp:${DEMO_PILOT_TENANT_ID}:staff`, PILOT_STAFF);
-    await dataProvider.set(`randapp:${DEMO_PILOT_TENANT_ID}:appointments`, PILOT_APPOINTMENTS);
-    await dataProvider.set(`randapp:${DEMO_PILOT_TENANT_ID}:customers`, PILOT_CUSTOMERS);
+    await dataProvider.set(`lari:${DEMO_PILOT_TENANT_ID}:branding`, PILOT_TENANT.branding);
+    await dataProvider.set(`lari:${DEMO_PILOT_TENANT_ID}:profile`, PILOT_BUSINESS_PROFILE);
+    await dataProvider.set(`lari:${DEMO_PILOT_TENANT_ID}:services`, PILOT_SERVICES);
+    await dataProvider.set(`lari:${DEMO_PILOT_TENANT_ID}:staff`, PILOT_STAFF);
+    await dataProvider.set(`lari:${DEMO_PILOT_TENANT_ID}:appointments`, PILOT_APPOINTMENTS);
+    await dataProvider.set(`lari:${DEMO_PILOT_TENANT_ID}:customers`, PILOT_CUSTOMERS);
     
     // Seed campaign data
     const mockCampaigns = [{
@@ -202,9 +202,9 @@ export const pilotDemoService = {
     localStorage.setItem('lari_customer_campaigns_by_tenant', JSON.stringify(mockCampaigns));
     localStorage.setItem('lari_customer_referrals_by_tenant', JSON.stringify(mockReferrals));
     localStorage.setItem('lari_customer_campaign_rewards_by_tenant', JSON.stringify(mockRewards));
-    // Also use the randapp keys just in case
-    localStorage.setItem(`randapp_business_campaigns`, JSON.stringify(mockCampaigns));
-    localStorage.setItem(`randapp_business_referrals`, JSON.stringify(mockReferrals));
+    // Also use the lari keys for compatibility
+    localStorage.setItem(`lari_business_campaigns`, JSON.stringify(mockCampaigns));
+    localStorage.setItem(`lari_business_referrals`, JSON.stringify(mockReferrals));
     
     // Seed billing status to pass admin gates
     const mockSub = {
@@ -218,7 +218,7 @@ export const pilotDemoService = {
         cancelAtPeriodEnd: false,
         paymentProvider: 'local_dry_run'
     };
-    await dataProvider.set(`randapp:${DEMO_PILOT_TENANT_ID}:subscription`, mockSub);
+    await dataProvider.set(`lari:${DEMO_PILOT_TENANT_ID}:subscription`, mockSub);
     localStorage.setItem(`mock_subscription_${DEMO_PILOT_TENANT_ID}`, JSON.stringify(mockSub));
     
     // Set allowed client-facing keys

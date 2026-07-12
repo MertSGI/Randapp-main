@@ -1,11 +1,11 @@
-# Routing and Role QA
+﻿# Routing and Role QA
 
 ## Current Implementation State
 - Route `/super-admin/*` is strictly guarded for the `super_admin` role.
 - Route `/admin/*` is strictly guarded for the `tenant_owner` role (or `admin` equivalence).
-- Unauthenticated users trying to access guarded routes hit `ProtectedRoute` and are met with "Bu alana erişim yetkiniz yok" or get redirected to login, depending on exact URL and login state.
+- Unauthenticated users trying to access guarded routes hit `ProtectedRoute` and are met with "Bu alana eriÅŸim yetkiniz yok" or get redirected to login, depending on exact URL and login state.
 - `LoginPage.tsx` handles automatic role redirection after successful login.
-- Mock `superadmin@randapp.com` is configured in `authService.ts`.
+- Mock `superadmin@randevulari.com` is configured in `authService.ts`.
 
 ## Layout Distribution
 - `MarketingLayout`: Used by public-facing non-salon pages (Landing, Login, Pricing).
@@ -29,3 +29,4 @@
 - Admin to Super Admin crossover blocked: **YES** (verified via `ProtectedRoute.tsx`)
 - Super Admin Dashboard operational with Mock Actions: **YES**
 - Super Admin Nested Routing via Layout Outlet: **YES**
+

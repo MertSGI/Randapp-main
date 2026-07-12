@@ -1,4 +1,4 @@
-import { User, Role } from '../types';
+﻿import { User, Role } from '../types';
 import { supabase } from './supabaseClient';
 
 // Helper mock user for development
@@ -6,7 +6,7 @@ const MOCK_ADMIN_USER: User = {
   id: 'user_admin',
   tenantId: 'tenant_demo',
   name: 'Demo Admin',
-  email: 'admin@randapp.com', // mock email
+  email: 'admin@randevulari.com', // mock email
   role: 'tenant_owner',
   active: true,
 };
@@ -15,7 +15,7 @@ const MOCK_SUPER_ADMIN_USER: User = {
   id: 'user_super_admin',
   tenantId: 'system',
   name: 'Super Admin',
-  email: 'superadmin@randapp.com', // mock email
+  email: 'superadmin@randevulari.com', // mock email
   role: 'super_admin',
   active: true,
 };
@@ -54,7 +54,7 @@ export const authService = {
     // Mock mode logic
     return new Promise(resolve => {
       setTimeout(() => {
-        if (email === 'superadmin@randapp.com' && passwordHash === 'superadmin123') {
+        if (email === 'superadmin@randevulari.com' && passwordHash === 'superadmin123') {
           localStorage.setItem('lari_active_owner_session', JSON.stringify(MOCK_SUPER_ADMIN_USER));
           resolve(MOCK_SUPER_ADMIN_USER);
         } else if (passwordHash === 'admin123') {
@@ -75,7 +75,7 @@ export const authService = {
     }
     
     localStorage.removeItem('nexus_admin_auth');
-    localStorage.removeItem('randapp_mock_user');
+    localStorage.removeItem('lari_mock_user');
     localStorage.removeItem('lari_active_owner_session');
   },
 
@@ -101,7 +101,7 @@ export const authService = {
       };
     }
     
-    const mockUserStr = localStorage.getItem('lari_active_owner_session') || localStorage.getItem('randapp_mock_user');
+    const mockUserStr = localStorage.getItem('lari_active_owner_session') || localStorage.getItem('lari_mock_user');
     if (mockUserStr) {
       try {
         return JSON.parse(mockUserStr) as User;
@@ -120,3 +120,4 @@ export const authService = {
     return null;
   }
 };
+

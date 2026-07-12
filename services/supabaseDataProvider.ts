@@ -5,7 +5,7 @@ import { supabase } from './supabaseClient';
 // Rather than providing generic key/value endpoints, we throw an error here 
 // to enforce that domain services (like appointmentService) directly use 
 // Supabase table methods when VITE_DATA_MODE=supabase.
-// Do not rely on translating keys like 'randapp:tenant:appointments' into database tables for production.
+// Do not rely on translating keys like 'lari:tenant:appointments' into database tables for production.
 
 export const supabaseProvider: DataProvider = {
   async get<T>(key: string): Promise<T | null> {

@@ -28,7 +28,7 @@ async function runTests() {
   const tenantId = 'demo-tenant-1';
 
   // Make sure it doesn't try to mock seed automatically
-  localStorage.setItem(`randapp:${tenantId}:is_seeded`, 'true');
+  localStorage.setItem(`lari:${tenantId}:is_seeded`, 'true');
 
   // TEST 1: Staff
   try {

@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+﻿import { chromium } from "playwright";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
@@ -116,25 +116,25 @@ async function captureScreenshots() {
       let failedAssertion = null;
       if (
         group === "Admin" &&
-        pageText.includes("Yönetici Girişi") &&
+        pageText.includes("YÃ¶netici GiriÅŸi") &&
         !route.path.includes("login")
       ) {
         failedAssertion = "Admin page shows login screen";
       }
       if (
         group === "Super Admin" &&
-        pageText.includes("Yönetici Girişi") &&
+        pageText.includes("YÃ¶netici GiriÅŸi") &&
         !route.path.includes("login")
       ) {
         failedAssertion = "Super Admin page shows login screen";
       }
       if (
         route.path === "/customer/appointments" &&
-        pageText.includes("Randevu Panelinize Giriş Yapın")
+        pageText.includes("Randevu Panelinize GiriÅŸ YapÄ±n")
       ) {
         failedAssertion = "Customer portal shows login screen";
       }
-      if (route.path === "/book" && pageText.includes("Hesap Askıda")) {
+      if (route.path === "/book" && pageText.includes("Hesap AskÄ±da")) {
         failedAssertion = "Booking page shows suspended state";
       }
       
@@ -156,7 +156,7 @@ async function captureScreenshots() {
         }
         
         if (
-          lowerPageText.includes("ayşe") && 
+          lowerPageText.includes("ayÅŸe") && 
           lowerPageText.includes("harika") && 
           lowerPageText.includes("yorum")
         ) {
@@ -193,7 +193,7 @@ async function captureScreenshots() {
         file: `${viewportName}/${filename}`,
         hash,
       });
-      console.log(`📸 Captured: ${route.name} (${viewportName})`);
+      console.log(`ğŸ“¸ Captured: ${route.name} (${viewportName})`);
     } catch (err) {
       console.error(`Failed to capture ${route.name} (${viewportName}):`, err);
       skippedRoutes.push({
@@ -205,14 +205,14 @@ async function captureScreenshots() {
 
   // Inject go_live_status and some demo data for demo tenant so /book and admin panels work with rich data
   await page.evaluate(() => {
-    localStorage.setItem("randapp:tenant_demo:go_live_status", '"live"');
-    localStorage.setItem("randapp:tenant_demo:provisioning_status", '"live"');
+    localStorage.setItem("lari:tenant_demo:go_live_status", '"live"');
+    localStorage.setItem("lari:tenant_demo:provisioning_status", '"live"');
 
     // Inject Mock staff and services if absent to ensure good screenshots
     const s1 = {
       id: "svc_1",
       name: "Premium Haircut",
-      name_tr: "Premium Saç Kesimi",
+      name_tr: "Premium SaÃ§ Kesimi",
       price: 50,
       duration: 45,
       active: true,
@@ -220,23 +220,23 @@ async function captureScreenshots() {
     const s2 = {
       id: "svc_2",
       name: "Beard Trim",
-      name_tr: "Sakal Tıraşı",
+      name_tr: "Sakal TÄ±raÅŸÄ±",
       price: 25,
       duration: 30,
       active: true,
     };
     localStorage.setItem(
-      "randapp:tenant_demo:services",
+      "lari:tenant_demo:services",
       JSON.stringify([s1, s2]),
     );
 
     const st1 = {
       id: "stf_1",
-      name: "Ali Yılmaz",
+      name: "Ali YÄ±lmaz",
       title: "Senior Barber",
       active: true,
     };
-    localStorage.setItem("randapp:tenant_demo:staff", JSON.stringify([st1]));
+    localStorage.setItem("lari:tenant_demo:staff", JSON.stringify([st1]));
 
     const today = new Date().toISOString().split("T")[0];
     let tomorrowDate = new Date();
@@ -288,12 +288,12 @@ async function captureScreenshots() {
     }
 
     localStorage.setItem(
-      "randapp:tenant_demo:appointments",
+      "lari:tenant_demo:appointments",
       JSON.stringify([a1, { ...a2, date: yesterday() }, a3]),
     );
 
     localStorage.setItem(
-      "randapp:tenant_demo:customers",
+      "lari:tenant_demo:customers",
       JSON.stringify([
         {
           id: "cust_1",
@@ -339,14 +339,14 @@ async function captureScreenshots() {
         throw new Error("no 'Randevu Al' CTA is visible on storefront");
       }
       if (
-        !pageText.includes("AI Stil Asistanı") &&
+        !pageText.includes("AI Stil AsistanÄ±") &&
         !pageText.includes("AI Style Assistant")
       ) {
-        throw new Error("no 'AI Stil Asistanı' CTA is visible on storefront");
+        throw new Error("no 'AI Stil AsistanÄ±' CTA is visible on storefront");
       }
 
       if (
-        pageText.includes("Super Admin Önizleme Modu") ||
+        pageText.includes("Super Admin Ã–nizleme Modu") ||
         pageText.includes("Super Admin Preview")
       ) {
         throw new Error("public /book shows Super Admin preview banner");
@@ -401,9 +401,9 @@ async function captureScreenshots() {
       // Check map/contact card (we have working hours or directions)
       const hasMap =
         pageText.includes("Get Directions") ||
-        pageText.includes("Haritada Aç") ||
+        pageText.includes("Haritada AÃ§") ||
         pageText.includes("Working Hours") ||
-        pageText.includes("Çalışma Saatleri");
+        pageText.includes("Ã‡alÄ±ÅŸma Saatleri");
       if (!hasMap) throw new Error("no map/location visual appears");
       
       const headersCount = await page.evaluate(() => document.querySelectorAll('header').length);
@@ -494,7 +494,7 @@ async function captureScreenshots() {
 
       // AI Modal Test
       try {
-        const aiCtaBtn = await page.locator("button:has-text('🪄')").first();
+        const aiCtaBtn = await page.locator("button:has-text('ğŸª„')").first();
         if ((await aiCtaBtn.count()) > 0) {
           await aiCtaBtn.click();
           await delay(1000);
@@ -504,7 +504,7 @@ async function captureScreenshots() {
              throw new Error("AI CTA opens a disconnected platform page/header");
           }
           const pageText = await page.evaluate(() => document.body.innerText);
-          if (!pageText.includes("Randevu öncesi AI")) {
+          if (!pageText.includes("Randevu Ã¶ncesi AI")) {
              throw new Error("AI CTA does not open proper modal");
           }
           
@@ -546,10 +546,10 @@ async function captureScreenshots() {
             () => document.body.innerText,
           );
           if (
-            !preselectPageText.includes("Uzman Seçin") &&
+            !preselectPageText.includes("Uzman SeÃ§in") &&
             !preselectPageText.includes("Staff Choice") &&
             !preselectPageText.includes("Tarih & Saat") &&
-            !preselectPageText.includes("Uzmanlarımız")
+            !preselectPageText.includes("UzmanlarÄ±mÄ±z")
           ) {
             throw new Error("service CTA cannot preselect service");
           }
@@ -575,7 +575,7 @@ async function captureScreenshots() {
           // Either service step again or dates
           if (
             !preselectPageText2.includes("Tarih & Saat") &&
-            !preselectPageText2.includes("Hizmet Seç")
+            !preselectPageText2.includes("Hizmet SeÃ§")
           ) {
             throw new Error("staff/no-preference CTA cannot start the flow");
           }
@@ -659,7 +659,7 @@ async function captureScreenshots() {
             await delay(1500);
 
             // Look for time step
-            const hasTimeStep = await page.$('div:has-text("Saat Seç")');
+            const hasTimeStep = await page.$('div:has-text("Saat SeÃ§")');
 
             const timeName = `customer-book-time-step-${viewportName}.png`;
             await page.screenshot({
@@ -765,7 +765,7 @@ async function captureScreenshots() {
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => {
     localStorage.setItem(
-      "randapp_customer_auth",
+      "lari_customer_auth",
       JSON.stringify({
         id: "cust_demo",
         phone: "5551234567",
@@ -787,11 +787,11 @@ async function captureScreenshots() {
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => {
     localStorage.setItem(
-      "randapp_mock_user",
+      "lari_mock_user",
       JSON.stringify({
         id: "usr_admin",
         name: "Cemil Kaya",
-        email: "admin@randapp.com",
+        email: "admin@randevulari.com",
         role: "tenant_owner",
         tenantId: "tenant_demo",
       }),
@@ -809,11 +809,11 @@ async function captureScreenshots() {
   await page.waitForLoadState("networkidle");
   await page.evaluate(() => {
     localStorage.setItem(
-      "randapp_mock_user",
+      "lari_mock_user",
       JSON.stringify({
         id: "usr_super",
         name: "Super Admin",
-        email: "superadmin@randapp.com",
+        email: "superadmin@randevulari.com",
         role: "super_admin",
         tenantId: "tenant_platform",
       }),
@@ -855,7 +855,7 @@ async function captureScreenshots() {
   const uniqueBadDuplicates = [...new Set(badDuplicates)];
   if (uniqueBadDuplicates.length > 0) {
     console.error(
-      "❌ QA Failed due to unacceptable screenshot duplication (likely a login wall)",
+      "âŒ QA Failed due to unacceptable screenshot duplication (likely a login wall)",
     );
     uniqueBadDuplicates.forEach((msg) => console.error(msg));
     skippedRoutes.push({
@@ -889,7 +889,7 @@ async function captureScreenshots() {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Randapp QA Screenshot Report</title>
+  <title>LARİ QA Screenshot Report</title>
   <style>
     body { font-family: system-ui, sans-serif; background: #f9fafb; color: #111827; padding: 2rem; margin: 0; }
     h1 { border-bottom: 2px solid #e5e7eb; padding-bottom: 0.5rem; }
@@ -910,7 +910,7 @@ async function captureScreenshots() {
   </style>
 </head>
 <body>
-  <h1>Randapp QA Screenshot Report</h1>
+  <h1>LARİ QA Screenshot Report</h1>
   <div class="summary">
     <h2>Summary</h2>
     <ul>
@@ -965,17 +965,17 @@ async function captureScreenshots() {
     path.join(OUT_DIR, "QA_SCREENSHOT_REPORT.html"),
     htmlContent,
   );
-  console.log("\\n📊 Summary:");
+  console.log("\\nğŸ“Š Summary:");
   console.log(`- Expected Routes: ${expectedRouteCount}`);
   console.log(`- Expected Screenshots: ${expectedScreenshotCount}`);
   console.log(`- Captured Screenshots: ${reportItems.length}`);
-  console.log("✅ Generated QA_SCREENSHOT_REPORT.html");
+  console.log("âœ… Generated QA_SCREENSHOT_REPORT.html");
 
   // Generate README.md
   const readmeContent = `
-# Randapp Automated QA Screenshots
+# LARİ Automated QA Screenshots
 
-This folder contains automatically captured screenshots of the Randapp application for QA purposes.
+This folder contains automatically captured screenshots of the LARİ application for QA purposes.
 
 ## How to Capture
 Run from the project root:
@@ -1005,37 +1005,37 @@ npm run qa:screenshots
   `.trim();
 
   fs.writeFileSync(path.join(OUT_DIR, "README.md"), readmeContent);
-  console.log("✅ Generated README.md");
-  console.log("🎉 Screenshot Capture Complete!");
+  console.log("âœ… Generated README.md");
+  console.log("ğŸ‰ Screenshot Capture Complete!");
 
   let hasError = false;
   if (skippedRoutes.length > 0) {
     console.error(
-      "❌ QA Failed: Some required routes were skipped or assertions failed.",
+      "âŒ QA Failed: Some required routes were skipped or assertions failed.",
     );
     hasError = true;
   }
   if (baseSnapshots.length < expectedScreenshotCount) {
     console.error(
-      `❌ QA Failed: Expected at least ${expectedScreenshotCount} base screenshots, but only captured ${baseSnapshots.length}.`,
+      `âŒ QA Failed: Expected at least ${expectedScreenshotCount} base screenshots, but only captured ${baseSnapshots.length}.`,
     );
     hasError = true;
   }
   if (interactionSnapshots.length < expectedInteractionCount) {
     console.error(
-      `❌ QA Failed: Expected at least ${expectedInteractionCount} interaction screenshots, but only captured ${interactionSnapshots.length}.`,
+      `âŒ QA Failed: Expected at least ${expectedInteractionCount} interaction screenshots, but only captured ${interactionSnapshots.length}.`,
     );
     hasError = true;
   }
   if (viewportMismatches.length > 0) {
     console.error(
-      `❌ QA Failed: ${viewportMismatches.length} interaction screenshots have the wrong viewport.`,
+      `âŒ QA Failed: ${viewportMismatches.length} interaction screenshots have the wrong viewport.`,
     );
     hasError = true;
   }
   if (uniqueBadDuplicates.length > 0) {
     console.error(
-      "❌ QA Failed: Unacceptable screenshot duplication detected.",
+      "âŒ QA Failed: Unacceptable screenshot duplication detected.",
     );
     hasError = true;
   }
@@ -1046,3 +1046,4 @@ npm run qa:screenshots
 }
 
 captureScreenshots().catch(console.error);
+

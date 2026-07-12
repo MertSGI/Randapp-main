@@ -24,9 +24,9 @@ export const MockDiagnosticTool: React.FC = () => {
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key) {
-        // Find keys belonging to Randapp
+        // Find keys belonging to LARİ
         if (
-          key.startsWith('randapp') ||
+          key.startsWith('lari') ||
           key.startsWith('mock_') ||
           key.startsWith('nexus_') ||
           key.includes('tenant_') ||
@@ -124,12 +124,12 @@ export const MockDiagnosticTool: React.FC = () => {
   const handleResetAllMockData = async () => {
     const confirmed = await showConfirm({ message: 'Emin misiniz? \n\nSadece LARİ mock verileri temizlenecek ve ilk durumlarına dönecektir (Tema ve dil tercihleriniz korunur).' });
     if (confirmed) {
-      // Clean only Randapp mock keys
+      // Clean only LARİ mock keys
       const keysToRemove: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key && (
-          key.startsWith('randapp') ||
+          key.startsWith('lari') ||
           key.startsWith('mock_') ||
           key.startsWith('nexus_') ||
           key.includes('tenant_') ||
@@ -142,7 +142,7 @@ export const MockDiagnosticTool: React.FC = () => {
       keysToRemove.forEach(k => localStorage.removeItem(k));
       
       // Clear seeding flags
-      localStorage.removeItem('randapp:demo-tenant-1:is_seeded');
+      localStorage.removeItem('lari:demo-tenant-1:is_seeded');
       
       await showAlert('Mock verileri sıfırlandı. Sayfa yenileniyor...');
       window.location.reload();

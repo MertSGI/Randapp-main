@@ -19,7 +19,7 @@ function checkFileContains(filePath, stringsToFind) {
   return true;
 }
 
-console.log('=== RadApp / LARİ CUSTOMER CAMPAIGN REWARD LEDGER INTEGRITY CHECK ===');
+console.log('=== LARİ CUSTOMER CAMPAIGN REWARD LEDGER INTEGRITY CHECK ===');
 
 const checks = [
   {

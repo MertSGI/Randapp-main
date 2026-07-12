@@ -27,7 +27,7 @@ export const sendBookingEmail = async (appointment: Appointment, serviceName: st
  * which would then use Twilio, SNS, or another SMS gateway.
  */
 export const sendBookingSms = async (appointment: Appointment, serviceName: string): Promise<boolean> => {
-  const message = `RadApp: Hello ${appointment.user_name}, your ${serviceName} appointment on ${appointment.date} at ${appointment.time} is confirmed.`;
+  const message = `LARİ: Merhaba ${appointment.user_name}, ${serviceName} randevunuz ${appointment.date} tarihinde saat ${appointment.time}'de onaylandı.`;
   
   console.group("📱 Sending SMS...");
   console.log(`To: ${appointment.phone || 'No phone provided'}`);

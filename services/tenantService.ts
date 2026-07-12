@@ -1,4 +1,4 @@
-import { Tenant, TenantBranding } from '../types';
+﻿import { Tenant, TenantBranding } from '../types';
 import { dataProvider } from './dataProvider';
 import { supabase } from './supabaseClient';
 
@@ -25,7 +25,7 @@ export const tenantService = {
       // In supabase mode (including staging), always resolve from DB regardless of hostname.
       // Localhost is a valid dev environment for real supabase testing.
       if (hostname === 'localhost' || hostname.startsWith('127.0.0.1')) {
-        console.info('Supabase staging mode on localhost — resolving tenant from authenticated user profile.');
+        console.info('Supabase staging mode on localhost â€” resolving tenant from authenticated user profile.');
         // Fall through to DB resolution
       }
 
@@ -136,7 +136,7 @@ export const tenantService = {
         return {
              id: 'tenant_pilot_demo',
              slug: 'tenant_pilot_demo',
-             name: 'Lumina Güzellik & Kuaför',
+             name: 'Lumina GÃ¼zellik & KuafÃ¶r',
              status: 'active',
              createdAt: new Date().toISOString(),
              updatedAt: new Date().toISOString(),
@@ -149,7 +149,7 @@ export const tenantService = {
     const mode = import.meta.env.VITE_DATA_MODE || 'mock';
     if (mode === 'mock') {
        if (activeTenantId && activeTenantId !== 'tenant_pilot_demo') {
-          const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || localStorage.getItem('randapp_registered_tenants') || '[]');
+          const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || localStorage.getItem('lari_registered_tenants') || '[]');
           const tenantRecord = registeredArr.find((t: any) => t.id === activeTenantId);
           if (tenantRecord) {
              return {
@@ -219,9 +219,9 @@ export const tenantService = {
     if (tenantId === 'tenant_pilot_demo') {
       return {
         tenantId: 'tenant_pilot_demo',
-        businessName: 'Lumina Güzellik & Kuaför',
-        tagline: 'Kendinizi özel hissedeceğiniz o yer',
-        footerText: 'Lumina Güzellik. Tüm hakları saklıdır.',
+        businessName: 'Lumina GÃ¼zellik & KuafÃ¶r',
+        tagline: 'Kendinizi Ã¶zel hissedeceÄŸiniz o yer',
+        footerText: 'Lumina GÃ¼zellik. TÃ¼m haklarÄ± saklÄ±dÄ±r.',
         primaryColor: '#8b5cf6',
       } as TenantBranding;
     }
@@ -251,7 +251,7 @@ export const tenantService = {
       return null;
     }
     
-    const key = `randapp:${tenantId}:branding`;
+    const key = `lari:${tenantId}:branding`;
     return dataProvider.get<TenantBranding>(key);
   },
 
@@ -277,7 +277,7 @@ export const tenantService = {
       return;
     }
 
-    let raw = localStorage.getItem('lari_registered_tenants') || localStorage.getItem('randapp_registered_tenants');
+    let raw = localStorage.getItem('lari_registered_tenants') || localStorage.getItem('lari_registered_tenants');
     if (!raw) {
       raw = '[]';
     }
@@ -294,7 +294,7 @@ export const tenantService = {
       } else {
         const item = {
           id: tenantId,
-          businessName: updates.name || 'Yeni İşletme',
+          businessName: updates.name || 'Yeni Ä°ÅŸletme',
           ownerEmail: 'manual@test.com',
           created_at: new Date().toISOString(),
           planId: updates.planId || 'free',
@@ -306,7 +306,7 @@ export const tenantService = {
         tenants.push(item);
       }
       localStorage.setItem('lari_registered_tenants', JSON.stringify(tenants));
-      localStorage.setItem('randapp_registered_tenants', JSON.stringify(tenants));
+      localStorage.setItem('lari_registered_tenants', JSON.stringify(tenants));
     } catch (e) {}
   },
 
@@ -340,8 +340,9 @@ export const tenantService = {
       return next;
     }
 
-    const key = `randapp:${tenantId}:branding`;
+    const key = `lari:${tenantId}:branding`;
     await dataProvider.set(key, next);
     return next;
   }
 };
+

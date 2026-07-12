@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient';
+﻿import { supabase } from './supabaseClient';
 import { dataProvider } from './dataProvider';
 import { planService, PricingPlan } from './planService';
 import { communicationEventService } from './communicationEventService';
@@ -84,7 +84,7 @@ export const subscriptionService = {
     if (saved) {
       return JSON.parse(saved);
     }
-    const dataProvSaved = await dataProvider.get<any>(`randapp:${tenantId}:subscription`);
+    const dataProvSaved = await dataProvider.get<any>(`lari:${tenantId}:subscription`);
     if (dataProvSaved) {
       return dataProvSaved;
     }
@@ -146,8 +146,8 @@ export const subscriptionService = {
     }
 
     // Mock Mode
-    const staffList = (await dataProvider.get<any[]>(`randapp:${tenantId}:staff`)) || [];
-    const servicesList = (await dataProvider.get<any[]>(`randapp:${tenantId}:services`)) || [];
+    const staffList = (await dataProvider.get<any[]>(`lari:${tenantId}:staff`)) || [];
+    const servicesList = (await dataProvider.get<any[]>(`lari:${tenantId}:services`)) || [];
     const aiUsage = parseInt(localStorage.getItem('mock_ai_usage') || '0', 10);
 
     return {
@@ -215,7 +215,7 @@ export const subscriptionService = {
           paymentProvider: 'local_dry_run'
         };
         localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(mockSub));
-        await dataProvider.set(`randapp:${tenantId}:subscription`, mockSub);
+        await dataProvider.set(`lari:${tenantId}:subscription`, mockSub);
       }
 
       return simUrl;
@@ -225,7 +225,7 @@ export const subscriptionService = {
       if (runModeStatus.mode === 'sandbox_live' && !runModeStatus.canRunCheckout) {
         throw {
           isSafeStructure: true,
-          message: 'Sistem sandbox testine hazır değil (eksik yapılandırmalar var). Lütfen Super Admin panelini kontrol edin.',
+          message: 'Sistem sandbox testine hazÄ±r deÄŸil (eksik yapÄ±landÄ±rmalar var). LÃ¼tfen Super Admin panelini kontrol edin.',
           errorCode: 'SANDBOX_NOT_CONFIGURED',
           raw: { blockers: runModeStatus.missingBlockers }
         };
@@ -255,7 +255,7 @@ export const subscriptionService = {
 
           throw {
             isSafeStructure: true,
-            message: parsedError?.message || error.message || 'Ödeme oturumu oluşturulamadı. Lütfen sistem yöneticisiyle iletişime geçin.',
+            message: parsedError?.message || error.message || 'Ã–deme oturumu oluÅŸturulamadÄ±. LÃ¼tfen sistem yÃ¶neticisiyle iletiÅŸime geÃ§in.',
             errorCode: parsedError?.errorCode || 'UNKNOWN_CHECKOUT_ERROR',
             raw: parsedError
           };
@@ -264,7 +264,7 @@ export const subscriptionService = {
         if (data?.error) {
           throw {
             isSafeStructure: true,
-            message: data.message || data.error || 'Ödeme oturumu oluşturulamadı. Lütfen sistem yöneticisiyle iletişime geçin.',
+            message: data.message || data.error || 'Ã–deme oturumu oluÅŸturulamadÄ±. LÃ¼tfen sistem yÃ¶neticisiyle iletiÅŸime geÃ§in.',
             errorCode: data.errorCode || 'UNKNOWN_CHECKOUT_ERROR',
             raw: data
           };
@@ -284,7 +284,7 @@ export const subscriptionService = {
         } else {
           throw {
             isSafeStructure: true,
-            message: 'Ödeme oturumu URL döndürmedi. Lütfen sistem yöneticisiyle iletişime geçin.',
+            message: 'Ã–deme oturumu URL dÃ¶ndÃ¼rmedi. LÃ¼tfen sistem yÃ¶neticisiyle iletiÅŸime geÃ§in.',
             errorCode: 'MISSING_CHECKOUT_URL',
             raw: data
           };
@@ -296,7 +296,7 @@ export const subscriptionService = {
         }
         throw {
           isSafeStructure: true,
-          message: 'Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.',
+          message: 'Beklenmeyen bir hata oluÅŸtu. LÃ¼tfen tekrar deneyin.',
           errorCode: 'UNEXPECTED_ERROR',
           raw: err
         };
@@ -331,14 +331,14 @@ export const subscriptionService = {
         }
       } catch (err: any) {
         console.error("Billing portal error:", err);
-        alert('Portal başlatılırken bir hata oluştu: ' + err.message);
+        alert('Portal baÅŸlatÄ±lÄ±rken bir hata oluÅŸtu: ' + err.message);
       }
       return;
     }
 
     // Mock Mode
     console.log(`[Mock Mode] Opening billing portal for ${tenantId}`);
-    alert(`[Demo] Fatura portalı açılıyor. Geçmiş faturalarınız listelenebilir.`);
+    alert(`[Demo] Fatura portalÄ± aÃ§Ä±lÄ±yor. GeÃ§miÅŸ faturalarÄ±nÄ±z listelenebilir.`);
   },
 
   async getSubscriptionState(tenantId: string): Promise<TenantSubscription | null> {
@@ -373,7 +373,7 @@ export const subscriptionService = {
     sub.currentPeriodStart = new Date().toISOString();
     sub.currentPeriodEnd = sub.trialEnd;
     localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-    await dataProvider.set(`randapp:${tenantId}:subscription`, sub);
+    await dataProvider.set(`lari:${tenantId}:subscription`, sub);
 
     // Queue Trial Started communication event
     try {
@@ -384,7 +384,7 @@ export const subscriptionService = {
         channel: 'email',
         type: 'trial_started',
         contextArgs: {
-          ownerName: 'İşletme Yetkilisi',
+          ownerName: 'Ä°ÅŸletme Yetkilisi',
           businessName: tenantId,
           planName: sub.planId.toUpperCase()
         }
@@ -411,7 +411,7 @@ export const subscriptionService = {
       referralCredits: options.referralCredits
     };
     localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-    await dataProvider.set(`randapp:${tenantId}:subscription`, sub);
+    await dataProvider.set(`lari:${tenantId}:subscription`, sub);
 
     // Queue Manual Subscriber communication event
     try {
@@ -422,7 +422,7 @@ export const subscriptionService = {
         channel: 'email',
         type: 'manual_subscription_activated',
         contextArgs: {
-          ownerName: 'İşletme Yetkilisi',
+          ownerName: 'Ä°ÅŸletme Yetkilisi',
           businessName: tenantId,
           planName: sub.planId.toUpperCase()
         }
@@ -442,7 +442,7 @@ export const subscriptionService = {
       currentEnd.setMonth(currentEnd.getMonth() + months);
       sub.currentPeriodEnd = currentEnd.toISOString();
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`randapp:${tenantId}:subscription`, sub);
+      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
 
       // Queue Credit Awarded communication event
       try {
@@ -470,7 +470,7 @@ export const subscriptionService = {
       sub.discountType = discount.type;
       sub.discountValue = discount.value;
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`randapp:${tenantId}:subscription`, sub);
+      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
       return sub;
     }
     throw new Error('Subscription not found');
@@ -491,7 +491,7 @@ export const subscriptionService = {
       sub.planChangeStatus = 'none';
       sub.scheduledPlanId = undefined;
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`randapp:${tenantId}:subscription`, sub);
+      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
 
       // Queue Upgrade Success event
       try {
@@ -521,7 +521,7 @@ export const subscriptionService = {
       sub.planChangeStatus = 'downgrade_scheduled';
       sub.scheduledPlanId = targetPlanId;
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`randapp:${tenantId}:subscription`, sub);
+      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
 
       // Queue Downgrade Scheduled event
       try {
@@ -550,7 +550,7 @@ export const subscriptionService = {
       sub.cancelAtPeriodEnd = true;
       sub.planChangeStatus = 'cancelled_at_period_end';
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`randapp:${tenantId}:subscription`, sub);
+      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
 
       // Queue Period End Cancellation event
       try {
@@ -580,7 +580,7 @@ export const subscriptionService = {
       sub.cancelAtPeriodEnd = false;
       sub.planChangeStatus = 'none';
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`randapp:${tenantId}:subscription`, sub);
+      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
 
       // Queue Immediate Deactivation event
       try {
@@ -607,7 +607,7 @@ export const subscriptionService = {
       sub.status = 'paused';
       sub.setupNotes = reason || 'User paused';
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`randapp:${tenantId}:subscription`, sub);
+      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
 
       // Queue Suspend Paused event
       try {
@@ -635,7 +635,7 @@ export const subscriptionService = {
     if (sub) {
       sub.status = 'active';
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`randapp:${tenantId}:subscription`, sub);
+      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
 
       // Queue Re-activated active subscription event
       try {
@@ -663,7 +663,7 @@ export const subscriptionService = {
     if (sub) {
       sub.status = 'past_due';
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`randapp:${tenantId}:subscription`, sub);
+      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
 
       // Queue Past Due invoice retry alert
       try {
@@ -674,7 +674,7 @@ export const subscriptionService = {
           channel: 'email',
           type: 'subscription_past_due',
           contextArgs: {
-            ownerName: 'İşletme Yetkilisi',
+            ownerName: 'Ä°ÅŸletme Yetkilisi',
             businessName: tenantId
           }
         });
@@ -692,7 +692,7 @@ export const subscriptionService = {
     if (sub) {
       sub.status = 'expired';
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`randapp:${tenantId}:subscription`, sub);
+      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
       return sub;
     }
     throw new Error('Subscription not found');
@@ -722,3 +722,4 @@ export const subscriptionService = {
     };
   }
 };
+

@@ -70,7 +70,7 @@ export const manualProvisioningService = {
 
       // Set in both local storage and dataProvider to ensure perfect retrieval
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(subscriptionRecord));
-      await dataProvider.set(`randapp:${tenantId}:subscription`, subscriptionRecord);
+      await dataProvider.set(`lari:${tenantId}:subscription`, subscriptionRecord);
 
       // Queue administrative outbox notifications
       try {

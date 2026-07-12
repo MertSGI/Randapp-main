@@ -1,7 +1,7 @@
 {
-  "name": "RadApp Booking",
-  "short_name": "RadApp",
-  "description": "Barbershop Appointment Booking",
+  "name": "LARİ Randevu",
+  "short_name": "LARİ",
+  "description": "Salon & Kuaför Randevu Yönetimi",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#ffffff",

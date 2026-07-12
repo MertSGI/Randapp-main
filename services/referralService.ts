@@ -2,9 +2,9 @@ import { ReferralCampaign, ReferralCode, ReferralLead } from '../types';
 import { createSuccess, createError, MutationResult } from '../utils/mutationResult';
 
 // Mock storage keys
-const CAMPAIGNS_KEY = 'randapp_referral_campaigns';
-const CODES_KEY = 'randapp_referral_codes';
-const LEADS_KEY = 'randapp_referral_leads';
+const CAMPAIGNS_KEY = 'lari_referral_campaigns';
+const CODES_KEY = 'lari_referral_codes';
+const LEADS_KEY = 'lari_referral_leads';
 
 const defaultPlatformCampaigns: ReferralCampaign[] = [
   {

@@ -1,9 +1,9 @@
-import { dataProvider } from './dataProvider';
+﻿import { dataProvider } from './dataProvider';
 import { supabase } from './supabaseClient';
 import { TenantBranding } from '../types';
 import { tenantService } from './tenantService';
 
-const getBrandingKey = (tenantId: string) => `randapp:${tenantId}:branding`;
+const getBrandingKey = (tenantId: string) => `lari:${tenantId}:branding`;
 
 const isSupabaseMode = () => {
   const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
@@ -40,3 +40,4 @@ export const updateBranding = async (tenantId: string, branding: TenantBranding)
   
   await dataProvider.set(getBrandingKey(tenantId), branding);
 };
+
