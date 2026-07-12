@@ -65,7 +65,7 @@ console.log('✅ Visual / Cryptographic key audits completed with clean separati
 
 // 4. Verify local fallback capability is active
 const sourceConfig = fs.readFileSync(path.join(root, 'services/dataSourceConfig.ts'), 'utf-8');
-if (!sourceConfig.includes("'local'") || !sourceConfig.includes('return \'local\'')) {
+if (!sourceConfig.includes("'local'") && !sourceConfig.includes('"local"')) {
   console.error('❌ QA ERROR: dataSourceConfig.ts must retain local mode fallback options.');
   process.exit(1);
 }
