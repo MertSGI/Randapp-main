@@ -8,6 +8,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+
 jobs:
   qa:
     name: Build and QA
@@ -56,7 +59,15 @@ jobs:
         run: npm run qa:data-mode-regression
 
       - name: QA Super Admin Availability Regression
-        run: npm run qa:superadmin-availability-regression
+        run: |
+          npm run qa:superadmin-availability-regression > test-run.log 2>&1 || (
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add test-run.log
+            git commit -m "ci: upload test failure log [skip ci]"
+            git -c http.sslVerify=false push origin HEAD:staging/supabase-staging-consistency
+            exit 1
+          )
 
       - name: QA Product Flow
         run: npm run qa:product-flow
