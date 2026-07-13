@@ -50,4 +50,12 @@ jobs:
         run: npm run qa:supabase-priority1-core
 
       - name: Full QA
-        run: npm run qa:all
+        run: |
+          npm run qa:all > qa-run.log 2>&1 || (cat qa-run.log && exit 1)
+
+      - name: Upload QA logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-logs
+          path: qa-run.log
