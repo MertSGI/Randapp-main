@@ -1,6 +1,7 @@
 import { User } from '../types';
 import { supabase } from './supabaseClient';
 import { mapSupabaseProfileToUser, SUPABASE_AUTH_PROFILE_ERROR } from './authProfileMapper';
+import { resolveDataSourceMode } from './dataSourceModeResolver';
 
 // Helper mock user for development
 const MOCK_ADMIN_USER: User = {
@@ -21,10 +22,21 @@ const MOCK_SUPER_ADMIN_USER: User = {
   active: true,
 };
 
+function getValidatedMode(): string {
+  const env = (import.meta as any).env || (globalThis as any).import?.meta?.env || {};
+  resolveDataSourceMode({
+    dataMode: env.VITE_DATA_MODE,
+    legacyDataSource: env.VITE_LARI_DATA_SOURCE,
+    supabaseUrlPresent: !!env.VITE_SUPABASE_URL,
+    supabaseAnonKeyPresent: !!env.VITE_SUPABASE_ANON_KEY
+  });
+  return (env.VITE_DATA_MODE || '').trim();
+}
+
 export const authService = {
   async login(email: string, passwordHash: string): Promise<User | null> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode.startsWith('supabase')) {
+    const mode = getValidatedMode();
+    if (mode === 'supabase_staging' || mode === 'supabase_production') {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password: passwordHash, // In real impl, Supabase expects plain password here. We map it to password field.
@@ -39,15 +51,16 @@ export const authService = {
         .select('*')
         .eq('id', data.user.id)
         .single();
-      if (profileError) {
+      if (profileError || !profile) {
         console.error('Supabase profile lookup failed for authenticated user.');
+        await supabase.auth.signOut();
         return null;
       }
 
       try {
         return mapSupabaseProfileToUser(data.user, profile, email);
-      } catch {
-        console.error(SUPABASE_AUTH_PROFILE_ERROR);
+      } catch (err) {
+        console.error(SUPABASE_AUTH_PROFILE_ERROR, err);
         await supabase.auth.signOut();
         return null;
       }
@@ -70,8 +83,8 @@ export const authService = {
   },
 
   async logout(): Promise<void> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode.startsWith('supabase')) {
+    const mode = getValidatedMode();
+    if (mode === 'supabase_staging' || mode === 'supabase_production') {
       await supabase.auth.signOut();
       return;
     }
@@ -82,8 +95,8 @@ export const authService = {
   },
 
   async getCurrentUser(): Promise<User | null> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode.startsWith('supabase')) {
+    const mode = getValidatedMode();
+    if (mode === 'supabase_staging' || mode === 'supabase_production') {
       const { data, error } = await supabase.auth.getUser();
       if (error || !data.user) return null;
       
@@ -92,15 +105,15 @@ export const authService = {
         .select('*')
         .eq('id', data.user.id)
         .single();
-      if (profileError) {
+      if (profileError || !profile) {
         console.error('Supabase profile lookup failed for authenticated user.');
         return null;
       }
 
       try {
         return mapSupabaseProfileToUser(data.user, profile);
-      } catch {
-        console.error(SUPABASE_AUTH_PROFILE_ERROR);
+      } catch (err) {
+        console.error(SUPABASE_AUTH_PROFILE_ERROR, err);
         return null;
       }
     }
@@ -124,4 +137,3 @@ export const authService = {
     return null;
   }
 };
-

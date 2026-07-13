@@ -1,4 +1,11 @@
 globalThis.import = { meta: { env: {} } };
+if (!import.meta.env) {
+  Object.defineProperty(import.meta, 'env', {
+    value: {},
+    writable: true,
+    configurable: true
+  });
+}
 
 console.log('🏁 Running super-admin and availability mapper regression test suite...');
 
@@ -620,6 +627,63 @@ async function testLocalAvailabilityRepositoryBehavior() {
   }
 }
 await testLocalAvailabilityRepositoryBehavior();
+
+async function testAuthServiceResolution() {
+  const { authService } = await import('../services/authService.js');
+  
+  // Save current env to restore later
+  const oldEnv = { ...globalThis.import.meta.env };
+
+  // 1. Missing VITE_DATA_MODE cannot activate mock auth
+  {
+    globalThis.import.meta.env.VITE_DATA_MODE = undefined;
+    globalThis.import.meta.env.VITE_LARI_DATA_SOURCE = undefined;
+    try {
+      await authService.login('admin@randevulari.com', 'admin123');
+      assert(false, 'Missing VITE_DATA_MODE must throw configuration error');
+    } catch (err) {
+      assert(err.message.includes('VITE_DATA_MODE is missing'), 'Should throw missing VITE_DATA_MODE error');
+    }
+  }
+
+  // 2. Invalid VITE_DATA_MODE cannot activate mock auth
+  {
+    globalThis.import.meta.env.VITE_DATA_MODE = 'invalid-mode';
+    globalThis.import.meta.env.VITE_LARI_DATA_SOURCE = undefined;
+    try {
+      await authService.login('admin@randevulari.com', 'admin123');
+      assert(false, 'Invalid VITE_DATA_MODE must throw configuration error');
+    } catch (err) {
+      assert(err.message.includes('Unrecognized VITE_DATA_MODE value'), 'Should throw unrecognized value error');
+    }
+  }
+
+  // 3. supabase_staging never executes mock credential logic
+  {
+    globalThis.import.meta.env.VITE_DATA_MODE = 'supabase_staging';
+    globalThis.import.meta.env.VITE_LARI_DATA_SOURCE = 'supabase_staging';
+    globalThis.import.meta.env.VITE_SUPABASE_URL = 'https://rwedeejhjazwjthdjzrt.supabase.co';
+    globalThis.import.meta.env.VITE_SUPABASE_ANON_KEY = 'valid-key';
+    
+    const result = await authService.login('admin@randevulari.com', 'admin123');
+    assert(result === null, 'supabase_staging must not fall back to mock admin user');
+  }
+
+  // 4. Explicit mock/local mode still supports intended test credentials
+  {
+    globalThis.import.meta.env.VITE_DATA_MODE = 'mock';
+    globalThis.import.meta.env.VITE_LARI_DATA_SOURCE = 'mock';
+    const result = await authService.login('admin@randevulari.com', 'admin123');
+    assert(result !== null && result.id === 'user_admin', 'Mock mode must succeed with correct credentials');
+  }
+
+  // Restore env
+  Object.keys(globalThis.import.meta.env).forEach(key => delete globalThis.import.meta.env[key]);
+  Object.assign(globalThis.import.meta.env, oldEnv);
+  
+  console.log('✅ Auth service resolution — all assertions passed!');
+}
+await testAuthServiceResolution();
 
 if (failures > 0) {
   console.error(`\n🏁 Run completed with ${failures} failure(s).`);

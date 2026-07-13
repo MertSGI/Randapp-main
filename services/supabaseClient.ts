@@ -8,7 +8,8 @@ import { createClient } from '@supabase/supabase-js';
 let env: any = {};
 try { env = (import.meta as any).env || {}; } catch(e) {}
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://mock.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'mock-anon-key';
+const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL || 'https://mock.supabase.co';
+const supabaseAnonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY || 'mock-anon-key';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
