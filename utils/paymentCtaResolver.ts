@@ -1,6 +1,6 @@
 import { PricingPlan } from '../services/planService';
 
-export type PaymentMode = 'mock' | 'sandbox' | 'production';
+export type PaymentMode = 'mock' | 'sandbox' | 'production' | 'disabled' | 'none';
 
 export type CtaActionType = 
   | 'request_demo'
@@ -37,7 +37,7 @@ export const resolvePaymentCta = ({
   language
 }: PaymentCtaResolverParams): CtaConfig => {
   const isCurrentPlan = currentSubscriptionPlanId === plan.id;
-  const isMock = paymentMode === 'mock';
+  const isMock = paymentMode === 'mock' || paymentMode === 'disabled' || paymentMode === 'none';
 
   if (!plan.isActive) {
     return {

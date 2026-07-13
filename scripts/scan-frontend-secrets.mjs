@@ -35,9 +35,10 @@ function scanDir(dir) {
         const stat = fs.statSync(fullPath);
 
         const relativePath = path.relative(rootDir, fullPath);
+        const normalizedRelativePath = relativePath.split(path.sep).join('/');
         
         // Skip ignored directories/files
-        if (IGNORED_PATHS.some(ignored => relativePath.startsWith(ignored) || relativePath === ignored)) {
+        if (IGNORED_PATHS.some(ignored => normalizedRelativePath.startsWith(ignored) || normalizedRelativePath === ignored)) {
             continue;
         }
         

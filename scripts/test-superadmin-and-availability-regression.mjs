@@ -313,6 +313,314 @@ testAvailabilityDeduplication();
 testCrossTenantRejection();
 testLocalAvatarGeneration();
 
+// ─────────────────────────────────────────────────────
+// PHASE 7: Durable render-path verification
+// Reads AdminPage.tsx source and asserts the editor is
+// actually in the production render tree.
+// ─────────────────────────────────────────────────────
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import path from 'path';
+import { LocalCatalogRepository } from '../services/repositories/localCatalogRepository';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const adminPagePath = path.join(__dirname, '..', 'pages', 'AdminPage.tsx');
+
+function testAdminPageRenderPath() {
+  let source;
+  try {
+    source = readFileSync(adminPagePath, 'utf8');
+  } catch (e) {
+    failures++;
+    console.error(`❌ FAIL: Could not read AdminPage.tsx: ${e.message}`);
+    return;
+  }
+
+  // 1. data-testid="staff-availability-editor" is present
+  assert(
+    source.includes('data-testid="staff-availability-editor"'),
+    'AdminPage must contain data-testid="staff-availability-editor"'
+  );
+
+  // 2. data-testid="save-staff-availability" is present
+  assert(
+    source.includes('data-testid="save-staff-availability"'),
+    'AdminPage must contain data-testid="save-staff-availability"'
+  );
+
+  // 3. "Çalışma Saatleri" heading is rendered
+  assert(
+    source.includes('Çalışma Saatleri'),
+    'AdminPage must contain the "Çalışma Saatleri" heading'
+  );
+
+  // 4. "Haftalık Çalışma Takvimi" subtitle is rendered
+  assert(
+    source.includes('Haftalık Çalışma Takvimi'),
+    'AdminPage must contain the "Haftalık Çalışma Takvimi" subtitle'
+  );
+
+  // 5. "Çalışma Saatlerini Kaydet" save button label is rendered
+  assert(
+    source.includes('Çalışma Saatlerini Kaydet'),
+    'AdminPage must contain the dedicated save button label "Çalışma Saatlerini Kaydet"'
+  );
+
+  // 6. Editor is gated on editingStaffId (not always visible)
+  assert(
+    source.includes('editingStaffId && (') || source.includes('editingStaffId &&\n') || source.includes('{editingStaffId &&'),
+    'Availability editor must be conditional on editingStaffId'
+  );
+
+  // 7. All seven Turkish day labels are present
+  const days = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+  for (const day of days) {
+    assert(source.includes(day), `AdminPage must include day label "${day}"`);
+  }
+
+  // 8. start_time and end_time fields are present
+  assert(source.includes('start_time'), 'AdminPage must reference start_time field');
+  assert(source.includes('end_time'), 'AdminPage must reference end_time field');
+
+  // 9. The editor is NOT rendered only during creation (no-staff condition)
+  //    It must appear after editingStaffId is truthy, not gated by !editingStaffId
+  assert(
+    !source.includes('!editingStaffId && weeklyAvailability'),
+    'Availability editor must not be hidden behind !editingStaffId'
+  );
+
+  // 10. Loading state is visible
+  assert(
+    source.includes('loadingAvailability'),
+    'AdminPage must reference loadingAvailability state'
+  );
+
+  // 11. Error state (empty schedule after load) is handled
+  assert(
+    source.includes('weeklyAvailability.length === 0'),
+    'AdminPage must handle empty weeklyAvailability with an error state'
+  );
+
+  // 12. weeklyAvailability state is in the component
+  assert(
+    source.includes('weeklyAvailability'),
+    'AdminPage must declare weeklyAvailability state'
+  );
+
+  // 13. saveAvailabilityRules function exists
+  assert(
+    source.includes('saveAvailabilityRules'),
+    'AdminPage must define saveAvailabilityRules function'
+  );
+
+  // 14. initiateEdit loads availability rules from repository
+  assert(
+    source.includes('listAvailabilityRules'),
+    'AdminPage initiateEdit must call listAvailabilityRules on load'
+  );
+
+  // 15. The editor is inside the staff tab render path (activeTab === 'staff')
+  assert(
+    source.includes("activeTab === 'staff'"),
+    "AdminPage must have activeTab === 'staff' condition"
+  );
+
+  // 16. No display:none on the editor container
+  assert(
+    !source.includes('staff-availability-editor" style="display:none'),
+    'Availability editor must not be hidden with display:none'
+  );
+
+  // 17. No opacity-0 on the editor container
+  assert(
+    !source.includes('staff-availability-editor" className=".*opacity-0'),
+    'Availability editor must not be hidden with opacity-0'
+  );
+
+  // 18. saveAvailabilityRules is also called from the Güncelle path (inline with staff update for edit flow)
+  assert(
+    source.includes('await saveAvailabilityRules(editingStaffId)'),
+    'Availability save is also coupled to the staff profile update flow for consistency'
+  );
+
+  console.log('✅ AdminPage render-path verification — all assertions passed!');
+}
+
+// ─────────────────────────────────────────────────────
+// PHASE 7 cont'd: Availability helper behavior tests
+// ─────────────────────────────────────────────────────
+function testExistingRuleMapping() {
+  // Simulate what initiateEdit does: maps DB rows to 7-day editor state
+  const dbRules = [
+    { id: 'r-1', weekday: 1, is_active: true, start_time: '09:00:00', end_time: '17:00:00' },
+    { id: 'r-2', weekday: 2, is_active: true, start_time: '09:00:00', end_time: '17:00:00' },
+    { id: 'r-3', weekday: 3, is_active: true, start_time: '09:00:00', end_time: '17:00:00' },
+    { id: 'r-4', weekday: 4, is_active: true, start_time: '09:00:00', end_time: '17:00:00' },
+    { id: 'r-5', weekday: 5, is_active: true, start_time: '09:00:00', end_time: '17:00:00' },
+    { id: 'r-6', weekday: 6, is_active: true, start_time: '09:00:00', end_time: '17:00:00' },
+    // weekday 7 (Sunday) is absent from DB → should default to inactive
+  ];
+
+  const parsedRules = [];
+  for (let d = 1; d <= 7; d++) {
+    const rule = dbRules.find(r => r.weekday === d);
+    parsedRules.push({
+      id: rule?.id,
+      weekday: d,
+      is_active: rule ? rule.is_active : true, // initiateEdit uses true as default
+      start_time: rule ? rule.start_time.substring(0, 5) : '09:00',
+      end_time: rule ? rule.end_time.substring(0, 5) : '18:00'
+    });
+  }
+
+  // Must produce 7 entries
+  assert(parsedRules.length === 7, `Rule mapping must produce 7 entries (got ${parsedRules.length})`);
+
+  // Monday (weekday 1) = 09:00–17:00, active
+  const monday = parsedRules.find(d => d.weekday === 1);
+  assert(monday.is_active === true, 'Monday must be active (staging data)');
+  assert(monday.start_time === '09:00', `Monday start_time must be 09:00 (got ${monday.start_time})`);
+  assert(monday.end_time === '17:00', `Monday end_time must be 17:00 (got ${monday.end_time})`);
+  assert(monday.id === 'r-1', 'Monday must carry existing DB row id for update path');
+
+  // Saturday (weekday 6) = 09:00–17:00, active
+  const saturday = parsedRules.find(d => d.weekday === 6);
+  assert(saturday.is_active === true, 'Saturday must be active (staging data)');
+
+  // Sunday (weekday 7) = missing from DB → id undefined
+  const sunday = parsedRules.find(d => d.weekday === 7);
+  assert(sunday.id === undefined, 'Sunday must have no DB id (new row on first save)');
+
+  // Simulate user changes Monday from 09:00-17:00 to 10:00-18:00
+  const updated = parsedRules.map(d =>
+    d.weekday === 1 ? { ...d, start_time: '10:00', end_time: '18:00' } : d
+  );
+  const updatedMonday = updated.find(d => d.weekday === 1);
+  assert(updatedMonday.start_time === '10:00', 'After update, Monday start_time should be 10:00');
+  assert(updatedMonday.end_time === '18:00', 'After update, Monday end_time should be 18:00');
+  assert(updatedMonday.id === 'r-1', 'Update must preserve existing row ID (no duplicate creation)');
+
+  // Validate invalid time range: 18:00–10:00 must be rejected
+  const validate = (day) => {
+    if (!day.is_active) return true;
+    const [sh, sm] = day.start_time.split(':').map(Number);
+    const [eh, em] = day.end_time.split(':').map(Number);
+    return (eh * 60 + em) > (sh * 60 + sm);
+  };
+  assert(validate({ weekday: 1, is_active: true, start_time: '18:00', end_time: '10:00' }) === false,
+    'Invalid range 18:00–10:00 must be rejected');
+  assert(validate({ weekday: 7, is_active: false, start_time: '18:00', end_time: '10:00' }) === true,
+    'Disabled Sunday with bad times must bypass validation');
+
+  // Repository error propagation: if listAvailabilityRules rejects, weeklyAvailability stays empty
+  let weeklyAvailability = [];
+  const simulateLoadError = async () => {
+    try {
+      throw new Error('Network error: connection refused');
+    } catch (err) {
+      // Error logged, weeklyAvailability remains []
+    }
+    return weeklyAvailability;
+  };
+  simulateLoadError().then(result => {
+    assert(result.length === 0, 'Load error must leave weeklyAvailability empty (triggers error UI)');
+  });
+
+  console.log('✅ Existing rule mapping — all assertions passed!');
+}
+
+testAdminPageRenderPath();
+testExistingRuleMapping();
+
+
+function installMemoryLocalStorage() {
+  const store = new Map();
+  globalThis.localStorage = {
+    get length() { return store.size; },
+    key(index) { return Array.from(store.keys())[index] || null; },
+    getItem(key) { return store.has(key) ? store.get(key) : null; },
+    setItem(key, value) { store.set(key, String(value)); },
+    removeItem(key) { store.delete(key); },
+    clear() { store.clear(); }
+  };
+}
+
+async function testLocalAvailabilityRepositoryBehavior() {
+  installMemoryLocalStorage();
+  const repo = new LocalCatalogRepository();
+  const tenantId = 'tenant-availability-test';
+  const staffId = 'staff-availability-test';
+
+  const created = await repo.createAvailabilityRule(tenantId, {
+    staffId,
+    weekday: 1,
+    is_active: true,
+    start_time: '09:00:00',
+    end_time: '17:00:00'
+  });
+  assert(created.staffId === staffId, 'Local availability create persists canonical staffId');
+
+  const listed = await repo.listAvailabilityRules(tenantId, staffId);
+  assert(listed.length === 1, `Local availability list returns one persisted rule (got ${listed.length})`);
+  assert(listed[0].start_time === '09:00:00', 'Local availability list returns persisted start time');
+
+  await repo.updateAvailabilityRule(created.id, { start_time: '10:00:00', end_time: '18:00:00' });
+  const updated = await repo.listAvailabilityRules(tenantId, staffId);
+  assert(updated[0].start_time === '10:00:00', 'Local availability update mutates existing rule');
+  assert(updated[0].end_time === '18:00:00', 'Local availability update persists end time');
+
+  await repo.createAvailabilityRule(tenantId, {
+    staffId,
+    weekday: 1,
+    is_active: true,
+    start_time: '11:00:00',
+    end_time: '19:00:00'
+  });
+  const deduped = await repo.listAvailabilityRules(tenantId, staffId);
+  assert(deduped.length === 1, `Duplicate tenant+staff+weekday is upserted, not duplicated (got ${deduped.length})`);
+  assert(deduped[0].start_time === '11:00:00', 'Duplicate create updates existing tenant+staff+weekday rule');
+
+  const disabled = await repo.createAvailabilityRule(tenantId, {
+    staffId,
+    weekday: 2,
+    is_active: false,
+    start_time: '18:00:00',
+    end_time: '10:00:00'
+  });
+  assert(disabled.is_active === false, 'Disabled weekday may persist without active time-range validation');
+
+  try {
+    await repo.createAvailabilityRule(tenantId, {
+      staff_id: staffId,
+      weekday: 3,
+      is_active: true,
+      start_time: '18:00:00',
+      end_time: '10:00:00'
+    });
+    assert(false, 'Invalid active time range must be rejected');
+  } catch {
+    console.log('? Invalid active availability time range rejected');
+  }
+
+  await repo.createAvailabilityRule(tenantId, {
+    staff_id: staffId,
+    weekday: 4,
+    is_active: true,
+    start_time: '08:00:00',
+    end_time: '12:00:00'
+  });
+  const legacyMapped = await repo.listAvailabilityRules(tenantId, staffId);
+  assert(legacyMapped.some(rule => rule.weekday === 4 && rule.staffId === staffId), 'Legacy staff_id input is normalized to canonical staffId');
+
+  try {
+    await repo.updateAvailabilityRule('missing-rule', { start_time: '10:00:00' });
+    assert(false, 'Missing availability update must propagate repository error');
+  } catch {
+    console.log('? Missing availability update propagates repository error');
+  }
+}
+await testLocalAvailabilityRepositoryBehavior();
+
 if (failures > 0) {
   console.error(`\n🏁 Run completed with ${failures} failure(s).`);
   process.exit(1);

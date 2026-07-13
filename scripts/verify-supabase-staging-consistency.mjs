@@ -47,6 +47,7 @@ const CANONICAL_MIGRATIONS = [
   '20260620_paymentless_production_core_tables.sql',
   '20260621_paymentless_production_repository_columns.sql',
   '20260622_paymentless_production_rls_identity_alignment.sql',
+  '20260713_communication_outbox_rls_hardening.sql',
 ];
 
 // Check actual migration files on disk
@@ -54,7 +55,7 @@ const migrationsDir = join(ROOT, 'supabase', 'migrations');
 if (existsSync(migrationsDir)) {
   const diskFiles = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
   check(
-    'Migration files on disk match canonical list (10 files)',
+    'Migration files on disk match canonical list (11 files)',
     diskFiles.length === CANONICAL_MIGRATIONS.length &&
     diskFiles.every((f, i) => f === CANONICAL_MIGRATIONS[i]),
     `Found: [${diskFiles.join(', ')}]`
@@ -67,7 +68,7 @@ if (existsSync(migrationsDir)) {
 const manifest = readSafe('supabase/MIGRATION_APPLY_MANIFEST.md');
 if (manifest) {
   check(
-    'MIGRATION_APPLY_MANIFEST.md lists all 10 migrations',
+    'MIGRATION_APPLY_MANIFEST.md lists all 11 migrations',
     CANONICAL_MIGRATIONS.every(m => manifest.includes(m)),
     'Missing: ' + CANONICAL_MIGRATIONS.filter(m => !manifest.includes(m)).join(', ')
   );
@@ -82,13 +83,13 @@ const DOCS_WITH_MIGRATION_LISTS = [
   'docs/SUPABASE_CANONICAL_MIGRATION_APPLY_STRATEGY.md',
 ];
 
-const CRITICAL_MIGRATION = '20260622_paymentless_production_rls_identity_alignment.sql';
+const CRITICAL_MIGRATION = '20260713_communication_outbox_rls_hardening.sql';
 
 for (const docPath of DOCS_WITH_MIGRATION_LISTS) {
   const content = readSafe(docPath);
   if (content) {
     check(
-      `${docPath} includes 10th migration`,
+      `${docPath} includes latest communication_outbox hardening migration`,
       content.includes(CRITICAL_MIGRATION),
       `Missing: ${CRITICAL_MIGRATION}`
     );

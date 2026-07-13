@@ -1,7 +1,7 @@
-﻿import { 
-  BackgroundJobType, 
-  BackgroundJobStatus, 
-  BackgroundJobRun 
+import {
+  BackgroundJobType,
+  BackgroundJobStatus,
+  BackgroundJobRun
 } from '../types';
 import { tenantService } from './tenantService';
 import { subscriptionService } from './subscriptionService';
@@ -23,81 +23,81 @@ export interface BackgroundJobDefinition {
 const DEFAULT_JOBS: BackgroundJobDefinition[] = [
   {
     jobType: 'subscription_trial_ending_sweep',
-    nameTr: 'Deneme SÃ¼resi Sonu TaramasÄ±',
+    nameTr: 'Deneme Süresi Sonu Taraması',
     nameEn: 'Trial Ending Sweep',
-    descriptionTr: 'Deneme sÃ¼resi bitmek Ã¼zere olan (son 3 gÃ¼n) iÅŸletmeleri bulur ve uyarÄ± bildirimlerini kuyruÄŸa ekler.',
+    descriptionTr: 'Deneme süresi bitmek üzere olan (son 3 gün) işletmeleri bulur ve uyarı bildirimlerini kuyruğa ekler.',
     descriptionEn: 'Finds trials ending within 3 days and queues warning notifications.',
-    schedule: '0 9 * * * (Her gÃ¼n 09:00)',
+    schedule: '0 9 * * * (Her gün 09:00)',
     enabled: true
   },
   {
     jobType: 'subscription_trial_expiration_sweep',
-    nameTr: 'Deneme SÃ¼resi Dolum TaramasÄ±',
+    nameTr: 'Deneme Süresi Dolum Taraması',
     nameEn: 'Trial Expiration Sweep',
-    descriptionTr: 'SÃ¼resi dolan deneme hesaplarÄ±nÄ± saptayÄ±p abonelik durumunu duraklatÄ±p/sonlandÄ±rÄ±r.',
+    descriptionTr: 'Süresi dolan deneme hesaplarını saptayıp abonelik durumunu duraklatıp/sonlandırır.',
     descriptionEn: 'Detects expired trials and transitions status to expired or pending checkout.',
-    schedule: '0 0 * * * (Her gÃ¼n Gece YarÄ±sÄ±)',
+    schedule: '0 0 * * * (Her gün Gece Yarısı)',
     enabled: true
   },
   {
     jobType: 'subscription_past_due_sweep',
-    nameTr: 'Ã–deme Gecikmesi TaramasÄ±',
+    nameTr: '�deme Gecikmesi Taramas�',
     nameEn: 'Past Due Subscription Sweep',
-    descriptionTr: 'TahsilatÄ± baÅŸarÄ±sÄ±z olan faturalandÄ±rÄ±lmÄ±ÅŸ abonelikleri dunning kurallarÄ±na gÃ¶re askÄ±ya alÄ±r.',
+    descriptionTr: 'Tahsilat� ba�ar�s�z olan faturaland�r�lm�� abonelikleri dunning kurallar�na g�re ask�ya al�r.',
     descriptionEn: 'Identifies past due subscriptions and manages dunning or suspension rules.',
-    schedule: '0 2 * * * (Her gÃ¼n 02:00)',
+    schedule: '0 2 * * * (Her gün 02:00)',
     enabled: true
   },
   {
     jobType: 'subscription_cancel_at_period_end_sweep',
-    nameTr: 'DÃ¶nem Sonu Ä°ptal TaramasÄ±',
+    nameTr: 'Dönem Sonu İptal Taraması',
     nameEn: 'Period End Cancellation Sweep',
-    descriptionTr: 'Ä°ptal talebi bulunan aboneliklerin sÃ¼resi dolduÄŸunda otomatik olarak iptal kaydÄ±nÄ± tamamlar.',
+    descriptionTr: 'İptal talebi bulunan aboneliklerin süresi dolduğunda otomatik olarak iptal kaydını tamamlar.',
     descriptionEn: 'Applies final cancellation to subscriptions marked to terminate on end period.',
-    schedule: '0 1 * * * (Her gÃ¼n 01:00)',
+    schedule: '0 1 * * * (Her gün 01:00)',
     enabled: true
   },
   {
     jobType: 'subscription_downgrade_at_period_end_sweep',
-    nameTr: 'DÃ¶nem Sonu Paket DÃ¼ÅŸÃ¼rme TaramasÄ±',
+    nameTr: 'Dönem Sonu Paket Düşürme Taraması',
     nameEn: 'Period End Downgrade Sweep',
-    descriptionTr: 'DÃ¼ÅŸÃ¼k pakete geÃ§iÅŸ planlanmÄ±ÅŸ aboneliklerin dÃ¶nem sonunda yeni yetki ve limit sÄ±nÄ±rlarÄ±nÄ± uygular.',
+    descriptionTr: 'Düşük pakete geçiş planlanmış aboneliklerin dönem sonunda yeni yetki ve limit sınırlarını uygular.',
     descriptionEn: 'Processes scheduled plan downgrades at subscription billing boundary.',
-    schedule: '0 1 * * * (Her gÃ¼n 01:00)',
+    schedule: '0 1 * * * (Her gün 01:00)',
     enabled: true
   },
   {
     jobType: 'referral_credit_monthly_application',
-    nameTr: 'AylÄ±k Referans Kredisi UygulamasÄ±',
+    nameTr: 'Aylık Referans Kredisi Uygulaması',
     nameEn: 'Monthly Referral Credit Application',
-    descriptionTr: 'BaÅŸarÄ±yla onaylanan referans indirimlerini abonelik hak ediÅŸ fatura dÃ¶nemine yansÄ±tÄ±r.',
+    descriptionTr: 'Başarıyla onaylanan referans indirimlerini abonelik hak ediş fatura dönemine yansıtır.',
     descriptionEn: 'Applies approved referral credits/months to active tenant billing records.',
-    schedule: '0 3 1 * * (Her ayÄ±n 1. GÃ¼nÃ¼ 03:00)',
+    schedule: '0 3 1 * * (Her ayın 1. Günü 03:00)',
     enabled: true
   },
   {
     jobType: 'communication_outbox_retry_sweep',
-    nameTr: 'Ä°letiÅŸim Outbox Hata Yenileme TaramasÄ±',
+    nameTr: 'İletişim Outbox Hata Yenileme Taraması',
     nameEn: 'Communication Outbox Retry Sweep',
-    descriptionTr: 'BaÅŸarÄ±sÄ±z olmuÅŸ veya geÃ§ici hata almÄ±ÅŸ email/SMS/WhatsApp bildirimlerini kurallara gÃ¶re yeniden modeller.',
+    descriptionTr: 'Başarısız olmuş veya geçici hata almış email/SMS/WhatsApp bildirimlerini kurallara göre yeniden modeller.',
     descriptionEn: 'Retrieves failed communication outbox records and schedules automatic retries.',
     schedule: '*/15 * * * * (Her 15 Dakikada Bir)',
     enabled: true
   },
   {
     jobType: 'communication_failed_delivery_review',
-    nameTr: 'BaÅŸarÄ±sÄ±z Ä°leti OperatÃ¶r Ä°nceleme Ã–zeti',
+    nameTr: 'Başarısız İleti Operatör İnceleme Özeti',
     nameEn: 'Failed Delivery Operator Review',
-    descriptionTr: 'Boyutu sÄ±radÄ±ÅŸÄ± veya kalÄ±cÄ± olarak reddedilmiÅŸ teslimat hatalarÄ±nÄ± admin kuyruÄŸuna toplar.',
+    descriptionTr: 'Boyutu sıradışı veya kalıcı olarak reddedilmiş teslimat hatalarını admin kuyruğuna toplar.',
     descriptionEn: 'Aggregates terminal delivery failures (hard bounces, complaints) for review.',
-    schedule: '0 18 * * * (Her gÃ¼n 18:00)',
+    schedule: '0 18 * * * (Her gün 18:00)',
     enabled: true
   },
   {
     jobType: 'custom_domain_verification_poll',
-    nameTr: 'Ã–zel Alan AdÄ± DNS DoÄŸrulama YoklamasÄ±',
+    nameTr: 'Özel Alan Adı DNS Doğrulama Yoklaması',
     nameEn: 'Custom Domain Verification Polling',
-    descriptionTr: 'DoÄŸrulama bekleyen CNAME ve A kayÄ±tlarÄ±nÄ± sorgular ve onay durumunu gÃ¼nceller.',
+    descriptionTr: 'Doğrulama bekleyen CNAME ve A kayıtlarını sorgular ve onay durumunu günceller.',
     descriptionEn: 'Polls DNS authorization records for requested tenant custom domains.',
     schedule: '*/30 * * * * (Her 30 Dakikada Bir)',
     enabled: true
@@ -106,36 +106,36 @@ const DEFAULT_JOBS: BackgroundJobDefinition[] = [
     jobType: 'booking_availability_refresh',
     nameTr: 'Randevu Rezervasyon Takvimi Tazeleme',
     nameEn: 'Booking Calendar Availability Sync',
-    descriptionTr: 'Eski geÃ§miÅŸ randevularÄ± temizler, geleceÄŸe yÃ¶nelik otomatik Ã§alÄ±ÅŸma saat matrisini tazeler.',
+    descriptionTr: 'Eski geçmiş randevuları temizler, geleceğe yönelik otomatik çalışma saat matrisini tazeler.',
     descriptionEn: 'Cleans old booking blocks and pre-generates calendar slots for rolling windows.',
-    schedule: '0 4 * * * (Her gÃ¼n 04:00)',
+    schedule: '0 4 * * * (Her gün 04:00)',
     enabled: true
   },
   {
     jobType: 'data_export_reminder',
-    nameTr: 'Veri Yedekleme ve DÄ±ÅŸa AktarÄ±m HatÄ±rlatÄ±cÄ±',
+    nameTr: 'Veri Yedekleme ve Dışa Aktarım Hatırlatıcı',
     nameEn: 'Data Backup Export Reminder',
-    descriptionTr: 'Uzun sÃ¼redir verisini yedeklememiÅŸ iÅŸletmelere bilgilendirme ve veri bÃ¼tÃ¼nlÃ¼ÄŸÃ¼ uyarÄ±sÄ± oluÅŸturur.',
+    descriptionTr: 'Uzun süredir verisini yedeklememiş işletmelere bilgilendirme ve veri bütünlüğü uyarısı oluşturur.',
     descriptionEn: 'Creates system alerts recommending data export for backup compliance.',
     schedule: '0 10 * * 0 (Her Pazar 10:00)',
     enabled: true
   },
   {
     jobType: 'migration_snapshot_integrity_check',
-    nameTr: 'GeliÅŸmiÅŸ GeÃ§iÅŸ ve Entegrasyon KontrolÃ¼',
+    nameTr: 'Gelişmiş Geçiş ve Entegrasyon Kontrolü',
     nameEn: 'Migration Integrity Snapshot Run',
-    descriptionTr: 'Staging, RLS ve lokal SQL ÅŸema uyuÅŸmazlÄ±klarÄ±nÄ± test eden sessiz veri bÃ¼tÃ¼nlÃ¼ÄŸÃ¼ taramasÄ±y yapar.',
+    descriptionTr: 'Staging, RLS ve lokal SQL şema uyuşmazlıklarını test eden sessiz veri bütünlüğü taramasıy yapar.',
     descriptionEn: 'Performs non-destructive integrity audit checking schema-to-adapter match.',
     schedule: '0 3 * * 6 (Her Cumartesi 03:00)',
     enabled: true
   },
   {
     jobType: 'support_review_queue_digest',
-    nameTr: 'Destek Talepleri OperatÃ¶r Ã–zeti',
+    nameTr: 'Destek Talepleri Operatör Özeti',
     nameEn: 'Daily Support Queue Digest',
-    descriptionTr: 'SLA yanÄ±t sÃ¼resi bitmek Ã¼zere olan Ã§Ã¶zÃ¼lmemiÅŸ destek taleplerini Super Admin iÃ§in raporlar.',
+    descriptionTr: 'SLA yanıt süresi bitmek üzere olan çözülmemiş destek taleplerini Super Admin için raporlar.',
     descriptionEn: 'Aggregates open support tickets and triggers warnings for critical SLAs.',
-    schedule: '0 8 * * * (Her gÃ¼n 08:00)',
+    schedule: '0 8 * * * (Her gün 08:00)',
     enabled: true
   }
 ];
@@ -228,14 +228,14 @@ export const backgroundJobService = {
         finishedAt: now.toISOString(),
         durationMs: now.getTime() - new Date(runs[index].startedAt).getTime(),
         errorCount: 1,
-        summary: `Hata ile sonlandÄ±: ${error}`
+        summary: `Hata ile sonlandı: ${error}`
       };
       this.saveJobRuns(runs);
     }
   },
 
   async runBackgroundJobNow(
-    jobType: BackgroundJobType, 
+    jobType: BackgroundJobType,
     options: { createdBy?: 'system' | 'super_admin' | 'local_simulation'; force?: boolean } = {}
   ): Promise<BackgroundJobRun> {
     const now = new Date();
@@ -249,7 +249,7 @@ export const backgroundJobService = {
       affectedRecordCount: 0,
       warningCount: 0,
       errorCount: 0,
-      summary: 'Ä°ÅŸlem sÃ¼rdÃ¼rÃ¼lÃ¼yor...',
+      summary: 'İşlem sürdürülüyor...',
       createdBy: options.createdBy || 'local_simulation',
       internalOnly: true
     };
@@ -304,7 +304,7 @@ export const backgroundJobService = {
           result = {
             affectedTenantIds: [],
             affectedRecordCount: 0,
-            summary: 'Bu iÅŸlem simÃ¼lasyon aÅŸamasÄ±nda ve pas geÃ§ildi.'
+            summary: 'Bu işlem simülasyon aşamasında ve pas geçildi.'
           };
       }
 
@@ -362,7 +362,7 @@ export const backgroundJobService = {
           const eventType = 'trial_ending';
           const recentEvents = communicationEventService.listCommunicationEventsForTenant(tenantId);
           const alreadyQueued = recentEvents.some(
-            e => e.type === eventType && 
+            e => e.type === eventType &&
             (Date.now() - new Date(e.createdAt).getTime() < 1000 * 60 * 60 * 24)
           );
 
@@ -375,7 +375,7 @@ export const backgroundJobService = {
               channel: 'email',
               type: eventType,
               contextArgs: {
-                businessName: tenantObj?.name || 'DeÄŸerli Ä°ÅŸletmemiz',
+                businessName: tenantObj?.name || 'Değerli İşletmemiz',
                 daysRemaining,
                 trialEndDate: new Date(sub.trialEnd).toLocaleDateString('tr-TR')
               }
@@ -388,7 +388,7 @@ export const backgroundJobService = {
     return {
       affectedTenantIds,
       affectedRecordCount,
-      summary: `Deneme sÃ¼resi dolacak durumdaki ${affectedRecordCount} iÅŸletme iÃ§in email bildirimleri outbox sÄ±rasÄ±na eklendi.`
+      summary: `Deneme süresi dolacak durumdaki ${affectedRecordCount} işletme için email bildirimleri outbox sırasına eklendi.`
     };
   },
 
@@ -426,7 +426,7 @@ export const backgroundJobService = {
     return {
       affectedTenantIds,
       affectedRecordCount,
-      summary: `Deneme sÃ¼resi dolan ${affectedRecordCount} adet iÅŸletme duraklatÄ±larak "expired" konumuna alÄ±ndÄ±.`
+      summary: `Deneme süresi dolan ${affectedRecordCount} adet işletme duraklatılarak "expired" konumuna alındı.`
     };
   },
 
@@ -450,7 +450,7 @@ export const backgroundJobService = {
 
           // Update storage
           localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-          
+
           communicationEventService.queueCommunicationEvent({
             tenantId,
             audience: 'business_owner',
@@ -467,7 +467,7 @@ export const backgroundJobService = {
     return {
       affectedTenantIds,
       affectedRecordCount,
-      summary: `Ä°ptali planlanan ${affectedRecordCount} iÅŸletme dÃ¶nem sonuna ulaÅŸtÄ± ve hesaplarÄ± kalÄ±cÄ± olarak donduruldu.`
+      summary: `İptali planlanan ${affectedRecordCount} işletme dönem sonuna ulaştı ve hesapları kalıcı olarak donduruldu.`
     };
   },
 
@@ -490,7 +490,7 @@ export const backgroundJobService = {
           sub.planId = newPlan;
           sub.scheduledPlanId = undefined;
           sub.planChangeStatus = 'none';
-          
+
           // Renew billing cycle dates
           const start = new Date(sub.currentPeriodEnd);
           const end = new Date(sub.currentPeriodEnd);
@@ -519,7 +519,7 @@ export const backgroundJobService = {
     return {
       affectedTenantIds,
       affectedRecordCount,
-      summary: `Alt pakete geÃ§iÅŸ kararÄ± olan ${affectedRecordCount} iÅŸletme dÃ¶nem sÄ±nÄ±rÄ±nÄ± aÅŸarak baÅŸarÄ±yla yeni limitlerine adapte edildi.`
+      summary: `Alt pakete geçiş kararı olan ${affectedRecordCount} işletme dönem sınırını aşarak başarıyla yeni limitlerine adapte edildi.`
     };
   },
 
@@ -536,7 +536,7 @@ export const backgroundJobService = {
           ev.status = 'rendered'; // Mark ready for simulated check
           ev.metadata = { ...ev.metadata, retryCount: retryCount + 1, retriedAt: new Date().toISOString() };
           ev.updatedAt = new Date().toISOString();
-          
+
           if (!affectedTenantIds.includes(ev.tenantId)) {
             affectedTenantIds.push(ev.tenantId);
           }
@@ -552,7 +552,7 @@ export const backgroundJobService = {
     return {
       affectedTenantIds,
       affectedRecordCount,
-      summary: `Outbox kuyruÄŸunda geÃ§ici hata almÄ±ÅŸ ${affectedRecordCount} adet ileti yeniden gÃ¶nderim planÄ±na dahil edildi.`
+      summary: `Outbox kuyruğunda geçici hata almış ${affectedRecordCount} adet ileti yeniden gönderim planına dahil edildi.`
     };
   },
 
@@ -589,7 +589,7 @@ export const backgroundJobService = {
     return {
       affectedTenantIds,
       affectedRecordCount,
-      summary: `DoÄŸrulama bekleyen ${affectedRecordCount} adet Ã¶zel alan adÄ±nÄ±n CNAME / SSL yapÄ±sÄ± kontrol edildi.`
+      summary: `Doğrulama bekleyen ${affectedRecordCount} adet özel alan adının CNAME / SSL yapısı kontrol edildi.`
     };
   },
 
@@ -597,7 +597,7 @@ export const backgroundJobService = {
     return {
       affectedTenantIds: [],
       affectedRecordCount: 0,
-      summary: `Veri gÃ¼venliÄŸi politikasÄ± gereÄŸi Super Admin ve salon veritabanÄ± bÃ¼tÃ¼nlÃ¼k raporu baÅŸarÄ±yla yedekleme arÅŸivine iÅŸlendi.`
+      summary: `Veri güvenliği politikası gereği Super Admin ve salon veritabanı bütünlük raporu başarıyla yedekleme arşivine işlendi.`
     };
   },
 
@@ -605,7 +605,7 @@ export const backgroundJobService = {
     return {
       affectedTenantIds: [],
       affectedRecordCount: 0,
-      summary: `Vadesi geÃ§miÅŸ fatura taramasÄ± gerÃ§ekleÅŸtirildi. Aktif dunning sÃ¼reci iÅŸletilmeye devam ediliyor.`
+      summary: `Vadesi geçmiş fatura taraması gerçekleştirildi. Aktif dunning süreci işletilmeye devam ediliyor.`
     };
   },
 
@@ -613,7 +613,7 @@ export const backgroundJobService = {
     return {
       affectedTenantIds: [],
       affectedRecordCount: 0,
-      summary: `AylÄ±k referans kazanÃ§ hakediÅŸ mutabakatÄ± tamamlandÄ±.`
+      summary: `Aylık referans kazanç hakediş mutabakatı tamamlandı.`
     };
   },
 
@@ -621,7 +621,7 @@ export const backgroundJobService = {
     return {
       affectedTenantIds: [],
       affectedRecordCount: 0,
-      summary: `GÃ¶nderimi Bounce eden e-posta adresleri incelendi ve kara liste temizliÄŸi yapÄ±ldÄ±.`
+      summary: `Gönderimi Bounce eden e-posta adresleri incelendi ve kara liste temizliği yapıldı.`
     };
   },
 
@@ -629,7 +629,7 @@ export const backgroundJobService = {
     return {
       affectedTenantIds: [],
       affectedRecordCount: 0,
-      summary: `GeÃ§miÅŸ randevu slotlarÄ± temizlendi ve 30 gÃ¼nlÃ¼k dinamik takvim matrisi baÅŸarÄ±yla yenilendi.`
+      summary: `Geçmiş randevu slotları temizlendi ve 30 günlük dinamik takvim matrisi başarıyla yenilendi.`
     };
   },
 
@@ -637,7 +637,7 @@ export const backgroundJobService = {
     return {
       affectedTenantIds: [],
       affectedRecordCount: 0,
-      summary: `Entegrasyon bÃ¼tÃ¼nlÃ¼k doÄŸrulayÄ±cÄ± test edildi. SÄ±fÄ±r Ã§akÄ±ÅŸma saptandÄ±.`
+      summary: `Entegrasyon bütünlük doğrulayıcı test edildi. Sıfır çakışma saptandı.`
     };
   },
 
@@ -645,7 +645,7 @@ export const backgroundJobService = {
     return {
       affectedTenantIds: [],
       affectedRecordCount: 0,
-      summary: `AÃ§Ä±k destek taleplerinin SLA durumu kontrol edildi ve raporlandÄ±.`
+      summary: `Açık destek taleplerinin SLA durumu kontrol edildi ve raporlandı.`
     };
   },
 
@@ -656,12 +656,12 @@ export const backgroundJobService = {
       isCronTriggered: false,
       readyForLiveOps: false,
       checklist: [
-        { label: 'Background Model ve Servis AltyapÄ±sÄ±', completed: true },
-        { label: 'Abonelik Deneme SÃ¼resi Sonu & Ä°ptal Sweepleri', completed: true },
-        { label: 'Outbox Yeniden GÃ¶nderim ve Hata Retraing MekanizmasÄ±', completed: true },
-        { label: 'Super Admin YÃ¶netim Konsolu Paneli', completed: true },
-        { label: 'Supabase Edge Functions / Scheduled Cron Entegrasyonu', completed: false, comment: 'SÃ¼rekli Ã§alÄ±ÅŸan bir server cron veya Supabase Scheduled Function tetikleyicisi kurulmalÄ±dÄ±r.' },
-        { label: 'CanlÄ± E-Posta / SMS / WhatsApp SaÄŸlayÄ±cÄ± API Key BaÄŸlantÄ±sÄ±', completed: false, comment: 'Resend API key, Netgsm ÅŸifreleri ve Meta Token baÄŸlantÄ±larÄ± girilmelidir.' }
+        { label: 'Background Model ve Servis Altyapısı', completed: true },
+        { label: 'Abonelik Deneme Süresi Sonu & İptal Sweepleri', completed: true },
+        { label: 'Outbox Yeniden Gönderim ve Hata Retraing Mekanizması', completed: true },
+        { label: 'Super Admin Y�netim Konsolu Paneli', completed: true },
+        { label: 'Supabase Edge Functions / Scheduled Cron Entegrasyonu', completed: false, comment: 'Sürekli çalışan bir server cron veya Supabase Scheduled Function tetikleyicisi kurulmalıdır.' },
+        { label: 'Canlı E-Posta / SMS / WhatsApp Sağlayıcı API Key Bağlantısı', completed: false, comment: 'Resend API key, Netgsm şifreleri ve Meta Token bağlantıları girilmelidir.' }
       ]
     };
   }

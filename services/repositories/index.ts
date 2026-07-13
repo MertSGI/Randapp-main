@@ -76,7 +76,7 @@ const rawSupabaseProviders = {
 };
 
 // Pilot demo bypass helper proxy
-const createPilotBypassProxy = <T extends object>(supabaseImpl: T, localImpl: T): T => {
+const createPilotBypassProxy = <T extends object>(supabaseImpl: T, localImpl: object): T => {
   return new Proxy(supabaseImpl, {
     get(target, prop, receiver) {
       const originalMethod = Reflect.get(target, prop, receiver);
@@ -98,7 +98,7 @@ const createPilotBypassProxy = <T extends object>(supabaseImpl: T, localImpl: T)
             // safe fallback
           }
           if (isPilot) {
-            const localMethod = Reflect.get(localImpl, prop);
+            const localMethod = Reflect.get(localImpl as any, prop);
             if (typeof localMethod === 'function') {
               return localMethod.apply(localImpl, args);
             }

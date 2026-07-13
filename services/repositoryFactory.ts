@@ -1,5 +1,6 @@
 import { launchModeService } from './launchModeService';
 import { getDataSourceMode } from './dataSourceConfig';
+import { shouldUsePilotLocalBypass } from './pilotBypassPolicy';
 import { 
   BusinessProfileRepository, 
   CatalogRepository, 
@@ -68,7 +69,7 @@ const supabaseSupportTicket = new SupabaseSupportTicketRepository();
 const supabasePolicyAndConsent = new SupabasePolicyAndConsentRepository();
 
 // Proxy helper for pilot demo bypass
-const createPilotBypassProxy = <T extends object>(supabaseImpl: T, localImpl: T): T => {
+const createPilotBypassProxy = <T extends object>(supabaseImpl: T, localImpl: object): T => {
   return new Proxy(supabaseImpl, {
     get(target, prop, receiver) {
       const originalMethod = Reflect.get(target, prop, receiver);
@@ -81,16 +82,18 @@ const createPilotBypassProxy = <T extends object>(supabaseImpl: T, localImpl: T)
             const hashPilot = window.location.hash.includes('tenant_pilot_demo') || window.location.hash.includes('pilot/customer');
             const pathPilot = window.location.pathname.includes('tenant_pilot_demo') || window.location.pathname.includes('pilot/customer');
             
-            isPilot = activeTenantId === 'tenant_pilot_demo' || 
-                      inPilotDemo || 
-                      hashPilot || 
-                      pathPilot || 
-                      args.includes('tenant_pilot_demo');
+            isPilot = shouldUsePilotLocalBypass(getDataSourceMode(), {
+              activeTenantId,
+              inPilotDemo,
+              hash: window.location.hash,
+              pathname: window.location.pathname,
+              args,
+            });
           } catch (e) {
             // safe fallback
           }
           if (isPilot) {
-            const localMethod = Reflect.get(localImpl, prop);
+            const localMethod = Reflect.get(localImpl as any, prop);
             if (typeof localMethod === 'function') {
               return localMethod.apply(localImpl, args);
             }

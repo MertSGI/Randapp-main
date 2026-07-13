@@ -85,7 +85,8 @@ const BillingTab: React.FC = () => {
     if (!tenant) return;
     setCheckoutError(null);
 
-    const isMock = (import.meta as any).env.VITE_PAYMENT_PROVIDER === 'mock' || !(import.meta as any).env.VITE_PAYMENT_PROVIDER;
+    const paymentProvider = (import.meta as any).env.VITE_PAYMENT_PROVIDER;
+    const isMock = !paymentProvider || paymentProvider === 'mock' || paymentProvider === 'disabled' || paymentProvider === 'none';
 
     // Presentation mode block
     if (isMock) {

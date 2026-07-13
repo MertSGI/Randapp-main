@@ -34,6 +34,15 @@ export interface BusinessProfileRepository {
   getPublicBusinessProfileBySlug(slug: string): Promise<SalonBusinessProfile | null>;
 }
 
+export interface AvailabilityRule {
+  id?: string;
+  tenantId: string;
+  staffId?: string | null;
+  weekday: number;
+  is_active: boolean;
+  start_time: string;
+  end_time: string;
+}
 export interface CatalogRepository {
   listServices(tenantId: string, options?: { activeOnly?: boolean }): Promise<Service[]>;
   getServiceById(serviceId: string): Promise<Service | null>;
@@ -55,9 +64,9 @@ export interface CatalogRepository {
   removeServiceFromStaff(staffId: string, serviceId: string): Promise<void>;
   listStaffForService(tenantId: string, serviceId: string): Promise<Staff[]>;
   
-  listAvailabilityRules(tenantId: string, staffId?: string): Promise<any[]>;
-  updateAvailabilityRule(ruleId: string, patch: any): Promise<void>;
-  createAvailabilityRule(tenantId: string, input: any): Promise<any>;
+  listAvailabilityRules(tenantId: string, staffId?: string): Promise<AvailabilityRule[]>;
+  updateAvailabilityRule(ruleId: string, patch: Partial<AvailabilityRule>): Promise<void>;
+  createAvailabilityRule(tenantId: string, input: Omit<AvailabilityRule, 'id' | 'tenantId'>): Promise<AvailabilityRule>;
 
   getAvailability(tenantId: string): Promise<any>;
   updateAvailability(tenantId: string, input: any): Promise<any>;

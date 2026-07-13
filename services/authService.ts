@@ -1,5 +1,6 @@
-﻿import { User, Role } from '../types';
+import { User } from '../types';
 import { supabase } from './supabaseClient';
+import { mapSupabaseProfileToUser, SUPABASE_AUTH_PROFILE_ERROR } from './authProfileMapper';
 
 // Helper mock user for development
 const MOCK_ADMIN_USER: User = {
@@ -38,17 +39,18 @@ export const authService = {
         .select('*')
         .eq('id', data.user.id)
         .single();
-      
-      console.log('Diagnostic Profile Query:', { profile, profileError, userId: data.user.id });
-        
-      return {
-        id: data.user.id,
-        tenantId: profile?.tenant_id || 'tenant_demo', // TODO: strictly derive from profile in prod
-        name: profile?.name || data.user.email || 'User',
-        email: data.user.email || email,
-        role: (profile?.role as Role) || 'tenant_owner', // TODO: strictly derive from profile in prod
-        active: profile?.active ?? true,
-      };
+      if (profileError) {
+        console.error('Supabase profile lookup failed for authenticated user.');
+        return null;
+      }
+
+      try {
+        return mapSupabaseProfileToUser(data.user, profile, email);
+      } catch {
+        console.error(SUPABASE_AUTH_PROFILE_ERROR);
+        await supabase.auth.signOut();
+        return null;
+      }
     }
     
     // Mock mode logic
@@ -85,20 +87,22 @@ export const authService = {
       const { data, error } = await supabase.auth.getUser();
       if (error || !data.user) return null;
       
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from('users_profile')
         .select('*')
         .eq('id', data.user.id)
         .single();
+      if (profileError) {
+        console.error('Supabase profile lookup failed for authenticated user.');
+        return null;
+      }
 
-      return {
-        id: data.user.id,
-        tenantId: profile?.tenant_id || 'tenant_demo', // TODO: strictly derive from profile in prod
-        name: profile?.name || data.user.email || 'User',
-        email: data.user.email || '',
-        role: (profile?.role as Role) || 'tenant_owner', // TODO: strictly derive from profile in prod
-        active: profile?.active ?? true,
-      };
+      try {
+        return mapSupabaseProfileToUser(data.user, profile);
+      } catch {
+        console.error(SUPABASE_AUTH_PROFILE_ERROR);
+        return null;
+      }
     }
     
     const mockUserStr = localStorage.getItem('lari_active_owner_session') || localStorage.getItem('lari_mock_user');

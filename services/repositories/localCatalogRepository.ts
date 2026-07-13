@@ -1,4 +1,4 @@
-﻿import { CatalogRepository } from './types';
+import { AvailabilityRule, CatalogRepository } from './types';
 import { Service, Staff, SERVICES as DEMO_SERVICES } from '../../types';
 import { dataProvider } from '../dataProvider';
 
@@ -12,14 +12,14 @@ const DEMO_STAFF: Staff[] = [
   },
   {
     id: 'staff_2',
-    name: 'AyÅŸe YÄ±lmaz',
+    name: 'Ayşe Yılmaz',
     title: 'Hair Colorist',
     image: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=200',
     isOwner: false,
   },
   {
     id: 'staff_3',
-    name: 'Burak Ã–z',
+    name: 'Burak Öz',
     title: 'Barber',
     image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200',
     isOwner: false,
@@ -182,25 +182,82 @@ export class LocalCatalogRepository implements CatalogRepository {
     });
   }
 
-  async listAvailabilityRules(tenantId: string, staffId?: string): Promise<any[]> {
+  private normalizeAvailabilityRule(tenantId: string, rule: any): AvailabilityRule {
+    return {
+      id: rule.id,
+      tenantId: rule.tenantId || rule.tenant_id || tenantId,
+      staffId: rule.staffId ?? rule.staff_id ?? null,
+      weekday: Number(rule.weekday),
+      is_active: rule.is_active ?? rule.isActive ?? true,
+      start_time: rule.start_time || rule.startTime || '09:00:00',
+      end_time: rule.end_time || rule.endTime || '18:00:00'
+    };
+  }
+
+  private assertValidAvailabilityRule(rule: Pick<AvailabilityRule, 'weekday' | 'is_active' | 'start_time' | 'end_time'>) {
+    if (!Number.isInteger(rule.weekday) || rule.weekday < 1 || rule.weekday > 7) {
+      throw new Error('Availability weekday must be between 1 and 7.');
+    }
+    if (!rule.is_active) return;
+
+    const [sh, sm] = rule.start_time.substring(0, 5).split(':').map(Number);
+    const [eh, em] = rule.end_time.substring(0, 5).split(':').map(Number);
+    if (![sh, sm, eh, em].every(Number.isFinite) || (eh * 60 + em) <= (sh * 60 + sm)) {
+      throw new Error('Availability end time must be after start time for active weekdays.');
+    }
+  }
+
+  async listAvailabilityRules(tenantId: string, staffId?: string): Promise<AvailabilityRule[]> {
     const localData = localStorage.getItem(`lari:${tenantId}:availability_rules`);
-    const rules = localData ? JSON.parse(localData) : [];
+    const rules = (localData ? JSON.parse(localData) : []).map((rule: any) => this.normalizeAvailabilityRule(tenantId, rule));
     if (staffId) {
-      return rules.filter((r: any) => r.staffId === staffId || r.staffId == null);
+      return rules.filter((r: AvailabilityRule) => r.staffId === staffId || r.staffId == null);
     }
     return rules;
   }
 
-  async updateAvailabilityRule(ruleId: string, patch: any): Promise<void> {
-    // Simplified stub
+  async updateAvailabilityRule(ruleId: string, patch: Partial<AvailabilityRule>): Promise<void> {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.endsWith(':availability_rules')) continue;
+      const tenantId = key.split(':')[1];
+      const rules = JSON.parse(localStorage.getItem(key) || '[]').map((rule: any) => this.normalizeAvailabilityRule(tenantId, rule));
+      const index = rules.findIndex((rule: AvailabilityRule) => rule.id === ruleId);
+      if (index < 0) continue;
+
+      const updated = { ...rules[index], ...patch };
+      this.assertValidAvailabilityRule(updated);
+      rules[index] = updated;
+      localStorage.setItem(key, JSON.stringify(rules));
+      return;
+    }
+    throw new Error(`Availability rule not found: ${ruleId}`);
   }
 
-  async createAvailabilityRule(tenantId: string, input: any): Promise<any> {
+  async createAvailabilityRule(tenantId: string, input: Omit<AvailabilityRule, 'id' | 'tenantId'>): Promise<AvailabilityRule> {
     const rules = await this.listAvailabilityRules(tenantId);
-    const newRule = { ...input, id: `rule_${Date.now()}` };
-    rules.push(newRule);
+    const normalizedInput = this.normalizeAvailabilityRule(tenantId, { ...input, tenantId });
+    this.assertValidAvailabilityRule(normalizedInput);
+
+    const duplicateIndex = rules.findIndex((rule: AvailabilityRule) =>
+      rule.tenantId === tenantId &&
+      (rule.staffId || null) === (normalizedInput.staffId || null) &&
+      rule.weekday === normalizedInput.weekday
+    );
+
+    const nextRule: AvailabilityRule = {
+      ...normalizedInput,
+      id: rules[duplicateIndex]?.id || `rule_${tenantId}_${normalizedInput.staffId || 'tenant'}_${normalizedInput.weekday}`
+    };
+
+    if (duplicateIndex >= 0) {
+      rules[duplicateIndex] = nextRule;
+    } else {
+      rules.push(nextRule);
+    }
+
     localStorage.setItem(`lari:${tenantId}:availability_rules`, JSON.stringify(rules));
-    return newRule;
+    return nextRule;
   }
 
   async archiveService(tenantId: string, serviceId: string): Promise<boolean> {

@@ -1,4 +1,4 @@
-﻿import { supabase } from './supabaseClient';
+import { supabase } from './supabaseClient';
 import { dataProvider } from './dataProvider';
 import { planService, PricingPlan } from './planService';
 import { communicationEventService } from './communicationEventService';
@@ -225,7 +225,7 @@ export const subscriptionService = {
       if (runModeStatus.mode === 'sandbox_live' && !runModeStatus.canRunCheckout) {
         throw {
           isSafeStructure: true,
-          message: 'Sistem sandbox testine hazÄ±r deÄŸil (eksik yapÄ±landÄ±rmalar var). LÃ¼tfen Super Admin panelini kontrol edin.',
+          message: 'Sistem sandbox testine hazır değil (eksik yapılandırmalar var). Lütfen Super Admin panelini kontrol edin.',
           errorCode: 'SANDBOX_NOT_CONFIGURED',
           raw: { blockers: runModeStatus.missingBlockers }
         };
@@ -255,7 +255,7 @@ export const subscriptionService = {
 
           throw {
             isSafeStructure: true,
-            message: parsedError?.message || error.message || 'Ã–deme oturumu oluÅŸturulamadÄ±. LÃ¼tfen sistem yÃ¶neticisiyle iletiÅŸime geÃ§in.',
+            message: parsedError?.message || error.message || '�deme oturumu olu�turulamad�. L�tfen sistem y�neticisiyle ileti�ime ge�in.',
             errorCode: parsedError?.errorCode || 'UNKNOWN_CHECKOUT_ERROR',
             raw: parsedError
           };
@@ -264,7 +264,7 @@ export const subscriptionService = {
         if (data?.error) {
           throw {
             isSafeStructure: true,
-            message: data.message || data.error || 'Ã–deme oturumu oluÅŸturulamadÄ±. LÃ¼tfen sistem yÃ¶neticisiyle iletiÅŸime geÃ§in.',
+            message: data.message || data.error || '�deme oturumu olu�turulamad�. L�tfen sistem y�neticisiyle ileti�ime ge�in.',
             errorCode: data.errorCode || 'UNKNOWN_CHECKOUT_ERROR',
             raw: data
           };
@@ -284,7 +284,7 @@ export const subscriptionService = {
         } else {
           throw {
             isSafeStructure: true,
-            message: 'Ã–deme oturumu URL dÃ¶ndÃ¼rmedi. LÃ¼tfen sistem yÃ¶neticisiyle iletiÅŸime geÃ§in.',
+            message: '�deme oturumu URL d�nd�rmedi. L�tfen sistem y�neticisiyle ileti�ime ge�in.',
             errorCode: 'MISSING_CHECKOUT_URL',
             raw: data
           };
@@ -296,7 +296,7 @@ export const subscriptionService = {
         }
         throw {
           isSafeStructure: true,
-          message: 'Beklenmeyen bir hata oluÅŸtu. LÃ¼tfen tekrar deneyin.',
+          message: 'Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.',
           errorCode: 'UNEXPECTED_ERROR',
           raw: err
         };
@@ -331,14 +331,14 @@ export const subscriptionService = {
         }
       } catch (err: any) {
         console.error("Billing portal error:", err);
-        alert('Portal baÅŸlatÄ±lÄ±rken bir hata oluÅŸtu: ' + err.message);
+        alert('Portal ba�lat�l�rken bir hata olu�tu: ' + err.message);
       }
       return;
     }
 
     // Mock Mode
     console.log(`[Mock Mode] Opening billing portal for ${tenantId}`);
-    alert(`[Demo] Fatura portalÄ± aÃ§Ä±lÄ±yor. GeÃ§miÅŸ faturalarÄ±nÄ±z listelenebilir.`);
+    alert(`[Demo] Fatura portalı açılıyor. Geçmiş faturalarınız listelenebilir.`);
   },
 
   async getSubscriptionState(tenantId: string): Promise<TenantSubscription | null> {
@@ -384,7 +384,7 @@ export const subscriptionService = {
         channel: 'email',
         type: 'trial_started',
         contextArgs: {
-          ownerName: 'Ä°ÅŸletme Yetkilisi',
+          ownerName: 'İşletme Yetkilisi',
           businessName: tenantId,
           planName: sub.planId.toUpperCase()
         }
@@ -422,7 +422,7 @@ export const subscriptionService = {
         channel: 'email',
         type: 'manual_subscription_activated',
         contextArgs: {
-          ownerName: 'Ä°ÅŸletme Yetkilisi',
+          ownerName: 'İşletme Yetkilisi',
           businessName: tenantId,
           planName: sub.planId.toUpperCase()
         }
@@ -674,7 +674,7 @@ export const subscriptionService = {
           channel: 'email',
           type: 'subscription_past_due',
           contextArgs: {
-            ownerName: 'Ä°ÅŸletme Yetkilisi',
+            ownerName: 'İşletme Yetkilisi',
             businessName: tenantId
           }
         });

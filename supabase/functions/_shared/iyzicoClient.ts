@@ -151,7 +151,7 @@ export const iyzicoClient = {
     
     const isValid = iyzicoClient.safeTimingEqual(expectedSignature, signature);
     if (!isValid) {
-      console.error(`[SECURITY] Webhook signature verification failed. Computed: ${expectedSignature}, Received: ${signature}`);
+      console.error("[SECURITY] Webhook signature verification failed.");
     }
     return isValid;
   },

@@ -30,7 +30,8 @@ class GoLiveReadinessService {
     // In a real environment, you'd fetch an endpoint that validated secrets securely.
     // Here we check whatever client-side indicators exist and show placeholder values for strictly server secrets.
     
-    const isMockPayment = (import.meta as any).env.VITE_PAYMENT_PROVIDER === 'mock' || !(import.meta as any).env.VITE_PAYMENT_PROVIDER;
+    const paymentProvider = (import.meta as any).env.VITE_PAYMENT_PROVIDER;
+    const isMockPayment = !paymentProvider || paymentProvider === 'mock' || paymentProvider === 'disabled' || paymentProvider === 'none';
     
     if (isMockPayment) {
        blockers.push("Payment provider is set to 'mock'. Set VITE_PAYMENT_PROVIDER to 'iyzico' in production.");

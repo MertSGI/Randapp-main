@@ -185,6 +185,25 @@ if (conflictDetected) {
   process.exit(1);
 }
 
+// 4.5. communication_outbox RLS hardening regression checks
+const outboxUnsafePolicyStillCreated = /CREATE\s+POLICY\s+"System\/Admin can manage outbox"\s+ON\s+(?:public\.)?communication_outbox[\s\S]*?USING\s*\(\s*true\s*\)/i.test(aggregateSql);
+const outboxUnsafePolicyDropped = /DROP\s+POLICY\s+IF\s+EXISTS\s+"System\/Admin can manage outbox"\s+ON\s+(?:public\.)?communication_outbox/i.test(aggregateSql);
+const outboxScopedReaderExists = /CREATE\s+POLICY\s+"Tenant Owner\/Staff - Read own communication_outbox"\s+ON\s+(?:public\.)?communication_outbox[\s\S]*?up\.role\s+IN\s*\(\s*'tenant_owner'\s*,\s*'staff'\s*\)[\s\S]*?up\.tenant_id\s*=\s*communication_outbox\.tenant_id::uuid/i.test(aggregateSql);
+const outboxSuperAdminPolicyExists = /CREATE\s+POLICY\s+"Super Admins - Manage communication_outbox"\s+ON\s+(?:public\.)?communication_outbox[\s\S]*?public\.is_super_admin\(auth\.uid\(\)\)/i.test(aggregateSql);
+
+if (outboxUnsafePolicyStillCreated && !outboxUnsafePolicyDropped) {
+  console.error('[FAIL] communication_outbox still has broad System/Admin USING(true) policy without a forward drop.');
+  process.exit(1);
+}
+if (!outboxScopedReaderExists) {
+  console.error('[FAIL] communication_outbox tenant/staff scoped read policy is missing.');
+  process.exit(1);
+}
+if (!outboxSuperAdminPolicyExists) {
+  console.error('[FAIL] communication_outbox explicit super_admin management policy is missing.');
+  process.exit(1);
+}
+console.log('[PASS] communication_outbox RLS hardening policies are present in the active migration path.');
 // 5. Check required core tables exist
 const requiredTables = [
   'tenants',

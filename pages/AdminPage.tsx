@@ -449,7 +449,7 @@ const AdminPage: React.FC = () => {
         } else {
           // Row missing — create it (only one row per tenant+staff+weekday is enforced by DB unique constraint)
           await repo.createAvailabilityRule(tenant.id, {
-            staff_id: staffId,
+            staffId,
             weekday: day.weekday,
             is_active: day.is_active,
             start_time: `${day.start_time}:00`,
@@ -990,6 +990,177 @@ const AdminPage: React.FC = () => {
               </div>
             </form>
           </div>
+
+          {/* ── Weekly Availability Editor ──
+              Only rendered when editing an existing staff member.
+              Completely independent of the staff profile save flow.
+          */}
+          {editingStaffId && (
+            <div
+              data-testid="staff-availability-editor"
+              className="bg-white dark:bg-slate-800 shadow-sm rounded-lg border border-gray-200 dark:border-slate-700 overflow-hidden p-6 transition-colors duration-300"
+            >
+              {/* Section heading */}
+              <div className="border-b border-gray-200 dark:border-slate-700 pb-4 mb-6">
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                  Çalışma Saatleri
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Haftalık Çalışma Takvimi
+                </p>
+              </div>
+
+              {/* Loading state */}
+              {loadingAvailability && (
+                <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 py-4">
+                  <svg className="animate-spin w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+                  </svg>
+                  <span>Çalışma saatleri yükleniyor…</span>
+                </div>
+              )}
+
+              {/* Error: load finished but returned empty */}
+              {!loadingAvailability && weeklyAvailability.length === 0 && (
+                <div className="rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 text-sm text-red-700 dark:text-red-400">
+                  Çalışma saatleri yüklenemedi. Lütfen sayfayı yenileyip tekrar deneyin.
+                </div>
+              )}
+
+              {/* Weekly schedule grid */}
+              {!loadingAvailability && weeklyAvailability.length > 0 && (
+                <div className="space-y-3">
+                  {weeklyAvailability.map((day) => {
+                    const dayLabels = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+                    const label = dayLabels[day.weekday - 1] ?? `Gün ${day.weekday}`;
+                    return (
+                      <div
+                        key={day.weekday}
+                        className={`flex flex-col sm:flex-row sm:items-center gap-3 p-3 rounded-lg border transition-colors ${
+                          day.is_active
+                            ? 'border-blue-200 dark:border-blue-700 bg-blue-50/40 dark:bg-blue-900/10'
+                            : 'border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 opacity-60'
+                        }`}
+                      >
+                        {/* Active toggle */}
+                        <div className="flex items-center gap-2 min-w-[140px]">
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={day.is_active}
+                            aria-label={`${label} aktif`}
+                            onClick={() =>
+                              setWeeklyAvailability(prev =>
+                                prev.map(d =>
+                                  d.weekday === day.weekday ? { ...d, is_active: !d.is_active } : d
+                                )
+                              )
+                            }
+                            className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 ${
+                              day.is_active ? 'bg-accent' : 'bg-gray-300 dark:bg-slate-600'
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                day.is_active ? 'translate-x-4' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                          <span className="text-sm font-medium text-gray-800 dark:text-gray-200 w-20 select-none">
+                            {label}
+                          </span>
+                        </div>
+
+                        {/* Time inputs */}
+                        <div className="flex items-center gap-2 flex-1">
+                          <div className="flex flex-col">
+                            <label className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">Başlangıç</label>
+                            <input
+                              type="time"
+                              value={day.start_time}
+                              disabled={!day.is_active}
+                              aria-label={`${label} başlangıç saati`}
+                              onChange={e =>
+                                setWeeklyAvailability(prev =>
+                                  prev.map(d =>
+                                    d.weekday === day.weekday ? { ...d, start_time: e.target.value } : d
+                                  )
+                                )
+                              }
+                              className="rounded-md border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 dark:text-white px-2 py-1 text-sm shadow-sm disabled:opacity-40 disabled:cursor-not-allowed focus:ring-1 focus:ring-accent focus:border-accent"
+                            />
+                          </div>
+                          <span className="text-gray-400 dark:text-gray-500 text-sm pt-4 select-none">–</span>
+                          <div className="flex flex-col">
+                            <label className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">Bitiş</label>
+                            <input
+                              type="time"
+                              value={day.end_time}
+                              disabled={!day.is_active}
+                              aria-label={`${label} bitiş saati`}
+                              onChange={e =>
+                                setWeeklyAvailability(prev =>
+                                  prev.map(d =>
+                                    d.weekday === day.weekday ? { ...d, end_time: e.target.value } : d
+                                  )
+                                )
+                              }
+                              className="rounded-md border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 dark:text-white px-2 py-1 text-sm shadow-sm disabled:opacity-40 disabled:cursor-not-allowed focus:ring-1 focus:ring-accent focus:border-accent"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Save result banners */}
+              {availabilitySaveResult === 'success' && (
+                <div className="mt-4 rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 p-3 text-sm text-green-700 dark:text-green-400 flex items-center gap-2">
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  Çalışma saatleri başarıyla kaydedildi.
+                </div>
+              )}
+              {availabilitySaveResult === 'error' && (
+                <div className="mt-4 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3 text-sm text-red-700 dark:text-red-400">
+                  Kaydetme başarısız oldu. Lütfen tekrar deneyin.
+                </div>
+              )}
+
+              {/* Dedicated availability save button */}
+              {!loadingAvailability && weeklyAvailability.length > 0 && (
+                <div className="mt-6 flex items-center gap-3">
+                  <button
+                    type="button"
+                    data-testid="save-staff-availability"
+                    disabled={availabilitySaving}
+                    onClick={() => {
+                      if (editingStaffId) {
+                        setAvailabilitySaveResult('idle');
+                        saveAvailabilityRules(editingStaffId);
+                      }
+                    }}
+                    className="inline-flex items-center gap-2 bg-accent text-white px-4 py-2 rounded-md shadow-sm font-medium hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {availabilitySaving && (
+                      <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+                      </svg>
+                    )}
+                    Çalışma Saatlerini Kaydet
+                  </button>
+                  {availabilitySaving && (
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Kaydediliyor…</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {staffList.length === 0 ? (
             <div className="py-12 flex flex-col items-center justify-center text-center px-4 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl shadow-sm">

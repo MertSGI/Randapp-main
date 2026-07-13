@@ -1,6 +1,8 @@
-﻿import { Tenant, TenantBranding } from '../types';
+import { Tenant, TenantBranding } from '../types';
 import { dataProvider } from './dataProvider';
 import { supabase } from './supabaseClient';
+import { getDataSourceMode } from './dataSourceConfig';
+import { shouldUsePilotLocalBypass } from './pilotBypassPolicy';
 
 const DEMO_TENANT: Tenant = {
   id: 'tenant_demo',
@@ -25,7 +27,7 @@ export const tenantService = {
       // In supabase mode (including staging), always resolve from DB regardless of hostname.
       // Localhost is a valid dev environment for real supabase testing.
       if (hostname === 'localhost' || hostname.startsWith('127.0.0.1')) {
-        console.info('Supabase staging mode on localhost â€” resolving tenant from authenticated user profile.');
+        console.info('Supabase staging mode on localhost — resolving tenant from authenticated user profile.');
         // Fall through to DB resolution
       }
 
@@ -123,7 +125,13 @@ export const tenantService = {
                              window.location.hash.includes('/pilot/customer') ||
                              window.location.pathname.includes('/pilot/customer');
     
-    if (isPilotDemoRoute || activeTenantId === 'tenant_pilot_demo') {
+    const allowPilotDemoTenant = shouldUsePilotLocalBypass(getDataSourceMode(), {
+      activeTenantId,
+      hash: window.location.hash,
+      pathname: window.location.pathname,
+    });
+
+    if (allowPilotDemoTenant && (isPilotDemoRoute || activeTenantId === 'tenant_pilot_demo')) {
         try {
           // Dynamically import and seed data only, without establishing an owner session
           import('./pilotDemoService').then(({ pilotDemoService }) => {
@@ -136,7 +144,7 @@ export const tenantService = {
         return {
              id: 'tenant_pilot_demo',
              slug: 'tenant_pilot_demo',
-             name: 'Lumina GÃ¼zellik & KuafÃ¶r',
+             name: 'Lumina Güzellik & Kuaför',
              status: 'active',
              createdAt: new Date().toISOString(),
              updatedAt: new Date().toISOString(),
@@ -219,9 +227,9 @@ export const tenantService = {
     if (tenantId === 'tenant_pilot_demo') {
       return {
         tenantId: 'tenant_pilot_demo',
-        businessName: 'Lumina GÃ¼zellik & KuafÃ¶r',
-        tagline: 'Kendinizi Ã¶zel hissedeceÄŸiniz o yer',
-        footerText: 'Lumina GÃ¼zellik. TÃ¼m haklarÄ± saklÄ±dÄ±r.',
+        businessName: 'Lumina Güzellik & Kuaför',
+        tagline: 'Kendinizi özel hissedeceğiniz o yer',
+        footerText: 'Lumina Güzellik. Tüm hakları saklıdır.',
         primaryColor: '#8b5cf6',
       } as TenantBranding;
     }
@@ -294,7 +302,7 @@ export const tenantService = {
       } else {
         const item = {
           id: tenantId,
-          businessName: updates.name || 'Yeni Ä°ÅŸletme',
+          businessName: updates.name || 'Yeni İşletme',
           ownerEmail: 'manual@test.com',
           created_at: new Date().toISOString(),
           planId: updates.planId || 'free',

@@ -19,7 +19,8 @@ export const paymentDiagnosticsService = {
       paymentProvider: import.meta.env.VITE_PAYMENT_PROVIDER || 'mock',
       dataMode: import.meta.env.VITE_DATA_MODE || 'mock',
       supabaseUrlConfigured: !!import.meta.env.VITE_SUPABASE_URL,
-      edgeFunctionBase: EDGE_FUNCTION_BASE
+      edgeFunctionBase: EDGE_FUNCTION_BASE,
+      noFrontendSecretsExposed: true
     };
   },
 

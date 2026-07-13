@@ -65,7 +65,12 @@ serve(async (req) => {
       });
     }
 
-    console.log(`[iyzico-webhook] Received verified webhook payload:`, payload);
+    const providerEventIdForLog = payload.iyziPaymentId || payload.token || payload.eventType || 'unknown';
+    console.log('[iyzico-webhook] Received verified webhook metadata:', {
+      eventType: payload.eventType || payload.iyziEventType || 'unknown',
+      providerEventId: providerEventIdForLog,
+      hasCustomerReference: Boolean(payload.customerReferenceCode || payload.customer?.referenceCode),
+    });
 
     // Map provider event to internal status
     const mappedStatus = iyzicoClient.mapIyzicoWebhookToInternalStatus(payload);

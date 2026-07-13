@@ -1,4 +1,4 @@
-import { CatalogRepository } from './types';
+import { AvailabilityRule, CatalogRepository } from './types';
 import { Service, Staff } from '../../types';
 import { fetchSupabase } from './supabaseClient';
 
@@ -155,29 +155,55 @@ export class SupabaseCatalogRepository implements CatalogRepository {
     return this.listStaff(tenantId, { activeOnly: true });
   }
 
-  async listAvailabilityRules(tenantId: string, staffId?: string): Promise<any[]> {
+  private mapAvailabilityRow(row: any): AvailabilityRule {
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      staffId: row.staff_id ?? null,
+      weekday: Number(row.weekday),
+      is_active: row.is_active,
+      start_time: row.start_time,
+      end_time: row.end_time
+    };
+  }
+
+  private mapAvailabilityPatch(patch: Partial<AvailabilityRule>): any {
+    const mapped: any = {};
+    if (patch.staffId !== undefined) mapped.staff_id = patch.staffId;
+    if (patch.weekday !== undefined) mapped.weekday = patch.weekday;
+    if (patch.is_active !== undefined) mapped.is_active = patch.is_active;
+    if (patch.start_time !== undefined) mapped.start_time = patch.start_time;
+    if (patch.end_time !== undefined) mapped.end_time = patch.end_time;
+    return mapped;
+  }
+
+  async listAvailabilityRules(tenantId: string, staffId?: string): Promise<AvailabilityRule[]> {
     let url = `/rest/v1/availability_rules?tenant_id=eq.${tenantId}&select=*`;
     if (staffId) url += `&staff_id=eq.${staffId}`;
     const res = await fetchSupabase(url);
-    if (!res.ok) return [];
-    return res.json();
+    if (!res.ok) throw new Error('Supabase availability_rules list failed');
+    const data = await res.json();
+    return data.map((row: any) => this.mapAvailabilityRow(row));
   }
 
-  async updateAvailabilityRule(ruleId: string, patch: any): Promise<void> {
-    await fetchSupabase(`/rest/v1/availability_rules?id=eq.${ruleId}`, {
+  async updateAvailabilityRule(ruleId: string, patch: Partial<AvailabilityRule>): Promise<void> {
+    const res = await fetchSupabase(`/rest/v1/availability_rules?id=eq.${ruleId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch)
+        body: JSON.stringify(this.mapAvailabilityPatch(patch))
     });
+    if (!res.ok) throw new Error('Supabase availability_rules update failed');
   }
 
-  async createAvailabilityRule(tenantId: string, input: any): Promise<any> {
+  async createAvailabilityRule(tenantId: string, input: Omit<AvailabilityRule, 'id' | 'tenantId'>): Promise<AvailabilityRule> {
     const res = await fetchSupabase('/rest/v1/availability_rules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-        body: JSON.stringify({ ...input, tenant_id: tenantId })
+        body: JSON.stringify({ ...this.mapAvailabilityPatch(input), tenant_id: tenantId })
     });
-    return (await res.json())[0];
+    if (!res.ok) throw new Error('Supabase availability_rules insert failed');
+    const data = await res.json();
+    return this.mapAvailabilityRow(data[0]);
   }
 
   async archiveService(tenantId: string, serviceId: string): Promise<boolean> {

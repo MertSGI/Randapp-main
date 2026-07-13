@@ -15,7 +15,7 @@ const PricingPage: React.FC = () => {
   const [plans, setPlans] = useState<PricingPlan[]>([]);
   
   const { alert: showAlert } = useDialog();
-  const paymentMode = ((import.meta as any).env.VITE_PAYMENT_PROVIDER as 'mock' | 'sandbox' | 'production') || 'mock';
+  const paymentMode = ((import.meta as any).env.VITE_PAYMENT_PROVIDER as 'mock' | 'sandbox' | 'production' | 'disabled' | 'none') || 'mock';
 
   useEffect(() => {
     // Only display active plans
