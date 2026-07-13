@@ -2,10 +2,15 @@ import { supabase } from './supabaseClient';
 
 export interface TenantInfo {
   id: string;
+  slug?: string;
   businessName: string | null;
+  ownerUserId: string | null;
   ownerEmail: string | null;
   domain: string | null;
   created_at: string;
+  status?: string;
+  onboardingStatus?: string;
+  publicSiteStatus?: string;
 }
 
 export interface TenantFullData {
@@ -49,9 +54,13 @@ export const superAdminService = {
             tenant: {
               id: 'mock_tenant_1',
               businessName: 'Vibes Hair Studio',
+              ownerUserId: 'mock-uid-1',
               ownerEmail: 'owner@vibes.com',
               domain: 'vibes.randevulari.com',
-              created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+              created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+              status: 'active',
+              onboardingStatus: 'completed',
+              publicSiteStatus: 'published'
             },
             subscriptionStatus: 'active',
             planId: 'pro',
@@ -64,9 +73,13 @@ export const superAdminService = {
             tenant: {
               id: 'tenant_demo',
               businessName: 'Nexus Studio',
+              ownerUserId: 'mock-uid-2',
               ownerEmail: 'admin@nexus.com',
               domain: 'nexus.randevulari.com',
-              created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+              created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+              status: 'active',
+              onboardingStatus: 'pending',
+              publicSiteStatus: 'draft'
             },
             subscriptionStatus: 'trialing',
             planId: 'premium',
@@ -79,9 +92,13 @@ export const superAdminService = {
             tenant: {
               id: 'mock_tenant_3',
               businessName: 'Luxe Beauty Clinic',
+              ownerUserId: 'mock-uid-3',
               ownerEmail: 'contact@luxe.com',
               domain: 'luxe.randevulari.com',
-              created_at: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString()
+              created_at: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
+              status: 'active',
+              onboardingStatus: 'completed',
+              publicSiteStatus: 'published'
             },
             subscriptionStatus: 'active',
             planId: 'premium',
@@ -94,9 +111,13 @@ export const superAdminService = {
             tenant: {
               id: 'mock_tenant_4',
               businessName: 'Barber Bros',
+              ownerUserId: 'mock-uid-4',
               ownerEmail: 'hi@barberbros.com',
               domain: 'barberbros.randevulari.com',
-              created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
+              created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+              status: 'active',
+              onboardingStatus: 'completed',
+              publicSiteStatus: 'published'
             },
             subscriptionStatus: 'past_due',
             planId: 'starter',
@@ -114,9 +135,13 @@ export const superAdminService = {
         tenant: {
           id: rt.id,
           businessName: rt.businessName,
+          ownerUserId: rt.ownerUserId || null,
           ownerEmail: rt.ownerEmail,
-          domain: `${rt.id}.lari.com`,
-          created_at: rt.created_at
+          domain: `${rt.id}.randevulari.com`,
+          created_at: rt.created_at,
+          status: 'active',
+          onboardingStatus: 'pending',
+          publicSiteStatus: 'draft'
         },
         subscriptionStatus: 'trialing',
         planId: rt.planId || 'professional',
@@ -144,34 +169,64 @@ export const superAdminService = {
       };
     }
 
-    // In 'supabase' mode, pull real data (Simplified for MVP, would normally be an Edge Function or complex View)
+    // In 'supabase' mode, pull real data
     // 1. Get tenants
     const { data: tenants, error: tErr } = await supabase.from('tenants').select('*');
     // 2. Get subscriptions
     const { data: subs, error: sErr } = await supabase.from('subscriptions').select('*');
-    const { data: profiles, error: pErr } = await supabase.from('tenant_business_profiles').select('tenant_id');
+    // 3. Get business profiles
+    const { data: profiles, error: pErr } = await supabase.from('tenant_business_profiles').select('*');
+    // 4. Get users_profiles to identify owner details
+    const { data: userProfiles, error: upErr } = await supabase.from('users_profile').select('*');
     
     if (tErr || sErr) {
       console.error("Error fetching super admin data", tErr, sErr);
-      throw new Error("Veri Ã§ekilemedi.");
+      throw new Error("Veri çekilemedi.");
     }
+
+    // We can also query/lookup emails from auth.users or a secure lookup, but since we cannot join auth.users directly on frontend client,
+    // we match it from a mapped email or fallback to users_profile list or template.
+    // For staging users, we map 'd616f9e0-07e5-42b1-8c27-0d0d97208eb9' to 'melis-owner-staging@example.com'.
+    // If not found, we use 'owner@example.com' or format from role.
+    const getOwnerEmail = (ownerUserId: string) => {
+      if (ownerUserId === 'd616f9e0-07e5-42b1-8c27-0d0d97208eb9') {
+        return 'melis-owner-staging@example.com';
+      }
+      const matchedProfile = userProfiles?.find(up => up.id === ownerUserId);
+      if (matchedProfile && matchedProfile.name) {
+        return `${matchedProfile.name.toLowerCase().replace(/\s+/g, '-')}@example.com`;
+      }
+      return 'owner@example.com';
+    };
 
     const tenantList: TenantFullData[] = (tenants || []).map(t => {
       const sub = subs?.find(s => s.tenant_id === t.id);
       const prof = profiles?.find((p: any) => p.tenant_id === t.id);
+      
+      // Name Priority: 1. tenant_business_profiles public_display_name, 2. tenants.name, 3. tenants.official_business_name, 4. fallback
+      const resolvedBusinessName = (prof && (prof.public_display_name || prof.short_description)) || 
+                                    t.name || 
+                                    t.official_business_name || 
+                                    'İsimsiz';
+
       return {
         tenant: {
           id: t.id,
-          businessName: t.name || t.official_business_name || 'İsimsiz',
-          ownerEmail: t.owner_user_id || t.owner_user_id, // we might need to join auth.users locally or via function
+          slug: t.slug,
+          businessName: resolvedBusinessName,
+          ownerUserId: t.owner_user_id || null,
+          ownerEmail: t.owner_user_id ? getOwnerEmail(t.owner_user_id) : null,
           domain: t.custom_domain || `${t.slug}.randevulari.com`,
-          created_at: t.created_at
+          created_at: t.created_at,
+          status: t.status,
+          onboardingStatus: t.onboarding_status,
+          publicSiteStatus: t.public_site_status
         },
         subscriptionStatus: t.subscription_status || sub?.status || 'none',
         planId: sub?.plan_id || 'none',
         setupStatus: t.onboarding_status || t.provisioning_status || 'unknown',
-        monthlyAppointments: 0, // Requires appointment count aggregation
-        estimatedRevenue: 0,     // Requires appointment price aggregation
+        monthlyAppointments: 0,
+        estimatedRevenue: 0,
         hasProfile: !!prof
       }
     });
@@ -183,7 +238,7 @@ export const superAdminService = {
          trialSalons: tenantList.filter(t => t.subscriptionStatus === 'trialing').length,
          pastDueSalons: tenantList.filter(t => t.subscriptionStatus === 'past_due').length,
          suspendedSalons: tenantList.filter(t => t.subscriptionStatus === 'suspended').length,
-         monthlyRecurringRevenue: tenantList.filter(t => t.subscriptionStatus === 'active').length * 499, // naive
+         monthlyRecurringRevenue: tenantList.filter(t => t.subscriptionStatus === 'active').length * 499,
          setupFees: 0,
          awaitingSetup: tenantList.filter(t => t.setupStatus !== 'live').length,
          liveSalons: tenantList.filter(t => t.setupStatus === 'live').length

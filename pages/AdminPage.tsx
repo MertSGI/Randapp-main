@@ -24,6 +24,20 @@ import { onboardingChecklistService, OnboardingReport } from '../services/onboar
 import { adminFeatureAvailabilityService, AdminFeatureAvailability } from '../services/adminFeatureAvailabilityService';
 import { appointmentSelfServiceService } from '../services/appointmentSelfServiceService';
 
+// Local initials avatar — generates an SVG data-URI (no external network request, no personal data leaves the app)
+const getInitialsAvatar = (name: string): string => {
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map(w => w[0]?.toUpperCase() || '')
+    .join('');
+  const colors = ['#6366f1','#8b5cf6','#ec4899','#14b8a6','#f59e0b','#10b981','#3b82f6'];
+  const bg = colors[(name.charCodeAt(0) || 0) % colors.length];
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="${bg}"/><text x="32" y="38" text-anchor="middle" font-family="sans-serif" font-size="22" font-weight="700" fill="#fff">${initials}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+};
+
 const AdminPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -309,7 +323,7 @@ const AdminPage: React.FC = () => {
       await updateStaff(tenant.id, editingStaffId, {
         name: newStaffName,
         title: newStaffTitle,
-        image: newStaffImage || `https://ui-avatars.com/api/?name=${encodeURIComponent(newStaffName)}&background=random`,
+        image: newStaffImage || '',
         calendarEmail: newStaffEmail || undefined,
         phone: newStaffPhone || undefined,
         active: newStaffActive
@@ -324,7 +338,7 @@ const AdminPage: React.FC = () => {
       await createStaff(tenant.id, {
         name: newStaffName,
         title: newStaffTitle,
-        image: newStaffImage || `https://ui-avatars.com/api/?name=${encodeURIComponent(newStaffName)}&background=random`,
+        image: newStaffImage || '',
         calendarEmail: newStaffEmail || undefined,
         phone: newStaffPhone || undefined,
         active: newStaffActive
@@ -345,6 +359,9 @@ const AdminPage: React.FC = () => {
   }
   const [weeklyAvailability, setWeeklyAvailability] = useState<AvailabilityDay[]>([]);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
+  // Independent availability save state — separate from staff save
+  const [availabilitySaving, setAvailabilitySaving] = useState(false);
+  const [availabilitySaveResult, setAvailabilitySaveResult] = useState<'idle' | 'success' | 'error'>('idle');
 
   const initiateEdit = async (staff: Staff) => {
     setEditingStaffId(staff.id);
@@ -386,32 +403,51 @@ const AdminPage: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  /**
+   * saveStaffAvailability — dedicated availability persistence function.
+   * Completely independent of the staff profile save flow.
+   * Requires: staffId belongs to active tenant, valid time ranges, no duplicate weekday rows.
+   */
   const saveAvailabilityRules = async (staffId: string) => {
-    if (!tenant) return;
+    if (!tenant) throw new Error('Kiracı bağlamı bulunamadı.');
+
+    // Guard: verify staff belongs to this tenant (using already-loaded staffList)
+    const belongsToTenant = staffList.some(s => s.id === staffId && s.tenantId === tenant.id);
+    if (!belongsToTenant) {
+      throw new Error('Bu uzman bu işletmeye ait değil.');
+    }
+
+    setAvailabilitySaving(true);
+    setAvailabilitySaveResult('idle');
     try {
       const { getAvailabilityRepository } = await import('../services/repositories');
       const repo = getAvailabilityRepository();
-      
-      // Perform time-range validations (end <= start)
+
+      // Validate time ranges for all active days
+      const dayNames = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
       for (const day of weeklyAvailability) {
         if (day.is_active) {
           const [sh, sm] = day.start_time.split(':').map(Number);
           const [eh, em] = day.end_time.split(':').map(Number);
-          if (eh < sh || (eh === sh && em <= sm)) {
-            const dayNames = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+          const startMinutes = sh * 60 + sm;
+          const endMinutes = eh * 60 + em;
+          if (endMinutes <= startMinutes) {
             throw new Error(`${dayNames[day.weekday - 1]} günü için bitiş saati başlangıç saatinden sonra olmalıdır.`);
           }
         }
       }
 
+      // Persist each weekday: update existing rows, insert missing ones — prevents duplicates
       for (const day of weeklyAvailability) {
         if (day.id) {
+          // Row exists — update it (covers is_active toggling and time changes)
           await repo.updateAvailabilityRule(day.id, {
             is_active: day.is_active,
             start_time: `${day.start_time}:00`,
             end_time: `${day.end_time}:00`
           });
         } else {
+          // Row missing — create it (only one row per tenant+staff+weekday is enforced by DB unique constraint)
           await repo.createAvailabilityRule(tenant.id, {
             staff_id: staffId,
             weekday: day.weekday,
@@ -421,9 +457,28 @@ const AdminPage: React.FC = () => {
           });
         }
       }
+
+      // Reload from DB so UI reflects database truth
+      const freshRules = await repo.listAvailabilityRules(tenant.id, staffId);
+      const parsedRules: AvailabilityDay[] = [];
+      for (let d = 1; d <= 7; d++) {
+        const rule = freshRules.find((r: any) => r.weekday === d);
+        parsedRules.push({
+          id: rule?.id,
+          weekday: d,
+          is_active: rule ? rule.is_active : false,
+          start_time: rule ? rule.start_time.substring(0, 5) : '09:00',
+          end_time: rule ? rule.end_time.substring(0, 5) : '18:00'
+        });
+      }
+      setWeeklyAvailability(parsedRules);
+      setAvailabilitySaveResult('success');
     } catch (err: any) {
+      setAvailabilitySaveResult('error');
       showAlert(err.message || 'Çalışma saatleri kaydedilirken bir hata oluştu.');
-      throw err;
+      throw err; // re-throw so caller knows availability failed independently
+    } finally {
+      setAvailabilitySaving(false);
     }
   };
 
@@ -987,10 +1042,10 @@ const AdminPage: React.FC = () => {
                     )}
                 </div>
                  <img 
-                   src={staff.image} 
+                   src={staff.image || getInitialsAvatar(staff.name)} 
                    alt={staff.name} 
                    onError={(e) => {
-                     (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(staff.name)}&background=random`;
+                     (e.target as HTMLImageElement).src = getInitialsAvatar(staff.name);
                    }}
                    className="w-16 h-16 rounded-full mb-3 object-cover shadow-sm"
                  />

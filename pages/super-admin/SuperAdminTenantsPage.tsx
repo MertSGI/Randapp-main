@@ -57,6 +57,11 @@ const SuperAdminTenantsPage: React.FC = () => {
               <div className="text-sm text-gray-700 dark:text-gray-300">
                 Email: {t.tenant.ownerEmail || '-'}
               </div>
+              {t.tenant.ownerUserId && (
+                <div className="text-xs text-gray-400 dark:text-gray-500 font-mono">
+                  UID: {t.tenant.ownerUserId}
+                </div>
+              )}
               <div className="flex justify-end space-x-3 pt-2 text-sm font-medium">
                 <Link to={`/super-admin/tenant-preview/${t.tenant.id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300">
                    Önizle
@@ -90,10 +95,18 @@ const SuperAdminTenantsPage: React.FC = () => {
                 <tr key={t.tenant.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="font-bold text-gray-900 dark:text-white">{t.tenant.businessName || 'İsimsiz'}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">{t.tenant.id}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 font-mono">{t.tenant.slug || t.tenant.id}</div>
+                    {t.tenant.publicSiteStatus === 'published' && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 mt-0.5">Yayında</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-700 dark:text-gray-300">{t.tenant.ownerEmail || '-'}</div>
+                    {t.tenant.ownerUserId && (
+                      <div className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate max-w-[180px]" title={t.tenant.ownerUserId}>
+                        UID: {t.tenant.ownerUserId.substring(0, 12)}…
+                      </div>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400`}>
