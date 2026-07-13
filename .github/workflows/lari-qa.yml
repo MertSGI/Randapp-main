@@ -49,13 +49,47 @@ jobs:
       - name: Supabase Priority 1 core QA
         run: npm run qa:supabase-priority1-core
 
-      - name: Full QA
-        run: |
-          npm run qa:all > qa-run.log 2>&1 || (cat qa-run.log && exit 1)
+      - name: QA Slug Regression
+        run: npm run qa:slug-regression
 
-      - name: Upload QA logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qa-logs
-          path: qa-run.log
+      - name: QA Data Mode Regression
+        run: npm run qa:data-mode-regression
+
+      - name: QA Super Admin Availability Regression
+        run: npm run qa:superadmin-availability-regression
+
+      - name: QA Product Flow
+        run: npm run qa:product-flow
+
+      - name: QA Subscription Lifecycle
+        run: npm run qa:subscription-lifecycle
+
+      - name: QA Payment Security
+        run: npm run qa:payment-security
+
+      - name: QA Sandbox Readiness
+        run: npm run qa:sandbox-readiness
+
+      - name: QA Payment Run Modes
+        run: npm run qa:payment-run-modes
+
+      - name: QA Pilot Demo
+        run: npm run qa:pilot-demo
+
+      - name: QA Customer Pilot
+        run: npm run qa:customer-pilot
+
+      - name: QA Notifications
+        run: npm run qa:notifications
+
+      - name: QA Supabase Schema
+        run: npm run qa:supabase-schema
+
+      - name: QA Data Source Adapters
+        run: npm run qa:data-source-adapters
+
+      - name: QA Catalog Consistency
+        run: npm run qa:catalog-consistency
+
+      - name: QA Booking Consistency
+        run: npm run qa:booking-consistency
