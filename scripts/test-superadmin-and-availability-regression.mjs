@@ -7,6 +7,8 @@ if (!import.meta.env) {
   });
 }
 
+import { authService } from '../services/authService';
+
 console.log('🏁 Running super-admin and availability mapper regression test suite...');
 
 let failures = 0;
@@ -629,8 +631,6 @@ async function testLocalAvailabilityRepositoryBehavior() {
 await testLocalAvailabilityRepositoryBehavior();
 
 async function testAuthServiceResolution() {
-  const { authService } = await import('../services/authService.ts');
-  
   // Save current env to restore later
   const oldEnv = { ...globalThis.import.meta.env };
 
