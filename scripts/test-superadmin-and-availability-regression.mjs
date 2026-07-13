@@ -629,7 +629,7 @@ async function testLocalAvailabilityRepositoryBehavior() {
 await testLocalAvailabilityRepositoryBehavior();
 
 async function testAuthServiceResolution() {
-  const { authService } = await import('../services/authService.js');
+  const { authService } = await import('../services/authService.ts');
   
   // Save current env to restore later
   const oldEnv = { ...globalThis.import.meta.env };
