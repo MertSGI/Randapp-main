@@ -50,7 +50,7 @@ export interface TenantUsage {
 
 export const subscriptionService = {
   async getCurrentSubscription(tenantId: string): Promise<TenantSubscription | null> {
-    const mode = import.meta.env.VITE_DATA_MODE || 'mock';
+    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
 
     if (mode.startsWith('supabase')) {
       const { data, error } = await supabase
@@ -122,7 +122,7 @@ export const subscriptionService = {
   },
 
   async getTenantUsage(tenantId: string): Promise<TenantUsage> {
-    const mode = import.meta.env.VITE_DATA_MODE || 'mock';
+    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
 
     if (mode.startsWith('supabase')) {
       try {
@@ -255,7 +255,7 @@ export const subscriptionService = {
 
           throw {
             isSafeStructure: true,
-            message: parsedError?.message || error.message || 'Ödeme oturumu oluþturulamadý. Lütfen sistem yöneticisiyle iletiþime geçin.',
+            message: parsedError?.message || error.message || 'ï¿½deme oturumu oluï¿½turulamadï¿½. Lï¿½tfen sistem yï¿½neticisiyle iletiï¿½ime geï¿½in.',
             errorCode: parsedError?.errorCode || 'UNKNOWN_CHECKOUT_ERROR',
             raw: parsedError
           };
@@ -264,7 +264,7 @@ export const subscriptionService = {
         if (data?.error) {
           throw {
             isSafeStructure: true,
-            message: data.message || data.error || 'Ödeme oturumu oluþturulamadý. Lütfen sistem yöneticisiyle iletiþime geçin.',
+            message: data.message || data.error || 'ï¿½deme oturumu oluï¿½turulamadï¿½. Lï¿½tfen sistem yï¿½neticisiyle iletiï¿½ime geï¿½in.',
             errorCode: data.errorCode || 'UNKNOWN_CHECKOUT_ERROR',
             raw: data
           };
@@ -284,7 +284,7 @@ export const subscriptionService = {
         } else {
           throw {
             isSafeStructure: true,
-            message: 'Ödeme oturumu URL döndürmedi. Lütfen sistem yöneticisiyle iletiþime geçin.',
+            message: 'ï¿½deme oturumu URL dï¿½ndï¿½rmedi. Lï¿½tfen sistem yï¿½neticisiyle iletiï¿½ime geï¿½in.',
             errorCode: 'MISSING_CHECKOUT_URL',
             raw: data
           };
@@ -331,7 +331,7 @@ export const subscriptionService = {
         }
       } catch (err: any) {
         console.error("Billing portal error:", err);
-        alert('Portal baþlatýlýrken bir hata oluþtu: ' + err.message);
+        alert('Portal baï¿½latï¿½lï¿½rken bir hata oluï¿½tu: ' + err.message);
       }
       return;
     }
