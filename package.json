@@ -93,7 +93,7 @@
     "qa:market-global": "node scripts/verify-market-global-readiness.mjs",
     "qa:data-mode-regression": "npx tsx scripts/test-data-mode-regression.mjs",
     "qa:slug-regression": "npx tsx scripts/test-slug-regression.mjs",
-    "qa:superadmin-availability-regression": "npx tsx scripts/test-superadmin-and-availability-regression.mjs"
+    "qa:superadmin-availability-regression": "npx tsx scripts/test-superadmin-and-availability-regression.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",
