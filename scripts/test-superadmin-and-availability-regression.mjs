@@ -331,10 +331,9 @@ testLocalAvatarGeneration();
 // Reads AdminPage.tsx source and asserts the editor is
 // actually in the production render tree.
 // ─────────────────────────────────────────────────────
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import path from 'path';
-import { LocalCatalogRepository } from '../services/repositories/localCatalogRepository';
+const { readFileSync } = await import('fs');
+const { fileURLToPath } = await import('url');
+const path = (await import('path')).default;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const adminPagePath = path.join(__dirname, '..', 'pages', 'AdminPage.tsx');
@@ -560,6 +559,7 @@ function installMemoryLocalStorage() {
 
 async function testLocalAvailabilityRepositoryBehavior() {
   installMemoryLocalStorage();
+  const { LocalCatalogRepository } = await import('../services/repositories/localCatalogRepository');
   const repo = new LocalCatalogRepository();
   const tenantId = 'tenant-availability-test';
   const staffId = 'staff-availability-test';
