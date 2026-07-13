@@ -1,10 +1,14 @@
 globalThis.import = { meta: { env: {} } };
 if (!import.meta.env) {
-  Object.defineProperty(import.meta, 'env', {
-    value: {},
-    writable: true,
-    configurable: true
-  });
+  try {
+    Object.defineProperty(import.meta, 'env', {
+      value: {},
+      writable: true,
+      configurable: true
+    });
+  } catch (e) {
+    // import.meta is frozen/non-extensible in this environment
+  }
 }
 
 import { authService } from '../services/authService';
