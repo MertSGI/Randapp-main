@@ -162,14 +162,14 @@ export const superAdminService = {
       return {
         tenant: {
           id: t.id,
-          businessName: t.business_name,
-          ownerEmail: t.user_id, // we might need to join auth.users locally or via function
-          domain: t.custom_domain,
+          businessName: t.name || t.official_business_name || 'İsimsiz',
+          ownerEmail: t.owner_user_id || t.owner_user_id, // we might need to join auth.users locally or via function
+          domain: t.custom_domain || `${t.slug}.randevulari.com`,
           created_at: t.created_at
         },
-        subscriptionStatus: sub?.status || 'none',
+        subscriptionStatus: t.subscription_status || sub?.status || 'none',
         planId: sub?.plan_id || 'none',
-        setupStatus: t.provisioning_status || 'unknown',
+        setupStatus: t.onboarding_status || t.provisioning_status || 'unknown',
         monthlyAppointments: 0, // Requires appointment count aggregation
         estimatedRevenue: 0,     // Requires appointment price aggregation
         hasProfile: !!prof

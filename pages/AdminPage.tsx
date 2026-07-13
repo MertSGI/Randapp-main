@@ -314,6 +314,12 @@ const AdminPage: React.FC = () => {
         phone: newStaffPhone || undefined,
         active: newStaffActive
       });
+      try {
+        await saveAvailabilityRules(editingStaffId);
+      } catch (err) {
+        // Validation or update error, keep form open
+        return;
+      }
     } else {
       await createStaff(tenant.id, {
         name: newStaffName,
@@ -329,7 +335,18 @@ const AdminPage: React.FC = () => {
     resetForm();
   };
 
-  const initiateEdit = (staff: Staff) => {
+  // Weekly Availability Form State
+  interface AvailabilityDay {
+    id?: string;
+    weekday: number;
+    is_active: boolean;
+    start_time: string;
+    end_time: string;
+  }
+  const [weeklyAvailability, setWeeklyAvailability] = useState<AvailabilityDay[]>([]);
+  const [loadingAvailability, setLoadingAvailability] = useState(false);
+
+  const initiateEdit = async (staff: Staff) => {
     setEditingStaffId(staff.id);
     setNewStaffName(staff.name);
     setNewStaffTitle(staff.title);
@@ -337,7 +354,77 @@ const AdminPage: React.FC = () => {
     setNewStaffEmail(staff.calendarEmail || '');
     setNewStaffPhone(staff.phone || '');
     setNewStaffActive(staff.active ?? true);
+    
+    // Load availability rules
+    if (tenant) {
+      setLoadingAvailability(true);
+      try {
+        const { getAvailabilityRepository } = await import('../services/repositories');
+        const repo = getAvailabilityRepository();
+        const rules = await repo.listAvailabilityRules(tenant.id, staff.id);
+        
+        // Match weekday 1 (Mon) to 7 (Sun)
+        const parsedRules: AvailabilityDay[] = [];
+        for (let d = 1; d <= 7; d++) {
+          const rule = rules.find((r: any) => r.weekday === d);
+          parsedRules.push({
+            id: rule?.id,
+            weekday: d,
+            is_active: rule ? rule.is_active : true,
+            start_time: rule ? rule.start_time.substring(0, 5) : '09:00',
+            end_time: rule ? rule.end_time.substring(0, 5) : '18:00'
+          });
+        }
+        setWeeklyAvailability(parsedRules);
+      } catch (err) {
+        console.error("Error loading availability rules", err);
+      } finally {
+        setLoadingAvailability(false);
+      }
+    }
+    
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const saveAvailabilityRules = async (staffId: string) => {
+    if (!tenant) return;
+    try {
+      const { getAvailabilityRepository } = await import('../services/repositories');
+      const repo = getAvailabilityRepository();
+      
+      // Perform time-range validations (end <= start)
+      for (const day of weeklyAvailability) {
+        if (day.is_active) {
+          const [sh, sm] = day.start_time.split(':').map(Number);
+          const [eh, em] = day.end_time.split(':').map(Number);
+          if (eh < sh || (eh === sh && em <= sm)) {
+            const dayNames = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+            throw new Error(`${dayNames[day.weekday - 1]} günü için bitiş saati başlangıç saatinden sonra olmalıdır.`);
+          }
+        }
+      }
+
+      for (const day of weeklyAvailability) {
+        if (day.id) {
+          await repo.updateAvailabilityRule(day.id, {
+            is_active: day.is_active,
+            start_time: `${day.start_time}:00`,
+            end_time: `${day.end_time}:00`
+          });
+        } else {
+          await repo.createAvailabilityRule(tenant.id, {
+            staff_id: staffId,
+            weekday: day.weekday,
+            is_active: day.is_active,
+            start_time: `${day.start_time}:00`,
+            end_time: `${day.end_time}:00`
+          });
+        }
+      }
+    } catch (err: any) {
+      showAlert(err.message || 'Çalışma saatleri kaydedilirken bir hata oluştu.');
+      throw err;
+    }
   };
 
   const resetForm = () => {
@@ -348,6 +435,7 @@ const AdminPage: React.FC = () => {
     setNewStaffEmail('');
     setNewStaffPhone('');
     setNewStaffActive(true);
+    setWeeklyAvailability([]);
   };
 
   return (
@@ -898,14 +986,20 @@ const AdminPage: React.FC = () => {
                     </button>
                     )}
                 </div>
-                <img src={staff.image} alt={staff.name} className="w-16 h-16 rounded-full mb-3 object-cover shadow-sm"/>
-                <h4 className="font-bold text-gray-900 dark:text-white text-lg transition-colors duration-300">{staff.name}</h4>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 transition-colors duration-300">{staff.title}</p>
-                <div className="flex flex-col gap-1 items-center w-full">
-                    <div className="text-xs bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 px-3 py-1 rounded-full transition-colors duration-300">{staff.id}</div>
-                    {staff.calendarEmail && <div className="text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-3 py-1 rounded-full truncate w-full transition-colors duration-300" title={staff.calendarEmail}>Google: {staff.calendarEmail}</div>}
-                    {staff.phone && <div className="text-xs bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 px-3 py-1 rounded-full truncate w-full transition-colors duration-300">{staff.phone}</div>}
-                </div>
+                 <img 
+                   src={staff.image} 
+                   alt={staff.name} 
+                   onError={(e) => {
+                     (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(staff.name)}&background=random`;
+                   }}
+                   className="w-16 h-16 rounded-full mb-3 object-cover shadow-sm"
+                 />
+                 <h4 className="font-bold text-gray-900 dark:text-white text-lg transition-colors duration-300">{staff.name}</h4>
+                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 transition-colors duration-300">{staff.title}</p>
+                 <div className="flex flex-col gap-1 items-center w-full">
+                     {staff.calendarEmail && <div className="text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-3 py-1 rounded-full truncate w-full transition-colors duration-300" title={staff.calendarEmail}>Google: {staff.calendarEmail}</div>}
+                     {staff.phone && <div className="text-xs bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 px-3 py-1 rounded-full truncate w-full transition-colors duration-300">{staff.phone}</div>}
+                 </div>
               </div>
             );
             })}
@@ -1022,7 +1116,6 @@ const AdminPage: React.FC = () => {
                    <span>•</span>
                    <span className="font-bold text-accent dark:text-blue-400">₺{service.price}</span>
                 </div>
-                <div className="text-xs bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 px-3 py-1 rounded-full transition-colors duration-300">{service.id}</div>
               </div>
             ))}
             </div>
