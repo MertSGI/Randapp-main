@@ -11,7 +11,7 @@ if (!import.meta.env) {
   }
 }
 
-import { authService } from '../services/authService';
+const { authService } = await import('../services/authService');
 
 console.log('🏁 Running super-admin and availability mapper regression test suite...');
 
