@@ -1,5 +1,6 @@
 import { User } from '../types';
 import { supabase } from './supabaseClient';
+import { createClient } from '@supabase/supabase-js';
 import { mapSupabaseProfileToUser, SUPABASE_AUTH_PROFILE_ERROR } from './authProfileMapper';
 import { resolveDataSourceMode } from './dataSourceModeResolver';
 
@@ -33,11 +34,19 @@ function getValidatedMode(): string {
   return (env.VITE_DATA_MODE || '').trim();
 }
 
+function getSupabaseClient() {
+  const env = (import.meta as any).env || (globalThis as any).import?.meta?.env || {};
+  const supabaseUrl = env.VITE_SUPABASE_URL || 'https://mock.supabase.co';
+  const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || 'mock-anon-key';
+  return createClient(supabaseUrl, supabaseAnonKey);
+}
+
 export const authService = {
   async login(email: string, passwordHash: string): Promise<User | null> {
     const mode = getValidatedMode();
     if (mode === 'supabase_staging' || mode === 'supabase_production') {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const client = getSupabaseClient();
+      const { data, error } = await client.auth.signInWithPassword({
         email,
         password: passwordHash, // In real impl, Supabase expects plain password here. We map it to password field.
       });
@@ -46,14 +55,14 @@ export const authService = {
         return null;
       }
       
-      const { data: profile, error: profileError } = await supabase
+      const { data: profile, error: profileError } = await client
         .from('users_profile')
         .select('*')
         .eq('id', data.user.id)
         .single();
       if (profileError || !profile) {
         console.error('Supabase profile lookup failed for authenticated user.');
-        await supabase.auth.signOut();
+        await client.auth.signOut();
         return null;
       }
 
@@ -61,7 +70,7 @@ export const authService = {
         return mapSupabaseProfileToUser(data.user, profile, email);
       } catch (err) {
         console.error(SUPABASE_AUTH_PROFILE_ERROR, err);
-        await supabase.auth.signOut();
+        await client.auth.signOut();
         return null;
       }
     }
@@ -85,7 +94,8 @@ export const authService = {
   async logout(): Promise<void> {
     const mode = getValidatedMode();
     if (mode === 'supabase_staging' || mode === 'supabase_production') {
-      await supabase.auth.signOut();
+      const client = getSupabaseClient();
+      await client.auth.signOut();
       return;
     }
     
@@ -97,10 +107,11 @@ export const authService = {
   async getCurrentUser(): Promise<User | null> {
     const mode = getValidatedMode();
     if (mode === 'supabase_staging' || mode === 'supabase_production') {
-      const { data, error } = await supabase.auth.getUser();
+      const client = getSupabaseClient();
+      const { data, error } = await client.auth.getUser();
       if (error || !data.user) return null;
       
-      const { data: profile, error: profileError } = await supabase
+      const { data: profile, error: profileError } = await client
         .from('users_profile')
         .select('*')
         .eq('id', data.user.id)
