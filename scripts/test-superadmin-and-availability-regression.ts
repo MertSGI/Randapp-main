@@ -1,6 +1,6 @@
-// Polyfill globalThis.import.meta.env for test environment
-// (needed by testAuthServiceResolution which reads/writes env vars via globalThis.import.meta.env)
-(globalThis as any).import = { meta: { env: {} } };
+// Polyfill globalThis.import.meta.env for test environment BEFORE any static imports
+// (needed by testAuthServiceResolution and any static references in services/modules)
+(globalThis as any).import = { meta: { env: { VITE_DATA_MODE: 'mock', VITE_LARI_DATA_SOURCE: 'mock' } } };
 
 import { authService } from '../services/authService';
 
