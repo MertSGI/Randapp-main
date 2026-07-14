@@ -601,7 +601,7 @@ async function testLocalAvailabilityRepositoryBehavior() {
       is_active: true,
       start_time: '18:00:00',
       end_time: '10:00:00'
-    });
+    } as any);
     assert(false, 'Invalid active time range must be rejected');
   } catch {
     console.log('? Invalid active availability time range rejected');
@@ -613,7 +613,7 @@ async function testLocalAvailabilityRepositoryBehavior() {
     is_active: true,
     start_time: '08:00:00',
     end_time: '12:00:00'
-  });
+  } as any);
   const legacyMapped = await repo.listAvailabilityRules(tenantId, staffId);
   assert(legacyMapped.some(rule => rule.weekday === 4 && rule.staffId === staffId), 'Legacy staff_id input is normalized to canonical staffId');
 
