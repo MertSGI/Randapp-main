@@ -11,6 +11,7 @@ export interface TenantInfo {
   status?: string;
   onboardingStatus?: string;
   publicSiteStatus?: string;
+  businessContactEmail?: string | null;
 }
 
 export interface TenantFullData {
@@ -188,15 +189,13 @@ export const superAdminService = {
     // we match it from a mapped email or fallback to users_profile list or template.
     // For staging users, we map 'd616f9e0-07e5-42b1-8c27-0d0d97208eb9' to 'melis-owner-staging@example.com'.
     // If not found, we use 'owner@example.com' or format from role.
+    // Trustworthy owner email lookup: only use userProfiles email if it actually exists in the db profile
     const getOwnerEmail = (ownerUserId: string) => {
-      if (ownerUserId === 'd616f9e0-07e5-42b1-8c27-0d0d97208eb9') {
-        return 'melis-owner-staging@example.com';
-      }
       const matchedProfile = userProfiles?.find(up => up.id === ownerUserId);
-      if (matchedProfile && matchedProfile.name) {
-        return `${matchedProfile.name.toLowerCase().replace(/\s+/g, '-')}@example.com`;
+      if (matchedProfile && matchedProfile.email) {
+        return matchedProfile.email;
       }
-      return 'owner@example.com';
+      return null;
     };
 
     const tenantList: TenantFullData[] = (tenants || []).map(t => {
@@ -204,7 +203,7 @@ export const superAdminService = {
       const prof = profiles?.find((p: any) => p.tenant_id === t.id);
       
       // Name Priority: 1. tenant_business_profiles public_display_name, 2. tenants.name, 3. tenants.official_business_name, 4. fallback
-      const resolvedBusinessName = (prof && (prof.public_display_name || prof.short_description)) || 
+      const resolvedBusinessName = (prof && prof.public_display_name) || 
                                     t.name || 
                                     t.official_business_name || 
                                     'İsimsiz';
@@ -220,7 +219,8 @@ export const superAdminService = {
           created_at: t.created_at,
           status: t.status,
           onboardingStatus: t.onboarding_status,
-          publicSiteStatus: t.public_site_status
+          publicSiteStatus: t.public_site_status,
+          businessContactEmail: prof?.email || null
         },
         subscriptionStatus: t.subscription_status || sub?.status || 'none',
         planId: sub?.plan_id || 'none',

@@ -50,12 +50,23 @@ const SuperAdminTenantsPage: React.FC = () => {
                   <div className="font-bold text-gray-900 dark:text-white">{t.tenant.businessName || 'İsimsiz'}</div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">ID: {t.tenant.id}</div>
                 </div>
-                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400`}>
-                  {t.setupStatus}
-                </span>
+                <div className="flex flex-col space-y-1 text-right items-end">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${t.tenant.status === 'active' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'}`}>
+                    {t.tenant.status || 'unknown'}
+                  </span>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${t.tenant.onboardingStatus === 'completed' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'}`}>
+                    {t.tenant.onboardingStatus || 'unknown'}
+                  </span>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${t.tenant.publicSiteStatus === 'published' ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400' : 'bg-gray-100 text-gray-800 dark:bg-gray-700/30 dark:text-gray-400'}`}>
+                    {t.tenant.publicSiteStatus || 'unknown'}
+                  </span>
+                </div>
               </div>
               <div className="text-sm text-gray-700 dark:text-gray-300">
-                Email: {t.tenant.ownerEmail || '-'}
+                Email: {t.tenant.ownerEmail || '—'}
+                {t.tenant.businessContactEmail && (
+                  <div className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">İletişim: {t.tenant.businessContactEmail}</div>
+                )}
               </div>
               {t.tenant.ownerUserId && (
                 <div className="text-xs text-gray-400 dark:text-gray-500 font-mono">
@@ -101,17 +112,32 @@ const SuperAdminTenantsPage: React.FC = () => {
                     )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-700 dark:text-gray-300">{t.tenant.ownerEmail || '-'}</div>
+                    <div className="text-sm text-gray-700 dark:text-gray-300">{t.tenant.ownerEmail || '—'}</div>
+                    {t.tenant.businessContactEmail && (
+                      <div className="text-xs text-indigo-600 dark:text-indigo-400 mt-0.5">İletişim: {t.tenant.businessContactEmail}</div>
+                    )}
                     {t.tenant.ownerUserId && (
-                      <div className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate max-w-[180px]" title={t.tenant.ownerUserId}>
+                      <div className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate max-w-[180px] mt-0.5" title={t.tenant.ownerUserId}>
                         UID: {t.tenant.ownerUserId.substring(0, 12)}…
                       </div>
                     )}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400`}>
-                      {t.setupStatus}
-                    </span>
+                  <td className="px-6 py-4 whitespace-nowrap space-y-1">
+                    <div>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${t.tenant.status === 'active' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'}`}>
+                        İşletme: {t.tenant.status || 'unknown'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${t.tenant.onboardingStatus === 'completed' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'}`}>
+                        Kurulum: {t.tenant.onboardingStatus || 'unknown'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${t.tenant.publicSiteStatus === 'published' ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400' : 'bg-gray-100 text-gray-800 dark:bg-gray-700/30 dark:text-gray-400'}`}>
+                        Site: {t.tenant.publicSiteStatus || 'unknown'}
+                      </span>
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
                     <Link to={`/super-admin/tenant-preview/${t.tenant.id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300">

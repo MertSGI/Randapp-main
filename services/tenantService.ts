@@ -117,6 +117,43 @@ export const tenantService = {
   async getCurrentTenant(): Promise<Tenant | null> {
     const hostname = window.location.hostname;
     
+    // Check if slug is present in URL hash or path (e.g. /booking/:slug or /:slug)
+    let urlSlug = '';
+    const hash = window.location.hash || '';
+    const path = window.location.pathname || '';
+    
+    // Parse Hash Routing e.g. #/booking/melis-guzellik or #/melis-guzellik
+    if (hash) {
+      const parts = hash.split('/');
+      // hash usually starts with #/
+      // e.g. #, booking, melis-guzellik
+      if (parts.length >= 3 && parts[1] === 'booking') {
+        urlSlug = parts[2].split('?')[0];
+      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer') {
+        urlSlug = parts[1].split('?')[0];
+      }
+    }
+    
+    // Parse Path routing if not found in hash
+    if (!urlSlug && path && path !== '/') {
+      const parts = path.split('/');
+      if (parts.length >= 3 && parts[1] === 'booking') {
+        urlSlug = parts[2];
+      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer') {
+        urlSlug = parts[1];
+      }
+    }
+    
+    if (urlSlug) {
+      const resolved = await this.getTenantBySlug(urlSlug);
+      if (resolved) {
+        if ((resolved as any).status !== undefined) {
+          resolved.status = (resolved as any).status;
+        }
+        return resolved;
+      }
+    }
+
     // In all modes, if we are specifically previewing pilot demo, return it.
     // This allows /pilot -> /#/tenant_pilot_demo flow to work even in production/supabase mode without breaking the publish gate.
     const activeTenantId = localStorage.getItem('lari_active_tenant_id');
@@ -256,7 +293,21 @@ export const tenantService = {
           address: branding.address,
         } as TenantBranding;
       }
-      return null;
+      
+      // Fallback: If no branding row exists in supabase, construct a default branding object using tenant info
+      const { data: tenantRow } = await supabase
+        .from('tenants')
+        .select('name')
+        .eq('id', tenantId)
+        .single();
+      
+      return {
+        tenantId,
+        businessName: tenantRow?.name || 'Güzellik Salonu',
+        tagline: '',
+        footerText: `${tenantRow?.name || 'Güzellik Salonu'}. Tüm hakları saklıdır.`,
+        primaryColor: '#8b5cf6',
+      } as TenantBranding;
     }
     
     const key = `lari:${tenantId}:branding`;
