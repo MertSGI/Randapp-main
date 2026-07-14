@@ -732,7 +732,7 @@ async function testDatabaseRLSRegression() {
   assert(rpcContent.includes("v_caller_role IS DISTINCT FROM 'super_admin'"), 'Must reject non-super-admin caller role');
   assert(rpcContent.includes('SELECT EXISTS'), 'Must validate readiness constraints via SELECT EXISTS');
   assert(rpcContent.includes('premium_monthly'), 'Must associate premium_monthly plan');
-  assert(rpcContent.includes('active'), 'Must assign active status');
+  assert(rpcContent.includes('manual_active'), 'Must assign manual_active status');
   assert(rpcContent.includes('completed'), 'Must assign completed onboarding status');
   assert(rpcContent.includes('published'), 'Must assign published public site status');
 

@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { getDataSourceMode } from './dataSourceConfig';
 
 export interface TenantInfo {
   id: string;
@@ -41,11 +42,9 @@ export const superAdminService = {
     tenants: TenantFullData[]
   }> {
     
-    // In a real environment with RLS, the super_admin user must have permissions
-    // Here we assume service role or RLS policies permit super_admin to read all.
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = getDataSourceMode();
 
-    if (mode === 'mock') {
+    if (mode !== 'supabase') {
       const { dataProvider } = await import('./dataProvider');
       const provStatus1 = await dataProvider.get<string>(`lari:mock_tenant_1:provisioning_status`) || 'live';
       const provStatus2 = await dataProvider.get<string>(`lari:tenant_demo:provisioning_status`) || 'setup_in_progress';
@@ -80,73 +79,34 @@ export const superAdminService = {
               created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
               status: 'active',
               onboardingStatus: 'pending',
-              publicSiteStatus: 'draft'
+              publicSiteStatus: 'preview_ready'
             },
             subscriptionStatus: 'trialing',
-            planId: 'premium',
+            planId: 'pro',
             setupStatus: provStatus2,
             monthlyAppointments: 12,
-            estimatedRevenue: 1200,
-            hasProfile: true
-          },
-          {
-            tenant: {
-              id: 'mock_tenant_3',
-              businessName: 'Luxe Beauty Clinic',
-              ownerUserId: 'mock-uid-3',
-              ownerEmail: 'contact@luxe.com',
-              domain: 'luxe.randevulari.com',
-              created_at: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
-              status: 'active',
-              onboardingStatus: 'completed',
-              publicSiteStatus: 'published'
-            },
-            subscriptionStatus: 'active',
-            planId: 'premium',
-            setupStatus: 'live',
-            monthlyAppointments: 320,
-            estimatedRevenue: 120000,
-            hasProfile: true
-          },
-          {
-            tenant: {
-              id: 'mock_tenant_4',
-              businessName: 'Barber Bros',
-              ownerUserId: 'mock-uid-4',
-              ownerEmail: 'hi@barberbros.com',
-              domain: 'barberbros.randevulari.com',
-              created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-              status: 'active',
-              onboardingStatus: 'completed',
-              publicSiteStatus: 'published'
-            },
-            subscriptionStatus: 'past_due',
-            planId: 'starter',
-            setupStatus: 'live',
-            monthlyAppointments: 45,
-            estimatedRevenue: 4500,
+            estimatedRevenue: 3000,
             hasProfile: true
           }
-        ];
-        
-      const localTenantsRaw = localStorage.getItem('lari_registered_tenants') || localStorage.getItem('lari_registered_tenants');
-      const localTenants = localTenantsRaw ? JSON.parse(localTenantsRaw) : [];
-      
-      const dynamicTenants = localTenants.map((rt: any) => ({
+      ];
+
+      const registeredRaw = localStorage.getItem('lari_registered_tenants');
+      const dynamicTenants: TenantFullData[] = !registeredRaw ? [] : JSON.parse(registeredRaw).map((t: any) => ({
         tenant: {
-          id: rt.id,
-          businessName: rt.businessName,
-          ownerUserId: rt.ownerUserId || null,
-          ownerEmail: rt.ownerEmail,
-          domain: `${rt.id}.randevulari.com`,
-          created_at: rt.created_at,
-          status: 'active',
-          onboardingStatus: 'pending',
-          publicSiteStatus: 'draft'
+          id: t.id,
+          slug: t.slug,
+          businessName: t.name,
+          ownerUserId: 'mock-owner',
+          ownerEmail: 'owner@' + t.slug + '.com',
+          domain: `${t.slug}.randevulari.com`,
+          created_at: t.createdAt || new Date().toISOString(),
+          status: t.status,
+          onboardingStatus: t.onboardingStatus || 'pending',
+          publicSiteStatus: t.publicSiteStatus || 'draft'
         },
-        subscriptionStatus: 'trialing',
-        planId: rt.planId || 'professional',
-        setupStatus: 'setup_in_progress',
+        subscriptionStatus: 'none',
+        planId: 'none',
+        setupStatus: t.onboardingStatus || 'pending',
         monthlyAppointments: 0,
         estimatedRevenue: 0,
         hasProfile: true
@@ -171,13 +131,9 @@ export const superAdminService = {
     }
 
     // In 'supabase' mode, pull real data
-    // 1. Get tenants
     const { data: tenants, error: tErr } = await supabase.from('tenants').select('*');
-    // 2. Get subscriptions
     const { data: subs, error: sErr } = await supabase.from('subscriptions').select('*');
-    // 3. Get business profiles
     const { data: profiles, error: pErr } = await supabase.from('tenant_business_profiles').select('*');
-    // 4. Get users_profiles to identify owner details
     const { data: userProfiles, error: upErr } = await supabase.from('users_profile').select('*');
     
     if (tErr || sErr) {
@@ -185,11 +141,6 @@ export const superAdminService = {
       throw new Error("Veri çekilemedi.");
     }
 
-    // We can also query/lookup emails from auth.users or a secure lookup, but since we cannot join auth.users directly on frontend client,
-    // we match it from a mapped email or fallback to users_profile list or template.
-    // For staging users, we map 'd616f9e0-07e5-42b1-8c27-0d0d97208eb9' to 'melis-owner-staging@example.com'.
-    // If not found, we use 'owner@example.com' or format from role.
-    // Trustworthy owner email lookup: only use userProfiles email if it actually exists in the db profile
     const getOwnerEmail = (ownerUserId: string) => {
       const matchedProfile = userProfiles?.find(up => up.id === ownerUserId);
       if (matchedProfile && matchedProfile.email) {
@@ -202,7 +153,6 @@ export const superAdminService = {
       const sub = subs?.find(s => s.tenant_id === t.id);
       const prof = profiles?.find((p: any) => p.tenant_id === t.id);
       
-      // Name Priority: 1. tenant_business_profiles public_display_name, 2. tenants.name, 3. tenants.official_business_name, 4. fallback
       const resolvedBusinessName = (prof && prof.public_display_name) || 
                                     t.name || 
                                     t.official_business_name || 
@@ -234,22 +184,22 @@ export const superAdminService = {
     return {
       stats: {
          totalSalons: tenantList.length,
-         activeSalons: tenantList.filter(t => t.subscriptionStatus === 'active').length,
+         activeSalons: tenantList.filter(t => t.subscriptionStatus === 'active' || t.subscriptionStatus === 'manual_active').length,
          trialSalons: tenantList.filter(t => t.subscriptionStatus === 'trialing').length,
          pastDueSalons: tenantList.filter(t => t.subscriptionStatus === 'past_due').length,
          suspendedSalons: tenantList.filter(t => t.subscriptionStatus === 'suspended').length,
-         monthlyRecurringRevenue: tenantList.filter(t => t.subscriptionStatus === 'active').length * 499,
+         monthlyRecurringRevenue: tenantList.filter(t => t.subscriptionStatus === 'active' || t.subscriptionStatus === 'manual_active').length * 499,
          setupFees: 0,
-         awaitingSetup: tenantList.filter(t => t.setupStatus !== 'live').length,
-         liveSalons: tenantList.filter(t => t.setupStatus === 'live').length
+         awaitingSetup: tenantList.filter(t => t.setupStatus !== 'live' && t.setupStatus !== 'completed').length,
+         liveSalons: tenantList.filter(t => t.setupStatus === 'live' || t.setupStatus === 'completed').length
       },
       tenants: tenantList
     };
   },
 
   async approveGoLive(tenantId: string): Promise<boolean> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-    if (mode === 'mock') {
+    const mode = getDataSourceMode();
+    if (mode !== 'supabase') {
        const { dataProvider } = await import('./dataProvider');
        await dataProvider.set(`lari:${tenantId}:go_live_status`, 'live');
        await dataProvider.set(`lari:${tenantId}:provisioning_status`, 'live');
@@ -272,12 +222,27 @@ export const superAdminService = {
        console.error("Super admin live approval failed", error);
        throw new Error(error.message || "Yayına alma işlemi başarısız oldu.");
     }
+
+    // Validate that the returned persisted state is fully complete.
+    if (!data || !data.tenant || !data.subscription) {
+      throw new Error("Persisted state validation failed: Incomplete payload returned from server.");
+    }
+
+    const { tenant, subscription } = data;
+    if (tenant.status !== 'active' || tenant.onboarding_status !== 'completed' || tenant.public_site_status !== 'published') {
+      throw new Error("Persisted tenant fields do not match expected published state.");
+    }
+
+    if (subscription.status !== 'manual_active' || subscription.plan_id !== 'premium_monthly') {
+      throw new Error("Persisted subscription entitlement does not match manual_active premium plan.");
+    }
+
     return true;
   },
 
   async sendBackToSetup(tenantId: string, internalNote: string): Promise<boolean> {
-     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-     if (mode === 'mock') {
+     const mode = getDataSourceMode();
+     if (mode !== 'supabase') {
        const { dataProvider } = await import('./dataProvider');
        await dataProvider.set(`lari:${tenantId}:go_live_status`, 'needs_changes');
        await dataProvider.set(`lari:${tenantId}:provisioning_status`, 'setup_in_progress');
@@ -302,8 +267,8 @@ export const superAdminService = {
   },
 
   async pauseBookings(tenantId: string): Promise<boolean> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-     if (mode === 'mock') {
+     const mode = getDataSourceMode();
+     if (mode !== 'supabase') {
        const { dataProvider } = await import('./dataProvider');
        await dataProvider.set(`lari:${tenantId}:go_live_status`, 'paused');
        return new Promise(resolve => setTimeout(() => resolve(true), 500));
@@ -316,8 +281,8 @@ export const superAdminService = {
   },
 
   async forceSubscriptionStatus(tenantId: string, status: string): Promise<boolean> {
-     const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
-     if (mode === 'mock') {
+     const mode = getDataSourceMode();
+     if (mode !== 'supabase') {
         const { dataProvider } = await import('./dataProvider');
         let mockSubscription = await dataProvider.get<any>(`subscription_${tenantId}`);
         if (!mockSubscription) {
@@ -341,4 +306,3 @@ export const superAdminService = {
      return true;
   }
 };
-

@@ -301,6 +301,7 @@ const BookingPage: React.FC = () => {
         });
       } catch (e) {
         console.error('Consent service capture failed', e);
+        throw new Error(language === 'tr' ? 'Yasal kullanım izinleri kaydedilemedi. Lütfen tekrar deneyin.' : 'Required consents could not be saved. Please try again.');
       }
 
       try {
@@ -339,6 +340,7 @@ const BookingPage: React.FC = () => {
         }
       } catch (e) {
         console.error('Policy acceptance recording failed', e);
+        throw new Error(language === 'tr' ? 'Kullanıcı sözleşmesi onayı kaydedilemedi. Lütfen tekrar deneyin.' : 'Policy acceptance could not be saved. Please try again.');
       }
 
       try {
@@ -385,6 +387,7 @@ const BookingPage: React.FC = () => {
         });
       } catch (e) {
         console.error('Consent ledger recording failed', e);
+        throw new Error(language === 'tr' ? 'Yasal onay kaydı oluşturulamadı. Lütfen tekrar deneyin.' : 'Consent ledger entry could not be saved. Please try again.');
       }
 
       // Core Operation: Save Customer Profile

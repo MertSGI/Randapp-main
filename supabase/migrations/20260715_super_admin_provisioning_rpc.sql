@@ -12,8 +12,11 @@ DECLARE
     v_has_staff boolean;
     v_has_staff_service boolean;
     v_has_availability boolean;
-    v_sub_id uuid := '99999999-9999-9999-9999-999999999999';
+    v_sub_id uuid;
+    v_sub_exists boolean;
     v_result jsonb;
+    v_persisted_tenant jsonb;
+    v_persisted_sub jsonb;
 BEGIN
     -- 1. Security check: Caller must be super_admin with NULL tenant_id
     SELECT role, tenant_id INTO v_caller_role, v_caller_tenant_id
@@ -66,40 +69,49 @@ BEGIN
         RAISE EXCEPTION 'Hata: İşletmede çalışan ve hizmet eşleşmesi (tanımlı uzmanlık) bulunamadı.';
     END IF;
 
-    -- E. Usable availability exists
+    -- E. Usable active availability exists (belongs to an active staff member)
     SELECT EXISTS (
-        SELECT 1 FROM public.availability_rules WHERE tenant_id = p_tenant_id
+        SELECT 1 FROM public.availability_rules ar
+        JOIN public.staff st ON st.id = ar.staff_id
+        WHERE ar.tenant_id = p_tenant_id AND st.tenant_id = p_tenant_id AND st.active = true
     ) INTO v_has_availability;
     IF NOT v_has_availability THEN
-        RAISE EXCEPTION 'Hata: İşletmeye ait çalışma saatleri veya uygunluk kuralları tanımlanmamış.';
+        RAISE EXCEPTION 'Hata: İşletmeye ait aktif çalışma saatleri veya uygunluk kuralları tanımlanmamış.';
     END IF;
 
     -- 4. Idempotently create or update the manual active subscription
-    INSERT INTO public.subscriptions (
-        id,
-        tenant_id,
-        plan_id,
-        status,
-        current_period_start,
-        current_period_end,
-        cancel_at_period_end
-    )
-    VALUES (
-        v_sub_id,
-        p_tenant_id,
-        'premium_monthly',
-        'active',
-        NOW(),
-        NOW() + INTERVAL '30 days',
-        false
-    )
-    ON CONFLICT (tenant_id) DO UPDATE SET
-        status = 'active',
-        current_period_end = NOW() + INTERVAL '30 days'
-    -- If there's an existing row with a different ID, this will resolve via tenant_id unique constraint.
-    -- To support ON CONFLICT on tenant_id, a unique index on tenant_id is required or conflict targets id/tenant_id.
-    -- Let's query if a subscription exists for the tenant first to avoid ON CONFLICT target issues on tables with multiple constraints.
-    ;
+    -- Since subscriptions table doesn't have a unique constraint on tenant_id, we check explicitly
+    SELECT EXISTS (
+        SELECT 1 FROM public.subscriptions WHERE tenant_id = p_tenant_id
+    ) INTO v_sub_exists;
+
+    IF v_sub_exists THEN
+        UPDATE public.subscriptions
+        SET
+            status = 'manual_active',
+            plan_id = 'premium_monthly',
+            billing_source = 'manual',
+            payment_reference_note = 'Süper Admin tarafından manuel onaylandı'
+        WHERE tenant_id = p_tenant_id;
+    ELSE
+        v_sub_id := gen_random_uuid();
+        INSERT INTO public.subscriptions (
+            id,
+            tenant_id,
+            plan_id,
+            status,
+            billing_source,
+            payment_reference_note
+        )
+        VALUES (
+            v_sub_id,
+            p_tenant_id,
+            'premium_monthly',
+            'manual_active',
+            'manual',
+            'Süper Admin tarafından manuel onaylandı'
+        );
+    END IF;
 
     -- 5. Update tenant state
     UPDATE public.tenants
@@ -112,17 +124,24 @@ BEGIN
         verification_status = 'approved'
     WHERE id = p_tenant_id;
 
-    -- 6. Build and return result object containing new state
-    SELECT jsonb_build_object(
-        'tenant_id', p_tenant_id,
-        'status', 'active',
-        'onboarding_status', 'completed',
-        'public_site_status', 'published',
-        'subscription_status', 'active',
-        'plan_id', 'premium_monthly'
-    ) INTO v_result;
+    -- 6. Retrieve actual persisted state
+    SELECT row_to_json(t)::jsonb INTO v_persisted_tenant FROM public.tenants t WHERE t.id = p_tenant_id;
+    SELECT row_to_json(s)::jsonb INTO v_persisted_sub FROM public.subscriptions s WHERE s.tenant_id = p_tenant_id LIMIT 1;
+
+    -- 7. Build and return result object containing new state
+    v_result := jsonb_build_object(
+        'tenant', v_persisted_tenant,
+        'subscription', v_persisted_sub
+    );
 
     RETURN v_result;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public;
+
+-- Revoke public execution permissions
+REVOKE EXECUTE ON FUNCTION public.approve_and_publish_tenant(uuid) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.approve_and_publish_tenant(uuid) FROM anon;
+
+-- Grant execution to authenticated users
+GRANT EXECUTE ON FUNCTION public.approve_and_publish_tenant(uuid) TO authenticated;
