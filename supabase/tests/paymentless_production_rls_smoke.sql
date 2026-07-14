@@ -130,6 +130,67 @@ WHERE tenant_id = 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa';
 -- EXPECTED: 0 rows (Owner B cannot view Owner A audit trails)
 
 
+-- Test 7: Super Admin Provisioning RPC validations
+-- A. Verify calling RPC as a non-super-admin is rejected
+DO $$
+BEGIN
+    PERFORM public.approve_and_publish_tenant('aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa');
+    RAISE EXCEPTION 'FAIL: Non-super-admin caller should have been rejected by RPC';
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'SUCCESS: Non-super-admin caller correctly rejected by RPC: %', SQLERRM;
+END;
+$$;
+
+-- B. Create a Super Admin profile to mock authorized RPC call
+SET LOCAL role = 'postgres';
+INSERT INTO public.users_profile (id, tenant_id, name, role, active)
+VALUES ('77777777-7777-7777-7777-777777777777', NULL, 'Test Super Admin', 'super_admin', true);
+
+SET LOCAL request.jwt.claim.sub = '77777777-7777-7777-7777-777777777777';
+SET LOCAL role = 'authenticated';
+
+-- C. Approve with missing readiness (availability rules missing for tenant_a in this mock transaction context)
+-- Since we did not insert availability rules for tenant_a, this call should fail on readiness validation.
+DO $$
+BEGIN
+    PERFORM public.approve_and_publish_tenant('aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa');
+    RAISE EXCEPTION 'FAIL: Tenant approval should fail due to missing availability rules';
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'SUCCESS: Missing readiness correctly blocked tenant approval: %', SQLERRM;
+END;
+$$;
+
+-- D. Insert missing readiness metrics to mock full readiness
+SET LOCAL role = 'postgres';
+INSERT INTO public.availability_rules (tenant_id, day_of_week, start_time, end_time)
+VALUES ('aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', 1, '09:00:00', '18:00:00');
+
+INSERT INTO public.staff_services (staff_id, service_id)
+SELECT s.id, sv.id 
+FROM public.staff s, public.services sv 
+WHERE s.tenant_id = 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa' AND sv.tenant_id = 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa';
+
+SET LOCAL request.jwt.claim.sub = '77777777-7777-7777-7777-777777777777';
+SET LOCAL role = 'authenticated';
+
+-- E. Execute successful atomic provisioning RPC call
+SELECT 'TEST_7_RPC_EXEC' as test, public.approve_and_publish_tenant('aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa');
+
+-- F. Verify tenant state is updated
+SELECT 'TEST_7_TENANT_STATE' as test, onboarding_status, status, public_site_status
+FROM public.tenants
+WHERE id = 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa';
+-- EXPECTED: onboarding_status = 'completed', status = 'active', public_site_status = 'published'
+
+-- G. Verify subscription row is established and has correct plan_id/status
+SELECT 'TEST_7_SUB_STATE' as test, plan_id, status
+FROM public.subscriptions
+WHERE tenant_id = 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa';
+-- EXPECTED: plan_id = 'premium_monthly', status = 'active'
+
+
 -- Rollback transaction block to keep test sandbox pure
 ROLLBACK;
 RAISE NOTICE '🧹 Scenario checks finished and database rollback completed!';

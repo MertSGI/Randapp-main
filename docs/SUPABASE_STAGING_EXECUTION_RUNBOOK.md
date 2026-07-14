@@ -78,6 +78,8 @@ To prevent table duplication and execution errors, we have isolated historical c
 9. `20260621_paymentless_production_repository_columns.sql`
 10. `20260622_paymentless_production_rls_identity_alignment.sql`
 11. `20260713_communication_outbox_rls_hardening.sql`
+12. `20260714_tenants_update_rls_hardening.sql`
+13. `20260715_super_admin_provisioning_rpc.sql` (Super Admin Provisioning RPC)
 
 *Applying Migrations*:
 - Using Supabase CLI: `supabase db push`

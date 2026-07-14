@@ -258,9 +258,10 @@ const BookingPage: React.FC = () => {
        return;
     }
 
+    if (isSubmitting) return; // Prevent duplicate submission
     setIsSubmitting(true);
     
-    // Anti-Abuse Protection Check
+    // Core Operation: Anti-Abuse Protection Check
     try {
       const { bookingAbuseProtectionService } = await import('../services/bookingAbuseProtectionService');
       const evaluation = await bookingAbuseProtectionService.evaluateBookingRequest({
@@ -286,196 +287,227 @@ const BookingPage: React.FC = () => {
       console.error('Abuse protection evaluation failed', err);
     }
 
-    // Attempt dynamic import for consent service
-    import('../services/consentService').then(({ consentService }) => {
-       const customerId = `guest_${Date.now()}`;
-       consentService.captureBookingConsent(tenant.id, {
-          id: customerId,
-          requiredBookingConsent: consentForms.requiredBookingConsent,
-          reminderConsent: consentForms.reminderConsent,
-          marketingConsent: consentForms.marketingConsent,
-          referralConsent: consentForms.referralConsent
-       });
-    }).catch(console.error);
-
-    import('../services/policyAcceptanceService').then(({ policyAcceptanceService }) => {
-       const actorId = formData.phone || formData.email || 'anonymous';
-       policyAcceptanceService.recordPolicyAcceptance({
-          tenantId: tenant.id,
-          actorType: 'customer',
-          actorId,
-          actorDisplayName: formData.name,
-          actorContact: formData.phone || formData.email,
-          documentType: 'booking_terms',
-          acceptanceSource: 'booking'
-       });
-       if (consentForms.reminderConsent) {
-          policyAcceptanceService.recordPolicyAcceptance({
-             tenantId: tenant.id,
-             actorType: 'customer',
-             actorId,
-             actorDisplayName: formData.name,
-             actorContact: formData.phone || formData.email,
-             documentType: 'communication_consent_text',
-             acceptanceSource: 'booking'
-          });
-       }
-       if (consentForms.marketingConsent) {
-          policyAcceptanceService.recordPolicyAcceptance({
-             tenantId: tenant.id,
-             actorType: 'customer',
-             actorId,
-             actorDisplayName: formData.name,
-             actorContact: formData.phone || formData.email,
-             documentType: 'marketing_consent_text',
-             acceptanceSource: 'booking'
-          });
-       }
-    }).catch(console.error);
-
-    import('../services/consentLedgerService').then(({ consentLedgerService }) => {
-       const actorId = formData.phone || formData.email || 'anonymous';
-       consentLedgerService.recordConsent({
-          tenantId: tenant.id,
-          actorType: 'customer',
-          actorId,
-          contact: formData.phone || formData.email,
-          consentType: 'booking_transactional',
-          status: consentForms.requiredBookingConsent ? 'granted' : 'denied',
-          source: 'booking_page',
-          legalDocumentType: 'booking_terms'
-       });
-       consentLedgerService.recordConsent({
-          tenantId: tenant.id,
-          actorType: 'customer',
-          actorId,
-          contact: formData.phone || formData.email,
-          consentType: 'communication',
-          status: consentForms.reminderConsent ? 'granted' : 'denied',
-          source: 'booking_page',
-          legalDocumentType: 'communication_consent_text'
-       });
-       consentLedgerService.recordConsent({
-          tenantId: tenant.id,
-          actorType: 'customer',
-          actorId,
-          contact: formData.phone || formData.email,
-          consentType: 'marketing',
-          status: consentForms.marketingConsent ? 'granted' : 'denied',
-          source: 'booking_page',
-          legalDocumentType: 'marketing_consent_text'
-         });
-       consentLedgerService.recordConsent({
-          tenantId: tenant.id,
-          actorType: 'customer',
-          actorId,
-          contact: formData.phone || formData.email,
-          consentType: 'referral_campaign',
-          status: consentForms.referralConsent ? 'granted' : 'denied',
-          source: 'booking_page'
-       });
-    }).catch(console.error);
-
-    if (saveProfile) {
-      customerService.saveCustomerProfile(tenant.id, {
-        fullName: formData.name,
-        email: formData.email,
-        phone: formData.phone,
-        preferredLanguage: language
-      });
-      setHasSavedProfile(true);
-    } else if (hasSavedProfile) {
-      // User unchecked it, maybe we should not clear unless they explicitly clear it.
-      // But we can update last appointment if they kept it checked
-    } else {
-       // if saveProfile is false, and hasSavedProfile is false, we do nothing
-    }
-
-    if (saveProfile && hasSavedProfile) {
-       customerService.updateLastAppointmentAt(tenant.id);
-    }
-
-    const newAppointmentPayload = {
-      userId: `guest_${Date.now()}`,
-      user_name: formData.name,
-      user_email: formData.email,
-      phone: formData.phone,
-      serviceId: selectedService.id,
-      staffId: selectedStaff.id,
-      branchId: currentBranchId,
-      source: urlSource,
-      date: selectedDate,
-      time: selectedTime,
-      status: 'confirmed' as const,
-      syncedToGoogle: false, 
-    };
-
-    const newAppointment = await createAppointment(tenant.id, newAppointmentPayload);
-
     try {
-      const { bookingAbuseProtectionService } = await import('../services/bookingAbuseProtectionService');
-      bookingAbuseProtectionService.recordBookingAttempt({
-        tenantId: tenant.id,
-        phone: formData.phone,
-        email: formData.email,
-        success: true
-      });
-    } catch (err) {}
-
-    if (formData.referrerName && tenant) {
+      // Core Operation: Consent service captures
       try {
-        const { customerCampaignService } = await import('../services/customerCampaignService');
-        const camps = await customerCampaignService.listCampaigns(tenant.id);
-        const activeCamp = camps.find(c => c.isActive) || { id: 'default' };
-        
-        await customerCampaignService.createCustomerReferral(tenant.id, {
-          campaignId: formData.campaignCode || activeCamp.id,
-          referrerCustomerId: 'referred_by_' + formData.referrerName,
-          referredCustomerName: formData.name,
-          referredCustomerPhone: formData.phone,
-          status: 'booked',
-          appointmentId: newAppointment.id,
+        const { consentService } = await import('../services/consentService');
+        const customerId = `guest_${Date.now()}`;
+        await consentService.captureBookingConsent(tenant.id, {
+           id: customerId,
+           requiredBookingConsent: consentForms.requiredBookingConsent,
+           reminderConsent: consentForms.reminderConsent,
+           marketingConsent: consentForms.marketingConsent,
+           referralConsent: consentForms.referralConsent
         });
-      } catch (err) {
-        console.warn("Failed to register customer referral during booking:", err);
+      } catch (e) {
+        console.error('Consent service capture failed', e);
       }
-    }
 
-    let aiResponse = { subject: 'Confirmation', body: 'Your appointment is booked.' };
-    try {
+      try {
+        const { policyAcceptanceService } = await import('../services/policyAcceptanceService');
+        const actorId = formData.phone || formData.email || 'anonymous';
+        await policyAcceptanceService.recordPolicyAcceptance({
+           tenantId: tenant.id,
+           actorType: 'customer',
+           actorId,
+           actorDisplayName: formData.name,
+           actorContact: formData.phone || formData.email,
+           documentType: 'booking_terms',
+           acceptanceSource: 'booking'
+        });
+        if (consentForms.reminderConsent) {
+           await policyAcceptanceService.recordPolicyAcceptance({
+              tenantId: tenant.id,
+              actorType: 'customer',
+              actorId,
+              actorDisplayName: formData.name,
+              actorContact: formData.phone || formData.email,
+              documentType: 'communication_consent_text',
+              acceptanceSource: 'booking'
+           });
+        }
+        if (consentForms.marketingConsent) {
+           await policyAcceptanceService.recordPolicyAcceptance({
+              tenantId: tenant.id,
+              actorType: 'customer',
+              actorId,
+              actorDisplayName: formData.name,
+              actorContact: formData.phone || formData.email,
+              documentType: 'marketing_consent_text',
+              acceptanceSource: 'booking'
+           });
+        }
+      } catch (e) {
+        console.error('Policy acceptance recording failed', e);
+      }
+
+      try {
+        const { consentLedgerService } = await import('../services/consentLedgerService');
+        const actorId = formData.phone || formData.email || 'anonymous';
+        await consentLedgerService.recordConsent({
+           tenantId: tenant.id,
+           actorType: 'customer',
+           actorId,
+           contact: formData.phone || formData.email,
+           consentType: 'booking_transactional',
+           status: consentForms.requiredBookingConsent ? 'granted' : 'denied',
+           source: 'booking_page',
+           legalDocumentType: 'booking_terms'
+        });
+        await consentLedgerService.recordConsent({
+           tenantId: tenant.id,
+           actorType: 'customer',
+           actorId,
+           contact: formData.phone || formData.email,
+           consentType: 'communication',
+           status: consentForms.reminderConsent ? 'granted' : 'denied',
+           source: 'booking_page',
+           legalDocumentType: 'communication_consent_text'
+        });
+        await consentLedgerService.recordConsent({
+           tenantId: tenant.id,
+           actorType: 'customer',
+           actorId,
+           contact: formData.phone || formData.email,
+           consentType: 'marketing',
+           status: consentForms.marketingConsent ? 'granted' : 'denied',
+           source: 'booking_page',
+           legalDocumentType: 'marketing_consent_text'
+          });
+        await consentLedgerService.recordConsent({
+           tenantId: tenant.id,
+           actorType: 'customer',
+           actorId,
+           contact: formData.phone || formData.email,
+           consentType: 'referral_campaign',
+           status: consentForms.referralConsent ? 'granted' : 'denied',
+           source: 'booking_page'
+        });
+      } catch (e) {
+        console.error('Consent ledger recording failed', e);
+      }
+
+      // Core Operation: Save Customer Profile
+      if (saveProfile) {
+        try {
+          await customerService.saveCustomerProfile(tenant.id, {
+            fullName: formData.name,
+            email: formData.email,
+            phone: formData.phone,
+            preferredLanguage: language
+          });
+          setHasSavedProfile(true);
+        } catch (e) {
+          console.error("Core save profile failed", e);
+          throw new Error("Müşteri bilgileri kaydedilemedi. Lütfen bilgilerinizi kontrol edin.");
+        }
+      }
+
+      if (saveProfile && hasSavedProfile) {
+        try {
+          await customerService.updateLastAppointmentAt(tenant.id);
+        } catch (e) {
+          console.warn("Non-critical last appointment update fail", e);
+        }
+      }
+
+      // Core Operation: Create Appointment & persistent state validation
+      const newAppointmentPayload = {
+        userId: `guest_${Date.now()}`,
+        user_name: formData.name,
+        user_email: formData.email,
+        phone: formData.phone,
+        serviceId: selectedService.id,
+        staffId: selectedStaff.id,
+        branchId: currentBranchId,
+        source: urlSource,
+        date: selectedDate,
+        time: selectedTime,
+        status: 'confirmed' as const,
+        syncedToGoogle: false, 
+      };
+
+      let newAppointment;
+      try {
+        newAppointment = await createAppointment(tenant.id, newAppointmentPayload);
+        if (!newAppointment || !newAppointment.id) {
+          throw new Error("Veritabanı boş yanıt döndürdü.");
+        }
+      } catch (e) {
+        console.error("Core appointment creation failed", e);
+        throw new Error("Randevu oluşturulamadı. Seçilen saat dolmuş veya servis dışı olabilir.");
+      }
+
+      try {
+        const { bookingAbuseProtectionService } = await import('../services/bookingAbuseProtectionService');
+        bookingAbuseProtectionService.recordBookingAttempt({
+          tenantId: tenant.id,
+          phone: formData.phone,
+          email: formData.email,
+          success: true
+        });
+      } catch (err) {}
+
+      // Non-critical: Campaigns, Notifications, Integrations, and WhatsApp confirmations (Safe failures)
+      if (formData.referrerName && tenant) {
+        try {
+          const { customerCampaignService } = await import('../services/customerCampaignService');
+          const camps = await customerCampaignService.listCampaigns(tenant.id);
+          const activeCamp = camps.find(c => c.isActive) || { id: 'default' };
+          
+          await customerCampaignService.createCustomerReferral(tenant.id, {
+            campaignId: formData.campaignCode || activeCamp.id,
+            referrerCustomerId: 'referred_by_' + formData.referrerName,
+            referredCustomerName: formData.name,
+            referredCustomerPhone: formData.phone,
+            status: 'booked',
+            appointmentId: newAppointment.id,
+          });
+        } catch (err) {
+          console.warn("Failed to register customer referral during booking:", err);
+        }
+      }
+
+      let aiResponse = { subject: 'Confirmation', body: 'Your appointment is booked.' };
+      try {
+        const serviceName = language === 'tr' ? selectedService.name_tr : selectedService.name;
+        const generated = await GeminiService.generateBookingConfirmation(newAppointment, serviceName, language);
+        if (generated) aiResponse = generated;
+        setConfirmation(aiResponse);
+      } catch (err) {
+        console.error("AI generation failed", err);
+      }
+
       const serviceName = language === 'tr' ? selectedService.name_tr : selectedService.name;
-      const generated = await GeminiService.generateBookingConfirmation(newAppointment, serviceName, language);
-      if (generated) aiResponse = generated;
-      setConfirmation(aiResponse);
-    } catch (err) {
-      console.error("AI generation failed", err);
+      try {
+          await Promise.all([
+              NotificationService.sendBookingEmail(newAppointment, serviceName, aiResponse).catch(e => console.error("Email send fail", e)),
+              NotificationService.sendBookingSms(newAppointment, serviceName).catch(e => console.error("SMS send fail", e)),
+              CalendarService.syncToBusinessCalendar(newAppointment, selectedStaff).catch(e => console.error("Calendar sync fail", e))
+          ]);
+          
+          await updateAppointmentStatus(tenant.id, newAppointment.id, 'confirmed').catch(e => console.error("Status confirm update fail", e)); 
+      } catch (error) {
+          console.error("Notification/Sync infrastructure error:", error);
+      }
+
+      const link = CalendarService.generateGoogleCalendarLink(newAppointment, selectedService, selectedStaff, language);
+      setCalendarLink(link);
+
+      const waText = language === 'tr'
+        ? `Merhaba ${newAppointment.user_name}, ${serviceName} randevunuz ${selectedStaff.name} ile onaylandı!\n\nTarih: ${newAppointment.date}\nSaat: ${newAppointment.time}\nUzman Tel: ${selectedStaff.phone || 'Girilmedi'}\n\nTakviminize eklemek için tıklayın: ${link}`
+        : `Hello ${newAppointment.user_name}, your ${serviceName} appointment with ${selectedStaff.name} is confirmed!\n\nDate: ${newAppointment.date}\nTime: ${newAppointment.time}\nStaff Phone: ${selectedStaff.phone || 'Not provided'}\n\nAdd to your calendar: ${link}`;
+
+      await NotificationService.sendAutomatedWhatsApp(newAppointment, waText).catch(e => console.error("WhatsApp send fail", e));
+      setWhatsappSent(true);
+
+      setStep(5);
+    } catch (e: any) {
+      console.error("Critical booking failure", e);
+      alert(e.message || (language === 'tr' ? 'Randevu oluşturulurken beklenmedik bir hata oluştu.' : 'An unexpected error occurred while booking.'));
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const serviceName = language === 'tr' ? selectedService.name_tr : selectedService.name;
-    try {
-        await Promise.all([
-            NotificationService.sendBookingEmail(newAppointment, serviceName, aiResponse),
-            NotificationService.sendBookingSms(newAppointment, serviceName),
-            CalendarService.syncToBusinessCalendar(newAppointment, selectedStaff)
-        ]);
-        
-        await updateAppointmentStatus(tenant.id, newAppointment.id, 'confirmed'); 
-    } catch (error) {
-        console.error("Notification/Sync infrastructure error:", error);
-    }
-
-    const link = CalendarService.generateGoogleCalendarLink(newAppointment, selectedService, selectedStaff, language);
-    setCalendarLink(link);
-
-    const waText = language === 'tr'
-      ? `Merhaba ${newAppointment.user_name}, ${serviceName} randevunuz ${selectedStaff.name} ile onaylandı!\n\nTarih: ${newAppointment.date}\nSaat: ${newAppointment.time}\nUzman Tel: ${selectedStaff.phone || 'Girilmedi'}\n\nTakviminize eklemek için tıklayın: ${link}`
-      : `Hello ${newAppointment.user_name}, your ${serviceName} appointment with ${selectedStaff.name} is confirmed!\n\nDate: ${newAppointment.date}\nTime: ${newAppointment.time}\nStaff Phone: ${selectedStaff.phone || 'Not provided'}\n\nAdd to your calendar: ${link}`;
-
-    await NotificationService.sendAutomatedWhatsApp(newAppointment, waText);
-    setWhatsappSent(true);
-
-    setIsSubmitting(false);
-    setStep(5);
   };
 
   const renderStepper = () => {

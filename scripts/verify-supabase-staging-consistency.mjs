@@ -49,6 +49,7 @@ const CANONICAL_MIGRATIONS = [
   '20260622_paymentless_production_rls_identity_alignment.sql',
   '20260713_communication_outbox_rls_hardening.sql',
   '20260714_tenants_update_rls_hardening.sql',
+  '20260715_super_admin_provisioning_rpc.sql',
 ];
 
 // Check actual migration files on disk
@@ -56,7 +57,7 @@ const migrationsDir = join(ROOT, 'supabase', 'migrations');
 if (existsSync(migrationsDir)) {
   const diskFiles = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
   check(
-    'Migration files on disk match canonical list (12 files)',
+    'Migration files on disk match canonical list (13 files)',
     diskFiles.length === CANONICAL_MIGRATIONS.length &&
     diskFiles.every((f, i) => f === CANONICAL_MIGRATIONS[i]),
     `Found: [${diskFiles.join(', ')}]`
@@ -69,7 +70,7 @@ if (existsSync(migrationsDir)) {
 const manifest = readSafe('supabase/MIGRATION_APPLY_MANIFEST.md');
 if (manifest) {
   check(
-    'MIGRATION_APPLY_MANIFEST.md lists all 12 migrations',
+    'MIGRATION_APPLY_MANIFEST.md lists all 13 migrations',
     CANONICAL_MIGRATIONS.every(m => manifest.includes(m)),
     'Missing: ' + CANONICAL_MIGRATIONS.filter(m => !manifest.includes(m)).join(', ')
   );

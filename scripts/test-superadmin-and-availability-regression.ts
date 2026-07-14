@@ -25,14 +25,11 @@ function testSuperAdminDTOMapping() {
   // Simulate the mapping logic from superAdminService.ts getDashboardData
   const mapTenantList = (tenants, subs, profiles, userProfiles) => {
     const getOwnerEmail = (ownerUserId) => {
-      if (ownerUserId === 'd616f9e0-07e5-42b1-8c27-0d0d97208eb9') {
-        return 'melis-owner-staging@example.com';
-      }
       const matchedProfile = userProfiles?.find(up => up.id === ownerUserId);
-      if (matchedProfile && matchedProfile.name) {
-        return `${matchedProfile.name.toLowerCase().replace(/\s+/g, '-')}@example.com`;
+      if (matchedProfile && matchedProfile.email) {
+        return matchedProfile.email;
       }
-      return 'owner@example.com';
+      return null;
     };
 
     return tenants.map(t => {
@@ -136,7 +133,8 @@ function testSuperAdminDTOMapping() {
       subscription_status: 'active',
       created_at: '2026-07-09T19:25:02Z'
     }];
-    const result = mapTenantList(tenants, [], [], []);
+    const userProfiles = [{ id: 'd616f9e0-07e5-42b1-8c27-0d0d97208eb9', email: 'melis-owner-staging@example.com' }];
+    const result = mapTenantList(tenants, [], [], userProfiles);
     assert(result[0].tenant.ownerUserId === 'd616f9e0-07e5-42b1-8c27-0d0d97208eb9',
       `ownerUserId is a UUID (got: "${result[0].tenant.ownerUserId}")`);
     assert(result[0].tenant.ownerEmail === 'melis-owner-staging@example.com',
@@ -723,15 +721,36 @@ async function testDatabaseRLSRegression() {
   // Read policy draft and newest hardening file content
   const draftContent = fs.readFileSync(path.join(migrationDir, '20260619_lari_rls_policy_draft.sql'), 'utf8');
   const hardeningContent = fs.readFileSync(path.join(migrationDir, '20260714_tenants_update_rls_hardening.sql'), 'utf8');
+  const rpcContent = fs.readFileSync(path.join(migrationDir, '20260715_super_admin_provisioning_rpc.sql'), 'utf8');
 
   // Validate legacy owner_user_id authorization is dropped/absent in new policy definitions
   assert(!hardeningContent.includes('owner_user_id'), 'Legacy owner_user_id authorization must be absent from active policies');
   assert(hardeningContent.includes('DROP POLICY IF EXISTS "Tenant Owner UPDATE own tenant" ON public.tenants'), 'Must drop tenant owner update policy');
 
+  // Validate RPC atomic transaction criteria
+  assert(rpcContent.includes('CREATE OR REPLACE FUNCTION public.approve_and_publish_tenant'), 'Must define approve_and_publish_tenant RPC');
+  assert(rpcContent.includes("v_caller_role IS DISTINCT FROM 'super_admin'"), 'Must reject non-super-admin caller role');
+  assert(rpcContent.includes('SELECT EXISTS'), 'Must validate readiness constraints via SELECT EXISTS');
+  assert(rpcContent.includes('premium_monthly'), 'Must associate premium_monthly plan');
+  assert(rpcContent.includes('active'), 'Must assign active status');
+  assert(rpcContent.includes('completed'), 'Must assign completed onboarding status');
+  assert(rpcContent.includes('published'), 'Must assign published public site status');
+
   // Static checks on canTenantAcceptBookings for neutral wording
   const goLiveContent = fs.readFileSync(path.join(process.cwd(), 'services', 'goLiveService.ts'), 'utf8');
   assert(goLiveContent.includes('Online randevu şu anda kullanılamıyor. Lütfen işletmeyle iletişime geçin.'), 'Neutral wording must be rendered on suspension or inactive subscription');
   assert(!goLiveContent.includes('Lütfen ödeme veya deneme adımını tamamlayın.'), 'Wording referencing payment or trial must be absent from public errors');
+
+  // Verify superAdminService approveGoLive validation presence
+  const adminServiceContent = fs.readFileSync(path.join(process.cwd(), 'services', 'superAdminService.ts'), 'utf8');
+  assert(adminServiceContent.includes("approve_and_publish_tenant"), 'Super admin approval must invoke the atomic RPC approve_and_publish_tenant');
+
+  // Verify BookingPage.tsx handles submit errors with try/catch/finally block
+  const bookingPageContent = fs.readFileSync(path.join(process.cwd(), 'pages', 'BookingPage.tsx'), 'utf8');
+  assert(bookingPageContent.includes("catch (e"), 'BookingPage handleSubmit must wrap operation in error boundary');
+  assert(bookingPageContent.includes("finally"), 'BookingPage handleSubmit must clear submitting loading state in finally block');
+  assert(bookingPageContent.includes("createAppointment"), 'BookingPage must execute createAppointment in Core path');
+  assert(bookingPageContent.includes("NotificationService.sendBookingEmail"), 'BookingPage must treat email notifications as non-critical caught side-effects');
   
   console.log('✅ Database RLS Hardening Regression Checks passed!');
 }

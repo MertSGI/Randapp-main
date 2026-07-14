@@ -263,15 +263,14 @@ export const superAdminService = {
        }
        return new Promise(resolve => setTimeout(() => resolve(true), 500));
     }
-    const { error } = await supabase.from('tenants').update({ 
-      provisioning_status: 'live',
-      go_live_status: 'live', // if column exists
-      public_site_status: 'published',
-      verification_status: 'approved'
-    }).eq('id', tenantId);
+
+    const { data, error } = await supabase.rpc('approve_and_publish_tenant', {
+      p_tenant_id: tenantId
+    });
+
     if (error) {
        console.error("Super admin live approval failed", error);
-       throw error;
+       throw new Error(error.message || "Yayına alma işlemi başarısız oldu.");
     }
     return true;
   },
