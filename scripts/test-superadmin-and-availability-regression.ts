@@ -727,6 +727,11 @@ async function testDatabaseRLSRegression() {
   // Validate legacy owner_user_id authorization is dropped/absent in new policy definitions
   assert(!hardeningContent.includes('owner_user_id'), 'Legacy owner_user_id authorization must be absent from active policies');
   assert(hardeningContent.includes('DROP POLICY IF EXISTS "Tenant Owner UPDATE own tenant" ON public.tenants'), 'Must drop tenant owner update policy');
+
+  // Static checks on canTenantAcceptBookings for neutral wording
+  const goLiveContent = fs.readFileSync(path.join(process.cwd(), 'services', 'goLiveService.ts'), 'utf8');
+  assert(goLiveContent.includes('Online randevu şu anda kullanılamıyor. Lütfen işletmeyle iletişime geçin.'), 'Neutral wording must be rendered on suspension or inactive subscription');
+  assert(!goLiveContent.includes('Lütfen ödeme veya deneme adımını tamamlayın.'), 'Wording referencing payment or trial must be absent from public errors');
   
   console.log('✅ Database RLS Hardening Regression Checks passed!');
 }

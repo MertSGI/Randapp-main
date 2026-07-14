@@ -69,10 +69,9 @@ export const goLiveService = {
     };
 
     const blockingReasons: string[] = [];
-    
     const isServiceActive = sub?.status === 'active' || sub?.status === 'trialing' || sub?.status === 'manual_active' || sub?.status === 'comped';
     if (!isServiceActive) {
-      blockingReasons.push('Abonelik veya deneme süresi aktif değil. Lütfen ödeme/doğrulama adımını tamamlayın.');
+      blockingReasons.push('Abonelik aktif değil. Lütfen yöneticinizle iletişime geçin veya aktivasyon işlemini tamamlayın.');
     }
     if (!checklist.servicesCompleted) {
       blockingReasons.push('En az 1 aktif hizmet eklenmesi gerekiyor.');
@@ -103,13 +102,7 @@ export const goLiveService = {
     const sub = await subscriptionService.getCurrentSubscription(tenantId);
     const isServiceActive = sub?.status === 'active' || sub?.status === 'trialing' || sub?.status === 'manual_active' || sub?.status === 'comped';
     if (!sub || !isServiceActive) {
-      if (sub?.status === 'paused') {
-        return { allowed: false, reason: 'İşletme sahibi online randevu kabulünü geçici olarak durdurmuştur.' };
-      }
-      if (sub?.status === 'suspended') {
-        return { allowed: false, reason: 'Bu salonun üyeliği geçici olarak askıya alınmıştır.' };
-      }
-      return { allowed: false, reason: 'Bu salonun online randevu sistemi geçici olarak kullanılamıyor. Lütfen ödeme veya deneme adımını tamamlayın.' };
+      return { allowed: false, reason: 'Online randevu şu anda kullanılamıyor. Lütfen işletmeyle iletişime geçin.' };
     }
 
     const tenant = await tenantService.getCurrentTenant();
