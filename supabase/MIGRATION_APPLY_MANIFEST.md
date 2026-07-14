@@ -19,6 +19,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 9. **`20260621_paymentless_production_repository_columns.sql`** — Manual/offline billing support columns.
 10. **`20260622_paymentless_production_rls_identity_alignment.sql`** — Aligns core tables with users_profile lookup canonical RLS identity model.
 11. **`20260713_communication_outbox_rls_hardening.sql`** — Drops unsafe communication_outbox broad write policy and installs scoped RLS policies.
+12. **`20260714_tenants_update_rls_hardening.sql`** — Drops broad tenant UPDATE policy and legacy owner_user_id authorization on tenants.
 
 ---
 

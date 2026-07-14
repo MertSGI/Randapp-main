@@ -56,7 +56,8 @@ To initialize a completely fresh Supabase staging or production database:
    8. `20260620_paymentless_production_core_tables.sql`
    9. `20260621_paymentless_production_repository_columns.sql`
    10. `20260622_paymentless_production_rls_identity_alignment.sql`
-11. `20260713_communication_outbox_rls_hardening.sql`
+   11. `20260713_communication_outbox_rls_hardening.sql`
+   12. `20260714_tenants_update_rls_hardening.sql`
 
 ---
 

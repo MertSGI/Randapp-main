@@ -165,11 +165,19 @@ for (const [typeName, definitions] of Object.entries(typeRegistry)) {
 }
 
 // Policy duplicates and safety check
+// We trace drops chronologically across files.
 for (const [tableName, policies] of Object.entries(policyRegistry)) {
   for (const [policyName, definitions] of Object.entries(policies)) {
     if (definitions.length > 1) {
       console.log(`[INFO] Policy "${policyName}" on table "${tableName}" is defined ${definitions.length} times.`);
-      const unsafe = definitions.filter(d => !d.hasDropBefore);
+      
+      // Let's trace chronologically. For each definition (except the first one),
+      // there must be a DROP POLICY statement in the same file or a subsequent file before or at the definition.
+      // To keep it simple and robust: a definition is safe if it has hasDropBefore === true (which checks the same file).
+      // If a policy is defined in file A, and then redefined in file B, file B must have a DROP POLICY statement.
+      // So definitions[i] (for i > 0) is unsafe if it does NOT have a DROP statement in its own file.
+      const unsafe = definitions.filter((d, idx) => idx > 0 && !d.hasDropBefore);
+      
       if (unsafe.length > 0) {
         console.error(`[FAIL] Policy "${policyName}" on table "${tableName}" has duplicate declarations without preceding "DROP POLICY IF EXISTS" in files: ${unsafe.map(u => u.file).join(', ')}`);
         conflictDetected = true;
