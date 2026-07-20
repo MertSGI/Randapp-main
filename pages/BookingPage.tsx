@@ -17,6 +17,8 @@ import { SalonBusinessProfile, BusinessBranch } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { canPreviewTenantSite } from '../utils/previewAuth';
 import SalonWebsiteView from '../components/SalonWebsiteView';
+import { getDataSourceMode } from '../services/dataSourceConfig';
+
 
 const generateTimeSlots = (): string[] => {
   const slots: string[] = [];
@@ -63,6 +65,8 @@ const BookingPage: React.FC = () => {
   const [branches, setBranches] = useState<BusinessBranch[]>([]);
   const [isMultiBranchEnabled, setIsMultiBranchEnabled] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState<BusinessBranch | null>(null);
+  const [idempotencyKey, setIdempotencyKey] = useState<string>('');
+
 
   const timeSlots = generateTimeSlots();
   
@@ -70,11 +74,17 @@ const BookingPage: React.FC = () => {
   const urlSource = new URLSearchParams(window.location.hash.split('?')[1]).get('source') || undefined;
   const isAuthorizedPreview = requestedPreview && canPreviewTenantSite(currentUser, tenant?.id);
 
+  // Regenerate PII-free idempotency key when booking selection parameters change
+  useEffect(() => {
+    setIdempotencyKey(crypto.randomUUID());
+  }, [tenant?.id, selectedService?.id, selectedStaff?.id, selectedDate, selectedTime]);
+
+
   useEffect(() => {
     if (tenant) {
       setIsCheckingSub(true);
-      const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
-      if (!mode.startsWith('supabase')) {
+      const isSupabaseMode = getDataSourceMode() === 'supabase';
+      if (!isSupabaseMode) {
         subscriptionService.getCurrentSubscription(tenant.id).then(sub => {
           if (sub) {
             setSubStatus(sub.status);
@@ -448,11 +458,7 @@ const BookingPage: React.FC = () => {
 
       // Core Operation: Create Appointment via safe RPC in Supabase mode,
       // or direct service call in local/mock/demo mode.
-      const dataMode = import.meta.env?.VITE_DATA_MODE || 'mock';
-      const isSupabaseMode = dataMode.startsWith('supabase');
-
-      // idempotency key: deterministic per browser session + service+staff+date+time
-      const idempotencyKey = `${tenant.id}:${selectedService.id}:${selectedStaff.id}:${selectedDate}:${selectedTime}:${formData.email || formData.phone}`;
+      const isSupabaseMode = getDataSourceMode() === 'supabase';
 
       let newAppointment: any;
       let manageToken: string | undefined;
@@ -486,7 +492,7 @@ const BookingPage: React.FC = () => {
             : 'Booking could not be completed right now. Please try again shortly.');
         }
 
-        if (!rpcResult?.success) {
+        if (!rpcResult?.success || !rpcResult?.manageToken || !rpcResult?.appointmentId) {
           const reasonCode = rpcResult?.reasonCode || 'temporary_failure';
           const messages: Record<string, string> = {
             slot_conflict:        language === 'tr' ? 'Seçtiğiniz saat artık uygun değil. Lütfen başka bir saat seçin.' : 'This time slot is no longer available. Please choose another time.',
@@ -515,6 +521,7 @@ const BookingPage: React.FC = () => {
           time:       selectedTime,
           status:     'confirmed',
         };
+
 
       } else {
         // --- Local/demo/mock path: use existing direct service call ---
