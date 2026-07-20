@@ -1,8 +1,8 @@
 -- 20260720_public_booking_rpc.sql
 -- Description: Hardened, safe, atomic, SECURITY DEFINER public booking RPC.
 -- Enforces advisory transaction locks, correct overlapping duration checks,
--- Europe/Istanbul timezone parsing, token-regeneration on idempotency replay,
--- and strict foreign keys on idempotency table.
+-- Europe/Istanbul timezone parsing, token-regeneration on idempotency replay (with old token revocation),
+-- explicit 24-hour idempotency key retention, and redacted SQLERRM exceptions.
 -- Migration count after this file: 15
 
 -- =========================================================================
@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS public.public_booking_idempotency (
     tenant_id       UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
     appointment_id  UUID NOT NULL REFERENCES public.appointments(id) ON DELETE CASCADE,
     created_at      TIMESTAMPTZ DEFAULT now() NOT NULL,
+    expires_at      TIMESTAMPTZ DEFAULT (now() + interval '24 hours') NOT NULL,
     PRIMARY KEY (idempotency_key, tenant_id)
 );
 
@@ -89,10 +90,12 @@ DECLARE
     v_req_start             timestamp;
     v_req_end               timestamp;
     v_lock_key              bigint;
+    v_stage                 text := 'init';
 BEGIN
     -- -----------------------------------------------------------------------
     -- Gate 1: Required consent must be granted by customer
     -- -----------------------------------------------------------------------
+    v_stage := 'consent_validation';
     IF p_required_consent IS NOT TRUE THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'consent_required');
     END IF;
@@ -100,6 +103,7 @@ BEGIN
     -- -----------------------------------------------------------------------
     -- Gate 2: Minimal customer data validation
     -- -----------------------------------------------------------------------
+    v_stage := 'customer_data_validation';
     IF p_customer_name IS NULL OR trim(p_customer_name) = '' THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_customer_data');
     END IF;
@@ -111,6 +115,7 @@ BEGIN
     -- -----------------------------------------------------------------------
     -- Gate 3: Tenant resolution and eligibility
     -- -----------------------------------------------------------------------
+    v_stage := 'tenant_validation';
     SELECT id, status, onboarding_status, public_site_status
     INTO v_tenant_id, v_tenant_status, v_onboarding_status, v_public_site_status
     FROM public.tenants
@@ -136,29 +141,24 @@ BEGIN
     -- -----------------------------------------------------------------------
     -- Gate 4: Active entitlement check
     -- -----------------------------------------------------------------------
+    v_stage := 'entitlement_validation';
+    
+    -- Select the current deterministic active/manual entitlement honoring active status
     SELECT EXISTS (
-        SELECT 1 FROM public.subscriptions WHERE tenant_id = v_tenant_id
+        SELECT 1 FROM public.subscriptions 
+        WHERE tenant_id = v_tenant_id 
+          AND status IN ('active', 'manual_active', 'comped', 'trialing')
+          AND (current_period_end IS NULL OR current_period_end > now())
     ) INTO v_sub_exists;
 
     IF NOT v_sub_exists THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'booking_unavailable');
     END IF;
 
-    SELECT status INTO v_sub_status
-    FROM public.subscriptions
-    WHERE tenant_id = v_tenant_id
-    LIMIT 1;
-
-    IF v_sub_status IS DISTINCT FROM 'active'
-       AND v_sub_status IS DISTINCT FROM 'manual_active'
-       AND v_sub_status IS DISTINCT FROM 'comped'
-       AND v_sub_status IS DISTINCT FROM 'trialing' THEN
-        RETURN jsonb_build_object('success', false, 'reason_code', 'booking_unavailable');
-    END IF;
-
     -- -----------------------------------------------------------------------
     -- Gate 5: Concurrency Safety via Transactional Advisory Lock
     -- -----------------------------------------------------------------------
+    v_stage := 'concurrency_lock';
     v_lock_key := hashtextextended(
         v_tenant_id::text || ':' || p_staff_id::text || ':' || p_appointment_date::text,
         0
@@ -166,8 +166,13 @@ BEGIN
     PERFORM pg_advisory_xact_lock(v_lock_key);
 
     -- -----------------------------------------------------------------------
-    -- Gate 6: Idempotency Replay (with Token Regeneration)
+    -- Gate 6: Idempotency Replay (with Token Regeneration & Old Token Revocation)
     -- -----------------------------------------------------------------------
+    v_stage := 'idempotency_replay';
+    -- Delete expired idempotency keys before checking to enforce the retention window
+    DELETE FROM public.public_booking_idempotency 
+    WHERE expires_at <= now();
+
     IF p_idempotency_key IS NOT NULL AND trim(p_idempotency_key) != '' THEN
         SELECT appointment_id INTO v_existing_apt_id
         FROM public.public_booking_idempotency
@@ -175,6 +180,12 @@ BEGIN
           AND tenant_id = v_tenant_id;
 
         IF FOUND THEN
+            -- Expire/Revoke all previous access tokens for this appointment to enforce max 1 active token rule
+            UPDATE public.appointment_access_tokens
+            SET expires_at = now()
+            WHERE appointment_id = v_existing_apt_id 
+              AND expires_at > now();
+
             -- Generate a fresh secure manage token on replay and store only its hash
             v_token      := encode(gen_random_bytes(32), 'hex');
             v_token_hash := encode(sha256(v_token::bytea), 'hex');
@@ -204,6 +215,7 @@ BEGIN
     -- -----------------------------------------------------------------------
     -- Gate 7: Service validation — must belong to this tenant and be active
     -- -----------------------------------------------------------------------
+    v_stage := 'service_validation';
     SELECT tenant_id, active, duration
     INTO v_service_tenant_id, v_service_active, v_service_duration
     FROM public.services
@@ -216,6 +228,7 @@ BEGIN
     -- -----------------------------------------------------------------------
     -- Gate 8: Staff validation — must belong to this tenant and be active
     -- -----------------------------------------------------------------------
+    v_stage := 'staff_validation';
     SELECT tenant_id, active
     INTO v_staff_tenant_id, v_staff_active
     FROM public.staff
@@ -228,6 +241,7 @@ BEGIN
     -- -----------------------------------------------------------------------
     -- Gate 9: Staff-service mapping must exist
     -- -----------------------------------------------------------------------
+    v_stage := 'staff_service_mapping_validation';
     SELECT EXISTS (
         SELECT 1 FROM public.staff_services
         WHERE staff_id = p_staff_id AND service_id = p_service_id
@@ -240,6 +254,7 @@ BEGIN
     -- -----------------------------------------------------------------------
     -- Gate 10: Date/time must be strictly in the future (timezone-aware)
     -- -----------------------------------------------------------------------
+    v_stage := 'timezone_validation';
     v_now_in_tz := now() AT TIME ZONE 'Europe/Istanbul';
     v_req_start := (p_appointment_date + p_appointment_time);
 
@@ -250,6 +265,7 @@ BEGIN
     -- -----------------------------------------------------------------------
     -- Gate 11: Availability rule check
     -- -----------------------------------------------------------------------
+    v_stage := 'availability_validation';
     v_weekday   := EXTRACT(DOW FROM p_appointment_date)::integer;
     v_req_end   := v_req_start + (COALESCE(v_service_duration, 60) || ' minutes')::interval;
 
@@ -271,6 +287,7 @@ BEGIN
     -- -----------------------------------------------------------------------
     -- Gate 12: Overlapping conflict detection
     -- -----------------------------------------------------------------------
+    v_stage := 'slot_conflict_validation';
     SELECT EXISTS (
         SELECT 1 FROM public.appointments a
         JOIN public.services s ON s.id = a.service_id
@@ -279,8 +296,6 @@ BEGIN
           AND a.appointment_date = p_appointment_date
           AND a.status NOT IN ('cancelled', 'cancelled_by_customer', 'cancelled_by_salon', 'cancelled_by_system', 'no_show')
           -- Check overlapping interval:
-          -- (a.appointment_date + a.appointment_time) < v_req_end
-          -- AND (a.appointment_date + a.appointment_time + s.duration) > v_req_start
           AND (a.appointment_date + a.appointment_time) < v_req_end
           AND ((a.appointment_date + a.appointment_time) + (COALESCE(s.duration, 60) || ' minutes')::interval) > v_req_start
     ) INTO v_slot_conflict;
@@ -294,6 +309,7 @@ BEGIN
     -- -----------------------------------------------------------------------
 
     -- Step 1: Resolve or create customer
+    v_stage := 'customer_write';
     SELECT id INTO v_customer_id
     FROM public.customers
     WHERE tenant_id = v_tenant_id
@@ -316,6 +332,7 @@ BEGIN
     END IF;
 
     -- Step 2: Persist booking consent to consent_ledger
+    v_stage := 'consent_write';
     INSERT INTO public.consent_ledger (
         tenant_id,
         customer_id,
@@ -346,6 +363,7 @@ BEGIN
     );
 
     -- Step 3: Insert appointment
+    v_stage := 'appointment_write';
     INSERT INTO public.appointments (
         tenant_id,
         customer_id,
@@ -372,6 +390,7 @@ BEGIN
     RETURNING id INTO v_appointment_id;
 
     -- Step 4: Record idempotency key if provided
+    v_stage := 'idempotency_write';
     IF p_idempotency_key IS NOT NULL AND trim(p_idempotency_key) != '' THEN
         INSERT INTO public.public_booking_idempotency (idempotency_key, tenant_id, appointment_id)
         VALUES (p_idempotency_key, v_tenant_id, v_appointment_id)
@@ -379,6 +398,7 @@ BEGIN
     END IF;
 
     -- Step 5: Create appointment access token
+    v_stage := 'token_write';
     v_token      := encode(gen_random_bytes(32), 'hex');
     v_token_hash := encode(sha256(v_token::bytea), 'hex');
     v_expires_at := now() + interval '30 days';
@@ -403,8 +423,8 @@ BEGIN
     );
 
 EXCEPTION WHEN OTHERS THEN
-    -- Log safe stage info/state details only
-    RAISE WARNING 'create_public_booking error state: %, SQLSTATE: %', SQLERRM, SQLSTATE;
+    -- Redact all details: Log only safe stage identifier and SQLSTATE, never log SQLERRM or PII
+    RAISE WARNING 'create_public_booking error stage: %, SQLSTATE: %', v_stage, SQLSTATE;
     RETURN jsonb_build_object(
         'success',      false,
         'reason_code',  'temporary_failure'
