@@ -752,6 +752,13 @@ async function testDatabaseRLSRegression() {
   assert(bookingPageContent.includes("createAppointment"), 'BookingPage must execute createAppointment in Core path');
   assert(bookingPageContent.includes("NotificationService.sendBookingEmail"), 'BookingPage must treat email notifications as non-critical caught side-effects');
   
+  // Verify 14th migration can_accept_public_booking RPC static checks
+  const eligibilityRpcContent = fs.readFileSync(path.join(migrationDir, '20260716_public_booking_eligibility_rpc.sql'), 'utf8');
+  assert(eligibilityRpcContent.includes('CREATE OR REPLACE FUNCTION public.can_accept_public_booking'), 'Must define can_accept_public_booking RPC');
+  assert(eligibilityRpcContent.includes('REVOKE EXECUTE ON FUNCTION public.can_accept_public_booking'), 'Must revoke execute from PUBLIC');
+  assert(eligibilityRpcContent.includes('GRANT EXECUTE ON FUNCTION public.can_accept_public_booking(text) TO anon'), 'Must grant execute to anon');
+  assert(eligibilityRpcContent.includes('SET search_path = public'), 'Must define explicit search_path');
+  
   console.log('✅ Database RLS Hardening Regression Checks passed!');
 }
 await testDatabaseRLSRegression();

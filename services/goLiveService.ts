@@ -99,6 +99,46 @@ export const goLiveService = {
       return { allowed: true };
     }
 
+    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    if (mode.startsWith('supabase')) {
+      const tenant = await tenantService.getCurrentTenant();
+      if (!tenant || !tenant.slug) {
+        return { allowed: false, reason: 'Online randevu şu anda kullanılamıyor. Lütfen işletmeyle iletişime geçin.' };
+      }
+      try {
+        const { data, error } = await supabase.rpc('can_accept_public_booking', { p_slug: tenant.slug });
+        if (error || !data) {
+          console.error('Error invoking can_accept_public_booking RPC:', error);
+          return { allowed: false, reason: 'Online randevu şu anda kullanılamıyor. Lütfen işletmeyle iletişime geçin.' };
+        }
+        if (data.allowed) {
+          return { allowed: true };
+        }
+        
+        // Map reason codes to public wording
+        const reasonCode = data.reason_code;
+        if (reasonCode === 'tenant_not_found' || reasonCode === 'tenant_inactive' || reasonCode === 'entitlement_inactive') {
+          return { allowed: false, reason: 'Online randevu şu anda kullanılamıyor. Lütfen işletmeyle iletişime geçin.' };
+        }
+        if (tenant.publicSiteStatus === 'suspended') {
+          return { allowed: false, reason: 'Bu işletmenin online randevu sayfası şu anda aktif değil.' };
+        }
+        if (tenant.publicSiteStatus === 'paused') {
+          return { allowed: false, reason: 'Bu salon şu anda online randevu kabul etmiyor. Lütfen işletme ile iletişime geçin.' };
+        }
+        if (tenant.publicSiteStatus === 'pending_review' || tenant.publicSiteStatus === 'draft' || tenant.publicSiteStatus === 'preview_ready') {
+          return { allowed: false, reason: 'Online randevu sistemi henüz aktif değil.' };
+        }
+        if (reasonCode === 'onboarding_incomplete') {
+          return { allowed: false, reason: 'Salon hazırlık aşamasında.' };
+        }
+        return { allowed: false, reason: 'Online randevu şu anda kullanılamıyor. Lütfen işletmeyle iletişime geçin.' };
+      } catch (err) {
+        console.error('Exception resolving public eligibility:', err);
+        return { allowed: false, reason: 'Online randevu şu anda kullanılamıyor. Lütfen işletmeyle iletişime geçin.' };
+      }
+    }
+
     const sub = await subscriptionService.getCurrentSubscription(tenantId);
     const isServiceActive = sub?.status === 'active' || sub?.status === 'trialing' || sub?.status === 'manual_active' || sub?.status === 'comped';
     if (!sub || !isServiceActive) {

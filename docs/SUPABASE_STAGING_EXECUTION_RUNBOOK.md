@@ -80,6 +80,7 @@ To prevent table duplication and execution errors, we have isolated historical c
 11. `20260713_communication_outbox_rls_hardening.sql`
 12. `20260714_tenants_update_rls_hardening.sql`
 13. `20260715_super_admin_provisioning_rpc.sql` (Super Admin Provisioning RPC)
+14. `20260716_public_booking_eligibility_rpc.sql` (Public Booking Eligibility RPC)
 
 *Applying Migrations*:
 - Using Supabase CLI: `supabase db push`
