@@ -102,6 +102,8 @@ To prevent schema conflicts or duplication bugs, apply the migrations sequential
 12. `20260714_tenants_update_rls_hardening.sql`
 13. `20260715_super_admin_provisioning_rpc.sql` (Super Admin Provisioning RPC)
 14. `20260716_public_booking_eligibility_rpc.sql` (Public Booking Eligibility RPC)
+15. `20260720_public_booking_rpc.sql` (Transactional Public Booking RPC)
+
 
 ---
 
