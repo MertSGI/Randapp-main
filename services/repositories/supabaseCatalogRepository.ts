@@ -150,10 +150,29 @@ export class SupabaseCatalogRepository implements CatalogRepository {
   }
 
   async listStaffForService(tenantId: string, serviceId: string): Promise<Staff[]> {
-    // This requires a join query in Supabase: select from staff_services
-    // Using simple stub approach that falls back to all staff for now
-    return this.listStaff(tenantId, { activeOnly: true });
+    try {
+      const url = `/rest/v1/staff_services?service_id=eq.${serviceId}&select=staff_id,staff:staff(*)`;
+      const res = await fetchSupabase(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data
+        .filter((d: any) => d.staff && d.staff.tenant_id === tenantId && d.staff.active === true)
+        .map((d: any) => ({
+          id: d.staff.id,
+          tenantId: d.staff.tenant_id,
+          name: d.staff.name,
+          title: d.staff.title,
+          image: d.staff.image,
+          isOwner: d.staff.is_owner,
+          phone: d.staff.phone,
+          calendarEmail: d.staff.calendar_email,
+          active: d.staff.active
+        }));
+    } catch {
+      return [];
+    }
   }
+
 
   private mapAvailabilityRow(row: any): AvailabilityRule {
     return {

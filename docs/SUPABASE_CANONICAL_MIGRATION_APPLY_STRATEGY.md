@@ -61,6 +61,7 @@ To initialize a completely fresh Supabase staging or production database:
    13. `20260715_super_admin_provisioning_rpc.sql` (Super Admin Provisioning RPC)
    14. `20260716_public_booking_eligibility_rpc.sql` (Public Booking Eligibility RPC)
    15. `20260720_public_booking_rpc.sql` (Transactional Public Booking RPC)
+   16. `20260721_public_booking_staff_validation_fix.sql` (Public Booking Staff Validation Fix Data Migration)
 
 ---
 

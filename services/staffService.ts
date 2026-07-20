@@ -32,6 +32,11 @@ export const listPublicActiveStaffByTenantSlug = async (slug: string): Promise<S
   return getCatalogRepository().listPublicActiveStaffByTenantSlug(slug);
 };
 
+export const getStaffListForService = async (tenantId: string, serviceId: string): Promise<Staff[]> => {
+  return getCatalogRepository().listStaffForService(tenantId, serviceId);
+};
+
+
 // Legacy verification reference: getStaffRepository
 
 

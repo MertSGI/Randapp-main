@@ -5,7 +5,8 @@ import * as NotificationService from '../services/notificationService';
 import * as CalendarService from '../services/calendarService';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useTenant } from '../contexts/TenantContext';
-import { getStaffList } from '../services/staffService';
+import { getStaffList, getStaffListForService } from '../services/staffService';
+
 import { getServices } from '../services/serviceCatalogService';
 import { createAppointment, getBookedSlots, updateAppointmentStatus } from '../services/appointmentService';
 import { subscriptionService, SubscriptionStatus } from '../services/subscriptionService';
@@ -154,6 +155,16 @@ const BookingPage: React.FC = () => {
   }, [tenant, selectedDate, selectedStaff]);
 
   useEffect(() => {
+    if (tenant) {
+      if (selectedService) {
+        getStaffListForService(tenant.id, selectedService.id).then(setStaffList);
+      } else {
+        getStaffList(tenant.id, { activeOnly: true }).then(setStaffList);
+      }
+    }
+  }, [tenant, selectedService]);
+
+  useEffect(() => {
     if (tenant && staffList.length > 0 && selectedService) {
       staffList.forEach(staff => {
         availabilityService.getNextAvailableSlotForStaff(tenant.id, staff.id, selectedService.id).then(slot => {
@@ -164,6 +175,7 @@ const BookingPage: React.FC = () => {
       });
     }
   }, [tenant, staffList, selectedService]);
+
 
   useEffect(() => {
     if (step > 0 && step < 5) {
