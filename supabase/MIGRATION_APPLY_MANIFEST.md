@@ -23,6 +23,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 13. **`20260715_super_admin_provisioning_rpc.sql`** — Adds atomic approve_and_publish_tenant RPC function for Super Admin.
 14. **`20260716_public_booking_eligibility_rpc.sql`** — Adds public eligibility checker RPC function by slug.
 15. **`20260720_public_booking_rpc.sql`** — Hardened transactional public booking RPC migration.
+16. **`20260722_public_booking_search_path_fix.sql`** — Fixes search_path for SECURITY DEFINER functions to include extensions schema.
 
 
 
