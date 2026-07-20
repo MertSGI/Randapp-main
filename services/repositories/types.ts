@@ -63,6 +63,7 @@ export interface CatalogRepository {
   assignServiceToStaff(staffId: string, serviceId: string): Promise<void>;
   removeServiceFromStaff(staffId: string, serviceId: string): Promise<void>;
   listStaffForService(tenantId: string, serviceId: string): Promise<Staff[]>;
+  listServicesForStaff(staffId: string): Promise<string[]>;
   
   listAvailabilityRules(tenantId: string, staffId?: string): Promise<AvailabilityRule[]>;
   updateAvailabilityRule(ruleId: string, patch: Partial<AvailabilityRule>): Promise<void>;

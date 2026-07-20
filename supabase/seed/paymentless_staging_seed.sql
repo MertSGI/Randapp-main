@@ -145,4 +145,78 @@ ON CONFLICT (id) DO UPDATE SET
 
 
 
+-- =========================================================================
+-- 7. STAGING SPECIALIST: Selin Uzman
+-- Tenant: aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa
+-- These records were added after initial seed. All operations are idempotent.
+-- =========================================================================
+
+-- Staging Blowdry service (may already exist from prior setup, idempotent)
+INSERT INTO public.services (id, tenant_id, name, name_tr, duration, price, active)
+VALUES (
+  'fdc4b301-26ec-40c1-a521-5a864766fbc5',
+  'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa',
+  'Staging Blowdry',
+  'Staging Blowdry',
+  30,
+  120,
+  true
+)
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name,
+  active = EXCLUDED.active;
+
+-- Selin Uzman staff record (may already exist from prior setup, idempotent)
+INSERT INTO public.staff (id, tenant_id, name, title, active, is_owner)
+VALUES (
+  '6234e7a1-9788-4f04-aa56-54d05c1fafb7',
+  'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa',
+  'Selin Uzman',
+  'Staging Specialist',
+  true,
+  false
+)
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name,
+  title = EXCLUDED.title,
+  active = EXCLUDED.active;
+
+-- Canonical missing mapping: Selin Uzman -> Staging Blowdry
+-- Guarded by pre-flight assertion that both records share the same tenant.
+DO $$
+DECLARE
+  v_staff_tenant_id uuid;
+  v_service_tenant_id uuid;
+BEGIN
+  SELECT tenant_id INTO v_staff_tenant_id FROM public.staff WHERE id = '6234e7a1-9788-4f04-aa56-54d05c1fafb7';
+  SELECT tenant_id INTO v_service_tenant_id FROM public.services WHERE id = 'fdc4b301-26ec-40c1-a521-5a864766fbc5';
+
+  IF v_staff_tenant_id IS NULL OR v_service_tenant_id IS NULL THEN
+    RAISE EXCEPTION 'SEED GUARD: staff or service not found for Selin Uzman / Staging Blowdry';
+  END IF;
+
+  IF v_staff_tenant_id <> v_service_tenant_id THEN
+    RAISE EXCEPTION 'SEED GUARD: cross-tenant mapping rejected (staff_tenant=%, service_tenant=%)', v_staff_tenant_id, v_service_tenant_id;
+  END IF;
+
+  INSERT INTO public.staff_services (staff_id, service_id)
+  VALUES ('6234e7a1-9788-4f04-aa56-54d05c1fafb7', 'fdc4b301-26ec-40c1-a521-5a864766fbc5')
+  ON CONFLICT (staff_id, service_id) DO NOTHING;
+END $$;
+
+-- Availability rules for Selin Uzman (Mon-Sat 10:00-18:00), idempotent
+INSERT INTO public.availability_rules (id, tenant_id, staff_id, weekday, start_time, end_time, is_active)
+VALUES
+  ('a0000000-0000-0000-0000-000000000001', 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', '6234e7a1-9788-4f04-aa56-54d05c1fafb7', 1, '10:00', '18:00', true),
+  ('a0000000-0000-0000-0000-000000000002', 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', '6234e7a1-9788-4f04-aa56-54d05c1fafb7', 2, '10:00', '18:00', true),
+  ('a0000000-0000-0000-0000-000000000003', 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', '6234e7a1-9788-4f04-aa56-54d05c1fafb7', 3, '10:00', '18:00', true),
+  ('a0000000-0000-0000-0000-000000000004', 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', '6234e7a1-9788-4f04-aa56-54d05c1fafb7', 4, '10:00', '18:00', true),
+  ('a0000000-0000-0000-0000-000000000005', 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', '6234e7a1-9788-4f04-aa56-54d05c1fafb7', 5, '10:00', '18:00', true),
+  ('a0000000-0000-0000-0000-000000000006', 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', '6234e7a1-9788-4f04-aa56-54d05c1fafb7', 6, '10:00', '18:00', true)
+ON CONFLICT (id) DO UPDATE SET
+  start_time = EXCLUDED.start_time,
+  end_time = EXCLUDED.end_time,
+  is_active = EXCLUDED.is_active;
+
+
 COMMIT;

@@ -182,6 +182,14 @@ export class LocalCatalogRepository implements CatalogRepository {
     });
   }
 
+  async listServicesForStaff(staffId: string): Promise<string[]> {
+    const staff = await this.getStaffById(staffId);
+    if (!staff?.tenantId) return [];
+    const key = this.getStaffServiceMappingKey(staff.tenantId);
+    const mappings = JSON.parse(localStorage.getItem(key) || '{}');
+    return Array.isArray(mappings[staffId]) ? mappings[staffId] : [];
+  }
+
   private normalizeAvailabilityRule(tenantId: string, rule: any): AvailabilityRule {
     return {
       id: rule.id,

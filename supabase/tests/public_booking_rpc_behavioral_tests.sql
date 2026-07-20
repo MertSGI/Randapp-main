@@ -464,6 +464,221 @@ END $$;
 
 
 -- =========================================================================
+-- STAFF-SERVICE MAPPING TESTS: Tests 21-26
+-- Verify that:
+--   TEST 21: Mapped staff -> service succeeds (with valid mapping)
+--   TEST 22: Unmapped staff (active, same tenant) -> invalid_staff
+--   TEST 23: Cross-tenant staff -> invalid_staff
+--   TEST 24: staff_services mapping insert is idempotent (duplicate does nothing)
+--   TEST 25: Removing mapping causes subsequent booking attempt to return invalid_staff
+--   TEST 26: Restoring mapping restores success path
+-- =========================================================================
+DO $$
+DECLARE
+  v_slug         text  := 'melis-guzellik';
+  v_tenant_id    uuid;
+  v_service_id   uuid;
+  v_mapped_staff_id   uuid;
+  v_unmapped_staff_id uuid;
+  v_other_tenant_id   uuid;
+  v_other_staff_id    uuid;
+  v_test_date    date  := (CURRENT_DATE + 21)::date;
+  v_count        int;
+  r              jsonb;
+BEGIN
+  -- Resolve tenant
+  SELECT id INTO v_tenant_id FROM public.tenants WHERE slug = v_slug;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'MAPPING TEST SETUP FAIL: tenant not found';
+  END IF;
+
+  -- Create a fresh test service with a known mapping target
+  INSERT INTO public.services (tenant_id, name, duration, price, active)
+  VALUES (v_tenant_id, 'Mapping Test Service', 30, 100, true)
+  RETURNING id INTO v_service_id;
+
+  -- Create a staff member that IS mapped to this service
+  INSERT INTO public.staff (tenant_id, name, title, active)
+  VALUES (v_tenant_id, 'Mapped Staff Test', 'Test Specialist', true)
+  RETURNING id INTO v_mapped_staff_id;
+
+  -- Create availability for the mapped staff
+  INSERT INTO public.availability_rules (tenant_id, staff_id, weekday, start_time, end_time, is_active)
+  SELECT v_tenant_id, v_mapped_staff_id, d, '09:00', '19:00', true
+  FROM generate_series(1, 7) AS d;
+
+  -- Create a staff member that is NOT mapped to this service
+  INSERT INTO public.staff (tenant_id, name, title, active)
+  VALUES (v_tenant_id, 'Unmapped Staff Test', 'Test Specialist', true)
+  RETURNING id INTO v_unmapped_staff_id;
+
+  -- Only map the first staff member to the service
+  INSERT INTO public.staff_services (staff_id, service_id)
+  VALUES (v_mapped_staff_id, v_service_id);
+
+  -- -----------------------------------------------------------------------
+  -- TEST 21: Mapped staff succeeds
+  -- -----------------------------------------------------------------------
+  r := public.create_public_booking(
+    p_slug             => v_slug,
+    p_service_id       => v_service_id,
+    p_staff_id         => v_mapped_staff_id,
+    p_appointment_date => v_test_date,
+    p_appointment_time => '10:00:00'::time,
+    p_customer_name    => 'Mapping Test Customer',
+    p_customer_email   => 'mapping-test-21@randapp-test.invalid',
+    p_customer_phone   => '+905001112299',
+    p_required_consent => true,
+    p_idempotency_key  => 'mapping-key-test-21'
+  );
+  IF NOT (r->>'success')::boolean THEN
+    RAISE EXCEPTION 'TEST 21 FAIL: mapped staff booking failed: %', r;
+  END IF;
+  RAISE NOTICE 'TEST 21 PASS: Mapped staff booking succeeded.';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 22: Active unmapped staff returns invalid_staff
+  -- -----------------------------------------------------------------------
+  r := public.create_public_booking(
+    p_slug             => v_slug,
+    p_service_id       => v_service_id,
+    p_staff_id         => v_unmapped_staff_id,
+    p_appointment_date => v_test_date,
+    p_appointment_time => '11:00:00'::time,
+    p_customer_name    => 'Mapping Test Customer',
+    p_customer_email   => 'mapping-test-22@randapp-test.invalid',
+    p_customer_phone   => '+905001112299',
+    p_required_consent => true,
+    p_idempotency_key  => 'mapping-key-test-22'
+  );
+  IF (r->>'success')::boolean OR r->>'reason_code' != 'invalid_staff' THEN
+    RAISE EXCEPTION 'TEST 22 FAIL: unmapped active staff did not return invalid_staff: %', r;
+  END IF;
+  RAISE NOTICE 'TEST 22 PASS: Unmapped active staff correctly rejected with invalid_staff.';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 23: Cross-tenant staff returns invalid_staff
+  -- -----------------------------------------------------------------------
+  DECLARE
+    v_xt_tenant_id uuid;
+    v_xt_staff_id  uuid;
+  BEGIN
+    INSERT INTO public.tenants (name, slug, status, onboarding_status, public_site_status)
+    VALUES ('Cross Tenant', 'cross-tenant-t23', 'active', 'completed', 'published')
+    RETURNING id INTO v_xt_tenant_id;
+
+    INSERT INTO public.staff (tenant_id, name, title, active)
+    VALUES (v_xt_tenant_id, 'Cross Tenant Staff', 'Specialist', true)
+    RETURNING id INTO v_xt_staff_id;
+
+    -- Even map the cross-tenant staff to the cross-tenant service (not our service)
+    r := public.create_public_booking(
+      p_slug             => v_slug,
+      p_service_id       => v_service_id,
+      p_staff_id         => v_xt_staff_id,
+      p_appointment_date => v_test_date,
+      p_appointment_time => '12:00:00'::time,
+      p_customer_name    => 'Cross Tenant Test',
+      p_customer_email   => 'mapping-test-23@randapp-test.invalid',
+      p_customer_phone   => '+905001112299',
+      p_required_consent => true,
+      p_idempotency_key  => 'mapping-key-test-23'
+    );
+    IF (r->>'success')::boolean OR r->>'reason_code' != 'invalid_staff' THEN
+      RAISE EXCEPTION 'TEST 23 FAIL: cross-tenant staff did not return invalid_staff: %', r;
+    END IF;
+
+    DELETE FROM public.staff WHERE id = v_xt_staff_id;
+    DELETE FROM public.tenants WHERE id = v_xt_tenant_id;
+    RAISE NOTICE 'TEST 23 PASS: Cross-tenant staff correctly rejected.';
+  END;
+
+  -- -----------------------------------------------------------------------
+  -- TEST 24: Duplicate mapping insert is idempotent (no error)
+  -- -----------------------------------------------------------------------
+  BEGIN
+    INSERT INTO public.staff_services (staff_id, service_id)
+    VALUES (v_mapped_staff_id, v_service_id)
+    ON CONFLICT (staff_id, service_id) DO NOTHING;
+    RAISE NOTICE 'TEST 24 PASS: Duplicate staff_services insert correctly did nothing.';
+  END;
+
+  -- -----------------------------------------------------------------------
+  -- TEST 25: Removing mapping causes invalid_staff
+  -- -----------------------------------------------------------------------
+  DELETE FROM public.staff_services
+  WHERE staff_id = v_mapped_staff_id AND service_id = v_service_id;
+
+  r := public.create_public_booking(
+    p_slug             => v_slug,
+    p_service_id       => v_service_id,
+    p_staff_id         => v_mapped_staff_id,
+    p_appointment_date => v_test_date,
+    p_appointment_time => '13:00:00'::time,
+    p_customer_name    => 'Mapping Test Customer',
+    p_customer_email   => 'mapping-test-25@randapp-test.invalid',
+    p_customer_phone   => '+905001112299',
+    p_required_consent => true,
+    p_idempotency_key  => 'mapping-key-test-25'
+  );
+  IF (r->>'success')::boolean OR r->>'reason_code' != 'invalid_staff' THEN
+    RAISE EXCEPTION 'TEST 25 FAIL: deleted mapping did not produce invalid_staff: %', r;
+  END IF;
+  RAISE NOTICE 'TEST 25 PASS: Removed mapping correctly produces invalid_staff.';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 26: Restoring mapping restores booking success
+  -- -----------------------------------------------------------------------
+  INSERT INTO public.staff_services (staff_id, service_id)
+  VALUES (v_mapped_staff_id, v_service_id)
+  ON CONFLICT (staff_id, service_id) DO NOTHING;
+
+  r := public.create_public_booking(
+    p_slug             => v_slug,
+    p_service_id       => v_service_id,
+    p_staff_id         => v_mapped_staff_id,
+    p_appointment_date => v_test_date,
+    p_appointment_time => '14:00:00'::time,
+    p_customer_name    => 'Mapping Test Customer',
+    p_customer_email   => 'mapping-test-26@randapp-test.invalid',
+    p_customer_phone   => '+905001112299',
+    p_required_consent => true,
+    p_idempotency_key  => 'mapping-key-test-26'
+  );
+  IF NOT (r->>'success')::boolean THEN
+    RAISE EXCEPTION 'TEST 26 FAIL: restored mapping did not restore success: %', r;
+  END IF;
+  RAISE NOTICE 'TEST 26 PASS: Restored mapping correctly restores booking success.';
+
+  -- Cleanup test fixtures
+  DELETE FROM public.staff_services WHERE staff_id IN (v_mapped_staff_id, v_unmapped_staff_id);
+
+  DELETE FROM public.appointment_access_tokens
+  WHERE appointment_id IN (
+    SELECT id FROM public.appointments WHERE tenant_id = v_tenant_id
+      AND user_email LIKE '%@randapp-test.invalid'
+  );
+  DELETE FROM public.public_booking_idempotency
+  WHERE tenant_id = v_tenant_id AND idempotency_key LIKE 'mapping-key-test-%';
+  DELETE FROM public.appointments
+  WHERE tenant_id = v_tenant_id AND user_email LIKE '%@randapp-test.invalid';
+  DELETE FROM public.consent_ledger
+  WHERE tenant_id = v_tenant_id::text
+    AND customer_id IN (
+      SELECT id::text FROM public.customers
+      WHERE tenant_id = v_tenant_id AND email LIKE '%@randapp-test.invalid'
+    );
+  DELETE FROM public.customers
+  WHERE tenant_id = v_tenant_id AND email LIKE '%@randapp-test.invalid';
+  DELETE FROM public.availability_rules WHERE staff_id IN (v_mapped_staff_id, v_unmapped_staff_id);
+  DELETE FROM public.staff WHERE id IN (v_mapped_staff_id, v_unmapped_staff_id);
+  DELETE FROM public.services WHERE id = v_service_id;
+
+  RAISE NOTICE '=== STAFF-SERVICE MAPPING TESTS 21-26 COMPLETED ===';
+END $$;
+
+
+-- =========================================================================
 -- CLEANUP: Delete all synthetic test artifacts
 -- =========================================================================
 DO $$

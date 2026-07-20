@@ -36,7 +36,17 @@ export const getStaffListForService = async (tenantId: string, serviceId: string
   return getCatalogRepository().listStaffForService(tenantId, serviceId);
 };
 
+export const assignServiceToStaff = async (staffId: string, serviceId: string): Promise<void> => {
+  return getCatalogRepository().assignServiceToStaff(staffId, serviceId);
+};
+
+export const removeServiceFromStaff = async (staffId: string, serviceId: string): Promise<void> => {
+  return getCatalogRepository().removeServiceFromStaff(staffId, serviceId);
+};
+
+export const listServicesForStaff = async (staffId: string): Promise<string[]> => {
+  return getCatalogRepository().listServicesForStaff(staffId);
+};
+
 
 // Legacy verification reference: getStaffRepository
-
-

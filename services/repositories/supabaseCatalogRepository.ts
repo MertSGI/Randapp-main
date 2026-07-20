@@ -138,7 +138,10 @@ export class SupabaseCatalogRepository implements CatalogRepository {
   async assignServiceToStaff(staffId: string, serviceId: string): Promise<void> {
     await fetchSupabase('/rest/v1/staff_services', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=ignore-duplicates'
+      },
       body: JSON.stringify({ staff_id: staffId, service_id: serviceId })
     });
   }
@@ -168,6 +171,17 @@ export class SupabaseCatalogRepository implements CatalogRepository {
           calendarEmail: d.staff.calendar_email,
           active: d.staff.active
         }));
+    } catch {
+      return [];
+    }
+  }
+
+  async listServicesForStaff(staffId: string): Promise<string[]> {
+    try {
+      const res = await fetchSupabase(`/rest/v1/staff_services?staff_id=eq.${staffId}&select=service_id`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.map((d: any) => d.service_id as string);
     } catch {
       return [];
     }

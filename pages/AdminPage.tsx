@@ -6,7 +6,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useTenant } from '../contexts/TenantContext';
 import { useAuth } from '../contexts/AuthContext';
 import { getAppointments, updateAppointmentStatus } from '../services/appointmentService';
-import { getStaffList, createStaff, updateStaff, deleteStaff } from '../services/staffService';
+import { getStaffList, createStaff, updateStaff, deleteStaff, assignServiceToStaff, removeServiceFromStaff, listServicesForStaff } from '../services/staffService';
 import { getServices, createService, updateService, deleteService } from '../services/serviceCatalogService';
 import { Service, BusinessBranch } from '../types';
 import { useDialog } from '../contexts/DialogContext';
@@ -86,6 +86,8 @@ const AdminPage: React.FC = () => {
   const [newStaffPhone, setNewStaffPhone] = useState('');
 
   const [newStaffActive, setNewStaffActive] = useState(true);
+  // Service assignment checkboxes — service IDs currently assigned to the staff being added/edited
+  const [selectedStaffServiceIds, setSelectedStaffServiceIds] = useState<string[]>([]);
 
   // New/Edit service form state
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
@@ -334,8 +336,16 @@ const AdminPage: React.FC = () => {
         // Validation or update error, keep form open
         return;
       }
+      // Sync service assignments: resolve existing mappings, then add/remove delta
+      const existingIds = await listServicesForStaff(editingStaffId).catch(() => [] as string[]);
+      const toAdd = selectedStaffServiceIds.filter(id => !existingIds.includes(id));
+      const toRemove = existingIds.filter(id => !selectedStaffServiceIds.includes(id));
+      await Promise.all([
+        ...toAdd.map(svcId => assignServiceToStaff(editingStaffId, svcId)),
+        ...toRemove.map(svcId => removeServiceFromStaff(editingStaffId, svcId))
+      ]);
     } else {
-      await createStaff(tenant.id, {
+      const newStaff = await createStaff(tenant.id, {
         name: newStaffName,
         title: newStaffTitle,
         image: newStaffImage || '',
@@ -343,11 +353,16 @@ const AdminPage: React.FC = () => {
         phone: newStaffPhone || undefined,
         active: newStaffActive
       });
+      // Assign selected services to the newly created staff member
+      if (newStaff?.id && selectedStaffServiceIds.length > 0) {
+        await Promise.all(selectedStaffServiceIds.map(svcId => assignServiceToStaff(newStaff.id, svcId)));
+      }
     }
     
     loadData();
     resetForm();
   };
+
 
   // Weekly Availability Form State
   interface AvailabilityDay {
@@ -372,7 +387,9 @@ const AdminPage: React.FC = () => {
     setNewStaffPhone(staff.phone || '');
     setNewStaffActive(staff.active ?? true);
     
-    // Load availability rules
+    // Load existing service-to-staff mappings for this staff member
+    listServicesForStaff(staff.id).then(ids => setSelectedStaffServiceIds(ids)).catch(() => setSelectedStaffServiceIds([]));
+
     if (tenant) {
       setLoadingAvailability(true);
       try {
@@ -490,8 +507,10 @@ const AdminPage: React.FC = () => {
     setNewStaffEmail('');
     setNewStaffPhone('');
     setNewStaffActive(true);
+    setSelectedStaffServiceIds([]);
     setWeeklyAvailability([]);
   };
+
 
   return (
     <div className="space-y-6 container mx-auto px-4 max-w-7xl pt-6 pb-safe pb-24 md:pb-6">
@@ -978,7 +997,37 @@ const AdminPage: React.FC = () => {
                   </label>
                 </div>
               </div>
-              <div className="flex gap-3">
+              {/* ── Service Assignment ── */}
+              <div className="mt-4 border-t border-gray-100 dark:border-slate-700 pt-4">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Hizmet Ataması <span className="text-xs text-gray-400">(Müşteri rezervasyon ekranında yalnızca atanmış hizmetler gösterilir)</span>
+                </label>
+                {servicesList.filter(s => s.active !== false).length === 0 ? (
+                  <p className="text-sm text-amber-600 dark:text-amber-400">Henüz aktif hizmet yok. Önce hizmetler sekmesinden hizmet ekleyin.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-3">
+                    {servicesList.filter(s => s.active !== false).map(svc => (
+                      <label key={svc.id} className="flex items-center gap-2 cursor-pointer select-none text-sm text-gray-700 dark:text-gray-300">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 text-accent focus:ring-accent border-gray-300 rounded"
+                          checked={selectedStaffServiceIds.includes(svc.id)}
+                          onChange={e => {
+                            setSelectedStaffServiceIds(prev =>
+                              e.target.checked ? [...prev, svc.id] : prev.filter(id => id !== svc.id)
+                            );
+                          }}
+                        />
+                        {svc.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {selectedStaffServiceIds.length === 0 && (
+                  <p className="text-xs text-amber-500 mt-1">⚠ Bu uzman hiçbir hizmete atanmamış — müşteriler bu uzmanı seçemeyecek.</p>
+                )}
+              </div>
+              <div className="flex gap-3 mt-4">
                   <button type="submit" className="bg-accent text-white px-4 py-2 rounded-md shadow-sm font-medium hover:bg-blue-600">
                     {editingStaffId ? t.admin.update : t.admin.add_staff_btn}
                   </button>
@@ -988,6 +1037,7 @@ const AdminPage: React.FC = () => {
                       </button>
                   )}
               </div>
+
             </form>
           </div>
 

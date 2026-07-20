@@ -751,7 +751,23 @@ async function testDatabaseRLSRegression() {
   assert(bookingPageContent.includes("finally"), 'BookingPage handleSubmit must clear submitting loading state in finally block');
   assert(bookingPageContent.includes("createAppointment"), 'BookingPage must execute createAppointment in Core path');
   assert(bookingPageContent.includes("NotificationService.sendBookingEmail"), 'BookingPage must treat email notifications as non-critical caught side-effects');
+  assert(bookingPageContent.includes("getStaffListForService"), 'BookingPage must use service-filtered staff list to prevent invalid_staff RPC rejections');
+
+  // Verify staffService.ts exports the staff-service assignment workflow functions
+  const staffServiceContent = fs.readFileSync(path.join(process.cwd(), 'services', 'staffService.ts'), 'utf8');
+  assert(staffServiceContent.includes('getStaffListForService'), 'staffService must export getStaffListForService for public booking filtering');
+  assert(staffServiceContent.includes('assignServiceToStaff'), 'staffService must export assignServiceToStaff for admin assignment workflow');
+  assert(staffServiceContent.includes('removeServiceFromStaff'), 'staffService must export removeServiceFromStaff for admin assignment workflow');
+  assert(staffServiceContent.includes('listServicesForStaff'), 'staffService must export listServicesForStaff for loading existing assignments in admin form');
+
+  // Verify AdminPage.tsx includes the service assignment UI and workflow
+  const adminPageContent = fs.readFileSync(path.join(process.cwd(), 'pages', 'AdminPage.tsx'), 'utf8');
+  assert(adminPageContent.includes('assignServiceToStaff'), 'AdminPage must call assignServiceToStaff when saving staff');
+  assert(adminPageContent.includes('removeServiceFromStaff'), 'AdminPage must call removeServiceFromStaff when removing assignments');
+  assert(adminPageContent.includes('listServicesForStaff'), 'AdminPage must load existing assignments when editing staff');
+  assert(adminPageContent.includes('selectedStaffServiceIds'), 'AdminPage must track selected service IDs for the staff form');
   
+
   // Verify 14th migration can_accept_public_booking RPC static checks
   const eligibilityRpcContent = fs.readFileSync(path.join(migrationDir, '20260716_public_booking_eligibility_rpc.sql'), 'utf8');
   assert(eligibilityRpcContent.includes('CREATE OR REPLACE FUNCTION public.can_accept_public_booking'), 'Must define can_accept_public_booking RPC');
