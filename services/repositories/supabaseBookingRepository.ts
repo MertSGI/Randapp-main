@@ -2,6 +2,14 @@ import { BookingRepository } from './types';
 import { Appointment, CustomerProfile, CustomerMemoryNote } from '../../types';
 import { fetchSupabase } from './supabaseClient';
 
+export interface PublicBookingResult {
+  success: boolean;
+  appointmentId?: string;
+  manageToken?: string;
+  reasonCode: string;
+}
+
+
 export class SupabaseBookingRepository implements BookingRepository {
   async listAppointments(tenantId: string, filter?: { date?: string, upcomingOnly?: boolean }): Promise<Appointment[]> {
     try {
@@ -143,6 +151,65 @@ export class SupabaseBookingRepository implements BookingRepository {
       cancelledBy
     });
     return !!res;
+  }
+
+  /**
+   * createPublicBooking — calls the SECURITY DEFINER RPC create_public_booking.
+   * The anonymous role cannot INSERT directly into appointments/customers/consent_ledger.
+   * This is the only valid path for public (unauthenticated) booking creation.
+   */
+  async createPublicBooking(params: {
+    slug: string;
+    serviceId: string;
+    staffId: string;
+    appointmentDate: string; // YYYY-MM-DD
+    appointmentTime: string; // HH:MM or HH:MM:SS
+    customerName: string;
+    customerEmail: string;
+    customerPhone: string;
+    requiredConsent: boolean;
+    marketingConsent?: boolean;
+    reminderConsent?: boolean;
+    idempotencyKey?: string;
+  }): Promise<PublicBookingResult> {
+    const body = {
+      p_slug:              params.slug,
+      p_service_id:        params.serviceId,
+      p_staff_id:          params.staffId,
+      p_appointment_date:  params.appointmentDate,
+      p_appointment_time:  params.appointmentTime,
+      p_customer_name:     params.customerName,
+      p_customer_email:    params.customerEmail || '',
+      p_customer_phone:    params.customerPhone || '',
+      p_required_consent:  params.requiredConsent,
+      p_marketing_consent: params.marketingConsent ?? false,
+      p_reminder_consent:  params.reminderConsent ?? false,
+      p_idempotency_key:   params.idempotencyKey ?? null,
+    };
+
+    const res = await fetchSupabase('/rest/v1/rpc/create_public_booking', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      let errBody = '';
+      try { errBody = await res.text(); } catch {}
+      console.error('create_public_booking RPC failed', res.status, errBody);
+      return { success: false, reasonCode: 'temporary_failure' };
+    }
+
+    const data = await res.json();
+    // Supabase wraps RPC results as the returned value directly
+    const result = Array.isArray(data) ? data[0] : data;
+
+    return {
+      success:       result?.success === true,
+      appointmentId: result?.appointment_id,
+      manageToken:   result?.manage_token,
+      reasonCode:    result?.reason_code || 'temporary_failure',
+    };
   }
 
   async listCustomers(tenantId: string): Promise<any[]> {

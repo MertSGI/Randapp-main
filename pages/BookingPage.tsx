@@ -216,6 +216,12 @@ const BookingPage: React.FC = () => {
   };
 
   const handleWidgetServiceSelect = async (service: Service) => {
+    // If a different service is selected, clear downstream incompatible selections
+    if (selectedService && selectedService.id !== service.id) {
+      setSelectedStaff(null);
+      setSelectedTime('');
+      setIsAnyStaffPreselected(false);
+    }
     setSelectedService(service);
     if (isAnyStaffPreselected && tenant) {
        // Auto-calculate earliest staff since they picked Any
@@ -256,6 +262,24 @@ const BookingPage: React.FC = () => {
   const handleTimeSelect = (time: string) => {
     setSelectedTime(time);
     setStep(4);
+  };
+
+  // Explicit Geri (Back) navigation handlers — preserve upstream state, clear only downstream
+  const handleGoBackFromStaff = () => {
+    // Going back from step 2 (staff) to step 1 (service) — no state cleared
+    setStep(1);
+  };
+
+  const handleGoBackFromDateTime = () => {
+    // Going back from step 3 (date/time) to step 2 (staff) — clear selected time
+    setSelectedTime('');
+    setStep(2);
+  };
+
+  const handleGoBackFromDetails = () => {
+    // Going back from step 4 (customer details) to step 3 (date/time) — clear selected time
+    setSelectedTime('');
+    setStep(3);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -422,31 +446,103 @@ const BookingPage: React.FC = () => {
         }
       }
 
-      // Core Operation: Create Appointment & persistent state validation
-      const newAppointmentPayload = {
-        userId: `guest_${Date.now()}`,
-        user_name: formData.name,
-        user_email: formData.email,
-        phone: formData.phone,
-        serviceId: selectedService.id,
-        staffId: selectedStaff.id,
-        branchId: currentBranchId,
-        source: urlSource,
-        date: selectedDate,
-        time: selectedTime,
-        status: 'confirmed' as const,
-        syncedToGoogle: false, 
-      };
+      // Core Operation: Create Appointment via safe RPC in Supabase mode,
+      // or direct service call in local/mock/demo mode.
+      const dataMode = import.meta.env?.VITE_DATA_MODE || 'mock';
+      const isSupabaseMode = dataMode.startsWith('supabase');
 
-      let newAppointment;
-      try {
-        newAppointment = await createAppointment(tenant.id, newAppointmentPayload);
-        if (!newAppointment || !newAppointment.id) {
-          throw new Error("Veritabanı boş yanıt döndürdü.");
+      // idempotency key: deterministic per browser session + service+staff+date+time
+      const idempotencyKey = `${tenant.id}:${selectedService.id}:${selectedStaff.id}:${selectedDate}:${selectedTime}:${formData.email || formData.phone}`;
+
+      let newAppointment: any;
+      let manageToken: string | undefined;
+
+      if (isSupabaseMode && tenant.slug) {
+        // --- Supabase path: call SECURITY DEFINER RPC ---
+        // Consent, customer, appointment, and token are all created atomically inside the RPC.
+        // Skip the pre-write consent blocks above (they already ran as non-critical in local mode).
+        let rpcResult: any;
+        try {
+          const { SupabaseBookingRepository } = await import('../services/repositories/supabaseBookingRepository');
+          const repo = new SupabaseBookingRepository();
+          rpcResult = await repo.createPublicBooking({
+            slug:            tenant.slug,
+            serviceId:       selectedService.id,
+            staffId:         selectedStaff.id,
+            appointmentDate: selectedDate,
+            appointmentTime: selectedTime,
+            customerName:    formData.name,
+            customerEmail:   formData.email,
+            customerPhone:   formData.phone,
+            requiredConsent: consentForms.requiredBookingConsent,
+            marketingConsent: consentForms.marketingConsent,
+            reminderConsent: consentForms.reminderConsent,
+            idempotencyKey,
+          });
+        } catch (e) {
+          console.error('create_public_booking RPC exception', e);
+          throw new Error(language === 'tr'
+            ? 'Randevu işlemi şu anda tamamlanamıyor. Lütfen kısa süre sonra tekrar deneyin.'
+            : 'Booking could not be completed right now. Please try again shortly.');
         }
-      } catch (e) {
-        console.error("Core appointment creation failed", e);
-        throw new Error("Randevu oluşturulamadı. Seçilen saat dolmuş veya servis dışı olabilir.");
+
+        if (!rpcResult?.success) {
+          const reasonCode = rpcResult?.reasonCode || 'temporary_failure';
+          const messages: Record<string, string> = {
+            slot_conflict:        language === 'tr' ? 'Seçtiğiniz saat artık uygun değil. Lütfen başka bir saat seçin.' : 'This time slot is no longer available. Please choose another time.',
+            outside_availability: language === 'tr' ? 'Seçtiğiniz saat çalışma saatleri dışında.' : 'The selected time is outside working hours.',
+            booking_unavailable:  language === 'tr' ? 'Bu salon şu an online randevu kabul etmiyor.' : 'This salon is not currently accepting online bookings.',
+            invalid_service:      language === 'tr' ? 'Seçilen hizmet geçerli değil.' : 'Selected service is not valid.',
+            invalid_staff:        language === 'tr' ? 'Seçilen uzman bu hizmeti şu an sunmuyor.' : 'Selected staff is not available for this service.',
+            consent_required:     language === 'tr' ? 'Devam etmek için gerekli onayları vermeniz gerekiyor.' : 'Required consents must be granted to proceed.',
+            invalid_customer_data: language === 'tr' ? 'Lütfen ad ve iletişim bilgilerinizi doldurun.' : 'Please fill in your name and contact details.',
+            temporary_failure:    language === 'tr' ? 'Randevu işlemi şu anda tamamlanamıyor. Lütfen kısa süre sonra tekrar deneyin.' : 'Booking could not be completed right now. Please try again shortly.',
+          };
+          throw new Error(messages[reasonCode] || messages['temporary_failure']);
+        }
+
+        manageToken = rpcResult.manageToken;
+        // Build a minimal appointment shape for downstream non-critical operations
+        newAppointment = {
+          id:         rpcResult.appointmentId,
+          tenantId:   tenant.id,
+          user_name:  formData.name,
+          user_email: formData.email,
+          phone:      formData.phone,
+          serviceId:  selectedService.id,
+          staffId:    selectedStaff.id,
+          date:       selectedDate,
+          time:       selectedTime,
+          status:     'confirmed',
+        };
+
+      } else {
+        // --- Local/demo/mock path: use existing direct service call ---
+        const newAppointmentPayload = {
+          userId: `guest_${Date.now()}`,
+          user_name: formData.name,
+          user_email: formData.email,
+          phone: formData.phone,
+          serviceId: selectedService.id,
+          staffId: selectedStaff.id,
+          branchId: currentBranchId,
+          source: urlSource,
+          date: selectedDate,
+          time: selectedTime,
+          status: 'confirmed' as const,
+          syncedToGoogle: false,
+        };
+        try {
+          newAppointment = await createAppointment(tenant.id, newAppointmentPayload);
+          if (!newAppointment || !newAppointment.id) {
+            throw new Error('Empty response from local booking service.');
+          }
+        } catch (e) {
+          console.error('Core appointment creation failed (local)', e);
+          throw new Error(language === 'tr'
+            ? 'Randevu oluşturulamadı. Seçilen saat dolmuş veya servis dışı olabilir.'
+            : 'Booking failed. The selected slot may no longer be available.');
+        }
       }
 
       try {
@@ -686,7 +782,7 @@ const BookingPage: React.FC = () => {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white transition-colors duration-300">{t.booking.steps[0] || 'Uzman Seçin'}</h2>
-              <button onClick={() => setStep(1)} className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white underline transition-colors duration-300">{t.booking.change_service}</button>
+              <button onClick={handleGoBackFromStaff} className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white underline transition-colors duration-300">← {t.booking.change_service}</button>
             </div>
             
             <div className="bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 p-4 rounded-xl text-sm justify-between shadow-sm flex items-center gap-3 transition-colors duration-300 mb-6">
@@ -748,7 +844,7 @@ const BookingPage: React.FC = () => {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white transition-colors duration-300">{t.booking.step2_title}</h2>
-              <button onClick={() => setStep(2)} className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white underline transition-colors duration-300">{t.booking.change_staff}</button>
+              <button onClick={handleGoBackFromDateTime} className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white underline transition-colors duration-300">← {t.booking.change_staff}</button>
             </div>
             
             <div className="bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 p-4 rounded-xl text-sm justify-between shadow-sm flex items-center gap-3 transition-colors duration-300 mb-6">
@@ -808,7 +904,7 @@ const BookingPage: React.FC = () => {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white transition-colors duration-300">{t.booking.step3_title}</h2>
-              <button onClick={() => setStep(3)} className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white underline transition-colors duration-300">{t.booking.step3_change}</button>
+              <button onClick={handleGoBackFromDetails} className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white underline transition-colors duration-300">← {t.booking.step3_change}</button>
             </div>
 
             <div className="bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 p-4 rounded-xl text-sm text-gray-600 dark:text-gray-300 mb-4 flex justify-between items-center shadow-sm transition-colors duration-300">
