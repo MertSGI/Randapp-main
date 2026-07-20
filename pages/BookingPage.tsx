@@ -69,7 +69,18 @@ const BookingPage: React.FC = () => {
   const [idempotencyKey, setIdempotencyKey] = useState<string>('');
 
 
-  const timeSlots = generateTimeSlots();
+  const [timeSlots, setTimeSlots] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (tenant && selectedStaff && selectedService && selectedDate) {
+      availabilityService.getAvailableSlotsForStaff(tenant.id, selectedStaff.id, selectedService.id, selectedDate)
+        .then(slots => {
+          setTimeSlots(slots.map(s => s.time));
+        });
+    } else {
+      setTimeSlots([]);
+    }
+  }, [tenant, selectedStaff, selectedService, selectedDate]);
   
   const requestedPreview = new URLSearchParams(window.location.hash.split('?')[1]).get('preview') === 'true';
   const urlSource = new URLSearchParams(window.location.hash.split('?')[1]).get('source') || undefined;

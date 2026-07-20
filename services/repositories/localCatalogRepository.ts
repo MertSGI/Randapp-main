@@ -217,7 +217,26 @@ export class LocalCatalogRepository implements CatalogRepository {
 
   async listAvailabilityRules(tenantId: string, staffId?: string): Promise<AvailabilityRule[]> {
     const localData = localStorage.getItem(`lari:${tenantId}:availability_rules`);
-    const rules = (localData ? JSON.parse(localData) : []).map((rule: any) => this.normalizeAvailabilityRule(tenantId, rule));
+    let rules = (localData ? JSON.parse(localData) : []).map((rule: any) => this.normalizeAvailabilityRule(tenantId, rule));
+    if (rules.length === 0) {
+      const seeded: AvailabilityRule[] = [];
+      const staffIds = ['staff_1', 'staff_2', 'staff_3'];
+      for (const sid of staffIds) {
+        for (let d = 1; d <= 7; d++) {
+          seeded.push({
+            id: `rule_seeded_${sid}_${d}`,
+            tenantId,
+            staffId: sid,
+            weekday: d,
+            is_active: true,
+            start_time: '09:00:00',
+            end_time: '18:00:00'
+          });
+        }
+      }
+      rules = seeded;
+      localStorage.setItem(`lari:${tenantId}:availability_rules`, JSON.stringify(rules));
+    }
     if (staffId) {
       return rules.filter((r: AvailabilityRule) => r.staffId === staffId || r.staffId == null);
     }

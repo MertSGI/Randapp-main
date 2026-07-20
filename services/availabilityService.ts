@@ -1,7 +1,7 @@
 import { getStaffList } from './staffService';
 import { Staff } from '../types';
 import { getAppointments } from './appointmentService';
-import { getAvailabilityRepository } from './repositories';
+import { getAvailabilityRepository, getBookingRepository, getServiceCatalogRepository } from './repositories';
 
 export interface TimeSlot {
   time: string; // HH:mm
@@ -24,22 +24,99 @@ export const availabilityService = {
     return repo.getPublicAvailabilityByTenantSlug(slug);
   },
 
-  getAvailableSlotsForStaff(tenantId: string, staffId: string, serviceId: string, dateStr: string): Promise<TimeSlot[]> {
-     return new Promise((resolve) => {
-        // Mock generation
-        // Normally, we query the appointments for this date and staff, 
-        // and check business hours.
-        const slots: TimeSlot[] = [];
-        const hours = ['10:00', '11:00', '13:00', '14:30', '15:00', '16:30'];
-        hours.forEach((h, idx) => {
-            // Randomly block some slots based on ID and date string for mock variety
-            slots.push({
-               time: h,
-               available: (idx + staffId.length + dateStr.length) % 3 !== 0
-            });
-        });
-        resolve(slots);
-     });
+  async getAvailableSlotsForStaff(tenantId: string, staffId: string, serviceId: string, dateStr: string): Promise<TimeSlot[]> {
+     try {
+       const catalogRepo = getAvailabilityRepository();
+       const bookingRepo = getBookingRepository();
+
+       // 1. Fetch staff availability rules
+       const rules = await catalogRepo.listAvailabilityRules(tenantId, staffId);
+       
+       // Parse local weekday from dateStr (YYYY-MM-DD)
+       // Standard weekday calculation: Monday=1, ..., Sunday=7
+       const localDate = new Date(dateStr + 'T00:00:00');
+       let weekday = localDate.getDay(); // 0=Sunday, 1=Monday, ..., 6=Saturday
+       if (weekday === 0) weekday = 7;
+
+       const rule = rules.find((r) => r.weekday === weekday && r.is_active);
+       if (!rule) return [];
+
+       // 2. Fetch service duration
+       const service = await getServiceCatalogRepository().getServiceById(serviceId);
+       const duration = service?.duration || 30;
+
+       // 3. Fetch non-cancelled booked slots for this date and staff
+       const appointments = await bookingRepo.listAppointments(tenantId, { date: dateStr });
+       const booked = appointments.filter((apt) => 
+         apt.status !== 'cancelled' && 
+         apt.status !== 'cancelled_by_customer' && 
+         apt.status !== 'cancelled_by_salon' && 
+         apt.status !== 'cancelled_by_system' && 
+         apt.status !== 'no_show' && 
+         apt.staffId === staffId
+       );
+
+       // 4. Generate candidate slots between rule.start_time and rule.end_time in 15 minute steps (or business interval)
+       const slots: TimeSlot[] = [];
+       const [sh, sm] = rule.start_time.split(':').map(Number);
+       const [eh, em] = rule.end_time.split(':').map(Number);
+       const startMin = sh * 60 + sm;
+       const endMin = eh * 60 + em;
+
+       // Determine the current local time in Europe/Istanbul to filter past slots
+       const istanbulTime = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }));
+       const todayStr = istanbulTime.getFullYear() + '-' + 
+         String(istanbulTime.getMonth() + 1).padStart(2, '0') + '-' + 
+         String(istanbulTime.getDate()).padStart(2, '0');
+       const nowMin = istanbulTime.getHours() * 60 + istanbulTime.getMinutes();
+
+       // Use 15-minute slot steps to offer flexible booking start times
+       for (let min = startMin; min <= endMin - duration; min += 15) {
+         const h = Math.floor(min / 60);
+         const m = min % 60;
+         const timeStr = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+
+         // Check if slot is in the past for today
+         if (dateStr === todayStr && min <= nowMin) {
+           continue;
+         }
+
+         // Check overlaps with booked appointments
+         let isOverlap = false;
+         for (const apt of booked) {
+           const [ah, am] = apt.time.split(':').map(Number);
+           const aptStart = ah * 60 + am;
+           // We need the duration of the booked service. Let's find it.
+           // Fallback to 30 mins if not resolvable.
+           let aptDuration = 30;
+           if (apt.serviceId) {
+             const s = await getServiceCatalogRepository().getServiceById(apt.serviceId);
+             if (s?.duration) aptDuration = s.duration;
+           }
+
+           const aptEnd = aptStart + aptDuration;
+           const slotStart = min;
+           const slotEnd = min + duration;
+
+           if (slotStart < aptEnd && slotEnd > aptStart) {
+             isOverlap = true;
+             break;
+           }
+         }
+
+         if (!isOverlap) {
+           slots.push({
+             time: timeStr,
+             available: true
+           });
+         }
+       }
+
+       return slots;
+     } catch (err) {
+       console.error('Error generating slots:', err);
+       return [];
+     }
   },
 
   getNextAvailableSlotForStaff(tenantId: string, staffId: string, serviceId: string): Promise<{date: string, time: string} | null> {
