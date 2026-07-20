@@ -7,11 +7,11 @@ export class SupabaseBookingRepository implements BookingRepository {
     try {
       let url = `/rest/v1/appointments?tenant_id=eq.${tenantId}&select=*`;
       if (filter?.date) {
-        url += `&date=eq.${filter.date}`;
+        url += `&appointment_date=eq.${filter.date}`;
       }
       if (filter?.upcomingOnly) {
         const now = new Date().toISOString().split('T')[0];
-        url += `&date=gte.${now}`;
+        url += `&appointment_date=gte.${now}`;
       }
       const res = await fetchSupabase(url);
       if (!res.ok) return [];
@@ -26,8 +26,8 @@ export class SupabaseBookingRepository implements BookingRepository {
         phone: a.phone,
         serviceId: a.service_id,
         staffId: a.staff_id,
-        date: a.date,
-        time: a.time,
+        date: a.appointment_date,
+        time: a.appointment_time,
         status: a.status,
         notes: a.notes,
         cancelReason: a.cancel_reason,
@@ -56,8 +56,8 @@ export class SupabaseBookingRepository implements BookingRepository {
         phone: a.phone,
         serviceId: a.service_id,
         staffId: a.staff_id,
-        date: a.date,
-        time: a.time,
+        date: a.appointment_date,
+        time: a.appointment_time,
         status: a.status,
         notes: a.notes,
         cancelReason: a.cancel_reason,
@@ -75,19 +75,24 @@ export class SupabaseBookingRepository implements BookingRepository {
       headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
       body: JSON.stringify({
         tenant_id: tenantId,
-        customer_id: input.customerId,
+        customer_id: input.customerId || null,
         user_name: input.user_name,
         user_email: input.user_email,
         phone: input.phone,
         service_id: input.serviceId,
         staff_id: input.staffId,
-        date: input.date,
-        time: input.time,
+        appointment_date: input.date,
+        appointment_time: input.time,
         status: input.status,
         notes: input.notes,
       })
     });
-    if (!res.ok) throw new Error('Supabase insert failed');
+    if (!res.ok) {
+      let errBody = '';
+      try { errBody = await res.text(); } catch {}
+      console.error('Supabase appointment INSERT failed', res.status, errBody);
+      throw new Error(`Supabase insert failed: ${res.status} ${errBody}`);
+    }
     const data = await res.json();
     const a = data[0];
     return {
@@ -100,8 +105,8 @@ export class SupabaseBookingRepository implements BookingRepository {
       phone: a.phone,
       serviceId: a.service_id,
       staffId: a.staff_id,
-      date: a.date,
-      time: a.time,
+      date: a.appointment_date,
+      time: a.appointment_time,
       status: a.status,
       notes: a.notes,
       cancelReason: a.cancel_reason,
@@ -121,8 +126,8 @@ export class SupabaseBookingRepository implements BookingRepository {
         cancel_reason: patch.cancelReason,
         cancelled_at: patch.cancelledAt,
         cancelled_by: patch.cancelledBy,
-        date: patch.date,
-        time: patch.time,
+        appointment_date: patch.date,
+        appointment_time: patch.time,
       }) // simplified
     });
     if (!res.ok) throw new Error('Supabase update failed');
