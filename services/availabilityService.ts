@@ -108,14 +108,15 @@ export const availabilityService = {
 
        // 3. Fetch non-cancelled booked slots for this date and staff
        const appointments = await bookingRepo.listAppointments(tenantId, { date: dateStr });
-       const booked = appointments.filter((apt) => 
-         apt.status !== 'cancelled' && 
-         apt.status !== 'cancelled_by_customer' && 
-         apt.status !== 'cancelled_by_salon' && 
-         apt.status !== 'cancelled_by_system' && 
-         apt.status !== 'no_show' && 
-         apt.staffId === staffId
-       );
+       const booked = appointments.filter((apt) => {
+         const st = (apt.status as string);
+         return st !== 'cancelled' && 
+                st !== 'cancelled_by_customer' && 
+                st !== 'cancelled_by_salon' && 
+                st !== 'cancelled_by_system' && 
+                st !== 'no_show' && 
+                apt.staffId === staffId;
+       });
 
        // 4. Generate candidate slots between rule.start_time and rule.end_time in 15 minute steps (or business interval)
        const slots: TimeSlot[] = [];

@@ -222,7 +222,7 @@ BEGIN
         SELECT 1 FROM pg_constraint WHERE conname = 'fk_appointments_branch_tenant'
     ) THEN
         ALTER TABLE public.appointments ADD CONSTRAINT fk_appointments_branch_tenant 
-            FOREIGN KEY (branch_id, tenant_id) REFERENCES public.branches(id, tenant_id) ON DELETE SET NULL;
+            FOREIGN KEY (branch_id, tenant_id) REFERENCES public.branches(id, tenant_id) ON DELETE RESTRICT;
     END IF;
 
     IF NOT EXISTS (

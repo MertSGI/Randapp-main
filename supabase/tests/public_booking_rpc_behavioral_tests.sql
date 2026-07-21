@@ -1252,3 +1252,140 @@ BEGIN
 END $$;
 
 
+-- =========================================================================
+-- STAGE A BRANCH DELETION & HISTORY TESTS: Tests 41-43
+-- TEST 41: Deactivating a branch preserves linked appointments & tenant_id/branch_id
+-- TEST 42: Physical deletion of a branch referenced by an appointment is REJECTED (ON DELETE RESTRICT)
+-- TEST 43: Deleting an unreferenced branch succeeds cleanly
+-- =========================================================================
+DO $$
+DECLARE
+  v_slug            text := 'melis-guzellik';
+  v_tenant_id       uuid;
+  v_branch_id       uuid;
+  v_unref_branch    uuid;
+  v_service_id      uuid;
+  v_staff_id        uuid;
+  v_test_date       date := (CURRENT_DATE + 40)::date;
+  v_apt_id          uuid;
+  r                 jsonb;
+  v_delete_failed   boolean := false;
+  v_check_tenant    uuid;
+  v_check_branch    uuid;
+BEGIN
+  SELECT id INTO v_tenant_id FROM public.tenants WHERE slug = v_slug;
+
+  -- Create branch with active appointment
+  INSERT INTO public.branches (tenant_id, name, slug, is_active, is_primary)
+  VALUES (v_tenant_id, 'Stage A Deletion Branch', 'stage-a-deletion', true, true)
+  ON CONFLICT (tenant_id, slug) DO UPDATE SET is_primary = true, is_active = true
+  RETURNING id INTO v_branch_id;
+
+  -- Create unreferenced branch
+  INSERT INTO public.branches (tenant_id, name, slug, is_active, is_primary)
+  VALUES (v_tenant_id, 'Stage A Unreferenced Branch', 'stage-a-unref', true, false)
+  RETURNING id INTO v_unref_branch;
+
+  INSERT INTO public.services (tenant_id, name, duration, price, active)
+  VALUES (v_tenant_id, 'Stage A Deletion Service', 30, 150, true)
+  RETURNING id INTO v_service_id;
+
+  INSERT INTO public.staff (tenant_id, name, title, active)
+  VALUES (v_tenant_id, 'Stage A Deletion Staff', 'Specialist', true)
+  RETURNING id INTO v_staff_id;
+
+  INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id) VALUES (v_tenant_id, v_staff_id, v_branch_id);
+  INSERT INTO public.service_branches (tenant_id, service_id, branch_id) VALUES (v_tenant_id, v_service_id, v_branch_id);
+  INSERT INTO public.staff_services (staff_id, service_id) VALUES (v_staff_id, v_service_id);
+  INSERT INTO public.availability_rules (tenant_id, staff_id, weekday, start_time, end_time, is_active)
+  SELECT v_tenant_id, v_staff_id, d, '09:00', '19:00', true FROM generate_series(1, 7) AS d;
+
+  -- Book an appointment on this branch
+  r := public.create_public_booking(
+    p_slug             => v_slug,
+    p_branch_id        => v_branch_id,
+    p_service_id       => v_service_id,
+    p_staff_id         => v_staff_id,
+    p_appointment_date => v_test_date,
+    p_appointment_time => '10:00:00'::time,
+    p_customer_name    => 'Deletion Test User',
+    p_customer_email   => 'del-test-41@randapp-test.invalid',
+    p_customer_phone   => '+905001117766',
+    p_required_consent => true,
+    p_idempotency_key  => 'del-key-41'
+  );
+  IF NOT (r->>'success')::boolean THEN
+    RAISE EXCEPTION 'TEST 41 SETUP FAIL: booking creation failed: %', r;
+  END IF;
+  v_apt_id := (r->>'appointment_id')::uuid;
+
+  RAISE NOTICE '=== STARTING STAGE A BRANCH DELETION & HISTORY TESTS 41-43 ===';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 41: Deactivating a branch preserves linked appointment & IDs
+  -- -----------------------------------------------------------------------
+  UPDATE public.branches SET is_active = false WHERE id = v_branch_id;
+
+  SELECT tenant_id, branch_id INTO v_check_tenant, v_check_branch
+  FROM public.appointments WHERE id = v_apt_id;
+
+  IF v_check_tenant IS NULL OR v_check_branch IS DISTINCT FROM v_branch_id THEN
+    RAISE EXCEPTION 'TEST 41 FAIL: Appointment tenant_id or branch_id mutated after branch deactivation';
+  END IF;
+  RAISE NOTICE 'TEST 41 PASS: Deactivating branch preserved appointment branch_id & tenant_id.';
+
+  -- Reactivate branch temporarily for delete test
+  UPDATE public.branches SET is_active = true WHERE id = v_branch_id;
+
+  -- -----------------------------------------------------------------------
+  -- TEST 42: Physical deletion of referenced branch is REJECTED by ON DELETE RESTRICT
+  -- -----------------------------------------------------------------------
+  BEGIN
+    DELETE FROM public.branches WHERE id = v_branch_id;
+  EXCEPTION WHEN foreign_key_violation THEN
+    v_delete_failed := true;
+  END;
+
+  IF NOT v_delete_failed THEN
+    RAISE EXCEPTION 'TEST 42 FAIL: ON DELETE RESTRICT constraint failed to reject deleting referenced branch';
+  END IF;
+
+  -- Verify appointment branch_id and tenant_id remain unchanged
+  SELECT tenant_id, branch_id INTO v_check_tenant, v_check_branch
+  FROM public.appointments WHERE id = v_apt_id;
+
+  IF v_check_tenant IS NULL OR v_check_branch IS DISTINCT FROM v_branch_id THEN
+    RAISE EXCEPTION 'TEST 42 FAIL: Appointment branch_id was modified during failed delete attempt';
+  END IF;
+  RAISE NOTICE 'TEST 42 PASS: Physical delete of referenced branch rejected by ON DELETE RESTRICT.';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 43: Deleting an unreferenced branch succeeds cleanly
+  -- -----------------------------------------------------------------------
+  DELETE FROM public.branches WHERE id = v_unref_branch;
+  IF EXISTS (SELECT 1 FROM public.branches WHERE id = v_unref_branch) THEN
+    RAISE EXCEPTION 'TEST 43 FAIL: Unreferenced branch deletion failed';
+  END IF;
+  RAISE NOTICE 'TEST 43 PASS: Deleting unreferenced branch succeeded cleanly.';
+
+  -- Cleanup
+  DELETE FROM public.appointment_access_tokens WHERE appointment_id = v_apt_id;
+  DELETE FROM public.public_booking_idempotency WHERE appointment_id = v_apt_id;
+  DELETE FROM public.appointments WHERE id = v_apt_id;
+  DELETE FROM public.consent_ledger WHERE customer_id IN (
+    SELECT id::text FROM public.customers WHERE tenant_id = v_tenant_id AND email = 'del-test-41@randapp-test.invalid'
+  );
+  DELETE FROM public.customers WHERE tenant_id = v_tenant_id AND email = 'del-test-41@randapp-test.invalid';
+  DELETE FROM public.staff_branches WHERE staff_id = v_staff_id;
+  DELETE FROM public.service_branches WHERE service_id = v_service_id;
+  DELETE FROM public.staff_services WHERE staff_id = v_staff_id;
+  DELETE FROM public.availability_rules WHERE staff_id = v_staff_id;
+  DELETE FROM public.staff WHERE id = v_staff_id;
+  DELETE FROM public.services WHERE id = v_service_id;
+  DELETE FROM public.branches WHERE id = v_branch_id;
+
+  RAISE NOTICE '=== STAGE A BRANCH DELETION & HISTORY TESTS 41-43 COMPLETED SUCCESSFULLY ===';
+END $$;
+
+
+
