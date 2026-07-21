@@ -54,6 +54,38 @@ assert(
   "AdminPage must use correct translation keys instead of hardcoded string 'Referans & Puan'"
 );
 
+// Stage B.2 Unified Admin Bootstrap Architecture Checks
+const useAdminBootstrapPath = path.join(rootDir, 'services/useAdminBootstrap.ts');
+assert(fs.existsSync(useAdminBootstrapPath), 'useAdminBootstrap.ts hook must exist');
+
+const useAdminBootstrapContent = fs.existsSync(useAdminBootstrapPath) ? fs.readFileSync(useAdminBootstrapPath, 'utf-8') : '';
+assert(
+  adminPageContent.includes("useAdminBootstrap"),
+  "AdminPage must import and use useAdminBootstrap hook"
+);
+
+assert(
+  useAdminBootstrapContent.includes("get_my_admin_bootstrap"),
+  "useAdminBootstrap hook must invoke get_my_admin_bootstrap RPC"
+);
+
+assert(
+  useAdminBootstrapContent.includes("loadedKeyRef") && useAdminBootstrapContent.includes("inFlightRef"),
+  "useAdminBootstrap hook must deduplicate bootstrap requests using loadedKeyRef and inFlightRef"
+);
+
+const bookingRepoPath = path.join(rootDir, 'services/repositories/supabaseBookingRepository.ts');
+const bookingRepoContent = fs.existsSync(bookingRepoPath) ? fs.readFileSync(bookingRepoPath, 'utf-8') : '';
+assert(
+  adminPageContent.includes("getAppointments") && bookingRepoContent.includes("get_my_tenant_appointments"),
+  "AdminPage must use get_my_tenant_appointments RPC via appointmentService / SupabaseBookingRepository"
+);
+
+assert(
+  adminPageContent.includes("getDashboardSummary"),
+  "AdminPage must use getDashboardSummary RPC adapter"
+);
+
 if (hasErrors) {
   console.error('\n❌ Admin UX Readiness check failed. Please fix the above issues.');
   process.exit(1);

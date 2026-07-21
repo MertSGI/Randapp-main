@@ -33,7 +33,7 @@ function verifyEntitlement(tenantId: string): void {
   const plan = getTenantPlan(tenantId);
   const hasAccess = entitlementService.canUseFeature(plan, 'campaigns_referrals');
   if (!hasAccess) {
-    throw new Error('Bu Ã¶zellik mevcut paketinizde yer almÄ±yor. MÃ¼ÅŸteri referans kampanyalarÄ±nÄ± kullanmak iÃ§in Profesyonel pakete geÃ§ebilirsiniz.');
+    throw new Error('Bu özellik mevcut paketinizde yer almıyor. Mü�xteri referans kampanyalarını kullanmak için Profesyonel pakete geçebilirsiniz.');
   }
 }
 
@@ -54,16 +54,16 @@ export const customerCampaignService = {
     const newCampaign: BusinessCustomerCampaign = {
       id: input.id || `camp_${Date.now()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
       tenantId,
-      name: input.name || 'ArkadaÅŸÄ±nÄ± Getir',
+      name: input.name || 'Arkada�xını Getir',
       type: input.type || 'refer_friend',
       isActive: input.isActive !== undefined ? input.isActive : true,
-      rewardDescription: input.rewardDescription || 'Ã–dÃ¼l, referansla gelen mÃ¼ÅŸterinin randevusunu tamamlamasÄ± sonrasÄ± geÃ§erlidir.',
+      rewardDescription: input.rewardDescription || '�dül, referansla gelen mü�xterinin randevusunu tamamlaması sonrası geçerlidir.',
       customerReward: input.customerReward || 'Bir sonraki randevuda %15 indirim',
-      referredCustomerReward: input.referredCustomerReward || 'Ä°lk randevuda %10 indirim',
+      referredCustomerReward: input.referredCustomerReward || 'İlk randevuda %10 indirim',
       startDate: input.startDate || new Date().toISOString(),
       endDate: input.endDate,
       maxUses: input.maxUses || 500,
-      terms: input.terms || 'Kampanya kurallarÄ±na tabidir.',
+      terms: input.terms || 'Kampanya kurallarına tabidir.',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -135,7 +135,7 @@ export const customerCampaignService = {
       tenantId,
       campaignId: input.campaignId || 'default',
       referrerCustomerId: input.referrerCustomerId || 'unknown',
-      referredCustomerName: input.referredCustomerName || 'Tavsiye Edilen MÃ¼ÅŸteri',
+      referredCustomerName: input.referredCustomerName || 'Tavsiye Edilen Mü�xteri',
       referredCustomerPhone: input.referredCustomerPhone,
       status: input.status || 'pending',
       appointmentId: input.appointmentId,
@@ -190,7 +190,7 @@ export const customerCampaignService = {
         localStorage.setItem('lari_customer_referrals_by_tenant', JSON.stringify(referrals));
         localStorage.setItem('lari_business_referrals', JSON.stringify(referrals));
         
-        notifyReferralCompleted(referrals[index].referrerCustomerId, referrals[index].referredCustomerName, 'Ä°ndirim Kuponu');
+        notifyReferralCompleted(referrals[index].referrerCustomerId, referrals[index].referredCustomerName, 'İndirim Kuponu');
         
         // Auto-generate rewards in our brand new ledger!
         await this.createRewardFromReferral(referralId);
@@ -289,9 +289,9 @@ export const customerCampaignService = {
     const campaigns = await repo.listCampaigns(referral.tenantId);
     const campaign = campaigns.find(c => c.id === referral.campaignId) || {
       id: referral.campaignId,
-      name: 'ArkadaÅŸÄ±nÄ± Getir',
+      name: 'Arkada�xını Getir',
       customerReward: 'Bir sonraki randevuda %15 indirim',
-      referredCustomerReward: 'Ä°lk randevuda %10 indirim',
+      referredCustomerReward: 'İlk randevuda %10 indirim',
       maxUses: 500,
       isActive: true,
       tenantId: referral.tenantId
@@ -339,7 +339,7 @@ export const customerCampaignService = {
         customerReferralId: referralId,
         customerId: refereeId,
         rewardOwnerType: 'referred_customer',
-        rewardDescription: campaign.referredCustomerReward || 'Ä°lk randevuda %10 indirim',
+        rewardDescription: campaign.referredCustomerReward || 'İlk randevuda %10 indirim',
         rewardValueType: 'percent_discount',
         rewardValue: 10,
         status: 'available',
@@ -383,7 +383,7 @@ export const customerCampaignService = {
         const reward = rewards[index];
         verifyEntitlement(reward.tenantId);
         if (reward.status === 'cancelled' || reward.status === 'expired') {
-          throw new Error("SÃ¼resi dolmuÅŸ veya iptal edilmiÅŸ bir Ã¶dÃ¼l rezerve edilemez.");
+          throw new Error("Süresi dolmu�x veya iptal edilmi�x bir ödül rezerve edilemez.");
         }
         reward.status = 'reserved';
         reward.appointmentId = appointmentId;
@@ -407,10 +407,10 @@ export const customerCampaignService = {
         
         // Safeguard: Used reward cannot be used twice
         if (reward.status === 'used') {
-          throw new Error("Bu Ã¶dÃ¼l zaten kullanÄ±lmÄ±ÅŸ.");
+          throw new Error("Bu ödül zaten kullanılmı�x.");
         }
         if (reward.status === 'cancelled' || reward.status === 'expired') {
-          throw new Error("SÃ¼resi dolmuÅŸ veya iptal edilmiÅŸ bir Ã¶dÃ¼l kullanÄ±lamaz.");
+          throw new Error("Süresi dolmu�x veya iptal edilmi�x bir ödül kullanılamaz.");
         }
 
         reward.status = 'used';
@@ -438,7 +438,7 @@ export const customerCampaignService = {
         const reward = rewards[index];
         verifyEntitlement(reward.tenantId);
         reward.status = 'cancelled';
-        reward.notes = reason ? `${reward.notes || ''} [Ä°ptal Sebebi: ${reason}]` : reward.notes;
+        reward.notes = reason ? `${reward.notes || ''} [İptal Sebebi: ${reason}]` : reward.notes;
         reward.updatedAt = new Date().toISOString();
         await repo.saveCustomerReward(reward.tenantId, reward);
         return reward;
