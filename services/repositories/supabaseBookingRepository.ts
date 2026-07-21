@@ -6,6 +6,7 @@ export interface PublicBookingResult {
   success: boolean;
   appointmentId?: string;
   manageToken?: string;
+  branchId?: string;
   reasonCode: string;
 }
 
