@@ -133,32 +133,43 @@ const AdminPage: React.FC = () => {
     }
   }, [navigate, tenant, currentUser, authLoading]);
 
+  const [adminAppointmentsError, setAdminAppointmentsError] = useState<string | null>(null);
+
   const loadData = async () => {
     if (!tenant) return;
-    const data = await getAppointments(tenant.id);
-    data.sort((a, b) => {
-        const dateA = new Date(`${a.date}T${a.time}`);
-        const dateB = new Date(`${b.date}T${b.time}`);
-        return dateA.getTime() - dateB.getTime();
-    });
-    setAppointments(data);
-    
-    const staffData = await getStaffList(tenant.id);
-    setStaffList(staffData);
-
-    const requests = await appointmentSelfServiceService.getAllChangeRequestsAsync(tenant.id);
-    setChangeRequests(requests);
-    
-    const policy = appointmentSelfServiceService.getBookingPolicy(tenant.id);
-    setBookingPolicy(policy);
-
-    const servicesData = await getServices(tenant.id);
-    setServicesList(servicesData);
-
-    const branchesData = await branchService.listBranches(tenant.id);
-    setBranches(branchesData);
-
+    setAdminAppointmentsError(null);
     try {
+      const data = await getAppointments(tenant.id);
+      data.sort((a, b) => {
+          const dateA = new Date(`${a.date}T${a.time}`);
+          const dateB = new Date(`${b.date}T${b.time}`);
+          return dateA.getTime() - dateB.getTime();
+      });
+      setAppointments(data);
+    } catch (err: any) {
+      console.error("Admin loadAppointments error:", err);
+      setAppointments([]);
+      setAdminAppointmentsError(language === 'tr'
+        ? 'Randevular şu anda yüklenemiyor. Lütfen tekrar deneyin.'
+        : 'Appointments could not be loaded right now. Please try again.');
+    }
+    
+    try {
+      const staffData = await getStaffList(tenant.id);
+      setStaffList(staffData);
+
+      const requests = await appointmentSelfServiceService.getAllChangeRequestsAsync(tenant.id);
+      setChangeRequests(requests);
+      
+      const policy = appointmentSelfServiceService.getBookingPolicy(tenant.id);
+      setBookingPolicy(policy);
+
+      const servicesData = await getServices(tenant.id);
+      setServicesList(servicesData);
+
+      const branchesData = await branchService.listBranches(tenant.id);
+      setBranches(branchesData);
+
       const report = await onboardingChecklistService.getOnboardingReport(tenant.id);
       setOnboardingReport(report);
       
@@ -172,7 +183,7 @@ const AdminPage: React.FC = () => {
       }
       setTabAvailability(available);
     } catch (e) {
-      console.error("Error loading admin data:", e);
+      console.error("Error loading admin auxiliary data:", e);
     }
   };
 
@@ -873,7 +884,14 @@ const AdminPage: React.FC = () => {
               )}
             </div>
             <ul className="divide-y divide-gray-200 dark:divide-slate-700 max-h-[600px] overflow-y-auto">
-              {appointments.filter(a => selectedBranchFilter === 'all' || a.branchId === selectedBranchFilter).length === 0 ? (
+              {adminAppointmentsError ? (
+                <div className="py-12 flex flex-col items-center justify-center text-center px-4">
+                  <p className="text-sm font-medium text-red-600 dark:text-red-400 mb-4">{adminAppointmentsError}</p>
+                  <button onClick={() => loadData()} className="px-5 py-2 bg-accent text-white rounded-lg shadow-sm font-medium hover:bg-blue-700 transition-colors text-sm">
+                    {language === 'tr' ? 'Yeniden Yükle' : 'Retry'}
+                  </button>
+                </div>
+              ) : appointments.filter(a => selectedBranchFilter === 'all' || a.branchId === selectedBranchFilter).length === 0 ? (
                 <div className="py-12 flex flex-col items-center justify-center text-center px-4">
                   <div className="w-16 h-16 bg-gray-50 dark:bg-slate-700/50 rounded-full flex items-center justify-center mb-4 border border-gray-100 dark:border-slate-600">
                     <svg className="w-8 h-8 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>

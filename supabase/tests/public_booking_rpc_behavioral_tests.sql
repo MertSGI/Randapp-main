@@ -1388,4 +1388,178 @@ BEGIN
 END $$;
 
 
+-- =========================================================================
+-- STAGE B ACCEPTANCE TESTS: Tests 44-48
+-- TEST 44: get_public_available_slots returns valid free slots with branch_id & duration_minutes
+-- TEST 45: create_public_booking contract returns appointment_id, manage_token, branch_id
+-- TEST 46: create_public_booking stores status=confirmed, branch_id & duration_minutes snapshot
+-- TEST 47: Booking a returned slot removes it from subsequent slot RPC queries (slot invalidation)
+-- TEST 48: Rebooking the exact same slot returns slot_conflict
+-- =========================================================================
+DO $$
+DECLARE
+  v_slug            text := 'melis-guzellik';
+  v_tenant_id       uuid;
+  v_branch_id       uuid;
+  v_service_id      uuid;
+  v_staff_id        uuid;
+  v_test_date       date := (CURRENT_DATE + 45)::date;
+  v_slot_res        jsonb;
+  v_slots           jsonb;
+  v_first_slot      text;
+  v_book_time       time;
+  r                 jsonb;
+  r_conflict        jsonb;
+  v_apt_id          uuid;
+  v_token           text;
+  v_branch_ret      uuid;
+  v_count           int;
+  v_status          text;
+  v_dur             int;
+BEGIN
+  SELECT id INTO v_tenant_id FROM public.tenants WHERE slug = v_slug;
+
+  INSERT INTO public.branches (tenant_id, name, slug, is_active, is_primary)
+  VALUES (v_tenant_id, 'Stage B Test Branch', 'stage-b-branch', true, true)
+  ON CONFLICT (tenant_id, slug) DO UPDATE SET is_primary = true, is_active = true
+  RETURNING id INTO v_branch_id;
+
+  INSERT INTO public.services (tenant_id, name, duration, price, active)
+  VALUES (v_tenant_id, 'Stage B Service', 30, 180, true)
+  RETURNING id INTO v_service_id;
+
+  INSERT INTO public.staff (tenant_id, name, title, active)
+  VALUES (v_tenant_id, 'Stage B Staff', 'Specialist', true)
+  RETURNING id INTO v_staff_id;
+
+  INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id) VALUES (v_tenant_id, v_staff_id, v_branch_id);
+  INSERT INTO public.service_branches (tenant_id, service_id, branch_id) VALUES (v_tenant_id, v_service_id, v_branch_id);
+  INSERT INTO public.staff_services (staff_id, service_id) VALUES (v_staff_id, v_service_id);
+  INSERT INTO public.availability_rules (tenant_id, staff_id, weekday, start_time, end_time, is_active)
+  SELECT v_tenant_id, v_staff_id, d, '09:00', '19:00', true FROM generate_series(1, 7) AS d;
+
+  RAISE NOTICE '=== STARTING STAGE B ACCEPTANCE TESTS 44-48 ===';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 44: get_public_available_slots returns valid free slots
+  -- -----------------------------------------------------------------------
+  v_slot_res := public.get_public_available_slots(
+    p_slug       => v_slug,
+    p_branch_id  => v_branch_id,
+    p_service_id => v_service_id,
+    p_staff_id   => v_staff_id,
+    p_date       => v_test_date
+  );
+
+  IF NOT (v_slot_res->>'success')::boolean OR v_slot_res->>'reason_code' != 'ok' THEN
+    RAISE EXCEPTION 'TEST 44 FAIL: Slot RPC failed: %', v_slot_res;
+  END IF;
+
+  v_slots := v_slot_res->'slots';
+  IF jsonb_array_length(v_slots) = 0 THEN
+    RAISE EXCEPTION 'TEST 44 FAIL: Expected free slots, got 0';
+  END IF;
+  v_first_slot := v_slots->0->>'start';
+  RAISE NOTICE 'TEST 44 PASS: Slot RPC returned % slots. First free slot: %', jsonb_array_length(v_slots), v_first_slot;
+
+  -- -----------------------------------------------------------------------
+  -- TEST 45 & 46: create_public_booking contract & snapshot verification
+  -- -----------------------------------------------------------------------
+  v_book_time := v_first_slot::time;
+  r := public.create_public_booking(
+    p_slug             => v_slug,
+    p_branch_id        => v_branch_id,
+    p_service_id       => v_service_id,
+    p_staff_id         => v_staff_id,
+    p_appointment_date => v_test_date,
+    p_appointment_time => v_book_time,
+    p_customer_name    => 'Stage B User',
+    p_customer_email   => 'stageb-test-45@randapp-test.invalid',
+    p_customer_phone   => '+905001116655',
+    p_required_consent => true,
+    p_idempotency_key  => 'stageb-key-45'
+  );
+
+  IF NOT (r->>'success')::boolean THEN
+    RAISE EXCEPTION 'TEST 45 FAIL: booking failed: %', r;
+  END IF;
+
+  v_apt_id     := (r->>'appointment_id')::uuid;
+  v_token      := r->>'manage_token';
+  v_branch_ret := (r->>'branch_id')::uuid;
+
+  IF v_apt_id IS NULL OR v_token IS NULL OR v_branch_ret IS DISTINCT FROM v_branch_id THEN
+    RAISE EXCEPTION 'TEST 45 FAIL: Contract mismatch. Return values: apt=%, token=%, branch=%', v_apt_id, v_token, v_branch_ret;
+  END IF;
+  RAISE NOTICE 'TEST 45 PASS: create_public_booking returned valid appointment_id, manage_token & branch_id.';
+
+  -- Verify exact appointment row stored with confirmed status and duration snapshot
+  SELECT status, duration_minutes INTO v_status, v_dur
+  FROM public.appointments WHERE id = v_apt_id;
+
+  IF v_status != 'confirmed' OR v_dur != 30 THEN
+    RAISE EXCEPTION 'TEST 46 FAIL: Stored status=% or duration_minutes=% mismatch (expected confirmed, 30)', v_status, v_dur;
+  END IF;
+  RAISE NOTICE 'TEST 46 PASS: Appointment stored status=confirmed & duration_minutes=30 snapshot.';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 47: Booking a returned slot removes it from subsequent slot RPC queries (Slot Invalidation)
+  -- -----------------------------------------------------------------------
+  v_slot_res := public.get_public_available_slots(
+    p_slug       => v_slug,
+    p_branch_id  => v_branch_id,
+    p_service_id => v_service_id,
+    p_staff_id   => v_staff_id,
+    p_date       => v_test_date
+  );
+  v_slots := v_slot_res->'slots';
+
+  IF v_slots @> jsonb_build_array(jsonb_build_object('start', v_first_slot, 'end', (v_first_slot::time + interval '30 minutes')::text)) THEN
+    RAISE EXCEPTION 'TEST 47 FAIL: Booked slot % still returned in slot list: %', v_first_slot, v_slots;
+  END IF;
+  RAISE NOTICE 'TEST 47 PASS: Booked slot % correctly absent from subsequent slot RPC query.', v_first_slot;
+
+  -- -----------------------------------------------------------------------
+  -- TEST 48: Rebooking the exact same slot returns slot_conflict
+  -- -----------------------------------------------------------------------
+  r_conflict := public.create_public_booking(
+    p_slug             => v_slug,
+    p_branch_id        => v_branch_id,
+    p_service_id       => v_service_id,
+    p_staff_id         => v_staff_id,
+    p_appointment_date => v_test_date,
+    p_appointment_time => v_book_time,
+    p_customer_name    => 'Second User',
+    p_customer_email   => 'stageb-test-48@randapp-test.invalid',
+    p_customer_phone   => '+905001116644',
+    p_required_consent => true,
+    p_idempotency_key  => 'stageb-key-48'
+  );
+
+  IF (r_conflict->>'success')::boolean OR r_conflict->>'reason_code' != 'slot_conflict' THEN
+    RAISE EXCEPTION 'TEST 48 FAIL: Rebooking occupied slot did not return slot_conflict: %', r_conflict;
+  END IF;
+  RAISE NOTICE 'TEST 48 PASS: Rebooking occupied slot cleanly returned slot_conflict.';
+
+  -- Cleanup
+  DELETE FROM public.appointment_access_tokens WHERE appointment_id = v_apt_id;
+  DELETE FROM public.public_booking_idempotency WHERE appointment_id = v_apt_id;
+  DELETE FROM public.appointments WHERE id = v_apt_id;
+  DELETE FROM public.consent_ledger WHERE customer_id IN (
+    SELECT id::text FROM public.customers WHERE tenant_id = v_tenant_id AND email LIKE 'stageb-test-%@randapp-test.invalid'
+  );
+  DELETE FROM public.customers WHERE tenant_id = v_tenant_id AND email LIKE 'stageb-test-%@randapp-test.invalid';
+  DELETE FROM public.staff_branches WHERE staff_id = v_staff_id;
+  DELETE FROM public.service_branches WHERE service_id = v_service_id;
+  DELETE FROM public.staff_services WHERE staff_id = v_staff_id;
+  DELETE FROM public.availability_rules WHERE staff_id = v_staff_id;
+  DELETE FROM public.staff WHERE id = v_staff_id;
+  DELETE FROM public.services WHERE id = v_service_id;
+  DELETE FROM public.branches WHERE id = v_branch_id;
+
+  RAISE NOTICE '=== STAGE B ACCEPTANCE TESTS 44-48 COMPLETED SUCCESSFULLY ===';
+END $$;
+
+
+
 

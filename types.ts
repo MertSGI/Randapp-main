@@ -281,7 +281,8 @@ export interface Appointment {
   staffId: string;
   date: string; // ISO Date string YYYY-MM-DD
   time: string; // HH:mm
-  status: 'confirmed' | 'cancelled' | 'cancelled_by_customer' | 'cancelled_by_salon' | 'completed' | 'no_show';
+  durationMinutes?: number;
+  status: 'pending' | 'confirmed' | 'cancelled' | 'cancelled_by_customer' | 'cancelled_by_salon' | 'cancelled_by_system' | 'completed' | 'no_show';
   notes?: string;
   cancelReason?: string;
   cancelledAt?: string;

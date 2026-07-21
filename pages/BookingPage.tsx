@@ -85,18 +85,30 @@ const BookingPage: React.FC = () => {
 
 
   const [timeSlots, setTimeSlots] = useState<string[]>([]);
+  const [slotLoadingError, setSlotLoadingError] = useState<string | null>(null);
+  const [slotRefreshKey, setSlotRefreshKey] = useState<number>(0);
 
   useEffect(() => {
     if (tenant && selectedStaff && selectedService && selectedDate) {
+      setSlotLoadingError(null);
       availabilityService.getAvailableSlotsForStaff(tenant.id, selectedStaff.id, selectedService.id, selectedDate)
         .then(slots => {
           setTimeSlots(slots.map(s => s.time));
+          setSlotLoadingError(null);
+        })
+        .catch(err => {
+          console.error("Public slot RPC load error:", err);
+          setTimeSlots([]);
+          setSlotLoadingError(language === 'tr'
+            ? 'Müsait saatler şu anda yüklenemiyor. Lütfen tekrar deneyin.'
+            : 'Available slots could not be loaded right now. Please try again.');
         });
     } else {
       setTimeSlots([]);
+      setSlotLoadingError(null);
     }
-  }, [tenant, selectedStaff, selectedService, selectedDate]);
-  
+  }, [tenant?.id, selectedStaff?.id, selectedService?.id, selectedDate, slotRefreshKey]);
+
   const requestedPreview = new URLSearchParams(window.location.hash.split('?')[1]).get('preview') === 'true';
   const urlSource = new URLSearchParams(window.location.hash.split('?')[1]).get('source') || undefined;
   const isAuthorizedPreview = requestedPreview && canPreviewTenantSite(currentUser, tenant?.id);
@@ -537,6 +549,7 @@ const BookingPage: React.FC = () => {
           const repo = new SupabaseBookingRepository();
           rpcResult = await repo.createPublicBooking({
             slug:            tenant.slug,
+            branchId:        currentBranchId || undefined,
             serviceId:       selectedService.id,
             staffId:         selectedStaff.id,
             appointmentDate: selectedDate,
@@ -699,6 +712,10 @@ const BookingPage: React.FC = () => {
         sessionStorage.setItem(`randapp_booking_confirmation_${tenant.id}`, JSON.stringify(confirmationPayload));
       } catch (_) { /* ignore quota errors */ }
       setBookingConfirmation(confirmationPayload);
+
+      // Invalidate slot cache and clear selected slot
+      setSelectedTime('');
+      setSlotRefreshKey(prev => prev + 1);
 
       setStep(5);
 
@@ -959,7 +976,17 @@ const BookingPage: React.FC = () => {
 
               <div className="flex-grow">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 transition-colors duration-300">{t.booking.step2_slots} ({selectedDate})</label>
-                {timeSlots.length === 0 || timeSlots.every(time => bookedSlots.includes(time)) ? (
+                {slotLoadingError ? (
+                  <div className="py-8 text-center text-red-600 dark:text-red-400 flex flex-col items-center bg-red-50 dark:bg-slate-800 rounded-xl border border-red-100 dark:border-slate-700">
+                     <p className="mb-3 font-medium">{slotLoadingError}</p>
+                     <button
+                       onClick={() => setSlotRefreshKey(prev => prev + 1)}
+                       className="px-4 py-2 bg-accent text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition"
+                     >
+                       {language === 'tr' ? 'Tekrar Dene' : 'Retry'}
+                     </button>
+                  </div>
+                ) : timeSlots.length === 0 || timeSlots.every(time => bookedSlots.includes(time)) ? (
                   <div className="py-8 text-center text-gray-500 dark:text-gray-400 flex flex-col items-center bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700">
                      <svg className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                      <span>{language === 'tr' ? 'Bu gün için uygun saat yok. Başka bir gün seçebilirsiniz.' : 'No available slots for this day. Please select another day.'}</span>

@@ -12,81 +12,78 @@ export interface PublicBookingResult {
 
 export class SupabaseBookingRepository implements BookingRepository {
   async listAppointments(tenantId: string, filter?: { date?: string, upcomingOnly?: boolean }): Promise<Appointment[]> {
-    try {
-      let url = `/rest/v1/appointments?tenant_id=eq.${tenantId}&select=*`;
-      if (filter?.date) {
-        url += `&appointment_date=eq.${filter.date}`;
-      }
-      if (filter?.upcomingOnly) {
-        const now = new Date().toISOString().split('T')[0];
-        url += `&appointment_date=gte.${now}`;
-      }
-      const res = await fetchSupabase(url);
-      if (!res.ok) {
-        // Log the status explicitly so Admin visibility failures are diagnosable.
-        // Common reasons: 401 (no auth session), 403 (RLS denial), 406 (header mismatch).
-        const errorBody = await res.text().catch(() => '');
-        console.error(
-          `[supabaseBookingRepository] listAppointments failed: HTTP ${res.status} for tenant=${tenantId}`,
-          errorBody.slice(0, 300)
-        );
-        return [];
-      }
-      const data = await res.json();
-      return data.map((a: any) => ({
-        id: a.id,
-        tenantId: a.tenant_id,
-        userId: a.user_id,
-        customerId: a.customer_id,
-        user_name: a.user_name,
-        user_email: a.user_email,
-        phone: a.phone,
-        serviceId: a.service_id,
-        staffId: a.staff_id,
-        date: a.appointment_date,
-        time: a.appointment_time,
-        status: a.status,
-        notes: a.notes,
-        cancelReason: a.cancel_reason,
-        cancelledAt: a.cancelled_at,
-        cancelledBy: a.cancelled_by,
-        createdAt: a.created_at,
-        syncedToGoogle: a.synced_to_google || false
-      }));
-    } catch (err) {
-      console.error('[supabaseBookingRepository] listAppointments exception:', err);
-      return [];
+    let url = `/rest/v1/appointments?tenant_id=eq.${tenantId}&select=*`;
+    if (filter?.date) {
+      url += `&appointment_date=eq.${filter.date}`;
     }
+    if (filter?.upcomingOnly) {
+      const now = new Date().toISOString().split('T')[0];
+      url += `&appointment_date=gte.${now}`;
+    }
+    const res = await fetchSupabase(url);
+    if (!res.ok) {
+      const errorBody = await res.text().catch(() => '');
+      console.error(
+        `[supabaseBookingRepository] listAppointments failed: HTTP ${res.status} for tenant=${tenantId}`,
+        errorBody.slice(0, 300)
+      );
+      throw new Error(`Repository error listAppointments: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return data.map((a: any) => ({
+      id: a.id,
+      tenantId: a.tenant_id,
+      branchId: a.branch_id,
+      userId: a.user_id,
+      customerId: a.customer_id,
+      user_name: a.user_name,
+      user_email: a.user_email,
+      phone: a.phone,
+      serviceId: a.service_id,
+      staffId: a.staff_id,
+      date: a.appointment_date,
+      time: a.appointment_time,
+      durationMinutes: a.duration_minutes,
+      status: a.status,
+      notes: a.notes,
+      cancelReason: a.cancel_reason,
+      cancelledAt: a.cancelled_at,
+      cancelledBy: a.cancelled_by,
+      createdAt: a.created_at,
+      syncedToGoogle: a.synced_to_google || false
+    }));
   }
 
   async getAppointmentById(appointmentId: string): Promise<Appointment | null> {
-    try {
-      const res = await fetchSupabase(`/rest/v1/appointments?id=eq.${appointmentId}&select=*`);
-      if (!res.ok) return null;
-      const data = await res.json();
-      const a = data[0];
-      if (!a) return null;
-      return {
-        id: a.id,
-        tenantId: a.tenant_id,
-        userId: a.user_id,
-        customerId: a.customer_id,
-        user_name: a.user_name,
-        user_email: a.user_email,
-        phone: a.phone,
-        serviceId: a.service_id,
-        staffId: a.staff_id,
-        date: a.appointment_date,
-        time: a.appointment_time,
-        status: a.status,
-        notes: a.notes,
-        cancelReason: a.cancel_reason,
-        cancelledAt: a.cancelled_at,
-        cancelledBy: a.cancelled_by,
-        createdAt: a.created_at,
-        syncedToGoogle: a.synced_to_google || false
-      };
-    } catch { return null; }
+    const res = await fetchSupabase(`/rest/v1/appointments?id=eq.${appointmentId}&select=*`);
+    if (!res.ok) {
+      throw new Error(`Repository error getAppointmentById: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const a = data[0];
+    if (!a) return null;
+    return {
+      id: a.id,
+      tenantId: a.tenant_id,
+      branchId: a.branch_id,
+      userId: a.user_id,
+      customerId: a.customer_id,
+      user_name: a.user_name,
+      user_email: a.user_email,
+      phone: a.phone,
+      serviceId: a.service_id,
+      staffId: a.staff_id,
+      date: a.appointment_date,
+      time: a.appointment_time,
+      durationMinutes: a.duration_minutes,
+      status: a.status,
+      notes: a.notes,
+      cancelReason: a.cancel_reason,
+      cancelledAt: a.cancelled_at,
+      cancelledBy: a.cancelled_by,
+      createdAt: a.created_at,
+      syncedToGoogle: a.synced_to_google || false
+    };
   }
 
   async createAppointment(tenantId: string, input: Omit<Appointment, 'id' | 'createdAt' | 'tenantId'>): Promise<Appointment> {
@@ -172,6 +169,7 @@ export class SupabaseBookingRepository implements BookingRepository {
    */
   async createPublicBooking(params: {
     slug: string;
+    branchId?: string;
     serviceId: string;
     staffId: string;
     appointmentDate: string; // YYYY-MM-DD
@@ -186,6 +184,7 @@ export class SupabaseBookingRepository implements BookingRepository {
   }): Promise<PublicBookingResult> {
     const body = {
       p_slug:              params.slug,
+      p_branch_id:         params.branchId ?? null,
       p_service_id:        params.serviceId,
       p_staff_id:          params.staffId,
       p_appointment_date:  params.appointmentDate,
@@ -220,25 +219,28 @@ export class SupabaseBookingRepository implements BookingRepository {
       success:       result?.success === true,
       appointmentId: result?.appointment_id,
       manageToken:   result?.manage_token,
+      branchId:      result?.branch_id,
       reasonCode:    result?.reason_code || 'temporary_failure',
     };
   }
 
   async listCustomers(tenantId: string): Promise<any[]> {
-    try {
-      const res = await fetchSupabase(`/rest/v1/customers?tenant_id=eq.${tenantId}&select=*`);
-      if (!res.ok) return [];
-      return res.json();
-    } catch { return []; }
+    const res = await fetchSupabase(`/rest/v1/customers?tenant_id=eq.${tenantId}&select=*`);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      console.error(`[supabaseBookingRepository] listCustomers failed: HTTP ${res.status}`, errBody.slice(0, 300));
+      throw new Error(`Repository error listCustomers: HTTP ${res.status}`);
+    }
+    return res.json();
   }
 
   async getCustomerById(customerId: string): Promise<any | null> {
-    try {
-       const res = await fetchSupabase(`/rest/v1/customers?id=eq.${customerId}&select=*`);
-       if (!res.ok) return null;
-       const data = await res.json();
-       return data[0] || null;
-    } catch { return null; }
+    const res = await fetchSupabase(`/rest/v1/customers?id=eq.${customerId}&select=*`);
+    if (!res.ok) {
+      throw new Error(`Repository error getCustomerById: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return data[0] || null;
   }
 
   async findCustomerByPhoneOrEmail(tenantId: string, phone?: string, email?: string): Promise<any | null> {
