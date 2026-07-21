@@ -11,26 +11,35 @@ export interface PublicBookingResult {
 
 
 export class SupabaseBookingRepository implements BookingRepository {
-  async listAppointments(tenantId: string, filter?: { date?: string, upcomingOnly?: boolean }): Promise<Appointment[]> {
-    let url = `/rest/v1/appointments?tenant_id=eq.${tenantId}&select=*`;
+  async listAppointments(tenantId: string, filter?: { date?: string, upcomingOnly?: boolean, branchId?: string }): Promise<Appointment[]> {
+    const res = await fetchSupabase('/rest/v1/rpc/get_my_tenant_appointments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_branch_id: filter?.branchId ?? null }),
+    });
+
+    if (!res.ok) {
+      console.error(`[supabaseBookingRepository] listAppointments RPC failed: HTTP ${res.status}`);
+      throw new Error(`Repository error listAppointments: HTTP ${res.status}`);
+    }
+
+    const raw = await res.json();
+    const result = Array.isArray(raw) ? raw[0] : raw;
+    if (!result?.success) {
+      console.error(`[supabaseBookingRepository] listAppointments RPC returned error: ${result?.reason_code}`);
+      throw new Error(`Repository error listAppointments: ${result?.reason_code || 'error'}`);
+    }
+
+    let list: any[] = result?.appointments || [];
     if (filter?.date) {
-      url += `&appointment_date=eq.${filter.date}`;
+      list = list.filter((a: any) => a.appointment_date === filter.date);
     }
     if (filter?.upcomingOnly) {
       const now = new Date().toISOString().split('T')[0];
-      url += `&appointment_date=gte.${now}`;
+      list = list.filter((a: any) => a.appointment_date >= now);
     }
-    const res = await fetchSupabase(url);
-    if (!res.ok) {
-      const errorBody = await res.text().catch(() => '');
-      console.error(
-        `[supabaseBookingRepository] listAppointments failed: HTTP ${res.status} for tenant=${tenantId}`,
-        errorBody.slice(0, 300)
-      );
-      throw new Error(`Repository error listAppointments: HTTP ${res.status}`);
-    }
-    const data = await res.json();
-    return data.map((a: any) => ({
+
+    return list.map((a: any) => ({
       id: a.id,
       tenantId: a.tenant_id,
       branchId: a.branch_id,
@@ -52,6 +61,23 @@ export class SupabaseBookingRepository implements BookingRepository {
       createdAt: a.created_at,
       syncedToGoogle: a.synced_to_google || false
     }));
+  }
+
+  async getDashboardSummary(): Promise<{ totalAppointments: number; confirmedToday: number; completedTotal: number } | null> {
+    const res = await fetchSupabase('/rest/v1/rpc/get_my_tenant_dashboard_summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) return null;
+    const raw = await res.json();
+    const result = Array.isArray(raw) ? raw[0] : raw;
+    if (!result?.success) return null;
+    return {
+      totalAppointments: Number(result.total_appointments || 0),
+      confirmedToday: Number(result.confirmed_today || 0),
+      completedTotal: Number(result.completed_total || 0),
+    };
   }
 
   async getAppointmentById(appointmentId: string): Promise<Appointment | null> {

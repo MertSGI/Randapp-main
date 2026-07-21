@@ -54,6 +54,7 @@ const CANONICAL_MIGRATIONS = [
   '20260720_public_booking_rpc.sql',
   '20260722_public_booking_search_path_fix.sql',
   '20260723_booking_lifecycle_foundation.sql',
+  '20260724_admin_rls_and_read_model_fix.sql',
 ];
 
 // Check actual migration files on disk

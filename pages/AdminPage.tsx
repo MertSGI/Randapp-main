@@ -121,71 +121,94 @@ const AdminPage: React.FC = () => {
     );
   };
 
-  useEffect(() => {
-    if (authLoading) return;
-    
-    if (!currentUser) {
-      navigate('/login');
-      return;
-    }
-    if (tenant) {
-      loadData();
-    }
-  }, [navigate, tenant, currentUser, authLoading]);
-
   const [adminAppointmentsError, setAdminAppointmentsError] = useState<string | null>(null);
+  const [dashboardSummary, setDashboardSummary] = useState<{ totalAppointments: number; confirmedToday: number; completedTotal: number } | null>(null);
+  
+  const inFlightRef = React.useRef<boolean>(false);
+  const loadedKeyRef = React.useRef<string>('');
 
-  const loadData = async () => {
-    if (!tenant) return;
+  const currentUserId = currentUser?.id;
+  const tenantId = tenant?.id;
+
+  const loadData = React.useCallback(async (force = false) => {
+    if (!tenantId || !currentUserId) return;
+    const requestKey = `${currentUserId}:${tenantId}`;
+    if (!force && loadedKeyRef.current === requestKey) return;
+    if (inFlightRef.current) return;
+
+    inFlightRef.current = true;
     setAdminAppointmentsError(null);
+
     try {
-      const data = await getAppointments(tenant.id);
+      const data = await getAppointments(tenantId);
       data.sort((a, b) => {
           const dateA = new Date(`${a.date}T${a.time}`);
           const dateB = new Date(`${b.date}T${b.time}`);
           return dateA.getTime() - dateB.getTime();
       });
       setAppointments(data);
+      loadedKeyRef.current = requestKey;
+
+      // Also try fetching server-side dashboard summary RPC if available
+      try {
+        const { SupabaseBookingRepository } = await import('../services/repositories/supabaseBookingRepository');
+        const repo = new SupabaseBookingRepository();
+        const summary = await repo.getDashboardSummary();
+        if (summary) setDashboardSummary(summary);
+      } catch (_) {}
     } catch (err: any) {
       console.error("Admin loadAppointments error:", err);
       setAppointments([]);
       setAdminAppointmentsError(language === 'tr'
         ? 'Randevular şu anda yüklenemiyor. Lütfen tekrar deneyin.'
         : 'Appointments could not be loaded right now. Please try again.');
+    } finally {
+      inFlightRef.current = false;
     }
-    
+
     try {
-      const staffData = await getStaffList(tenant.id);
+      const staffData = await getStaffList(tenantId);
       setStaffList(staffData);
 
-      const requests = await appointmentSelfServiceService.getAllChangeRequestsAsync(tenant.id);
+      const requests = await appointmentSelfServiceService.getAllChangeRequestsAsync(tenantId);
       setChangeRequests(requests);
       
-      const policy = appointmentSelfServiceService.getBookingPolicy(tenant.id);
+      const policy = appointmentSelfServiceService.getBookingPolicy(tenantId);
       setBookingPolicy(policy);
 
-      const servicesData = await getServices(tenant.id);
+      const servicesData = await getServices(tenantId);
       setServicesList(servicesData);
 
-      const branchesData = await branchService.listBranches(tenant.id);
+      const branchesData = await branchService.listBranches(tenantId);
       setBranches(branchesData);
 
-      const report = await onboardingChecklistService.getOnboardingReport(tenant.id);
+      const report = await onboardingChecklistService.getOnboardingReport(tenantId);
       setOnboardingReport(report);
       
-      const nextAction = await adminFeatureAvailabilityService.getAdminHomeNextActions(tenant.id);
+      const nextAction = await adminFeatureAvailabilityService.getAdminHomeNextActions(tenantId);
       setAdminNextAction(nextAction);
       
       const available: Record<string, AdminFeatureAvailability> = {};
       const validTabs = ['dashboard', 'setup', 'appointments', 'staff', 'services', 'reports', 'billing', 'profile', 'settings', 'customers', 'referrals'];
       for (const tab of validTabs) {
-        available[tab] = await adminFeatureAvailabilityService.getAvailability(tenant.id, tab);
+        available[tab] = await adminFeatureAvailabilityService.getAvailability(tenantId, tab);
       }
       setTabAvailability(available);
     } catch (e) {
       console.error("Error loading admin auxiliary data:", e);
     }
-  };
+  }, [currentUserId, tenantId, language]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!currentUser) {
+      navigate('/login');
+      return;
+    }
+    if (tenantId) {
+      loadData(false);
+    }
+  }, [authLoading, currentUser, tenantId, navigate, loadData]);
 
   const handleCancel = async (id: string) => {
     if (!tenant) return;
@@ -774,22 +797,22 @@ const AdminPage: React.FC = () => {
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-gray-100 dark:border-slate-700 transition-colors duration-300 cursor-pointer" onClick={() => setActiveTab('appointments')}>
               <div className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase transition-colors duration-300">{t.admin.stats_total || 'Toplam Randevu'}</div>
               <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white transition-colors duration-300">
-                {adminAppointmentsError ? '--' : appointments.length}
+                {adminAppointmentsError ? '--' : (dashboardSummary ? dashboardSummary.totalAppointments : appointments.length)}
               </div>
             </div>
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-gray-100 dark:border-slate-700 transition-colors duration-300 cursor-pointer" onClick={() => setActiveTab('appointments')}>
               <div className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase transition-colors duration-300">{language === 'tr' ? 'Bugün Onaylananlar' : "Today's Confirmed"}</div>
               <div className="mt-2 text-3xl font-bold text-blue-600 dark:text-blue-400 transition-colors duration-300">
-                {adminAppointmentsError ? '--' : (() => {
+                {adminAppointmentsError ? '--' : (dashboardSummary ? dashboardSummary.confirmedToday : (() => {
                   const todayIstanbul = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(new Date());
                   return appointments.filter(a => a.date === todayIstanbul && a.status === 'confirmed').length;
-                })()}
+                })())}
               </div>
             </div>
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-gray-100 dark:border-slate-700 transition-colors duration-300 cursor-pointer" onClick={() => setActiveTab('appointments')}>
               <div className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase transition-colors duration-300">{language === 'tr' ? 'Tamamlanan Görüşmeler' : 'Completed'}</div>
               <div className="mt-2 text-3xl font-bold text-green-600 dark:text-green-400 transition-colors duration-300">
-                {adminAppointmentsError ? '--' : appointments.filter(a => a.status === 'completed').length}
+                {adminAppointmentsError ? '--' : (dashboardSummary ? dashboardSummary.completedTotal : appointments.filter(a => a.status === 'completed').length)}
               </div> 
               <span className="text-xs text-gray-400 dark:text-gray-500 transition-colors duration-300">{language === 'tr' ? 'Tüm zamanlar' : 'All time'}</span>
             </div>
