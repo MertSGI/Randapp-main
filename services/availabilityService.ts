@@ -72,8 +72,11 @@ export const availabilityService = {
              return [];
            }
 
-           const slots: string[] = result?.slots || [];
-           return slots.map((time: string) => ({ time, available: true }));
+           const rawSlots: any[] = result?.slots || [];
+           return rawSlots.map((s: any) => {
+             const timeStr = typeof s === 'string' ? s : (s?.start || '');
+             return { time: timeStr, available: true };
+           }).filter(s => !!s.time);
 
          } catch (rpcErr) {
            console.error('get_public_available_slots RPC exception:', rpcErr);

@@ -36,6 +36,31 @@ ON CONFLICT (tenant_id) DO UPDATE SET
   short_description = EXCLUDED.short_description,
   is_public_profile_enabled = EXCLUDED.is_public_profile_enabled;
 
+-- Seed Canonical Primary Branch for Staging Tenant
+INSERT INTO public.branches (
+  id, tenant_id, name, slug, is_active, is_primary, timezone
+) VALUES (
+  'b0000000-0000-0000-0000-000000000001',
+  'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa',
+  'Melis Güzellik Merkez Şube',
+  'merkez',
+  true,
+  true,
+  'Europe/Istanbul'
+) ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name,
+  is_primary = EXCLUDED.is_primary,
+  is_active = EXCLUDED.is_active;
+
+-- Map Staging Specialist (Selin Uzman) and Staging Blowdry Service to Primary Branch
+INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)
+VALUES ('aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', '6234e7a1-9788-4f04-aa56-54d05c1fafb7', 'b0000000-0000-0000-0000-000000000001')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.service_branches (tenant_id, service_id, branch_id)
+VALUES ('aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', 'fdc4b301-26ec-40c1-a521-5a864766fbc5', 'b0000000-0000-0000-0000-000000000001')
+ON CONFLICT DO NOTHING;
+
 
 -- =========================================================================
 -- 2. SEED MANUAL SUBSCRIPTION

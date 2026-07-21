@@ -24,6 +24,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 14. **`20260716_public_booking_eligibility_rpc.sql`** — Adds public eligibility checker RPC function by slug.
 15. **`20260720_public_booking_rpc.sql`** — Hardened transactional public booking RPC migration.
 16. **`20260722_public_booking_search_path_fix.sql`** — Fixes search_path for SECURITY DEFINER functions to include extensions schema.
+17. **`20260723_booking_lifecycle_foundation.sql`** — Stage A Database Scheduling Foundation, branches model, staff/service branch junction tables, appointments contract fields (branch_id, duration_minutes), shared evaluate_booking_slot engine, updated get_public_available_slots and create_public_booking RPCs.
 
 
 

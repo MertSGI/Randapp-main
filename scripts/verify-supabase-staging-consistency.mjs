@@ -53,6 +53,7 @@ const CANONICAL_MIGRATIONS = [
   '20260716_public_booking_eligibility_rpc.sql',
   '20260720_public_booking_rpc.sql',
   '20260722_public_booking_search_path_fix.sql',
+  '20260723_booking_lifecycle_foundation.sql',
 ];
 
 // Check actual migration files on disk
@@ -60,7 +61,7 @@ const migrationsDir = join(ROOT, 'supabase', 'migrations');
 if (existsSync(migrationsDir)) {
   const diskFiles = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
   check(
-    'Migration files on disk match canonical list (16 files)',
+    'Migration files on disk match canonical list (17 files)',
     diskFiles.length === CANONICAL_MIGRATIONS.length &&
     diskFiles.every((f, i) => f === CANONICAL_MIGRATIONS[i]),
     `Found: [${diskFiles.join(', ')}]`

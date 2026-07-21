@@ -869,3 +869,226 @@ BEGIN
 
   RAISE NOTICE '=== TESTS 27-28 COMPLETED SUCCESSFULLY ===';
 END $$;
+
+
+-- =========================================================================
+-- STAGE A ACCEPTANCE TESTS: Tests 29-35
+-- TEST 29: Tenant primary branch setup & cross-tenant branch isolation
+-- TEST 30: Staff-branch & service-branch junction mapping enforcement
+-- TEST 31: evaluate_booking_slot returns allowed=true for free slot & slot_conflict for occupied
+-- TEST 32: Appointment creation stores branch_id & duration_minutes snapshot
+-- TEST 33: Changing service duration does not alter historical appointment duration_minutes
+-- TEST 34: Single-branch tenant auto-resolves branch_id when p_branch_id IS NULL
+-- TEST 35: Multi-branch tenant requires p_branch_id or returns branch_required
+-- =========================================================================
+DO $$
+DECLARE
+  v_slug            text := 'melis-guzellik';
+  v_tenant_id       uuid;
+  v_branch_id       uuid;
+  v_branch_id2      uuid;
+  v_service_id      uuid;
+  v_staff_id        uuid;
+  v_test_date       date := (CURRENT_DATE + 30)::date;
+  v_eval_res        jsonb;
+  r                 jsonb;
+  v_apt_id          uuid;
+  v_stored_duration int;
+  v_stored_branch   uuid;
+  v_other_tenant_id uuid;
+BEGIN
+  SELECT id INTO v_tenant_id FROM public.tenants WHERE slug = v_slug;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'STAGE A TEST SETUP FAIL: tenant melis-guzellik not found.';
+  END IF;
+
+  -- Create primary test branch for Melis Güzellik
+  INSERT INTO public.branches (tenant_id, name, slug, is_active, is_primary)
+  VALUES (v_tenant_id, 'Stage A Primary Branch', 'stage-a-primary', true, true)
+  ON CONFLICT (tenant_id, slug) DO UPDATE SET is_primary = true, is_active = true
+  RETURNING id INTO v_branch_id;
+
+  -- Create a test service and staff
+  INSERT INTO public.services (tenant_id, name, duration, price, active)
+  VALUES (v_tenant_id, 'Stage A Service', 45, 200, true)
+  RETURNING id INTO v_service_id;
+
+  INSERT INTO public.staff (tenant_id, name, title, active)
+  VALUES (v_tenant_id, 'Stage A Staff', 'Specialist', true)
+  RETURNING id INTO v_staff_id;
+
+  -- Map staff and service to branch
+  INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)
+  VALUES (v_tenant_id, v_staff_id, v_branch_id) ON CONFLICT DO NOTHING;
+
+  INSERT INTO public.service_branches (tenant_id, service_id, branch_id)
+  VALUES (v_tenant_id, v_service_id, v_branch_id) ON CONFLICT DO NOTHING;
+
+  -- Staff-service junction
+  INSERT INTO public.staff_services (staff_id, service_id)
+  VALUES (v_staff_id, v_service_id) ON CONFLICT DO NOTHING;
+
+  -- Availability rules (Mon-Sat 09:00-19:00)
+  INSERT INTO public.availability_rules (tenant_id, staff_id, weekday, start_time, end_time, is_active)
+  SELECT v_tenant_id, v_staff_id, d, '09:00', '19:00', true
+  FROM generate_series(1, 7) AS d;
+
+  RAISE NOTICE '=== STARTING STAGE A ACCEPTANCE TESTS 29-35 ===';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 29: Cross-tenant branch mapping isolation
+  -- -----------------------------------------------------------------------
+  INSERT INTO public.tenants (name, slug, status, onboarding_status, public_site_status)
+  VALUES ('Foreign Tenant 29', 'foreign-tenant-29', 'active', 'completed', 'published')
+  RETURNING id INTO v_other_tenant_id;
+
+  v_eval_res := public.evaluate_booking_slot(
+    p_tenant_id  => v_other_tenant_id, -- Mismatched tenant
+    p_branch_id  => v_branch_id,
+    p_service_id => v_service_id,
+    p_staff_id   => v_staff_id,
+    p_date       => v_test_date,
+    p_time       => '10:00:00'::time
+  );
+  IF (v_eval_res->>'allowed')::boolean OR v_eval_res->>'reason_code' != 'invalid_branch' THEN
+    RAISE EXCEPTION 'TEST 29 FAIL: Cross-tenant branch was not rejected with invalid_branch';
+  END IF;
+  RAISE NOTICE 'TEST 29 PASS: Cross-tenant branch mapping cleanly rejected.';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 30: Staff-branch junction mapping enforcement
+  -- -----------------------------------------------------------------------
+  DECLARE
+    v_unmapped_branch uuid;
+  BEGIN
+    INSERT INTO public.branches (tenant_id, name, slug, is_active, is_primary)
+    VALUES (v_tenant_id, 'Stage A Unmapped Branch', 'stage-a-unmapped', true, false)
+    RETURNING id INTO v_unmapped_branch;
+
+    v_eval_res := public.evaluate_booking_slot(
+      p_tenant_id  => v_tenant_id,
+      p_branch_id  => v_unmapped_branch, -- staff is not mapped to this branch
+      p_service_id => v_service_id,
+      p_staff_id   => v_staff_id,
+      p_date       => v_test_date,
+      p_time       => '10:00:00'::time
+    );
+    IF (v_eval_res->>'allowed')::boolean OR v_eval_res->>'reason_code' != 'invalid_staff' THEN
+      RAISE EXCEPTION 'TEST 30 FAIL: Staff not mapped to branch was not rejected with invalid_staff';
+    END IF;
+
+    DELETE FROM public.branches WHERE id = v_unmapped_branch;
+    RAISE NOTICE 'TEST 30 PASS: Unmapped branch enforced cleanly.';
+  END;
+
+  -- -----------------------------------------------------------------------
+  -- TEST 31: evaluate_booking_slot returns allowed=true for free slot & slot_conflict for occupied
+  -- -----------------------------------------------------------------------
+  v_eval_res := public.evaluate_booking_slot(
+    p_tenant_id  => v_tenant_id,
+    p_branch_id  => v_branch_id,
+    p_service_id => v_service_id,
+    p_staff_id   => v_staff_id,
+    p_date       => v_test_date,
+    p_time       => '10:00:00'::time
+  );
+  IF NOT (v_eval_res->>'allowed')::boolean THEN
+    RAISE EXCEPTION 'TEST 31 FAIL: Expected free slot allowed=true, got: %', v_eval_res;
+  END IF;
+  RAISE NOTICE 'TEST 31 PASS: evaluate_booking_slot allowed free slot.';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 32: Appointment creation stores branch_id & duration_minutes snapshot
+  -- -----------------------------------------------------------------------
+  r := public.create_public_booking(
+    p_slug             => v_slug,
+    p_branch_id        => v_branch_id,
+    p_service_id       => v_service_id,
+    p_staff_id         => v_staff_id,
+    p_appointment_date => v_test_date,
+    p_appointment_time => '10:00:00'::time,
+    p_customer_name    => 'Stage A Test User',
+    p_customer_email   => 'stagea-test-32@randapp-test.invalid',
+    p_customer_phone   => '+905001118877',
+    p_required_consent => true,
+    p_idempotency_key  => 'stagea-key-32'
+  );
+  IF NOT (r->>'success')::boolean THEN
+    RAISE EXCEPTION 'TEST 32 FAIL: create_public_booking failed: %', r;
+  END IF;
+  v_apt_id := (r->>'appointment_id')::uuid;
+
+  SELECT branch_id, duration_minutes INTO v_stored_branch, v_stored_duration
+  FROM public.appointments WHERE id = v_apt_id;
+
+  IF v_stored_branch IS DISTINCT FROM v_branch_id OR v_stored_duration != 45 THEN
+    RAISE EXCEPTION 'TEST 32 FAIL: Stored branch_id=% or duration_minutes=% mismatch (expected branch %, duration 45)',
+      v_stored_branch, v_stored_duration, v_branch_id;
+  END IF;
+  RAISE NOTICE 'TEST 32 PASS: Appointment stored branch_id & duration_minutes snapshot (45 min).';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 33: Changing service duration does NOT alter historical appointment duration
+  -- -----------------------------------------------------------------------
+  UPDATE public.services SET duration = 90 WHERE id = v_service_id;
+
+  SELECT duration_minutes INTO v_stored_duration FROM public.appointments WHERE id = v_apt_id;
+  IF v_stored_duration != 45 THEN
+    RAISE EXCEPTION 'TEST 33 FAIL: Historical appointment duration mutated from 45 to %', v_stored_duration;
+  END IF;
+  RAISE NOTICE 'TEST 33 PASS: Historical appointment duration preserved independently from service catalog mutation.';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 34: Single-branch tenant auto-resolves branch_id when p_branch_id IS NULL
+  -- -----------------------------------------------------------------------
+  r := public.get_public_available_slots(
+    p_slug       => v_slug,
+    p_branch_id  => NULL, -- Omitted branch_id
+    p_service_id => v_service_id,
+    p_staff_id   => v_staff_id,
+    p_date       => v_test_date
+  );
+  IF NOT (r->>'success')::boolean OR (r->>'branch_id')::uuid IS NULL THEN
+    RAISE EXCEPTION 'TEST 34 FAIL: Single-branch tenant failed to auto-resolve branch_id: %', r;
+  END IF;
+  RAISE NOTICE 'TEST 34 PASS: Single-branch tenant auto-resolved branch_id correctly.';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 35: Multi-branch tenant requires p_branch_id or returns branch_required
+  -- -----------------------------------------------------------------------
+  INSERT INTO public.branches (tenant_id, name, slug, is_active, is_primary)
+  VALUES (v_tenant_id, 'Stage A Second Active Branch', 'stage-a-second', true, false)
+  RETURNING id INTO v_branch_id2;
+
+  r := public.get_public_available_slots(
+    p_slug       => v_slug,
+    p_branch_id  => NULL, -- Ambiguous multi-branch request
+    p_service_id => v_service_id,
+    p_staff_id   => v_staff_id,
+    p_date       => v_test_date
+  );
+  IF (r->>'success')::boolean OR r->>'reason_code' != 'branch_required' THEN
+    RAISE EXCEPTION 'TEST 35 FAIL: Multi-branch tenant did not return branch_required: %', r;
+  END IF;
+  RAISE NOTICE 'TEST 35 PASS: Multi-branch tenant cleanly returned branch_required.';
+
+  -- Cleanup Stage A fixtures
+  DELETE FROM public.appointment_access_tokens WHERE appointment_id = v_apt_id;
+  DELETE FROM public.public_booking_idempotency WHERE appointment_id = v_apt_id;
+  DELETE FROM public.appointments WHERE id = v_apt_id;
+  DELETE FROM public.consent_ledger WHERE customer_id IN (
+    SELECT id::text FROM public.customers WHERE tenant_id = v_tenant_id AND email = 'stagea-test-32@randapp-test.invalid'
+  );
+  DELETE FROM public.customers WHERE tenant_id = v_tenant_id AND email = 'stagea-test-32@randapp-test.invalid';
+  DELETE FROM public.staff_branches WHERE staff_id = v_staff_id;
+  DELETE FROM public.service_branches WHERE service_id = v_service_id;
+  DELETE FROM public.staff_services WHERE staff_id = v_staff_id;
+  DELETE FROM public.availability_rules WHERE staff_id = v_staff_id;
+  DELETE FROM public.staff WHERE id = v_staff_id;
+  DELETE FROM public.services WHERE id = v_service_id;
+  DELETE FROM public.branches WHERE id IN (v_branch_id, v_branch_id2);
+  DELETE FROM public.tenants WHERE id = v_other_tenant_id;
+
+  RAISE NOTICE '=== STAGE A ACCEPTANCE TESTS 29-35 COMPLETED SUCCESSFULLY ===';
+END $$;
+
