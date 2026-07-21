@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Appointment, Staff } from '../types';
 import * as GeminiService from '../services/geminiService';
@@ -11,6 +11,7 @@ import { getServices, createService, updateService, deleteService } from '../ser
 import { Service, BusinessBranch } from '../types';
 import { useDialog } from '../contexts/DialogContext';
 import { branchService } from '../services/branchService';
+import { useAdminBootstrap } from '../services/useAdminBootstrap';
 
 import BillingTab from '../components/BillingTab';
 import OnboardingWizard from '../components/OnboardingWizard';
@@ -21,10 +22,10 @@ import ReferralTab from '../components/ReferralTab';
 import AdminSettingsTab from '../components/AdminSettingsTab';
 import { ImageUpload } from '../components/ImageUpload';
 import { onboardingChecklistService, OnboardingReport } from '../services/onboardingChecklistService';
-import { adminFeatureAvailabilityService, AdminFeatureAvailability } from '../services/adminFeatureAvailabilityService';
+import { AdminFeatureAvailability } from '../services/adminFeatureAvailabilityService';
 import { appointmentSelfServiceService } from '../services/appointmentSelfServiceService';
 
-// Local initials avatar — generates an SVG data-URI (no external network request, no personal data leaves the app)
+// Local initials avatar â€” generates an SVG data-URI (no external network request, no personal data leaves the app)
 const getInitialsAvatar = (name: string): string => {
   const initials = name
     .trim()
@@ -66,16 +67,61 @@ const AdminPage: React.FC = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [changeRequests, setChangeRequests] = useState<any[]>([]);
   const [bookingPolicy, setBookingPolicy] = useState<any>(null);
-  const [staffList, setStaffList] = useState<Staff[]>([]);
-  const [servicesList, setServicesList] = useState<Service[]>([]);
   const [onboardingReport, setOnboardingReport] = useState<OnboardingReport | null>(null);
-  const [tabAvailability, setTabAvailability] = useState<Record<string, AdminFeatureAvailability>>({});
   const [adminNextAction, setAdminNextAction] = useState<{message: string, ctaText: string, targetTab: string, isBlocked: boolean} | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<string>('');
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [targetAppointmentId, setTargetAppointmentId] = useState<string | null>(null);
-  const [branches, setBranches] = useState<BusinessBranch[]>([]);
   const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>('all');
+
+  // Bootstrap retry nonce â€” incrementing triggers exactly one new bootstrap request
+  const [bootstrapRetryNonce, setBootstrapRetryNonce] = useState(0);
+  const [appointmentRetryNonce, setAppointmentRetryNonce] = useState(0);
+
+  const currentUserId = currentUser?.id;
+  const tenantId = tenant?.id;
+
+  // â”€â”€ Single admin bootstrap: one RPC per session â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const bootstrap = useAdminBootstrap({ currentUserId, retryNonce: bootstrapRetryNonce });
+
+  // Derive stable references from bootstrap data
+  const staffList: Staff[] = (bootstrap.data?.staff || []).map((s: any) => ({
+    id: s.id,
+    tenantId: tenantId || '',
+    name: s.name,
+    title: s.title || '',
+    active: s.active,
+    isOwner: s.is_owner || false,
+    image: '',
+    phone: '',
+    calendarEmail: '',
+  }));
+  const servicesList: Service[] = (bootstrap.data?.services || []).map((s: any) => ({
+    id: s.id,
+    tenantId: tenantId || '',
+    name: s.name,
+    name_tr: s.name_tr || '',
+    duration: s.duration,
+    price: s.price,
+    active: s.active,
+    category: s.category || '',
+    image: '',
+  }));
+  const branches: BusinessBranch[] = (bootstrap.data?.branches || []).map((b: any) => ({
+    id: b.id,
+    tenantId: tenantId || '',
+    name: b.name,
+    slug: b.slug,
+    isPrimary: b.is_primary,
+    isActive: b.is_active,
+    phone: '',
+    address: '',
+    city: '',
+    district: '',
+    createdAt: '',
+    updatedAt: '',
+  }));
+  const tabAvailability = bootstrap.tabAvailability;
 
   // New/Edit staff form state
   const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
@@ -86,7 +132,7 @@ const AdminPage: React.FC = () => {
   const [newStaffPhone, setNewStaffPhone] = useState('');
 
   const [newStaffActive, setNewStaffActive] = useState(true);
-  // Service assignment checkboxes — service IDs currently assigned to the staff being added/edited
+  // Service assignment checkboxes â€” service IDs currently assigned to the staff being added/edited
   const [selectedStaffServiceIds, setSelectedStaffServiceIds] = useState<string[]>([]);
 
   // New/Edit service form state
@@ -105,16 +151,16 @@ const AdminPage: React.FC = () => {
          <div className="w-16 h-16 bg-blue-50 dark:bg-slate-700/50 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-500 dark:text-blue-400">
            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
          </div>
-         <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Özellik Kilitli</h3>
+         <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Ã–zellik Kilitli</h3>
          <p className="text-gray-500 dark:text-gray-400 mb-6">{lockReason}</p>
          {recommendedAction === 'upgrade' && (
            <button onClick={() => setActiveTab('billing')} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-sm transition">
-             Abonelik Planlarını İncele
+             Abonelik PlanlarÄ±nÄ± Ä°ncele
            </button>
          )}
          {recommendedAction === 'setup' && (
            <button onClick={() => setActiveTab('setup')} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-sm transition">
-             Kurulum Sihirbazına Dön
+             Kurulum SihirbazÄ±na DÃ¶n
            </button>
          )}
       </div>
@@ -123,33 +169,30 @@ const AdminPage: React.FC = () => {
 
   const [adminAppointmentsError, setAdminAppointmentsError] = useState<string | null>(null);
   const [dashboardSummary, setDashboardSummary] = useState<{ totalAppointments: number; confirmedToday: number; completedTotal: number } | null>(null);
-  
-  const inFlightRef = React.useRef<boolean>(false);
-  const loadedKeyRef = React.useRef<string>('');
 
-  const currentUserId = currentUser?.id;
-  const tenantId = tenant?.id;
+  const aptInFlightRef = useRef<boolean>(false);
+  const aptLoadedKeyRef = useRef<string>('');
 
-  const loadData = React.useCallback(async (force = false) => {
-    if (!tenantId || !currentUserId) return;
-    const requestKey = `${currentUserId}:${tenantId}`;
-    if (!force && loadedKeyRef.current === requestKey) return;
-    if (inFlightRef.current) return;
+  // â”€â”€ Appointment & dashboard load â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const loadAppointments = useCallback(async (userId: string, tid: string, nonce: number) => {
+    const requestKey = `apt:${userId}:${tid}:${nonce}`;
+    if (aptLoadedKeyRef.current === requestKey) return;
+    if (aptInFlightRef.current) return;
 
-    inFlightRef.current = true;
+    aptInFlightRef.current = true;
     setAdminAppointmentsError(null);
 
     try {
-      const data = await getAppointments(tenantId);
+      const data = await getAppointments(tid);
       data.sort((a, b) => {
-          const dateA = new Date(`${a.date}T${a.time}`);
-          const dateB = new Date(`${b.date}T${b.time}`);
-          return dateA.getTime() - dateB.getTime();
+        const dateA = new Date(`${a.date}T${a.time}`);
+        const dateB = new Date(`${b.date}T${b.time}`);
+        return dateA.getTime() - dateB.getTime();
       });
       setAppointments(data);
-      loadedKeyRef.current = requestKey;
+      aptLoadedKeyRef.current = requestKey;
 
-      // Also try fetching server-side dashboard summary RPC if available
+      // Dashboard summary via dedicated RPC
       try {
         const { SupabaseBookingRepository } = await import('../services/repositories/supabaseBookingRepository');
         const repo = new SupabaseBookingRepository();
@@ -157,79 +200,59 @@ const AdminPage: React.FC = () => {
         if (summary) setDashboardSummary(summary);
       } catch (_) {}
     } catch (err: any) {
-      console.error("Admin loadAppointments error:", err);
+      console.error('[AdminPage] loadAppointments error:', err?.message || err);
       setAppointments([]);
       setAdminAppointmentsError(language === 'tr'
-        ? 'Randevular şu anda yüklenemiyor. Lütfen tekrar deneyin.'
+        ? 'Randevular ÅŸu anda yÃ¼klenemiyor. LÃ¼tfen tekrar deneyin.'
         : 'Appointments could not be loaded right now. Please try again.');
     } finally {
-      inFlightRef.current = false;
+      aptInFlightRef.current = false;
     }
 
+    // Self-service auxiliary (does not trigger re-render loop â€” no state that feeds back into this effect)
     try {
-      const staffData = await getStaffList(tenantId);
-      setStaffList(staffData);
-
-      const requests = await appointmentSelfServiceService.getAllChangeRequestsAsync(tenantId);
+      const requests = await appointmentSelfServiceService.getAllChangeRequestsAsync(tid);
       setChangeRequests(requests);
-      
-      const policy = appointmentSelfServiceService.getBookingPolicy(tenantId);
+      const policy = appointmentSelfServiceService.getBookingPolicy(tid);
       setBookingPolicy(policy);
+    } catch (_) {}
+  }, [language]);
 
-      const servicesData = await getServices(tenantId);
-      setServicesList(servicesData);
-
-      const branchesData = await branchService.listBranches(tenantId);
-      setBranches(branchesData);
-
-      const report = await onboardingChecklistService.getOnboardingReport(tenantId);
-      setOnboardingReport(report);
-      
-      const nextAction = await adminFeatureAvailabilityService.getAdminHomeNextActions(tenantId);
-      setAdminNextAction(nextAction);
-      
-      const available: Record<string, AdminFeatureAvailability> = {};
-      const validTabs = ['dashboard', 'setup', 'appointments', 'staff', 'services', 'reports', 'billing', 'profile', 'settings', 'customers', 'referrals'];
-      for (const tab of validTabs) {
-        available[tab] = await adminFeatureAvailabilityService.getAvailability(tenantId, tab);
-      }
-      setTabAvailability(available);
-    } catch (e) {
-      console.error("Error loading admin auxiliary data:", e);
-    }
-  }, [currentUserId, tenantId, language]);
-
+  // â”€â”€ Auth redirect (primitive deps only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (authLoading) return;
     if (!currentUser) {
       navigate('/login');
-      return;
     }
-    if (tenantId) {
-      loadData(false);
-    }
-  }, [authLoading, currentUser, tenantId, navigate, loadData]);
+  }, [authLoading, currentUser, navigate]);
+
+  // â”€â”€ Appointment load (primitive keys) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  useEffect(() => {
+    if (!currentUserId || !tenantId) return;
+    loadAppointments(currentUserId, tenantId, appointmentRetryNonce);
+  }, [currentUserId, tenantId, appointmentRetryNonce, loadAppointments]);
 
   const handleCancel = async (id: string) => {
     if (!tenant) return;
     const confirmed = await showConfirm({ message: t.admin.confirm_cancel });
     if (confirmed) {
       await updateAppointmentStatus(tenant.id, id, 'cancelled_by_salon', '', 'salon');
-      loadData();
+      aptLoadedKeyRef.current = '';
+      setAppointmentRetryNonce(n => n + 1);
     }
   };
 
   const handleComplete = async (id: string) => {
     if (!tenant) return;
-    // In a real app we might show a confirm dialog. Here let's just complete.
     await updateAppointmentStatus(tenant.id, id, 'completed', '', 'salon');
-    loadData();
+    aptLoadedKeyRef.current = '';
+    setAppointmentRetryNonce(n => n + 1);
   };
 
   const handleNoShow = async (id: string) => {
     if (!tenant) return;
     await updateAppointmentStatus(tenant.id, id, 'no_show', '', 'salon');
-    loadData();
+    setAppointmentRetryNonce(n => n + 1);
   };
 
   const runAnalysis = async () => {
@@ -242,13 +265,13 @@ const AdminPage: React.FC = () => {
   const handleToggleStaffActive = async (teacher: Staff) => {
     if (!tenant) return;
     await updateStaff(tenant.id, teacher.id, { active: !teacher.active });
-    loadData();
+    setAppointmentRetryNonce(n => n + 1);
   };
 
   const handleToggleServiceActive = async (service: Service) => {
     if (!tenant) return;
     await updateService(tenant.id, service.id, { active: !service.active });
-    loadData();
+    setAppointmentRetryNonce(n => n + 1);
   };
 
   const handleDeleteService = async (id: string) => {
@@ -262,7 +285,7 @@ const AdminPage: React.FC = () => {
         } else {
           showAlert((t.admin as any).service_deleted || 'Service deleted.');
         }
-        loadData();
+        setAppointmentRetryNonce(n => n + 1);
       } else {
         showAlert((t.admin as any)[res.messageKey as string] || 'Action failed.');
       }
@@ -298,7 +321,7 @@ const AdminPage: React.FC = () => {
       await createService(tenant.id, payload);
     }
     
-    loadData();
+    setAppointmentRetryNonce(n => n + 1);
     resetServiceForm();
   };
 
@@ -334,7 +357,7 @@ const AdminPage: React.FC = () => {
         } else {
           showAlert((t.admin as any).staff_deleted || 'Staff deleted.');
         }
-        loadData();
+        setAppointmentRetryNonce(n => n + 1);
       } else {
         showAlert((t.admin as any)[res.messageKey as string] || (t.admin as any).action_failed || 'Action failed.');
       }
@@ -393,7 +416,7 @@ const AdminPage: React.FC = () => {
       }
     }
     
-    loadData();
+    setAppointmentRetryNonce(n => n + 1);
     resetForm();
   };
 
@@ -408,7 +431,7 @@ const AdminPage: React.FC = () => {
   }
   const [weeklyAvailability, setWeeklyAvailability] = useState<AvailabilityDay[]>([]);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
-  // Independent availability save state — separate from staff save
+  // Independent availability save state â€” separate from staff save
   const [availabilitySaving, setAvailabilitySaving] = useState(false);
   const [availabilitySaveResult, setAvailabilitySaveResult] = useState<'idle' | 'success' | 'error'>('idle');
 
@@ -455,17 +478,17 @@ const AdminPage: React.FC = () => {
   };
 
   /**
-   * saveStaffAvailability — dedicated availability persistence function.
+   * saveStaffAvailability â€” dedicated availability persistence function.
    * Completely independent of the staff profile save flow.
    * Requires: staffId belongs to active tenant, valid time ranges, no duplicate weekday rows.
    */
   const saveAvailabilityRules = async (staffId: string) => {
-    if (!tenant) throw new Error('Kiracı bağlamı bulunamadı.');
+    if (!tenant) throw new Error('KiracÄ± baÄŸlamÄ± bulunamadÄ±.');
 
     // Guard: verify staff belongs to this tenant (using already-loaded staffList)
     const belongsToTenant = staffList.some(s => s.id === staffId && s.tenantId === tenant.id);
     if (!belongsToTenant) {
-      throw new Error('Bu uzman bu işletmeye ait değil.');
+      throw new Error('Bu uzman bu iÅŸletmeye ait deÄŸil.');
     }
 
     setAvailabilitySaving(true);
@@ -475,7 +498,7 @@ const AdminPage: React.FC = () => {
       const repo = getAvailabilityRepository();
 
       // Validate time ranges for all active days
-      const dayNames = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+      const dayNames = ['Pazartesi', 'SalÄ±', 'Ã‡arÅŸamba', 'PerÅŸembe', 'Cuma', 'Cumartesi', 'Pazar'];
       for (const day of weeklyAvailability) {
         if (day.is_active) {
           const [sh, sm] = day.start_time.split(':').map(Number);
@@ -483,22 +506,22 @@ const AdminPage: React.FC = () => {
           const startMinutes = sh * 60 + sm;
           const endMinutes = eh * 60 + em;
           if (endMinutes <= startMinutes) {
-            throw new Error(`${dayNames[day.weekday - 1]} günü için bitiş saati başlangıç saatinden sonra olmalıdır.`);
+            throw new Error(`${dayNames[day.weekday - 1]} gÃ¼nÃ¼ iÃ§in bitiÅŸ saati baÅŸlangÄ±Ã§ saatinden sonra olmalÄ±dÄ±r.`);
           }
         }
       }
 
-      // Persist each weekday: update existing rows, insert missing ones — prevents duplicates
+      // Persist each weekday: update existing rows, insert missing ones â€” prevents duplicates
       for (const day of weeklyAvailability) {
         if (day.id) {
-          // Row exists — update it (covers is_active toggling and time changes)
+          // Row exists â€” update it (covers is_active toggling and time changes)
           await repo.updateAvailabilityRule(day.id, {
             is_active: day.is_active,
             start_time: `${day.start_time}:00`,
             end_time: `${day.end_time}:00`
           });
         } else {
-          // Row missing — create it (only one row per tenant+staff+weekday is enforced by DB unique constraint)
+          // Row missing â€” create it (only one row per tenant+staff+weekday is enforced by DB unique constraint)
           await repo.createAvailabilityRule(tenant.id, {
             staffId,
             weekday: day.weekday,
@@ -526,7 +549,7 @@ const AdminPage: React.FC = () => {
       setAvailabilitySaveResult('success');
     } catch (err: any) {
       setAvailabilitySaveResult('error');
-      showAlert(err.message || 'Çalışma saatleri kaydedilirken bir hata oluştu.');
+      showAlert(err.message || 'Ã‡alÄ±ÅŸma saatleri kaydedilirken bir hata oluÅŸtu.');
       throw err; // re-throw so caller knows availability failed independently
     } finally {
       setAvailabilitySaving(false);
@@ -660,14 +683,14 @@ const AdminPage: React.FC = () => {
       {activeTab === 'dashboard' && (
         <div className="space-y-6">
           <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
-             <h2 className="text-xl font-bold dark:text-white">{(t.admin as any).dashboard_today || 'Kayıtlar / Bugün'}</h2>
+             <h2 className="text-xl font-bold dark:text-white">{(t.admin as any).dashboard_today || 'KayÄ±tlar / BugÃ¼n'}</h2>
              <div className="flex gap-2">
                  <button 
                    onClick={() => { window.open('/#/book?preview=true', '_blank'); }}
                    className="inline-flex md:hidden items-center px-4 py-2 border border-gray-300 dark:border-slate-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-200 bg-white dark:bg-slate-700 hover:bg-gray-50 focus:outline-none"
                  >
                    <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                   Site Önizleme
+                   Site Ã–nizleme
                  </button>
                  <button 
                    onClick={runAnalysis}
@@ -686,15 +709,15 @@ const AdminPage: React.FC = () => {
                 <div>
                   <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
                     <span className="flex h-2.5 w-2.5 rounded-full bg-blue-600"></span>
-                    İşletme Kurulum Rehberi
+                    Ä°ÅŸletme Kurulum Rehberi
                   </h3>
                   <p className="text-xs text-gray-500 dark:text-gray-450 mt-1">
-                    Sitenizin yayına alınması ve online randevu kabul etmesi için kuruluma devam edin.
+                    Sitenizin yayÄ±na alÄ±nmasÄ± ve online randevu kabul etmesi iÃ§in kuruluma devam edin.
                   </p>
                 </div>
                 <div className="flex items-center gap-2 animate-pulse">
                   <span className="text-xs font-semibold px-2.5 py-1 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-450 rounded-full">
-                    Kurulum %{onboardingReport.progressPercent} Tamamlandı
+                    Kurulum %{onboardingReport.progressPercent} TamamlandÄ±
                   </span>
                 </div>
               </div>
@@ -710,7 +733,7 @@ const AdminPage: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
                 {/* Next Action */}
                 <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-gray-150 dark:border-slate-800">
-                  <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider block">Sıradaki Adım</span>
+                  <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider block">SÄ±radaki AdÄ±m</span>
                   {adminNextAction ? (
                      <div className="mt-1">
                        <span className={`text-sm font-semibold ${adminNextAction.isBlocked ? 'text-red-650 dark:text-red-400' : 'text-gray-800 dark:text-gray-200'}`}>{adminNextAction.message}</span>
@@ -722,35 +745,35 @@ const AdminPage: React.FC = () => {
                     </div>
                   ) : (
                     <div className="mt-1">
-                      <span className="text-sm font-semibold text-green-700 dark:text-green-500">Tüm Adımlar Tamam!</span>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Yayın incelemesine göndermek üzere kurulum sihirbazının son adımına geçebilirsiniz.</p>
+                      <span className="text-sm font-semibold text-green-700 dark:text-green-500">TÃ¼m AdÄ±mlar Tamam!</span>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">YayÄ±n incelemesine gÃ¶ndermek Ã¼zere kurulum sihirbazÄ±nÄ±n son adÄ±mÄ±na geÃ§ebilirsiniz.</p>
                     </div>
                   )}
                 </div>
 
                 {/* Publish & Verification Status */}
                 <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-gray-150 dark:border-slate-800">
-                  <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider block">Yayın Uygunluğu</span>
+                  <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider block">YayÄ±n UygunluÄŸu</span>
                   <div className="mt-1 text-xs">
                     {onboardingReport.pendingCheckout ? (
                       <p className="text-red-655 dark:text-red-400 font-medium">
-                        Deneme süresini başlatmak için ödeme doğrulaması tamamlanmalıdır.
+                        Deneme sÃ¼resini baÅŸlatmak iÃ§in Ã¶deme doÄŸrulamasÄ± tamamlanmalÄ±dÄ±r.
                       </p>
                     ) : onboardingReport.canSubmitForReview ? (
                       <p className="text-green-700 dark:text-green-400 font-medium">
-                        Tüm zorunlu adımlar tamamlandı. Yayın incelemesine gönderebilirsiniz!
+                        TÃ¼m zorunlu adÄ±mlar tamamlandÄ±. YayÄ±n incelemesine gÃ¶nderebilirsiniz!
                       </p>
                     ) : onboardingReport.isPendingReview ? (
                       <p className="text-blue-600 dark:text-blue-450 font-medium">
-                        Siteniz LARİ ekibi tarafından incelemede. Kısa süre içinde yayında olacaktır!
+                        Siteniz LARÄ° ekibi tarafÄ±ndan incelemede. KÄ±sa sÃ¼re iÃ§inde yayÄ±nda olacaktÄ±r!
                       </p>
                     ) : onboardingReport.isPublished ? (
                       <p className="text-green-700 dark:text-green-405 font-medium">
-                        Siteniz aktif ve yayında! Online randevular açık.
+                        Siteniz aktif ve yayÄ±nda! Online randevular aÃ§Ä±k.
                       </p>
                     ) : (
                       <p className="text-gray-600 dark:text-gray-400">
-                        Yayın incelemesine gönderebilmek için temel işletme bilgileri, hizmet, uzman ve ödeme doğrulaması tamamlanmalıdır.
+                        YayÄ±n incelemesine gÃ¶nderebilmek iÃ§in temel iÅŸletme bilgileri, hizmet, uzman ve Ã¶deme doÄŸrulamasÄ± tamamlanmalÄ±dÄ±r.
                       </p>
                     )}
                   </div>
@@ -778,7 +801,7 @@ const AdminPage: React.FC = () => {
                   onClick={() => setActiveTab('setup')}
                   className={`px-4 py-2 ${adminNextAction ? 'bg-white text-gray-700 border-gray-300 border hover:bg-gray-50 dark:bg-slate-700 dark:text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'} rounded-lg text-xs font-bold shadow-sm transition`}
                 >
-                  Kurulum Sihirbazını Aç
+                  Kurulum SihirbazÄ±nÄ± AÃ§
                 </button>
               </div>
             </div>
@@ -801,7 +824,7 @@ const AdminPage: React.FC = () => {
               </div>
             </div>
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-gray-100 dark:border-slate-700 transition-colors duration-300 cursor-pointer" onClick={() => setActiveTab('appointments')}>
-              <div className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase transition-colors duration-300">{language === 'tr' ? 'Bugün Onaylananlar' : "Today's Confirmed"}</div>
+              <div className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase transition-colors duration-300">{language === 'tr' ? 'BugÃ¼n Onaylananlar' : "Today's Confirmed"}</div>
               <div className="mt-2 text-3xl font-bold text-blue-600 dark:text-blue-400 transition-colors duration-300">
                 {adminAppointmentsError ? '--' : (dashboardSummary ? dashboardSummary.confirmedToday : (() => {
                   const todayIstanbul = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(new Date());
@@ -810,11 +833,11 @@ const AdminPage: React.FC = () => {
               </div>
             </div>
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-gray-100 dark:border-slate-700 transition-colors duration-300 cursor-pointer" onClick={() => setActiveTab('appointments')}>
-              <div className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase transition-colors duration-300">{language === 'tr' ? 'Tamamlanan Görüşmeler' : 'Completed'}</div>
+              <div className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase transition-colors duration-300">{language === 'tr' ? 'Tamamlanan GÃ¶rÃ¼ÅŸmeler' : 'Completed'}</div>
               <div className="mt-2 text-3xl font-bold text-green-600 dark:text-green-400 transition-colors duration-300">
                 {adminAppointmentsError ? '--' : (dashboardSummary ? dashboardSummary.completedTotal : appointments.filter(a => a.status === 'completed').length)}
               </div> 
-              <span className="text-xs text-gray-400 dark:text-gray-500 transition-colors duration-300">{language === 'tr' ? 'Tüm zamanlar' : 'All time'}</span>
+              <span className="text-xs text-gray-400 dark:text-gray-500 transition-colors duration-300">{language === 'tr' ? 'TÃ¼m zamanlar' : 'All time'}</span>
             </div>
           </div>
         </div>
@@ -829,7 +852,7 @@ const AdminPage: React.FC = () => {
                 <div className="mb-6 bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/60 rounded-xl p-5 shadow-sm text-left">
                   <div className="flex items-center gap-2 mb-3">
                     <span className="inline-block w-2.5 h-2.5 bg-amber-500 rounded-full animate-ping"></span>
-                    <h4 className="text-md font-bold text-amber-800 dark:text-amber-400">Onay Bekleyen Değişiklik Talepleri ({changeRequests.filter((r: any) => r.status === 'requested').length})</h4>
+                    <h4 className="text-md font-bold text-amber-800 dark:text-amber-400">Onay Bekleyen DeÄŸiÅŸiklik Talepleri ({changeRequests.filter((r: any) => r.status === 'requested').length})</h4>
                   </div>
                   <div className="space-y-3">
                     {changeRequests.filter((r: any) => r.status === 'requested').map((req: any) => {
@@ -842,32 +865,32 @@ const AdminPage: React.FC = () => {
                               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${
                                 req.type === 'cancellation' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-blue-50 text-blue-600 border border-blue-100'
                               }`}>
-                                {req.type === 'cancellation' ? 'İptal Talebi' : 'Erteleme Talebi'}
+                                {req.type === 'cancellation' ? 'Ä°ptal Talebi' : 'Erteleme Talebi'}
                               </span>
                               <span className="text-[10px] text-gray-400 font-mono">ID: {req.id}</span>
                             </div>
                             <p className="text-sm font-bold text-gray-800 dark:text-gray-200">
-                              {relatedApt?.user_name || 'Müşteri'} • <span className="text-gray-600 dark:text-gray-400">{language === 'tr' ? (service?.name_tr || service?.name) : service?.name}</span>
+                              {relatedApt?.user_name || 'MÃ¼ÅŸteri'} â€¢ <span className="text-gray-600 dark:text-gray-400">{language === 'tr' ? (service?.name_tr || service?.name) : service?.name}</span>
                             </p>
                             <p className="text-xs text-gray-500">
                               Mevcut Randevu: <strong className="text-gray-700 dark:text-gray-300">{relatedApt?.date} - {relatedApt?.time}</strong>
                             </p>
                             {req.type === 'reschedule' && (
                               <p className="text-xs text-blue-600 dark:text-blue-400">
-                                İstenen Yeni Zaman: <strong>{req.requestedDateTime}</strong>
+                                Ä°stenen Yeni Zaman: <strong>{req.requestedDateTime}</strong>
                               </p>
                             )}
                             {req.reason && <p className="text-xs text-gray-500 italic">Sebep: "{req.reason}"</p>}
-                            {req.customerNote && <p className="text-xs text-gray-500 italic font-medium">Müşteri Notu: "{req.customerNote}"</p>}
+                            {req.customerNote && <p className="text-xs text-gray-500 italic font-medium">MÃ¼ÅŸteri Notu: "{req.customerNote}"</p>}
                           </div>
                           <div className="flex gap-2 w-full md:w-auto">
                             <button
                               onClick={async () => {
-                                const confirmChange = await showConfirm({ message: 'Bu talebi reddetmek istediğinize emin misiniz?' });
+                                const confirmChange = await showConfirm({ message: 'Bu talebi reddetmek istediÄŸinize emin misiniz?' });
                                 if (confirmChange) {
-                                  const note = prompt('Müşteriye iletilecek ret nedeni (isteğe bağlı):') || '';
+                                  const note = prompt('MÃ¼ÅŸteriye iletilecek ret nedeni (isteÄŸe baÄŸlÄ±):') || '';
                                   await appointmentSelfServiceService.reviewChangeRequest(tenant!.id, req.id, 'rejected', note);
-                                  loadData();
+                                  setAppointmentRetryNonce(n => n + 1);
                                 }
                               }}
                               className="flex-1 md:flex-none px-3.5 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-200 rounded-lg text-xs font-semibold"
@@ -876,11 +899,11 @@ const AdminPage: React.FC = () => {
                             </button>
                             <button
                               onClick={async () => {
-                                const confirmChange = await showConfirm({ message: 'Bu talebi onaylamak ve randevuyu güncellemek istiyor musunuz?' });
+                                const confirmChange = await showConfirm({ message: 'Bu talebi onaylamak ve randevuyu gÃ¼ncellemek istiyor musunuz?' });
                                 if (confirmChange) {
-                                  const note = prompt('Müşteriye iletilecek onay mesajı (isteğe bağlı):') || '';
+                                  const note = prompt('MÃ¼ÅŸteriye iletilecek onay mesajÄ± (isteÄŸe baÄŸlÄ±):') || '';
                                   await appointmentSelfServiceService.reviewChangeRequest(tenant!.id, req.id, 'approved', note);
-                                  loadData();
+                                  setAppointmentRetryNonce(n => n + 1);
                                 }
                               }}
                               className="flex-1 md:flex-none px-3.5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-semibold shadow-sm"
@@ -904,7 +927,7 @@ const AdminPage: React.FC = () => {
                   onChange={(e) => setSelectedBranchFilter(e.target.value)}
                   className="rounded-md border-gray-300 shadow-sm focus:border-accent focus:ring-accent sm:text-sm p-1.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white"
                 >
-                  <option value="all">Tüm Şubeler</option>
+                  <option value="all">TÃ¼m Åubeler</option>
                   {branches.map(b => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
@@ -915,8 +938,8 @@ const AdminPage: React.FC = () => {
               {adminAppointmentsError ? (
                 <div className="py-12 flex flex-col items-center justify-center text-center px-4">
                   <p className="text-sm font-medium text-red-600 dark:text-red-400 mb-4">{adminAppointmentsError}</p>
-                  <button onClick={() => loadData()} className="px-5 py-2 bg-accent text-white rounded-lg shadow-sm font-medium hover:bg-blue-700 transition-colors text-sm">
-                    {language === 'tr' ? 'Yeniden Yükle' : 'Retry'}
+                  <button onClick={() => setAppointmentRetryNonce(n => n + 1)} className="px-5 py-2 bg-accent text-white rounded-lg shadow-sm font-medium hover:bg-blue-700 transition-colors text-sm">
+                    {language === 'tr' ? 'Yeniden YÃ¼kle' : 'Retry'}
                   </button>
                 </div>
               ) : appointments.filter(a => selectedBranchFilter === 'all' || a.branchId === selectedBranchFilter).length === 0 ? (
@@ -924,9 +947,9 @@ const AdminPage: React.FC = () => {
                   <div className="w-16 h-16 bg-gray-50 dark:bg-slate-700/50 rounded-full flex items-center justify-center mb-4 border border-gray-100 dark:border-slate-600">
                     <svg className="w-8 h-8 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                   </div>
-                  <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">Henüz Randevu Yok</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mb-6">Müşterileriniz online rezervasyon yaptıkça randevularınız otomatik olarak burada görünecektir.</p>
-                  <button onClick={() => window.open('/#/book?preview=true', '_blank')} className="px-5 py-2 bg-white text-gray-700 border border-gray-300 dark:bg-slate-700 dark:text-gray-200 dark:border-slate-600 rounded-lg shadow-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors text-sm">Site Önizlemesini Aç</button>
+                  <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">HenÃ¼z Randevu Yok</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mb-6">MÃ¼ÅŸterileriniz online rezervasyon yaptÄ±kÃ§a randevularÄ±nÄ±z otomatik olarak burada gÃ¶rÃ¼necektir.</p>
+                  <button onClick={() => window.open('/#/book?preview=true', '_blank')} className="px-5 py-2 bg-white text-gray-700 border border-gray-300 dark:bg-slate-700 dark:text-gray-200 dark:border-slate-600 rounded-lg shadow-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors text-sm">Site Ã–nizlemesini AÃ§</button>
                 </div>
               ) : (
                 appointments.filter(a => selectedBranchFilter === 'all' || a.branchId === selectedBranchFilter).map((apt) => {
@@ -942,11 +965,11 @@ const AdminPage: React.FC = () => {
                             {apt.user_name}
                           </p>
                           <p className="text-sm text-gray-500 dark:text-gray-400 transition-colors duration-300 mt-0.5">
-                            {apt.date} at {apt.time} • {serviceName || t.admin.unknown_service} {assignedStaff && `(${t.admin.with} ${assignedStaff.name})`} {branchName && `• [${branchName}]`}
+                            {apt.date} at {apt.time} â€¢ {serviceName || t.admin.unknown_service} {assignedStaff && `(${t.admin.with} ${assignedStaff.name})`} {branchName && `â€¢ [${branchName}]`}
                           </p>
                           <div className="mt-1 flex flex-wrap items-center text-xs text-gray-400 dark:text-gray-500 gap-x-2 gap-y-1 transition-colors duration-300">
                               <span>{apt.user_email}</span>
-                              <span className="hidden sm:inline">•</span>
+                              <span className="hidden sm:inline">â€¢</span>
                               <span>{apt.phone || t.admin.no_phone}</span>
                           </div>
                         </div>
@@ -980,7 +1003,7 @@ const AdminPage: React.FC = () => {
                                 onClick={() => handleComplete(apt.id)}
                                 className="text-green-600 hover:text-green-900 text-xs font-semibold px-2 py-1 bg-green-50 rounded"
                               >
-                                {language === 'tr' ? 'Tamamlandı' : 'Complete'}
+                                {language === 'tr' ? 'TamamlandÄ±' : 'Complete'}
                               </button>
                               <button
                                 onClick={() => handleNoShow(apt.id)}
@@ -1019,7 +1042,7 @@ const AdminPage: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors duration-300">{t.admin.full_name}</label>
-                  <input required placeholder="Uzman Adı Soyadı" type="text" value={newStaffName} onChange={e => setNewStaffName(e.target.value)} className="mt-1 w-full rounded-md border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 dark:text-white shadow-sm border p-2 transition-colors duration-300"/>
+                  <input required placeholder="Uzman AdÄ± SoyadÄ±" type="text" value={newStaffName} onChange={e => setNewStaffName(e.target.value)} className="mt-1 w-full rounded-md border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 dark:text-white shadow-sm border p-2 transition-colors duration-300"/>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors duration-300">{t.admin.title_role}</label>
@@ -1043,13 +1066,13 @@ const AdminPage: React.FC = () => {
                   </label>
                 </div>
               </div>
-              {/* ── Service Assignment ── */}
+              {/* â”€â”€ Service Assignment â”€â”€ */}
               <div className="mt-4 border-t border-gray-100 dark:border-slate-700 pt-4">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Hizmet Ataması <span className="text-xs text-gray-400">(Müşteri rezervasyon ekranında yalnızca atanmış hizmetler gösterilir)</span>
+                  Hizmet AtamasÄ± <span className="text-xs text-gray-400">(MÃ¼ÅŸteri rezervasyon ekranÄ±nda yalnÄ±zca atanmÄ±ÅŸ hizmetler gÃ¶sterilir)</span>
                 </label>
                 {servicesList.filter(s => s.active !== false).length === 0 ? (
-                  <p className="text-sm text-amber-600 dark:text-amber-400">Henüz aktif hizmet yok. Önce hizmetler sekmesinden hizmet ekleyin.</p>
+                  <p className="text-sm text-amber-600 dark:text-amber-400">HenÃ¼z aktif hizmet yok. Ã–nce hizmetler sekmesinden hizmet ekleyin.</p>
                 ) : (
                   <div className="flex flex-wrap gap-3">
                     {servicesList.filter(s => s.active !== false).map(svc => (
@@ -1070,7 +1093,7 @@ const AdminPage: React.FC = () => {
                   </div>
                 )}
                 {selectedStaffServiceIds.length === 0 && (
-                  <p className="text-xs text-amber-500 mt-1">⚠ Bu uzman hiçbir hizmete atanmamış — müşteriler bu uzmanı seçemeyecek.</p>
+                  <p className="text-xs text-amber-500 mt-1">âš  Bu uzman hiÃ§bir hizmete atanmamÄ±ÅŸ â€” mÃ¼ÅŸteriler bu uzmanÄ± seÃ§emeyecek.</p>
                 )}
               </div>
               <div className="flex gap-3 mt-4">
@@ -1087,7 +1110,7 @@ const AdminPage: React.FC = () => {
             </form>
           </div>
 
-          {/* ── Weekly Availability Editor ──
+          {/* â”€â”€ Weekly Availability Editor â”€â”€
               Only rendered when editing an existing staff member.
               Completely independent of the staff profile save flow.
           */}
@@ -1099,10 +1122,10 @@ const AdminPage: React.FC = () => {
               {/* Section heading */}
               <div className="border-b border-gray-200 dark:border-slate-700 pb-4 mb-6">
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                  Çalışma Saatleri
+                  Ã‡alÄ±ÅŸma Saatleri
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  Haftalık Çalışma Takvimi
+                  HaftalÄ±k Ã‡alÄ±ÅŸma Takvimi
                 </p>
               </div>
 
@@ -1113,14 +1136,14 @@ const AdminPage: React.FC = () => {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
                   </svg>
-                  <span>Çalışma saatleri yükleniyor…</span>
+                  <span>Ã‡alÄ±ÅŸma saatleri yÃ¼kleniyorâ€¦</span>
                 </div>
               )}
 
               {/* Error: load finished but returned empty */}
               {!loadingAvailability && weeklyAvailability.length === 0 && (
                 <div className="rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 text-sm text-red-700 dark:text-red-400">
-                  Çalışma saatleri yüklenemedi. Lütfen sayfayı yenileyip tekrar deneyin.
+                  Ã‡alÄ±ÅŸma saatleri yÃ¼klenemedi. LÃ¼tfen sayfayÄ± yenileyip tekrar deneyin.
                 </div>
               )}
 
@@ -1128,8 +1151,8 @@ const AdminPage: React.FC = () => {
               {!loadingAvailability && weeklyAvailability.length > 0 && (
                 <div className="space-y-3">
                   {weeklyAvailability.map((day) => {
-                    const dayLabels = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
-                    const label = dayLabels[day.weekday - 1] ?? `Gün ${day.weekday}`;
+                    const dayLabels = ['Pazartesi', 'SalÄ±', 'Ã‡arÅŸamba', 'PerÅŸembe', 'Cuma', 'Cumartesi', 'Pazar'];
+                    const label = dayLabels[day.weekday - 1] ?? `GÃ¼n ${day.weekday}`;
                     return (
                       <div
                         key={day.weekday}
@@ -1171,12 +1194,12 @@ const AdminPage: React.FC = () => {
                         {/* Time inputs */}
                         <div className="flex items-center gap-2 flex-1">
                           <div className="flex flex-col">
-                            <label className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">Başlangıç</label>
+                            <label className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">BaÅŸlangÄ±Ã§</label>
                             <input
                               type="time"
                               value={day.start_time}
                               disabled={!day.is_active}
-                              aria-label={`${label} başlangıç saati`}
+                              aria-label={`${label} baÅŸlangÄ±Ã§ saati`}
                               onChange={e =>
                                 setWeeklyAvailability(prev =>
                                   prev.map(d =>
@@ -1187,14 +1210,14 @@ const AdminPage: React.FC = () => {
                               className="rounded-md border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 dark:text-white px-2 py-1 text-sm shadow-sm disabled:opacity-40 disabled:cursor-not-allowed focus:ring-1 focus:ring-accent focus:border-accent"
                             />
                           </div>
-                          <span className="text-gray-400 dark:text-gray-500 text-sm pt-4 select-none">–</span>
+                          <span className="text-gray-400 dark:text-gray-500 text-sm pt-4 select-none">â€“</span>
                           <div className="flex flex-col">
-                            <label className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">Bitiş</label>
+                            <label className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">BitiÅŸ</label>
                             <input
                               type="time"
                               value={day.end_time}
                               disabled={!day.is_active}
-                              aria-label={`${label} bitiş saati`}
+                              aria-label={`${label} bitiÅŸ saati`}
                               onChange={e =>
                                 setWeeklyAvailability(prev =>
                                   prev.map(d =>
@@ -1218,12 +1241,12 @@ const AdminPage: React.FC = () => {
                   <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
-                  Çalışma saatleri başarıyla kaydedildi.
+                  Ã‡alÄ±ÅŸma saatleri baÅŸarÄ±yla kaydedildi.
                 </div>
               )}
               {availabilitySaveResult === 'error' && (
                 <div className="mt-4 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3 text-sm text-red-700 dark:text-red-400">
-                  Kaydetme başarısız oldu. Lütfen tekrar deneyin.
+                  Kaydetme baÅŸarÄ±sÄ±z oldu. LÃ¼tfen tekrar deneyin.
                 </div>
               )}
 
@@ -1248,10 +1271,10 @@ const AdminPage: React.FC = () => {
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
                       </svg>
                     )}
-                    Çalışma Saatlerini Kaydet
+                    Ã‡alÄ±ÅŸma Saatlerini Kaydet
                   </button>
                   {availabilitySaving && (
-                    <span className="text-sm text-gray-500 dark:text-gray-400">Kaydediliyor…</span>
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Kaydediliyorâ€¦</span>
                   )}
                 </div>
               )}
@@ -1263,8 +1286,8 @@ const AdminPage: React.FC = () => {
                 <div className="w-16 h-16 bg-gray-50 dark:bg-slate-700/50 rounded-full flex items-center justify-center mb-4 border border-gray-100 dark:border-slate-600">
                   <svg className="w-8 h-8 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                 </div>
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">Henüz Uzman Eklenmemiş</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mb-6">Müşterilerinize hizmet verecek çalışanları yukarıdaki formdan ekleyebilirsiniz.</p>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">HenÃ¼z Uzman EklenmemiÅŸ</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mb-6">MÃ¼ÅŸterilerinize hizmet verecek Ã§alÄ±ÅŸanlarÄ± yukarÄ±daki formdan ekleyebilirsiniz.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1346,7 +1369,7 @@ const AdminPage: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors duration-300">{t.admin.service_name_tr}</label>
-                  <input placeholder="Saç Kesimi" type="text" value={newServiceNameTr} onChange={e => setNewServiceNameTr(e.target.value)} className="mt-1 w-full rounded-md border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 dark:text-white shadow-sm border p-2 transition-colors duration-300"/>
+                  <input placeholder="SaÃ§ Kesimi" type="text" value={newServiceNameTr} onChange={e => setNewServiceNameTr(e.target.value)} className="mt-1 w-full rounded-md border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 dark:text-white shadow-sm border p-2 transition-colors duration-300"/>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors duration-300">{t.admin.price}</label>
@@ -1384,8 +1407,8 @@ const AdminPage: React.FC = () => {
                 <div className="w-16 h-16 bg-gray-50 dark:bg-slate-700/50 rounded-full flex items-center justify-center mb-4 border border-gray-100 dark:border-slate-600">
                   <svg className="w-8 h-8 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
                 </div>
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">Henüz Hizmet Eklenmemiş</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mb-6">Müşterilerinize online randevu sitenizde sunacağınız hizmetleri yukarıdaki formdan eklemeye başlayın.</p>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">HenÃ¼z Hizmet EklenmemiÅŸ</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mb-6">MÃ¼ÅŸterilerinize online randevu sitenizde sunacaÄŸÄ±nÄ±z hizmetleri yukarÄ±daki formdan eklemeye baÅŸlayÄ±n.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1435,8 +1458,8 @@ const AdminPage: React.FC = () => {
                 <h4 className="font-bold text-gray-900 dark:text-white text-lg transition-colors duration-300">{language === 'tr' ? service.name_tr || service.name : service.name}</h4>
                 <div className="flex gap-4 mt-2 mb-2 text-sm text-gray-500 dark:text-gray-400">
                    <span>{service.duration} {t.admin.min}</span>
-                   <span>•</span>
-                   <span className="font-bold text-accent dark:text-blue-400">₺{service.price}</span>
+                   <span>â€¢</span>
+                   <span className="font-bold text-accent dark:text-blue-400">â‚º{service.price}</span>
                 </div>
               </div>
             ))}
@@ -1479,7 +1502,7 @@ const AdminPage: React.FC = () => {
          <div className="flex justify-between items-center h-16 w-full">
             <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center justify-center flex-1 h-full ${activeTab === 'dashboard' ? 'text-accent dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}>
                <svg className="w-6 h-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
-               <span className="text-[10px] font-medium leading-none">Bugün</span>
+               <span className="text-[10px] font-medium leading-none">BugÃ¼n</span>
             </button>
             <button onClick={() => setActiveTab('appointments')} className={`flex flex-col items-center justify-center flex-1 h-full ${activeTab === 'appointments' ? 'text-accent dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}>
                <div className="relative">
@@ -1503,7 +1526,7 @@ const AdminPage: React.FC = () => {
             <div className="relative flex-1 h-full flex justify-center dropdown-container">
                 <button className={`flex flex-col items-center justify-center w-full h-full ${(['staff', 'reports', 'billing', 'profile', 'referrals', 'settings'].includes(activeTab)) ? 'text-accent dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`} onClick={() => setIsMobileMoreMenuOpen(!isMobileMoreMenuOpen)}>
                    <svg className="w-6 h-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16"/></svg>
-                   <span className="text-[10px] font-medium leading-none truncate w-full text-center px-1 text-ellipsis overflow-hidden">Diğer</span>
+                   <span className="text-[10px] font-medium leading-none truncate w-full text-center px-1 text-ellipsis overflow-hidden">DiÄŸer</span>
                 </button>
                 
                 {/* Mobile More Menu Overlay */}
@@ -1534,10 +1557,10 @@ const AdminPage: React.FC = () => {
                      {(t.admin as any).tab_settings || 'Settings'}
                   </button>
                   <button onClick={() => { window.open('/#/book?preview=true', '_blank'); }} className={`w-full text-left px-4 py-3 text-sm flex items-center gap-2 text-gray-700 dark:text-gray-300 border-t border-gray-100 dark:border-slate-700`}>
-                     Site Önizleme
+                     Site Ã–nizleme
                   </button>
                   <button onClick={() => { logout(); navigate('/login'); }} className={`w-full text-left px-4 py-3 text-sm flex items-center gap-2 text-red-600 dark:text-red-400 font-medium border-t border-gray-100 dark:border-slate-700`}>
-                     Çıkış Yap
+                     Ã‡Ä±kÄ±ÅŸ Yap
                   </button>
               </div>
           </div>
