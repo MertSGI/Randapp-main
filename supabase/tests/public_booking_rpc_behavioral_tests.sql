@@ -725,3 +725,147 @@ BEGIN
   RAISE NOTICE 'CLEANUP COMPLETE: removed behavioral test records.';
 END $$;
 
+
+-- =========================================================================
+-- TESTS 27-28: get_public_available_slots RPC (Phase 1C)
+-- TEST 27: Returns non-empty slots for a valid future weekday
+-- TEST 28: After booking a slot, that slot is absent from subsequent slot query
+-- =========================================================================
+DO $$
+DECLARE
+  v_slug          text  := 'melis-guzellik';
+  v_tenant_id     uuid;
+  v_service_id    uuid;
+  v_staff_id      uuid;
+  v_test_date     date;
+  v_slot_result   jsonb;
+  v_slots         jsonb;
+  v_slot_count    int;
+  v_first_slot    text;
+  v_book_time     time;
+  r               jsonb;
+  d               date;
+BEGIN
+  SELECT id INTO v_tenant_id FROM public.tenants WHERE slug = v_slug;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'SLOT TEST SETUP FAIL: melis-guzellik tenant not found.';
+  END IF;
+
+  SELECT s.id INTO v_service_id
+  FROM public.services s
+  WHERE s.tenant_id = v_tenant_id AND s.active = true
+  LIMIT 1;
+
+  SELECT ss.staff_id INTO v_staff_id
+  FROM public.staff_services ss
+  JOIN public.staff st ON st.id = ss.staff_id
+  WHERE ss.service_id = v_service_id AND st.active = true AND st.tenant_id = v_tenant_id
+  LIMIT 1;
+
+  IF v_service_id IS NULL OR v_staff_id IS NULL THEN
+    RAISE EXCEPTION 'SLOT TEST SETUP FAIL: no active service/staff pair found for tenant';
+  END IF;
+
+  -- Find the nearest future weekday with an availability rule for this staff
+  v_test_date := NULL;
+  FOR d IN SELECT generate_series(CURRENT_DATE + 14, CURRENT_DATE + 28, '1 day'::interval)::date LOOP
+    DECLARE
+      v_wd int := CASE EXTRACT(DOW FROM d)::int WHEN 0 THEN 7 ELSE EXTRACT(DOW FROM d)::int END;
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM public.availability_rules
+        WHERE staff_id = v_staff_id AND tenant_id = v_tenant_id
+          AND weekday = v_wd AND is_active = true
+      ) THEN
+        v_test_date := d;
+        EXIT;
+      END IF;
+    END;
+  END LOOP;
+
+  IF v_test_date IS NULL THEN
+    RAISE EXCEPTION 'SLOT TEST SETUP FAIL: no availability rule found in next 28 days for staff=%', v_staff_id;
+  END IF;
+
+  RAISE NOTICE '=== STARTING get_public_available_slots TESTS ===';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 27: get_public_available_slots returns slots for a valid future date
+  -- -----------------------------------------------------------------------
+  v_slot_result := public.get_public_available_slots(
+    p_slug       => v_slug,
+    p_staff_id   => v_staff_id,
+    p_service_id => v_service_id,
+    p_date       => v_test_date
+  );
+
+  IF v_slot_result->>'reason_code' != 'ok' THEN
+    RAISE EXCEPTION 'TEST 27 FAIL: reason_code != ok, got: %', v_slot_result;
+  END IF;
+
+  v_slots := v_slot_result->'slots';
+  v_slot_count := jsonb_array_length(v_slots);
+  IF v_slot_count = 0 THEN
+    RAISE EXCEPTION 'TEST 27 FAIL: expected at least 1 available slot, got 0';
+  END IF;
+
+  v_first_slot := v_slots->0 #>> '{}';
+  RAISE NOTICE 'TEST 27 PASS: returned % slots. First slot: %', v_slot_count, v_first_slot;
+
+  -- -----------------------------------------------------------------------
+  -- TEST 28: After booking, that slot no longer appears in get_public_available_slots
+  -- -----------------------------------------------------------------------
+  v_book_time := v_first_slot::time;
+
+  r := public.create_public_booking(
+    p_slug             => v_slug,
+    p_service_id       => v_service_id,
+    p_staff_id         => v_staff_id,
+    p_appointment_date => v_test_date,
+    p_appointment_time => v_book_time,
+    p_customer_name    => 'Slot Invalidation Test',
+    p_customer_email   => 'slot-inval-test-28@randapp-test.invalid',
+    p_customer_phone   => '+905001119988',
+    p_required_consent => true,
+    p_idempotency_key  => 'slot-inval-test-28'
+  );
+
+  IF NOT (r->>'success')::boolean THEN
+    RAISE EXCEPTION 'TEST 28 FAIL: booking failed: %', r;
+  END IF;
+
+  v_slot_result := public.get_public_available_slots(
+    p_slug       => v_slug,
+    p_staff_id   => v_staff_id,
+    p_service_id => v_service_id,
+    p_date       => v_test_date
+  );
+  v_slots := v_slot_result->'slots';
+
+  IF v_slots @> to_jsonb(v_first_slot) THEN
+    RAISE EXCEPTION 'TEST 28 FAIL: booked slot % still present in slot list: %', v_first_slot, v_slots;
+  END IF;
+
+  RAISE NOTICE 'TEST 28 PASS: booked slot % absent from subsequent query.', v_first_slot;
+
+  -- Cleanup
+  DELETE FROM public.appointment_access_tokens
+  WHERE appointment_id IN (
+    SELECT id FROM public.appointments
+    WHERE tenant_id = v_tenant_id AND user_email = 'slot-inval-test-28@randapp-test.invalid'
+  );
+  DELETE FROM public.public_booking_idempotency
+  WHERE tenant_id = v_tenant_id AND idempotency_key = 'slot-inval-test-28';
+  DELETE FROM public.appointments
+  WHERE tenant_id = v_tenant_id AND user_email = 'slot-inval-test-28@randapp-test.invalid';
+  DELETE FROM public.consent_ledger
+  WHERE tenant_id = v_tenant_id::text
+    AND customer_id IN (
+      SELECT id::text FROM public.customers
+      WHERE tenant_id = v_tenant_id AND email = 'slot-inval-test-28@randapp-test.invalid'
+    );
+  DELETE FROM public.customers
+  WHERE tenant_id = v_tenant_id AND email = 'slot-inval-test-28@randapp-test.invalid';
+
+  RAISE NOTICE '=== TESTS 27-28 COMPLETED SUCCESSFULLY ===';
+END $$;

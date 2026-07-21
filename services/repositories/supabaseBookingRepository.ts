@@ -22,7 +22,16 @@ export class SupabaseBookingRepository implements BookingRepository {
         url += `&appointment_date=gte.${now}`;
       }
       const res = await fetchSupabase(url);
-      if (!res.ok) return [];
+      if (!res.ok) {
+        // Log the status explicitly so Admin visibility failures are diagnosable.
+        // Common reasons: 401 (no auth session), 403 (RLS denial), 406 (header mismatch).
+        const errorBody = await res.text().catch(() => '');
+        console.error(
+          `[supabaseBookingRepository] listAppointments failed: HTTP ${res.status} for tenant=${tenantId}`,
+          errorBody.slice(0, 300)
+        );
+        return [];
+      }
       const data = await res.json();
       return data.map((a: any) => ({
         id: a.id,
@@ -44,7 +53,10 @@ export class SupabaseBookingRepository implements BookingRepository {
         createdAt: a.created_at,
         syncedToGoogle: a.synced_to_google || false
       }));
-    } catch { return []; }
+    } catch (err) {
+      console.error('[supabaseBookingRepository] listAppointments exception:', err);
+      return [];
+    }
   }
 
   async getAppointmentById(appointmentId: string): Promise<Appointment | null> {

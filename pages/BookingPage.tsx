@@ -67,6 +67,21 @@ const BookingPage: React.FC = () => {
   const [isMultiBranchEnabled, setIsMultiBranchEnabled] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState<BusinessBranch | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string>('');
+  // Stored confirmation payload for durable post-booking display
+  const [bookingConfirmation, setBookingConfirmation] = useState<{
+    appointmentId: string;
+    manageToken?: string;
+    selectedServiceName: string;
+    selectedServiceNameTr: string;
+    selectedStaffName: string;
+    selectedDate: string;
+    selectedTime: string;
+    customerName: string;
+    customerPhone: string;
+    tenantName: string;
+    calendarLink: string;
+    whatsappSent: boolean;
+  } | null>(null);
 
 
   const [timeSlots, setTimeSlots] = useState<string[]>([]);
@@ -91,6 +106,24 @@ const BookingPage: React.FC = () => {
     setIdempotencyKey(crypto.randomUUID());
   }, [tenant?.id, selectedService?.id, selectedStaff?.id, selectedDate, selectedTime]);
 
+
+  // Restore confirmation from sessionStorage on mount (durable confirmation state)
+  useEffect(() => {
+    if (!tenant) return;
+    const key = `randapp_booking_confirmation_${tenant.id}`;
+    try {
+      const stored = sessionStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.appointmentId) {
+          setBookingConfirmation(parsed);
+          setStep(5);
+        }
+      }
+    } catch (_) {
+      // Silently ignore sessionStorage read failures
+    }
+  }, [tenant?.id]);
 
   useEffect(() => {
     if (tenant) {
@@ -352,108 +385,116 @@ const BookingPage: React.FC = () => {
       console.error('Abuse protection evaluation failed', err);
     }
 
+    // Determine data source mode early — needed to gate consent writes
+      const isSupabaseMode = getDataSourceMode() === 'supabase';
+
     try {
       // Core Operation: Consent service captures
-      try {
-        const { consentService } = await import('../services/consentService');
-        const customerId = `guest_${Date.now()}`;
-        await consentService.captureBookingConsent(tenant.id, {
-           id: customerId,
-           requiredBookingConsent: consentForms.requiredBookingConsent,
-           reminderConsent: consentForms.reminderConsent,
-           marketingConsent: consentForms.marketingConsent,
-           referralConsent: consentForms.referralConsent
-        });
-      } catch (e) {
-        console.error('Consent service capture failed', e);
-        throw new Error(language === 'tr' ? 'Yasal kullanım izinleri kaydedilemedi. Lütfen tekrar deneyin.' : 'Required consents could not be saved. Please try again.');
-      }
-
-      try {
-        const { policyAcceptanceService } = await import('../services/policyAcceptanceService');
-        const actorId = formData.phone || formData.email || 'anonymous';
-        await policyAcceptanceService.recordPolicyAcceptance({
-           tenantId: tenant.id,
-           actorType: 'customer',
-           actorId,
-           actorDisplayName: formData.name,
-           actorContact: formData.phone || formData.email,
-           documentType: 'booking_terms',
-           acceptanceSource: 'booking'
-        });
-        if (consentForms.reminderConsent) {
-           await policyAcceptanceService.recordPolicyAcceptance({
-              tenantId: tenant.id,
-              actorType: 'customer',
-              actorId,
-              actorDisplayName: formData.name,
-              actorContact: formData.phone || formData.email,
-              documentType: 'communication_consent_text',
-              acceptanceSource: 'booking'
-           });
-        }
-        if (consentForms.marketingConsent) {
-           await policyAcceptanceService.recordPolicyAcceptance({
-              tenantId: tenant.id,
-              actorType: 'customer',
-              actorId,
-              actorDisplayName: formData.name,
-              actorContact: formData.phone || formData.email,
-              documentType: 'marketing_consent_text',
-              acceptanceSource: 'booking'
-           });
-        }
-      } catch (e) {
-        console.error('Policy acceptance recording failed', e);
-        throw new Error(language === 'tr' ? 'Kullanıcı sözleşmesi onayı kaydedilemedi. Lütfen tekrar deneyin.' : 'Policy acceptance could not be saved. Please try again.');
-      }
-
-      try {
-        const { consentLedgerService } = await import('../services/consentLedgerService');
-        const actorId = formData.phone || formData.email || 'anonymous';
-        await consentLedgerService.recordConsent({
-           tenantId: tenant.id,
-           actorType: 'customer',
-           actorId,
-           contact: formData.phone || formData.email,
-           consentType: 'booking_transactional',
-           status: consentForms.requiredBookingConsent ? 'granted' : 'denied',
-           source: 'booking_page',
-           legalDocumentType: 'booking_terms'
-        });
-        await consentLedgerService.recordConsent({
-           tenantId: tenant.id,
-           actorType: 'customer',
-           actorId,
-           contact: formData.phone || formData.email,
-           consentType: 'communication',
-           status: consentForms.reminderConsent ? 'granted' : 'denied',
-           source: 'booking_page',
-           legalDocumentType: 'communication_consent_text'
-        });
-        await consentLedgerService.recordConsent({
-           tenantId: tenant.id,
-           actorType: 'customer',
-           actorId,
-           contact: formData.phone || formData.email,
-           consentType: 'marketing',
-           status: consentForms.marketingConsent ? 'granted' : 'denied',
-           source: 'booking_page',
-           legalDocumentType: 'marketing_consent_text'
+      // In Supabase mode these are intentionally skipped: the create_public_booking RPC
+      // writes consent records atomically. Running them here as anon would fail silently
+      // (no anon INSERT/UPDATE policy on consent tables) and duplicate the RPC's work.
+      if (!isSupabaseMode) {
+        try {
+          const { consentService } = await import('../services/consentService');
+          const customerId = `guest_${Date.now()}`;
+          await consentService.captureBookingConsent(tenant.id, {
+             id: customerId,
+             requiredBookingConsent: consentForms.requiredBookingConsent,
+             reminderConsent: consentForms.reminderConsent,
+             marketingConsent: consentForms.marketingConsent,
+             referralConsent: consentForms.referralConsent
           });
-        await consentLedgerService.recordConsent({
-           tenantId: tenant.id,
-           actorType: 'customer',
-           actorId,
-           contact: formData.phone || formData.email,
-           consentType: 'referral_campaign',
-           status: consentForms.referralConsent ? 'granted' : 'denied',
-           source: 'booking_page'
-        });
-      } catch (e) {
-        console.error('Consent ledger recording failed', e);
-        throw new Error(language === 'tr' ? 'Yasal onay kaydı oluşturulamadı. Lütfen tekrar deneyin.' : 'Consent ledger entry could not be saved. Please try again.');
-      }
+        } catch (e) {
+          console.error('Consent service capture failed', e);
+          throw new Error(language === 'tr' ? 'Yasal kullanım izinleri kaydedilemedi. Lütfen tekrar deneyin.' : 'Required consents could not be saved. Please try again.');
+        }
+
+        try {
+          const { policyAcceptanceService } = await import('../services/policyAcceptanceService');
+          const actorId = formData.phone || formData.email || 'anonymous';
+          await policyAcceptanceService.recordPolicyAcceptance({
+             tenantId: tenant.id,
+             actorType: 'customer',
+             actorId,
+             actorDisplayName: formData.name,
+             actorContact: formData.phone || formData.email,
+             documentType: 'booking_terms',
+             acceptanceSource: 'booking'
+          });
+          if (consentForms.reminderConsent) {
+             await policyAcceptanceService.recordPolicyAcceptance({
+                tenantId: tenant.id,
+                actorType: 'customer',
+                actorId,
+                actorDisplayName: formData.name,
+                actorContact: formData.phone || formData.email,
+                documentType: 'communication_consent_text',
+                acceptanceSource: 'booking'
+             });
+          }
+          if (consentForms.marketingConsent) {
+             await policyAcceptanceService.recordPolicyAcceptance({
+                tenantId: tenant.id,
+                actorType: 'customer',
+                actorId,
+                actorDisplayName: formData.name,
+                actorContact: formData.phone || formData.email,
+                documentType: 'marketing_consent_text',
+                acceptanceSource: 'booking'
+             });
+          }
+        } catch (e) {
+          console.error('Policy acceptance recording failed', e);
+          throw new Error(language === 'tr' ? 'Kullanıcı sözleşmesi onayı kaydedilemedi. Lütfen tekrar deneyin.' : 'Policy acceptance could not be saved. Please try again.');
+        }
+
+        try {
+          const { consentLedgerService } = await import('../services/consentLedgerService');
+          const actorId = formData.phone || formData.email || 'anonymous';
+          await consentLedgerService.recordConsent({
+             tenantId: tenant.id,
+             actorType: 'customer',
+             actorId,
+             contact: formData.phone || formData.email,
+             consentType: 'booking_transactional',
+             status: consentForms.requiredBookingConsent ? 'granted' : 'denied',
+             source: 'booking_page',
+             legalDocumentType: 'booking_terms'
+          });
+          await consentLedgerService.recordConsent({
+             tenantId: tenant.id,
+             actorType: 'customer',
+             actorId,
+             contact: formData.phone || formData.email,
+             consentType: 'communication',
+             status: consentForms.reminderConsent ? 'granted' : 'denied',
+             source: 'booking_page',
+             legalDocumentType: 'communication_consent_text'
+          });
+          await consentLedgerService.recordConsent({
+             tenantId: tenant.id,
+             actorType: 'customer',
+             actorId,
+             contact: formData.phone || formData.email,
+             consentType: 'marketing',
+             status: consentForms.marketingConsent ? 'granted' : 'denied',
+             source: 'booking_page',
+             legalDocumentType: 'marketing_consent_text'
+            });
+          await consentLedgerService.recordConsent({
+             tenantId: tenant.id,
+             actorType: 'customer',
+             actorId,
+             contact: formData.phone || formData.email,
+             consentType: 'referral_campaign',
+             status: consentForms.referralConsent ? 'granted' : 'denied',
+             source: 'booking_page'
+          });
+        } catch (e) {
+          console.error('Consent ledger recording failed', e);
+          throw new Error(language === 'tr' ? 'Yasal onay kaydı oluşturulamadı. Lütfen tekrar deneyin.' : 'Consent ledger entry could not be saved. Please try again.');
+        }
+      } // end !isSupabaseMode consent block
 
       // Core Operation: Save Customer Profile
       if (saveProfile) {
@@ -481,7 +522,7 @@ const BookingPage: React.FC = () => {
 
       // Core Operation: Create Appointment via safe RPC in Supabase mode,
       // or direct service call in local/mock/demo mode.
-      const isSupabaseMode = getDataSourceMode() === 'supabase';
+      // Note: isSupabaseMode was already declared above for the consent block guard.
 
       let newAppointment: any;
       let manageToken: string | undefined;
@@ -622,8 +663,9 @@ const BookingPage: React.FC = () => {
               NotificationService.sendBookingSms(newAppointment, serviceName).catch(e => console.error("SMS send fail", e)),
               CalendarService.syncToBusinessCalendar(newAppointment, selectedStaff).catch(e => console.error("Calendar sync fail", e))
           ]);
-          
-          await updateAppointmentStatus(tenant.id, newAppointment.id, 'confirmed').catch(e => console.error("Status confirm update fail", e)); 
+          // Note: updateAppointmentStatus is intentionally omitted here in Supabase mode.
+          // The create_public_booking RPC already sets status='confirmed' atomically.
+          // An anonymous PATCH would fail (no anon UPDATE policy on appointments).
       } catch (error) {
           console.error("Notification/Sync infrastructure error:", error);
       }
@@ -638,7 +680,28 @@ const BookingPage: React.FC = () => {
       await NotificationService.sendAutomatedWhatsApp(newAppointment, waText).catch(e => console.error("WhatsApp send fail", e));
       setWhatsappSent(true);
 
+      // Persist booking confirmation to sessionStorage for durable display
+      const confirmationPayload = {
+        appointmentId: newAppointment.id,
+        manageToken,
+        selectedServiceName: selectedService.name,
+        selectedServiceNameTr: selectedService.name_tr || selectedService.name,
+        selectedStaffName: selectedStaff.name,
+        selectedDate,
+        selectedTime,
+        customerName: formData.name,
+        customerPhone: formData.phone,
+        tenantName: branding?.businessName || tenant.name || '',
+        calendarLink: CalendarService.generateGoogleCalendarLink(newAppointment, selectedService, selectedStaff, language),
+        whatsappSent: true,
+      };
+      try {
+        sessionStorage.setItem(`randapp_booking_confirmation_${tenant.id}`, JSON.stringify(confirmationPayload));
+      } catch (_) { /* ignore quota errors */ }
+      setBookingConfirmation(confirmationPayload);
+
       setStep(5);
+
     } catch (e: any) {
       console.error("Critical booking failure", e);
       alert(e.message || (language === 'tr' ? 'Randevu oluşturulurken beklenmedik bir hata oluştu.' : 'An unexpected error occurred while booking.'));
@@ -1222,10 +1285,10 @@ const BookingPage: React.FC = () => {
             <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white mb-2 transition-colors duration-300">{t.booking.step5_title}</h2>
             <p className="text-gray-500 dark:text-gray-400 mb-6 transition-colors duration-300">{t.booking.step5_subtitle}</p>
 
-            {whatsappSent && formData.phone && (
+            {(bookingConfirmation?.whatsappSent || whatsappSent) && (bookingConfirmation?.customerPhone || formData.phone) && (
               <div className="bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 p-4 rounded-xl border border-green-200 dark:border-green-800 mb-6 text-sm font-medium flex items-center gap-3 shadow-sm mx-auto max-w-sm transition-colors duration-300">
                 <svg className="w-6 h-6 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-                {t.booking.step5_whatsapp_sent_to} {formData.phone}
+                {t.booking.step5_whatsapp_sent_to} {bookingConfirmation?.customerPhone || formData.phone}
               </div>
             )}
 
@@ -1236,22 +1299,22 @@ const BookingPage: React.FC = () => {
               <div className="p-4 space-y-4">
                  <div>
                     <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 font-medium mb-1">{language === 'tr' ? 'İşletme' : 'Business'}</div>
-                    <div className="font-medium text-gray-900 dark:text-white">{branding?.businessName || tenant?.name}</div>
+                    <div className="font-medium text-gray-900 dark:text-white">{bookingConfirmation?.tenantName || branding?.businessName || tenant?.name}</div>
                  </div>
                  <div className="h-px border-b border-dashed border-gray-200 dark:border-slate-700"></div>
                  <div>
                     <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 font-medium mb-1">{language === 'tr' ? 'Hizmet' : 'Service'}</div>
-                    <div className="font-medium text-gray-900 dark:text-white">{language === 'tr' ? selectedService?.name_tr : selectedService?.name}</div>
+                    <div className="font-medium text-gray-900 dark:text-white">{language === 'tr' ? (bookingConfirmation?.selectedServiceNameTr || selectedService?.name_tr) : (bookingConfirmation?.selectedServiceName || selectedService?.name)}</div>
                  </div>
                  <div className="h-px border-b border-dashed border-gray-200 dark:border-slate-700"></div>
                  <div>
                     <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 font-medium mb-1">{language === 'tr' ? 'Tarih & Saat' : 'Date & Time'}</div>
-                    <div className="font-medium text-gray-900 dark:text-white">{selectedDate} <span className="text-accent font-bold">•</span> {selectedTime}</div>
+                    <div className="font-medium text-gray-900 dark:text-white">{bookingConfirmation?.selectedDate || selectedDate} <span className="text-accent font-bold">•</span> {bookingConfirmation?.selectedTime || selectedTime}</div>
                  </div>
                  <div className="h-px border-b border-dashed border-gray-200 dark:border-slate-700"></div>
                  <div>
                     <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 font-medium mb-1">{language === 'tr' ? 'Müşteri Bilgisi' : 'Customer Info'}</div>
-                    <div className="font-medium text-gray-900 dark:text-white">{formData.name} <span className="opacity-70 font-normal ml-1">({formData.phone})</span></div>
+                    <div className="font-medium text-gray-900 dark:text-white">{bookingConfirmation?.customerName || formData.name} <span className="opacity-70 font-normal ml-1">({bookingConfirmation?.customerPhone || formData.phone})</span></div>
                  </div>
               </div>
             </div>
@@ -1313,7 +1376,25 @@ const BookingPage: React.FC = () => {
               </button>
             </div>
 
-            <button onClick={() => window.location.reload()} className="text-accent font-medium hover:text-blue-700 transition">
+            <button
+              onClick={() => {
+                // Clear durable confirmation and reset booking flow cleanly
+                if (tenant) {
+                  try {
+                    sessionStorage.removeItem(`randapp_booking_confirmation_${tenant.id}`);
+                  } catch (_) {}
+                }
+                setBookingConfirmation(null);
+                setStep(0);
+                setSelectedService(null);
+                setSelectedStaff(null);
+                setSelectedTime('');
+                setSelectedDate(new Date().toISOString().split('T')[0]);
+                setFormData({ name: '', email: '', phone: '', referrerName: '', campaignCode: '' });
+                setConsentForms({ requiredBookingConsent: false, reminderConsent: false, marketingConsent: false, referralConsent: false });
+              }}
+              className="text-accent font-medium hover:text-blue-700 transition"
+            >
               {t.booking.book_another}
             </button>
           </div>

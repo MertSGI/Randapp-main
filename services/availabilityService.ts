@@ -26,6 +26,64 @@ export const availabilityService = {
 
   async getAvailableSlotsForStaff(tenantId: string, staffId: string, serviceId: string, dateStr: string): Promise<TimeSlot[]> {
      try {
+       const { getDataSourceMode } = await import('./dataSourceConfig');
+       const isSupabaseMode = getDataSourceMode() === 'supabase';
+
+       if (isSupabaseMode) {
+         // ---------------------------------------------------------------
+         // Supabase path: call get_public_available_slots SECURITY DEFINER
+         // RPC. This avoids the anon RLS block on /rest/v1/appointments
+         // which previously returned [] and made all slots appear free.
+         // ---------------------------------------------------------------
+         try {
+           const { fetchSupabase } = await import('./repositories/supabaseClient');
+
+           // Resolve tenant slug from tenantId via supabase REST.
+           // The RPC requires slug not tenantId.
+           const tenantRes = await fetchSupabase(`/rest/v1/tenants?id=eq.${tenantId}&select=slug`);
+           if (!tenantRes.ok) return [];
+           const tenantData = await tenantRes.json();
+           const slug = tenantData?.[0]?.slug;
+           if (!slug) return [];
+
+           const body = {
+             p_slug:       slug,
+             p_staff_id:   staffId,
+             p_service_id: serviceId,
+             p_date:       dateStr,
+           };
+
+           const res = await fetchSupabase('/rest/v1/rpc/get_public_available_slots', {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify(body),
+           });
+
+           if (!res.ok) {
+             console.error('get_public_available_slots RPC failed:', res.status);
+             return [];
+           }
+
+           const data = await res.json();
+           // Supabase wraps RPC results directly; handle both array wrap and direct
+           const result = Array.isArray(data) ? data[0] : data;
+
+           if (!result || result.reason_code === 'temporary_failure') {
+             return [];
+           }
+
+           const slots: string[] = result?.slots || [];
+           return slots.map((time: string) => ({ time, available: true }));
+
+         } catch (rpcErr) {
+           console.error('get_public_available_slots RPC exception:', rpcErr);
+           return [];
+         }
+       }
+
+       // ---------------------------------------------------------------
+       // Local / demo / mock path: compute slots client-side
+       // ---------------------------------------------------------------
        const catalogRepo = getAvailabilityRepository();
        const bookingRepo = getBookingRepository();
 
