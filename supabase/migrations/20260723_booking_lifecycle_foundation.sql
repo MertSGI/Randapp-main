@@ -1,19 +1,38 @@
 -- 20260723_booking_lifecycle_foundation.sql
--- Description: Stage A Database Scheduling Foundation & Shared Slot Engine
+-- Description: Stage A Database Scheduling Foundation & Shared Slot Engine (Hardened)
 -- Provisions:
---   1. public.branches (canonical multi-branch schema & RLS)
---   2. public.staff_branches & public.service_branches junction tables (RLS enabled)
---   3. public.appointments schema alterations:
---        - branch_id UUID NULL REFERENCES public.branches(id)
---        - duration_minutes INTEGER CHECK (duration_minutes > 0 AND duration_minutes <= 1440)
---   4. Backfills duration_minutes for existing appointments from services.duration
---   5. public.evaluate_booking_slot: Shared, internal SECURITY DEFINER slot evaluator engine
---   6. public.get_public_available_slots: Server-authoritative RPC returning safe slot metadata
---   7. public.create_public_booking: Updated to accept nullable p_branch_id, call evaluate_booking_slot,
---      store branch_id and duration_minutes snapshot while preserving locks, tokens, and idempotency.
+--   1. Candidate keys (id, tenant_id) on staff, services, branches for composite FK cross-tenant database-level constraints.
+--   2. public.branches with RLS and composite FK to tenants.
+--   3. public.staff_branches & public.service_branches junction tables with composite FK constraints and fail-closed RLS.
+--   4. public.appointments composite FK constraints:
+--        - (branch_id, tenant_id) REFERENCES public.branches(id, tenant_id)
+--        - duration_minutes INTEGER CHECK (duration_minutes IS NULL OR (duration_minutes > 0 AND duration_minutes <= 1440))
+--   5. Backfills duration_minutes for existing appointments ONLY where valid service duration exists (leaves unresolved as NULL).
+--   6. public.evaluate_booking_slot: Shared, internal SECURITY DEFINER slot evaluator engine with strict fail-closed branch mapping requirement and revoked public execution.
+--   7. public.get_public_available_slots & public.create_public_booking RPCs with hardened security, auto branch resolution, and safe returns.
 
 -- =========================================================================
--- 1. CANONICAL BRANCHES TABLE & CONSTRAINTS
+-- 1. UNIQUE CANDIDATE KEYS FOR COMPOSITE FK CROSS-TENANT INTEGRITY
+-- =========================================================================
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'uq_staff_id_tenant'
+    ) THEN
+        ALTER TABLE public.staff ADD CONSTRAINT uq_staff_id_tenant UNIQUE (id, tenant_id);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'uq_services_id_tenant'
+    ) THEN
+        ALTER TABLE public.services ADD CONSTRAINT uq_services_id_tenant UNIQUE (id, tenant_id);
+    END IF;
+END $$;
+
+
+-- =========================================================================
+-- 2. CANONICAL BRANCHES TABLE & CONSTRAINTS
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.branches (
@@ -26,38 +45,39 @@ CREATE TABLE IF NOT EXISTS public.branches (
     timezone TEXT DEFAULT 'Europe/Istanbul',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT unique_tenant_branch_slug UNIQUE (tenant_id, slug)
+    CONSTRAINT unique_tenant_branch_slug UNIQUE (tenant_id, slug),
+    CONSTRAINT uq_branches_id_tenant UNIQUE (id, tenant_id)
 );
 
--- Index for tenant lookup
 CREATE INDEX IF NOT EXISTS idx_branches_tenant_id ON public.branches(tenant_id);
 
--- Enforce at most one primary active branch per tenant
 CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_primary_branch_per_tenant 
 ON public.branches (tenant_id) 
 WHERE is_primary = true AND is_active = true;
 
--- Enable RLS
 ALTER TABLE public.branches ENABLE ROW LEVEL SECURITY;
 
--- Drop existing policies if re-running
 DROP POLICY IF EXISTS "Super Admins - Full Access on branches" ON public.branches;
+DROP POLICY IF EXISTS "Tenant Owner - Manage own branches" ON public.branches;
+DROP POLICY IF EXISTS "Tenant Staff - Read own branches" ON public.branches;
 DROP POLICY IF EXISTS "Tenant Staff - Read/Write own branches" ON public.branches;
 DROP POLICY IF EXISTS "Public - SELECT active branches" ON public.branches;
 
+-- Super Admins: Full access
 CREATE POLICY "Super Admins - Full Access on branches" 
 ON public.branches FOR ALL TO authenticated 
 USING (public.is_super_admin(auth.uid()))
 WITH CHECK (public.is_super_admin(auth.uid()));
 
-CREATE POLICY "Tenant Staff - Read/Write own branches" 
+-- Tenant Owner: CRUD within own tenant
+CREATE POLICY "Tenant Owner - Manage own branches" 
 ON public.branches FOR ALL TO authenticated 
 USING (
     EXISTS (
       SELECT 1 FROM public.users_profile up
       WHERE up.id = auth.uid()
         AND up.active = true
-        AND up.role IN ('tenant_owner', 'staff')
+        AND up.role = 'tenant_owner'
         AND up.tenant_id = branches.tenant_id
     )
 )
@@ -66,22 +86,39 @@ WITH CHECK (
       SELECT 1 FROM public.users_profile up
       WHERE up.id = auth.uid()
         AND up.active = true
-        AND up.role IN ('tenant_owner', 'staff')
+        AND up.role = 'tenant_owner'
+        AND up.tenant_id = branches.tenant_id
+    )
+);
+
+-- Tenant Staff: SELECT only within own tenant
+CREATE POLICY "Tenant Staff - Read own branches" 
+ON public.branches FOR SELECT TO authenticated 
+USING (
+    EXISTS (
+      SELECT 1 FROM public.users_profile up
+      WHERE up.id = auth.uid()
+        AND up.active = true
+        AND up.role = 'staff'
         AND up.tenant_id = branches.tenant_id
     )
 );
 
 
 -- =========================================================================
--- 2. BRANCH JUNCTION TABLES (STAFF & SERVICES)
+-- 3. BRANCH JUNCTION TABLES WITH COMPOSITE FKs (STAFF & SERVICES)
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.staff_branches (
-    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    staff_id UUID NOT NULL REFERENCES public.staff(id) ON DELETE CASCADE,
-    branch_id UUID NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL,
+    staff_id UUID NOT NULL,
+    branch_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (staff_id, branch_id)
+    PRIMARY KEY (staff_id, branch_id),
+    CONSTRAINT fk_staff_branches_staff_tenant 
+        FOREIGN KEY (staff_id, tenant_id) REFERENCES public.staff(id, tenant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_staff_branches_branch_tenant 
+        FOREIGN KEY (branch_id, tenant_id) REFERENCES public.branches(id, tenant_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_staff_branches_tenant ON public.staff_branches(tenant_id);
@@ -90,6 +127,7 @@ CREATE INDEX IF NOT EXISTS idx_staff_branches_branch ON public.staff_branches(br
 ALTER TABLE public.staff_branches ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Super Admins - Full Access on staff_branches" ON public.staff_branches;
+DROP POLICY IF EXISTS "Tenant Owner - Manage staff_branches" ON public.staff_branches;
 DROP POLICY IF EXISTS "Tenant Staff - Manage staff_branches" ON public.staff_branches;
 
 CREATE POLICY "Super Admins - Full Access on staff_branches" 
@@ -97,14 +135,14 @@ ON public.staff_branches FOR ALL TO authenticated
 USING (public.is_super_admin(auth.uid()))
 WITH CHECK (public.is_super_admin(auth.uid()));
 
-CREATE POLICY "Tenant Staff - Manage staff_branches" 
+CREATE POLICY "Tenant Owner - Manage staff_branches" 
 ON public.staff_branches FOR ALL TO authenticated 
 USING (
     EXISTS (
       SELECT 1 FROM public.users_profile up
       WHERE up.id = auth.uid()
         AND up.active = true
-        AND up.role IN ('tenant_owner', 'staff')
+        AND up.role = 'tenant_owner'
         AND up.tenant_id = staff_branches.tenant_id
     )
 )
@@ -113,18 +151,22 @@ WITH CHECK (
       SELECT 1 FROM public.users_profile up
       WHERE up.id = auth.uid()
         AND up.active = true
-        AND up.role IN ('tenant_owner', 'staff')
+        AND up.role = 'tenant_owner'
         AND up.tenant_id = staff_branches.tenant_id
     )
 );
 
 
 CREATE TABLE IF NOT EXISTS public.service_branches (
-    tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    service_id UUID NOT NULL REFERENCES public.services(id) ON DELETE CASCADE,
-    branch_id UUID NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL,
+    service_id UUID NOT NULL,
+    branch_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (service_id, branch_id)
+    PRIMARY KEY (service_id, branch_id),
+    CONSTRAINT fk_service_branches_service_tenant 
+        FOREIGN KEY (service_id, tenant_id) REFERENCES public.services(id, tenant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_service_branches_branch_tenant 
+        FOREIGN KEY (branch_id, tenant_id) REFERENCES public.branches(id, tenant_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_service_branches_tenant ON public.service_branches(tenant_id);
@@ -133,6 +175,7 @@ CREATE INDEX IF NOT EXISTS idx_service_branches_branch ON public.service_branche
 ALTER TABLE public.service_branches ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Super Admins - Full Access on service_branches" ON public.service_branches;
+DROP POLICY IF EXISTS "Tenant Owner - Manage service_branches" ON public.service_branches;
 DROP POLICY IF EXISTS "Tenant Staff - Manage service_branches" ON public.service_branches;
 
 CREATE POLICY "Super Admins - Full Access on service_branches" 
@@ -140,14 +183,14 @@ ON public.service_branches FOR ALL TO authenticated
 USING (public.is_super_admin(auth.uid()))
 WITH CHECK (public.is_super_admin(auth.uid()));
 
-CREATE POLICY "Tenant Staff - Manage service_branches" 
+CREATE POLICY "Tenant Owner - Manage service_branches" 
 ON public.service_branches FOR ALL TO authenticated 
 USING (
     EXISTS (
       SELECT 1 FROM public.users_profile up
       WHERE up.id = auth.uid()
         AND up.active = true
-        AND up.role IN ('tenant_owner', 'staff')
+        AND up.role = 'tenant_owner'
         AND up.tenant_id = service_branches.tenant_id
     )
 )
@@ -156,14 +199,14 @@ WITH CHECK (
       SELECT 1 FROM public.users_profile up
       WHERE up.id = auth.uid()
         AND up.active = true
-        AND up.role IN ('tenant_owner', 'staff')
+        AND up.role = 'tenant_owner'
         AND up.tenant_id = service_branches.tenant_id
     )
 );
 
 
 -- =========================================================================
--- 3. APPOINTMENTS CONTRACT ALTERATIONS & BACKFILL
+-- 4. APPOINTMENTS CONTRACT ALTERATIONS & SAFE BACKFILL
 -- =========================================================================
 
 DO $$
@@ -172,7 +215,14 @@ BEGIN
         SELECT 1 FROM information_schema.columns 
         WHERE table_schema = 'public' AND table_name = 'appointments' AND column_name = 'branch_id'
     ) THEN
-        ALTER TABLE public.appointments ADD COLUMN branch_id UUID NULL REFERENCES public.branches(id);
+        ALTER TABLE public.appointments ADD COLUMN branch_id UUID NULL;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'fk_appointments_branch_tenant'
+    ) THEN
+        ALTER TABLE public.appointments ADD CONSTRAINT fk_appointments_branch_tenant 
+            FOREIGN KEY (branch_id, tenant_id) REFERENCES public.branches(id, tenant_id) ON DELETE SET NULL;
     END IF;
 
     IF NOT EXISTS (
@@ -185,21 +235,20 @@ BEGIN
     END IF;
 END $$;
 
--- Backfill duration_minutes for existing appointments from their linked service duration
+-- Backfill duration_minutes ONLY where a valid service duration exists
 UPDATE public.appointments a
-SET duration_minutes = COALESCE(s.duration, 30)
+SET duration_minutes = s.duration
 FROM public.services s
 WHERE a.service_id = s.id
+  AND s.duration IS NOT NULL
+  AND s.duration > 0
   AND a.duration_minutes IS NULL;
 
--- Fallback for any appointment without a matching service
-UPDATE public.appointments
-SET duration_minutes = 30
-WHERE duration_minutes IS NULL;
+-- Unresolved legacy appointments without a matching valid service remain NULL.
 
 
 -- =========================================================================
--- 4. SHARED INTERNAL SLOT EVALUATOR ENGINE
+-- 5. SHARED INTERNAL SLOT EVALUATOR ENGINE (FAIL-CLOSED MAPPINGS)
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.evaluate_booking_slot(
@@ -217,17 +266,14 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public, extensions
 AS $$
 DECLARE
-    v_branch_exists        BOOLEAN;
     v_branch_active        BOOLEAN;
     v_branch_tenant        UUID;
     v_svc_tenant           UUID;
     v_svc_active           BOOLEAN;
     v_svc_duration         INTEGER;
-    v_svc_branch_count     INTEGER;
     v_svc_branch_match     BOOLEAN;
     v_staff_tenant         UUID;
     v_staff_active         BOOLEAN;
-    v_staff_branch_count   INTEGER;
     v_staff_branch_match   BOOLEAN;
     v_staff_svc_match      BOOLEAN;
     v_weekday              INTEGER;
@@ -250,28 +296,23 @@ BEGIN
     END IF;
 
     -- 2. Validate Service
-    SELECT tenant_id, active, COALESCE(duration, 30)
+    SELECT tenant_id, active, duration
     INTO v_svc_tenant, v_svc_active, v_svc_duration
     FROM public.services
     WHERE id = p_service_id;
 
-    IF NOT FOUND OR v_svc_tenant IS DISTINCT FROM p_tenant_id OR v_svc_active IS NOT TRUE THEN
+    IF NOT FOUND OR v_svc_tenant IS DISTINCT FROM p_tenant_id OR v_svc_active IS NOT TRUE OR v_svc_duration IS NULL OR v_svc_duration <= 0 THEN
         RETURN jsonb_build_object('allowed', false, 'reason_code', 'invalid_service', 'duration_minutes', 0);
     END IF;
 
-    -- Service-Branch check: if service_branches mappings exist for this service, p_branch_id must be among them
-    SELECT COUNT(*) INTO v_svc_branch_count
-    FROM public.service_branches WHERE service_id = p_service_id;
+    -- Service-Branch Fail-Closed Check: exact service_branches mapping required
+    SELECT EXISTS (
+        SELECT 1 FROM public.service_branches 
+        WHERE service_id = p_service_id AND branch_id = p_branch_id AND tenant_id = p_tenant_id
+    ) INTO v_svc_branch_match;
 
-    IF v_svc_branch_count > 0 THEN
-        SELECT EXISTS (
-            SELECT 1 FROM public.service_branches 
-            WHERE service_id = p_service_id AND branch_id = p_branch_id
-        ) INTO v_svc_branch_match;
-
-        IF NOT v_svc_branch_match THEN
-            RETURN jsonb_build_object('allowed', false, 'reason_code', 'invalid_service', 'duration_minutes', 0);
-        END IF;
+    IF NOT v_svc_branch_match THEN
+        RETURN jsonb_build_object('allowed', false, 'reason_code', 'invalid_service', 'duration_minutes', 0);
     END IF;
 
     -- 3. Validate Staff
@@ -284,19 +325,14 @@ BEGIN
         RETURN jsonb_build_object('allowed', false, 'reason_code', 'invalid_staff', 'duration_minutes', 0);
     END IF;
 
-    -- Staff-Branch check: if staff_branches mappings exist for this staff, p_branch_id must be among them
-    SELECT COUNT(*) INTO v_staff_branch_count
-    FROM public.staff_branches WHERE staff_id = p_staff_id;
+    -- Staff-Branch Fail-Closed Check: exact staff_branches mapping required
+    SELECT EXISTS (
+        SELECT 1 FROM public.staff_branches 
+        WHERE staff_id = p_staff_id AND branch_id = p_branch_id AND tenant_id = p_tenant_id
+    ) INTO v_staff_branch_match;
 
-    IF v_staff_branch_count > 0 THEN
-        SELECT EXISTS (
-            SELECT 1 FROM public.staff_branches 
-            WHERE staff_id = p_staff_id AND branch_id = p_branch_id
-        ) INTO v_staff_branch_match;
-
-        IF NOT v_staff_branch_match THEN
-            RETURN jsonb_build_object('allowed', false, 'reason_code', 'invalid_staff', 'duration_minutes', 0);
-        END IF;
+    IF NOT v_staff_branch_match THEN
+        RETURN jsonb_build_object('allowed', false, 'reason_code', 'invalid_staff', 'duration_minutes', 0);
     END IF;
 
     -- 4. Validate Staff-Service Mapping
@@ -341,8 +377,9 @@ BEGIN
     END IF;
 
     -- 7. Validate Overlapping Active Appointments
-    -- Active statuses that block slots: 'confirmed', 'pending'
+    -- Active slot-occupying statuses: 'confirmed', 'pending'
     -- Non-blocking statuses: 'cancelled', 'cancelled_by_customer', 'cancelled_by_salon', 'cancelled_by_system', 'completed', 'no_show'
+    -- Unknown status values fail closed by being treated as active/blocking.
     SELECT EXISTS (
         SELECT 1
         FROM public.appointments a
@@ -366,12 +403,18 @@ BEGIN
         'slot_start', p_time::text,
         'slot_end', (p_time + (v_svc_duration || ' minutes')::INTERVAL)::text
     );
+EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('allowed', false, 'reason_code', 'temporary_failure', 'duration_minutes', 0);
 END;
 $$;
 
+-- Revoke execution from PUBLIC and anon for internal evaluator engine
+REVOKE EXECUTE ON FUNCTION public.evaluate_booking_slot(UUID, UUID, UUID, UUID, DATE, TIME, UUID) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.evaluate_booking_slot(UUID, UUID, UUID, UUID, DATE, TIME, UUID) FROM anon;
+
 
 -- =========================================================================
--- 5. SERVER-AUTHORITATIVE PUBLIC SLOT RPC
+-- 6. SERVER-AUTHORITATIVE PUBLIC SLOT RPC
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.get_public_available_slots(
@@ -400,7 +443,6 @@ DECLARE
     v_avail_end          TIME;
     v_tz                 TEXT := 'Europe/Istanbul';
     v_now_in_tz          TIMESTAMP;
-    v_today_in_tz        DATE;
     v_start_min          INTEGER;
     v_end_min            INTEGER;
     v_slot_min           INTEGER;
@@ -453,7 +495,6 @@ BEGIN
         ELSIF array_length(v_active_branches, 1) > 1 THEN
             RETURN jsonb_build_object('success', false, 'reason_code', 'branch_required', 'slots', '[]'::jsonb);
         ELSIF array_length(v_active_branches, 1) IS NULL OR array_length(v_active_branches, 1) = 0 THEN
-            -- If tenant has no DB branches created yet, check if p_branch_id is omitted or fallback
             RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_branch', 'slots', '[]'::jsonb);
         END IF;
     ELSE
@@ -468,10 +509,9 @@ BEGIN
 
     -- 4. Service Duration & Validation
     SELECT duration INTO v_svc_duration FROM public.services WHERE id = p_service_id AND tenant_id = v_tenant_id AND active = true;
-    IF NOT FOUND THEN
+    IF NOT FOUND OR v_svc_duration IS NULL OR v_svc_duration <= 0 THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_service', 'slots', '[]'::jsonb);
     END IF;
-    v_svc_duration := COALESCE(v_svc_duration, 30);
 
     -- 5. Staff Availability Window
     v_weekday := EXTRACT(DOW FROM p_date)::INTEGER;
@@ -530,15 +570,17 @@ BEGIN
         'duration_minutes', v_svc_duration,
         'slots', v_slots
     );
+EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('success', false, 'reason_code', 'temporary_failure', 'slots', '[]'::jsonb);
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.get_public_available_slots(text, uuid, uuid, uuid, date) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.get_public_available_slots(text, uuid, uuid, uuid, date) TO anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.get_public_available_slots(TEXT, UUID, UUID, UUID, DATE) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_public_available_slots(TEXT, UUID, UUID, UUID, DATE) TO anon, authenticated;
 
 
 -- =========================================================================
--- 6. UPDATED CREATE_PUBLIC_BOOKING RPC (CALLING SHARED EVALUATOR)
+-- 7. UPDATED CREATE_PUBLIC_BOOKING RPC (CALLING SHARED EVALUATOR)
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.create_public_booking(
@@ -639,6 +681,8 @@ BEGIN
             v_effective_branch := v_active_branches[1];
         ELSIF array_length(v_active_branches, 1) > 1 THEN
             RETURN jsonb_build_object('success', false, 'reason_code', 'branch_required');
+        ELSIF array_length(v_active_branches, 1) IS NULL OR array_length(v_active_branches, 1) = 0 THEN
+            RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_branch');
         END IF;
     ELSE
         IF NOT (v_effective_branch = ANY(v_active_branches)) THEN
@@ -770,6 +814,8 @@ BEGIN
         'manage_token',   v_token,
         'reason_code',    'ok'
     );
+EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('success', false, 'reason_code', 'temporary_failure');
 END;
 $$;
 

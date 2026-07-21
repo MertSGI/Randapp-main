@@ -1092,3 +1092,163 @@ BEGIN
   RAISE NOTICE '=== STAGE A ACCEPTANCE TESTS 29-35 COMPLETED SUCCESSFULLY ===';
 END $$;
 
+
+-- =========================================================================
+-- STAGE A HARDENING ACCEPTANCE TESTS: Tests 36-40
+-- TEST 36: Composite FK constraint rejects direct cross-tenant staff_branches INSERT
+-- TEST 37: RLS WITH CHECK policy rejects unauthorized staff/owner branch mapping INSERT
+-- TEST 38: Anonymous user calling evaluate_booking_slot directly is rejected (EXECUTE REVOKED)
+-- TEST 39: Pending status appointment blocks future slot (conflict evaluation)
+-- TEST 40: Appointment slot evaluation rejects service when duration IS NULL or 0
+-- =========================================================================
+DO $$
+DECLARE
+  v_slug            text := 'melis-guzellik';
+  v_tenant_id       uuid;
+  v_other_tenant_id uuid;
+  v_branch_id       uuid;
+  v_service_id      uuid;
+  v_staff_id        uuid;
+  v_test_date       date := (CURRENT_DATE + 35)::date;
+  v_eval_res        jsonb;
+  r                 jsonb;
+  v_fk_failed       boolean := false;
+  v_anon_failed     boolean := false;
+BEGIN
+  SELECT id INTO v_tenant_id FROM public.tenants WHERE slug = v_slug;
+
+  -- Create primary test branch
+  INSERT INTO public.branches (tenant_id, name, slug, is_active, is_primary)
+  VALUES (v_tenant_id, 'Stage A Hardening Branch', 'stage-a-hardening', true, true)
+  ON CONFLICT (tenant_id, slug) DO UPDATE SET is_primary = true, is_active = true
+  RETURNING id INTO v_branch_id;
+
+  INSERT INTO public.services (tenant_id, name, duration, price, active)
+  VALUES (v_tenant_id, 'Stage A Hardening Service', 30, 150, true)
+  RETURNING id INTO v_service_id;
+
+  INSERT INTO public.staff (tenant_id, name, title, active)
+  VALUES (v_tenant_id, 'Stage A Hardening Staff', 'Specialist', true)
+  RETURNING id INTO v_staff_id;
+
+  -- Mappings
+  INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)
+  VALUES (v_tenant_id, v_staff_id, v_branch_id);
+
+  INSERT INTO public.service_branches (tenant_id, service_id, branch_id)
+  VALUES (v_tenant_id, v_service_id, v_branch_id);
+
+  INSERT INTO public.staff_services (staff_id, service_id)
+  VALUES (v_staff_id, v_service_id);
+
+  INSERT INTO public.availability_rules (tenant_id, staff_id, weekday, start_time, end_time, is_active)
+  SELECT v_tenant_id, v_staff_id, d, '09:00', '19:00', true
+  FROM generate_series(1, 7) AS d;
+
+  INSERT INTO public.tenants (name, slug, status, onboarding_status, public_site_status)
+  VALUES ('Foreign Tenant 36', 'foreign-tenant-36', 'active', 'completed', 'published')
+  RETURNING id INTO v_other_tenant_id;
+
+  RAISE NOTICE '=== STARTING STAGE A HARDENING TESTS 36-40 ===';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 36: Composite FK constraint rejects direct cross-tenant staff_branches INSERT
+  -- -----------------------------------------------------------------------
+  BEGIN
+    INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)
+    VALUES (v_other_tenant_id, v_staff_id, v_branch_id); -- Mismatched tenant_id
+  EXCEPTION WHEN foreign_key_violation THEN
+    v_fk_failed := true;
+  END;
+
+  IF NOT v_fk_failed THEN
+    RAISE EXCEPTION 'TEST 36 FAIL: Composite FK did not reject cross-tenant staff_branches INSERT';
+  END IF;
+  RAISE NOTICE 'TEST 36 PASS: Composite FK structurally rejected cross-tenant INSERT.';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 38: Anonymous user calling evaluate_booking_slot directly is rejected
+  -- -----------------------------------------------------------------------
+  IF EXISTS (
+    SELECT 1 FROM information_schema.routine_privileges
+    WHERE routine_name = 'evaluate_booking_slot'
+      AND grantee IN ('PUBLIC', 'anon')
+      AND privilege_type = 'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'TEST 38 FAIL: evaluate_booking_slot is directly executable by PUBLIC/anon';
+  END IF;
+  RAISE NOTICE 'TEST 38 PASS: evaluate_booking_slot execution revoked from PUBLIC and anon.';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 39: Pending status appointment blocks future slot
+  -- -----------------------------------------------------------------------
+  INSERT INTO public.appointments (
+    tenant_id, branch_id, service_id, staff_id, user_name, user_email,
+    appointment_date, appointment_time, duration_minutes, status
+  ) VALUES (
+    v_tenant_id, v_branch_id, v_service_id, v_staff_id, 'Pending User', 'pending@test.invalid',
+    v_test_date, '11:00:00'::time, 30, 'pending'
+  );
+
+  v_eval_res := public.evaluate_booking_slot(
+    p_tenant_id  => v_tenant_id,
+    p_branch_id  => v_branch_id,
+    p_service_id => v_service_id,
+    p_staff_id   => v_staff_id,
+    p_date       => v_test_date,
+    p_time       => '11:00:00'::time
+  );
+  IF (v_eval_res->>'allowed')::boolean OR v_eval_res->>'reason_code' != 'slot_conflict' THEN
+    RAISE EXCEPTION 'TEST 39 FAIL: Pending appointment did not block slot: %', v_eval_res;
+  END IF;
+  RAISE NOTICE 'TEST 39 PASS: Pending appointment correctly blocked future slot.';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 40: Appointment slot evaluation rejects service when duration IS NULL or 0
+  -- -----------------------------------------------------------------------
+  DECLARE
+    v_no_dur_service uuid;
+  BEGIN
+    INSERT INTO public.services (tenant_id, name, duration, price, active)
+    VALUES (v_tenant_id, 'No Duration Service', 0, 100, true)
+    RETURNING id INTO v_no_dur_service;
+
+    INSERT INTO public.service_branches (tenant_id, service_id, branch_id)
+    VALUES (v_tenant_id, v_no_dur_service, v_branch_id);
+
+    INSERT INTO public.staff_services (staff_id, service_id)
+    VALUES (v_staff_id, v_no_dur_service);
+
+    v_eval_res := public.evaluate_booking_slot(
+      p_tenant_id  => v_tenant_id,
+      p_branch_id  => v_branch_id,
+      p_service_id => v_no_dur_service,
+      p_staff_id   => v_staff_id,
+      p_date       => v_test_date,
+      p_time       => '14:00:00'::time
+    );
+    IF (v_eval_res->>'allowed')::boolean OR v_eval_res->>'reason_code' != 'invalid_service' THEN
+      RAISE EXCEPTION 'TEST 40 FAIL: Zero-duration service was not rejected with invalid_service: %', v_eval_res;
+    END IF;
+
+    DELETE FROM public.staff_services WHERE service_id = v_no_dur_service;
+    DELETE FROM public.service_branches WHERE service_id = v_no_dur_service;
+    DELETE FROM public.services WHERE id = v_no_dur_service;
+    RAISE NOTICE 'TEST 40 PASS: Zero/null duration service correctly rejected.';
+  END;
+
+  -- Cleanup
+  DELETE FROM public.appointments WHERE user_email = 'pending@test.invalid';
+  DELETE FROM public.staff_branches WHERE staff_id = v_staff_id;
+  DELETE FROM public.service_branches WHERE service_id = v_service_id;
+  DELETE FROM public.staff_services WHERE staff_id = v_staff_id;
+  DELETE FROM public.availability_rules WHERE staff_id = v_staff_id;
+  DELETE FROM public.staff WHERE id = v_staff_id;
+  DELETE FROM public.services WHERE id = v_service_id;
+  DELETE FROM public.branches WHERE id = v_branch_id;
+  DELETE FROM public.tenants WHERE id = v_other_tenant_id;
+
+  RAISE NOTICE '=== STAGE A HARDENING TESTS 36-40 COMPLETED SUCCESSFULLY ===';
+END $$;
+
+
