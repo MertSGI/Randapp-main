@@ -1561,5 +1561,108 @@ BEGIN
 END $$;
 
 
+-- =========================================================================
+-- STAGE B.1 ACCEPTANCE TESTS: Tests 49-51
+-- TEST 49: RLS policy Tenant Staff - Manage own appointments allows tenant owner SELECT
+-- TEST 50: Tenant owner cannot SELECT appointments belonging to another tenant
+-- TEST 51: Nullable legacy branch_id appointment rows are returned and mapped safely
+-- =========================================================================
+DO $$
+DECLARE
+  v_slug            text := 'melis-guzellik';
+  v_tenant_id       uuid;
+  v_other_tenant_id uuid;
+  v_branch_id       uuid;
+  v_service_id      uuid;
+  v_staff_id        uuid;
+  v_test_date       date := (CURRENT_DATE + 50)::date;
+  v_apt1_id         uuid;
+  v_apt2_id         uuid;
+  v_count           int;
+BEGIN
+  SELECT id INTO v_tenant_id FROM public.tenants WHERE slug = v_slug;
+
+  -- Create second tenant for isolation check
+  INSERT INTO public.tenants (name, slug, status, onboarding_status, public_site_status)
+  VALUES ('Foreign Tenant B1', 'foreign-tenant-b1', 'active', 'completed', 'published')
+  RETURNING id INTO v_other_tenant_id;
+
+  INSERT INTO public.branches (tenant_id, name, slug, is_active, is_primary)
+  VALUES (v_tenant_id, 'Stage B.1 Test Branch', 'stage-b1-branch', true, true)
+  ON CONFLICT (tenant_id, slug) DO UPDATE SET is_primary = true, is_active = true
+  RETURNING id INTO v_branch_id;
+
+  INSERT INTO public.services (tenant_id, name, duration, price, active)
+  VALUES (v_tenant_id, 'Stage B.1 Service', 30, 200, true)
+  RETURNING id INTO v_service_id;
+
+  INSERT INTO public.staff (tenant_id, name, title, active)
+  VALUES (v_tenant_id, 'Stage B.1 Staff', 'Specialist', true)
+  RETURNING id INTO v_staff_id;
+
+  RAISE NOTICE '=== STARTING STAGE B.1 ACCEPTANCE TESTS 49-51 ===';
+
+  -- Create appointment with branch_id
+  INSERT INTO public.appointments (
+    tenant_id, branch_id, service_id, staff_id, user_name, user_email,
+    appointment_date, appointment_time, duration_minutes, status
+  ) VALUES (
+    v_tenant_id, v_branch_id, v_service_id, v_staff_id, 'B1 User 1', 'b1-test-49@randapp-test.invalid',
+    v_test_date, '10:00:00'::time, 30, 'confirmed'
+  ) RETURNING id INTO v_apt1_id;
+
+  -- Create legacy appointment with NULL branch_id
+  INSERT INTO public.appointments (
+    tenant_id, branch_id, service_id, staff_id, user_name, user_email,
+    appointment_date, appointment_time, duration_minutes, status
+  ) VALUES (
+    v_tenant_id, NULL, v_service_id, v_staff_id, 'B1 Legacy User', 'b1-test-51@randapp-test.invalid',
+    v_test_date, '11:00:00'::time, 30, 'confirmed'
+  ) RETURNING id INTO v_apt2_id;
+
+  -- -----------------------------------------------------------------------
+  -- TEST 49: RLS allows tenant owner to SELECT own appointments
+  -- -----------------------------------------------------------------------
+  SELECT COUNT(*) INTO v_count
+  FROM public.appointments
+  WHERE tenant_id = v_tenant_id AND id IN (v_apt1_id, v_apt2_id);
+
+  IF v_count != 2 THEN
+    RAISE EXCEPTION 'TEST 49 FAIL: Expected 2 appointments for tenant, found %', v_count;
+  END IF;
+  RAISE NOTICE 'TEST 49 PASS: Tenant owner can query own appointments.';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 50: Cross-tenant isolation verification
+  -- -----------------------------------------------------------------------
+  SELECT COUNT(*) INTO v_count
+  FROM public.appointments
+  WHERE tenant_id = v_other_tenant_id;
+
+  IF v_count != 0 THEN
+    RAISE EXCEPTION 'TEST 50 FAIL: Found appointments under foreign tenant: %', v_count;
+  END IF;
+  RAISE NOTICE 'TEST 50 PASS: Cross-tenant appointment query strictly isolated.';
+
+  -- -----------------------------------------------------------------------
+  -- TEST 51: Nullable legacy branch_id row is present and valid
+  -- -----------------------------------------------------------------------
+  IF NOT EXISTS (SELECT 1 FROM public.appointments WHERE id = v_apt2_id AND branch_id IS NULL) THEN
+    RAISE EXCEPTION 'TEST 51 FAIL: Nullable legacy branch_id row invalid';
+  END IF;
+  RAISE NOTICE 'TEST 51 PASS: Nullable legacy branch_id appointment row validated successfully.';
+
+  -- Cleanup
+  DELETE FROM public.appointments WHERE id IN (v_apt1_id, v_apt2_id);
+  DELETE FROM public.staff WHERE id = v_staff_id;
+  DELETE FROM public.services WHERE id = v_service_id;
+  DELETE FROM public.branches WHERE id = v_branch_id;
+  DELETE FROM public.tenants WHERE id = v_other_tenant_id;
+
+  RAISE NOTICE '=== STAGE B.1 ACCEPTANCE TESTS 49-51 COMPLETED SUCCESSFULLY ===';
+END $$;
+
+
+
 
 

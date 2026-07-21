@@ -773,18 +773,23 @@ const AdminPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-gray-100 dark:border-slate-700 transition-colors duration-300 cursor-pointer" onClick={() => setActiveTab('appointments')}>
               <div className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase transition-colors duration-300">{t.admin.stats_total || 'Toplam Randevu'}</div>
-              <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white transition-colors duration-300">{appointments.length}</div>
+              <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white transition-colors duration-300">
+                {adminAppointmentsError ? '--' : appointments.length}
+              </div>
             </div>
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-gray-100 dark:border-slate-700 transition-colors duration-300 cursor-pointer" onClick={() => setActiveTab('appointments')}>
               <div className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase transition-colors duration-300">{language === 'tr' ? 'Bugün Onaylananlar' : "Today's Confirmed"}</div>
               <div className="mt-2 text-3xl font-bold text-blue-600 dark:text-blue-400 transition-colors duration-300">
-                {appointments.filter(a => a.date === new Date().toISOString().split('T')[0] && a.status === 'confirmed').length}
+                {adminAppointmentsError ? '--' : (() => {
+                  const todayIstanbul = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(new Date());
+                  return appointments.filter(a => a.date === todayIstanbul && a.status === 'confirmed').length;
+                })()}
               </div>
             </div>
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-gray-100 dark:border-slate-700 transition-colors duration-300 cursor-pointer" onClick={() => setActiveTab('appointments')}>
               <div className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase transition-colors duration-300">{language === 'tr' ? 'Tamamlanan Görüşmeler' : 'Completed'}</div>
               <div className="mt-2 text-3xl font-bold text-green-600 dark:text-green-400 transition-colors duration-300">
-                {appointments.filter(a => a.status === 'completed').length}
+                {adminAppointmentsError ? '--' : appointments.filter(a => a.status === 'completed').length}
               </div> 
               <span className="text-xs text-gray-400 dark:text-gray-500 transition-colors duration-300">{language === 'tr' ? 'Tüm zamanlar' : 'All time'}</span>
             </div>
