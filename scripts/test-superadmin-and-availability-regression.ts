@@ -61,10 +61,31 @@ process.on('unhandledRejection', (reason) => {
   }
 };
 
+// === CI DIAGNOSTICS ===
+console.log('[DIAG] Node version:', process.version);
+console.log('[DIAG] Platform:', process.platform);
+console.log('[DIAG] process.env.VITE_DATA_MODE:', process.env.VITE_DATA_MODE);
+console.log('[DIAG] process.env.VITE_LARI_DATA_SOURCE:', process.env.VITE_LARI_DATA_SOURCE);
+console.log('[DIAG] globalThis.import.meta.env.VITE_DATA_MODE:', (globalThis as any).import?.meta?.env?.VITE_DATA_MODE);
+try {
+  console.log('[DIAG] import.meta keys:', Object.keys(import.meta));
+  console.log('[DIAG] import.meta.env:', (import.meta as any).env);
+  console.log('[DIAG] import.meta.env truthy:', !!(import.meta as any).env);
+} catch (e) {
+  console.log('[DIAG] import.meta.env access threw:', e);
+}
+
 // Dynamically import authService after environment setup
 console.log('[DIAG] About to dynamically import authService...');
-const { authService } = await import('../services/authService');
-console.log('[DIAG] authService imported successfully');
+let authService: any;
+try {
+  const mod = await import('../services/authService');
+  authService = mod.authService;
+  console.log('[DIAG] authService imported successfully');
+} catch (importErr) {
+  console.error('[DIAG] ❌ IMPORT FAILED:', importErr);
+  process.exit(1);
+}
 
 console.log('🏁 Running super-admin and availability mapper regression test suite...');
 
