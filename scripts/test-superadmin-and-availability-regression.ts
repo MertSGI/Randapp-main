@@ -1,6 +1,38 @@
+import fs, { readFileSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+function loadEnvFile(filePath: string) {
+  if (fs.existsSync(filePath)) {
+    const lines = fs.readFileSync(filePath, 'utf8').split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+        const idx = trimmed.indexOf('=');
+        const key = trimmed.substring(0, idx).trim();
+        const val = trimmed.substring(idx + 1).trim();
+        if (!process.env[key]) {
+          process.env[key] = val;
+        }
+      }
+    }
+  }
+}
+
+loadEnvFile(path.join(process.cwd(), '.env.local'));
+loadEnvFile(path.join(process.cwd(), '.env'));
+
 // Polyfill globalThis.import.meta.env for test environment BEFORE any static imports
-// (needed by testAuthServiceResolution and any static references in services/modules)
-(globalThis as any).import = { meta: { env: { VITE_DATA_MODE: 'mock', VITE_LARI_DATA_SOURCE: 'mock' } } };
+(globalThis as any).import = {
+  meta: {
+    env: {
+      VITE_DATA_MODE: process.env.VITE_DATA_MODE || 'mock',
+      VITE_LARI_DATA_SOURCE: process.env.VITE_LARI_DATA_SOURCE || process.env.VITE_DATA_MODE || 'mock',
+      VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL || '',
+      VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY || ''
+    }
+  }
+};
 
 import { authService } from '../services/authService';
 
@@ -321,9 +353,6 @@ testLocalAvatarGeneration();
 // Reads AdminPage.tsx source and asserts the editor is
 // actually in the production render tree.
 // ─────────────────────────────────────────────────────
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import path from 'path';
 import { LocalCatalogRepository } from '../services/repositories/localCatalogRepository';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -706,7 +735,8 @@ async function testDatabaseRLSRegression() {
     throw new Error('VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY missing in environment');
   }
 
-  const client = createClient(url, key, { auth: { persistSession: false } });
+  const client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  client.auth.stopAutoRefresh();
 
   // 1. Anonymous tenant UPDATE is blocked
   try {
@@ -729,7 +759,8 @@ async function testDatabaseRLSRegression() {
   const rpcContent = fs.readFileSync(path.join(migrationDir, '20260715_super_admin_provisioning_rpc.sql'), 'utf8');
 
   // Validate legacy owner_user_id authorization is dropped/absent in new policy definitions
-  assert(!hardeningContent.includes('owner_user_id'), 'Legacy owner_user_id authorization must be absent from active policies');
+  const activeHardeningPolicySql = hardeningContent.split('\n').filter(line => !line.trim().startsWith('--')).join('\n');
+  assert(!activeHardeningPolicySql.includes('owner_user_id'), 'Legacy owner_user_id authorization must be absent from active policies');
   assert(hardeningContent.includes('DROP POLICY IF EXISTS "Tenant Owner UPDATE own tenant" ON public.tenants'), 'Must drop tenant owner update policy');
 
   // Validate RPC atomic transaction criteria
@@ -786,8 +817,8 @@ await testDatabaseRLSRegression();
 
 if (failures > 0) {
   console.error(`\n🏁 Run completed with ${failures} failure(s).`);
-  process.exit(1);
+  process.exitCode = 1;
 } else {
   console.log('\n🎉 All regression test cases passed successfully!');
-  process.exit(0);
+  process.exitCode = 0;
 }
