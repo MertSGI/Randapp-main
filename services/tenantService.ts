@@ -277,7 +277,7 @@ export const tenantService = {
         .from('tenant_branding')
         .select('*')
         .eq('tenant_id', tenantId)
-        .single();
+        .maybeSingle();
         
       if (branding) {
         return {
@@ -299,7 +299,7 @@ export const tenantService = {
         .from('tenants')
         .select('name')
         .eq('id', tenantId)
-        .single();
+        .maybeSingle();
       
       return {
         tenantId,

@@ -43,8 +43,7 @@ export class SupabaseBookingRepository implements BookingRepository {
     return list.map((a: any) => ({
       id: a.id,
       tenantId: a.tenant_id,
-      branchId: a.branch_id,
-      userId: a.user_id,
+      userId: a.user_id || a.customer_id || a.id,
       customerId: a.customer_id,
       user_name: a.user_name,
       user_email: a.user_email,

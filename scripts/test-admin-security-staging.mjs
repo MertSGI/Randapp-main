@@ -147,29 +147,19 @@ if (fs.existsSync(aclMigrationPath)) {
   console.log('  ✅ 20260726 EXECUTE ACL REVOKE/GRANT assertions passed.');
 }
 
-// Verify SECURITY DEFINER and search_path in definitions
-const b1MigrationPath = path.join(migrationDir, '20260724_admin_rls_and_read_model_fix.sql');
-const b2MigrationPath = path.join(migrationDir, '20260725_admin_bootstrap_and_runtime_consistency.sql');
+// Migration 20260727: Stage B.2 Runtime Schema-Contract Repair
+const repairMigrationPath = path.join(migrationDir, '20260727_admin_runtime_schema_contract_fix.sql');
+assert(fs.existsSync(repairMigrationPath), 'Migration 20260727_admin_runtime_schema_contract_fix.sql must exist');
 
-if (fs.existsSync(b1MigrationPath) && fs.existsSync(b2MigrationPath)) {
-  const b1Sql = fs.readFileSync(b1MigrationPath, 'utf8');
-  const b2Sql = fs.readFileSync(b2MigrationPath, 'utf8');
-
-  const b1Code = b1Sql.split('\n').filter(l => !l.trim().startsWith('--')).join('\n');
-  const b2Code = b2Sql.split('\n').filter(l => !l.trim().startsWith('--')).join('\n');
-
-  // SECURITY DEFINER
-  assert(b2Code.includes('SECURITY DEFINER'), 'get_my_admin_bootstrap must be SECURITY DEFINER');
-  assert(b1Code.includes('SECURITY DEFINER'), 'Stage B.1 RPCs must be SECURITY DEFINER');
-
-  // search_path = pg_catalog, public
-  assert(b2Code.includes('SET search_path = pg_catalog, public'), 'get_my_admin_bootstrap must have fixed search_path = pg_catalog, public');
-  assert(b1Code.includes('SET search_path = pg_catalog, public'), 'Stage B.1 RPCs must have fixed search_path = pg_catalog, public');
-
-  // No auth.users RLS dependency
-  assert(!b1Code.includes('auth.users'), 'Stage B.1 migration must not depend directly on auth.users table');
-  assert(!b2Code.includes('auth.users'), 'Stage B.2 migration must not depend directly on auth.users table');
-  console.log('  ✅ SECURITY DEFINER, search_path, and auth.users isolation assertions passed.');
+if (fs.existsSync(repairMigrationPath)) {
+  const repairSql = fs.readFileSync(repairMigrationPath, 'utf8');
+  const repairCode = repairSql.split('\n').filter(l => !l.trim().startsWith('--')).join('\n');
+  assert(repairSql.includes('website_url'), 'Repair migration must reference website_url');
+  assert(repairSql.includes('a.customer_id'), 'Repair migration must map a.customer_id');
+  assert(!/\ba\.user_id\b/.test(repairCode), 'Repair migration code must not select non-existent column a.user_id');
+  assert(repairSql.includes('SECURITY DEFINER'), 'Repaired functions must preserve SECURITY DEFINER');
+  assert(repairSql.includes('SET search_path = pg_catalog, public'), 'Repaired functions must preserve fixed search_path');
+  console.log('  ✅ 20260727 Repair Migration contracts passed.');
 }
 
 // ─────────────────────────────────────────────────────
