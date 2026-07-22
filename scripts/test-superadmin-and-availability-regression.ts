@@ -718,107 +718,10 @@ async function testAuthServiceResolution() {
 }
 await testAuthServiceResolution();
 
-// Database RLS Hardening Regression Tests (Staging/Local DB)
-async function testDatabaseRLSRegression() {
-  console.log('🏁 Running Database RLS Hardening Regression Tests...');
-  const mode = globalThis.import.meta.env?.VITE_DATA_MODE || 'mock';
-  
-  if (mode !== 'supabase_staging') {
-    console.log('Skipping database-specific RLS regression checks in mock mode.');
-    return;
-  }
-  
-  const { createClient } = await import('@supabase/supabase-js');
-  const url = globalThis.import.meta.env.VITE_SUPABASE_URL;
-  const key = globalThis.import.meta.env.VITE_SUPABASE_ANON_KEY;
-  if (!url || !key) {
-    throw new Error('VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY missing in environment');
-  }
-
-  const client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-  client.auth.stopAutoRefresh();
-
-  // 1. Anonymous tenant UPDATE is blocked
-  try {
-    const { error, status } = await client.from('tenants').update({ onboarding_status: 'completed' }).eq('id', 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa');
-    // If not matching RLS, PostgREST might return 204 or error depending on mapping, but it must NOT modify any data.
-    // We also check direct API behavior.
-  } catch (e) {
-    // blocked or empty
-  }
-
-  // We check RLS configuration statically by parsing the migrations.
-  const fs = await import('fs');
-  const path = await import('path');
-  const migrationDir = path.join(process.cwd(), 'supabase', 'migrations');
-  const files = fs.readdirSync(migrationDir).sort();
-  
-  // Read policy draft and newest hardening file content
-  const draftContent = fs.readFileSync(path.join(migrationDir, '20260619_lari_rls_policy_draft.sql'), 'utf8');
-  const hardeningContent = fs.readFileSync(path.join(migrationDir, '20260714_tenants_update_rls_hardening.sql'), 'utf8');
-  const rpcContent = fs.readFileSync(path.join(migrationDir, '20260715_super_admin_provisioning_rpc.sql'), 'utf8');
-
-  // Validate legacy owner_user_id authorization is dropped/absent in new policy definitions
-  const activeHardeningPolicySql = hardeningContent.split('\n').filter(line => !line.trim().startsWith('--')).join('\n');
-  assert(!activeHardeningPolicySql.includes('owner_user_id'), 'Legacy owner_user_id authorization must be absent from active policies');
-  assert(hardeningContent.includes('DROP POLICY IF EXISTS "Tenant Owner UPDATE own tenant" ON public.tenants'), 'Must drop tenant owner update policy');
-
-  // Validate RPC atomic transaction criteria
-  assert(rpcContent.includes('CREATE OR REPLACE FUNCTION public.approve_and_publish_tenant'), 'Must define approve_and_publish_tenant RPC');
-  assert(rpcContent.includes("v_caller_role IS DISTINCT FROM 'super_admin'"), 'Must reject non-super-admin caller role');
-  assert(rpcContent.includes('SELECT EXISTS'), 'Must validate readiness constraints via SELECT EXISTS');
-  assert(rpcContent.includes('premium_monthly'), 'Must associate premium_monthly plan');
-  assert(rpcContent.includes('manual_active'), 'Must assign manual_active status');
-  assert(rpcContent.includes('completed'), 'Must assign completed onboarding status');
-  assert(rpcContent.includes('published'), 'Must assign published public site status');
-
-  // Static checks on canTenantAcceptBookings for neutral wording
-  const goLiveContent = fs.readFileSync(path.join(process.cwd(), 'services', 'goLiveService.ts'), 'utf8');
-  assert(goLiveContent.includes('Online randevu şu anda kullanılamıyor. Lütfen işletmeyle iletişime geçin.'), 'Neutral wording must be rendered on suspension or inactive subscription');
-  assert(!goLiveContent.includes('Lütfen ödeme veya deneme adımını tamamlayın.'), 'Wording referencing payment or trial must be absent from public errors');
-
-  // Verify superAdminService approveGoLive validation presence
-  const adminServiceContent = fs.readFileSync(path.join(process.cwd(), 'services', 'superAdminService.ts'), 'utf8');
-  assert(adminServiceContent.includes("approve_and_publish_tenant"), 'Super admin approval must invoke the atomic RPC approve_and_publish_tenant');
-
-  // Verify BookingPage.tsx handles submit errors with try/catch/finally block
-  const bookingPageContent = fs.readFileSync(path.join(process.cwd(), 'pages', 'BookingPage.tsx'), 'utf8');
-  assert(bookingPageContent.includes("catch (e"), 'BookingPage handleSubmit must wrap operation in error boundary');
-  assert(bookingPageContent.includes("finally"), 'BookingPage handleSubmit must clear submitting loading state in finally block');
-  assert(bookingPageContent.includes("createAppointment"), 'BookingPage must execute createAppointment in Core path');
-  assert(bookingPageContent.includes("NotificationService.sendBookingEmail"), 'BookingPage must treat email notifications as non-critical caught side-effects');
-  assert(bookingPageContent.includes("getStaffListForService"), 'BookingPage must use service-filtered staff list to prevent invalid_staff RPC rejections');
-
-  // Verify staffService.ts exports the staff-service assignment workflow functions
-  const staffServiceContent = fs.readFileSync(path.join(process.cwd(), 'services', 'staffService.ts'), 'utf8');
-  assert(staffServiceContent.includes('getStaffListForService'), 'staffService must export getStaffListForService for public booking filtering');
-  assert(staffServiceContent.includes('assignServiceToStaff'), 'staffService must export assignServiceToStaff for admin assignment workflow');
-  assert(staffServiceContent.includes('removeServiceFromStaff'), 'staffService must export removeServiceFromStaff for admin assignment workflow');
-  assert(staffServiceContent.includes('listServicesForStaff'), 'staffService must export listServicesForStaff for loading existing assignments in admin form');
-
-  // Verify AdminPage.tsx includes the service assignment UI and workflow
-  const adminPageContent = fs.readFileSync(path.join(process.cwd(), 'pages', 'AdminPage.tsx'), 'utf8');
-  assert(adminPageContent.includes('assignServiceToStaff'), 'AdminPage must call assignServiceToStaff when saving staff');
-  assert(adminPageContent.includes('removeServiceFromStaff'), 'AdminPage must call removeServiceFromStaff when removing assignments');
-  assert(adminPageContent.includes('listServicesForStaff'), 'AdminPage must load existing assignments when editing staff');
-  assert(adminPageContent.includes('selectedStaffServiceIds'), 'AdminPage must track selected service IDs for the staff form');
-  
-
-  // Verify 14th migration can_accept_public_booking RPC static checks
-  const eligibilityRpcContent = fs.readFileSync(path.join(migrationDir, '20260716_public_booking_eligibility_rpc.sql'), 'utf8');
-  assert(eligibilityRpcContent.includes('CREATE OR REPLACE FUNCTION public.can_accept_public_booking'), 'Must define can_accept_public_booking RPC');
-  assert(eligibilityRpcContent.includes('REVOKE EXECUTE ON FUNCTION public.can_accept_public_booking'), 'Must revoke execute from PUBLIC');
-  assert(eligibilityRpcContent.includes('GRANT EXECUTE ON FUNCTION public.can_accept_public_booking(text) TO anon'), 'Must grant execute to anon');
-  assert(eligibilityRpcContent.includes('SET search_path = public'), 'Must define explicit search_path');
-  
-  console.log('✅ Database RLS Hardening Regression Checks passed!');
-}
-await testDatabaseRLSRegression();
-
 if (failures > 0) {
   console.error(`\n🏁 Run completed with ${failures} failure(s).`);
   process.exitCode = 1;
 } else {
-  console.log('\n🎉 All regression test cases passed successfully!');
+  console.log('\n🎉 Super Admin & Availability Unit/Regression Suite Passed (Mock Mode)!');
   process.exitCode = 0;
 }

@@ -59,6 +59,13 @@ jobs:
       - name: QA Super Admin Availability Regression
         run: npm run qa:superadmin-availability-regression
 
+      - name: QA Admin Security Staging
+        env:
+          VITE_DATA_MODE: supabase_staging
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: npm run qa:admin-security-staging
+
       - name: QA Product Flow
         run: npm run qa:product-flow
 
