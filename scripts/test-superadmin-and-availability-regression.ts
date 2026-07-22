@@ -374,8 +374,7 @@ testLocalAvatarGeneration();
 // ─────────────────────────────────────────────────────
 import { LocalCatalogRepository } from '../services/repositories/localCatalogRepository';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const adminPagePath = path.join(__dirname, '..', 'pages', 'AdminPage.tsx');
+const adminPagePath = path.resolve(process.cwd(), 'pages', 'AdminPage.tsx');
 
 function testAdminPageRenderPath() {
   let source;
@@ -651,7 +650,7 @@ async function testLocalAvailabilityRepositoryBehavior() {
     } as any);
     assert(false, 'Invalid active time range must be rejected');
   } catch {
-    console.log('? Invalid active availability time range rejected');
+    console.log('✅ Invalid active availability time range rejected');
   }
 
   await repo.createAvailabilityRule(tenantId, {
@@ -668,7 +667,7 @@ async function testLocalAvailabilityRepositoryBehavior() {
     await repo.updateAvailabilityRule('missing-rule', { start_time: '10:00:00' });
     assert(false, 'Missing availability update must propagate repository error');
   } catch {
-    console.log('? Missing availability update propagates repository error');
+    console.log('✅ Missing availability update propagates repository error');
   }
 }
 await testLocalAvailabilityRepositoryBehavior();
