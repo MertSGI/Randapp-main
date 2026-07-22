@@ -6,10 +6,10 @@ import { createClient } from '@supabase/supabase-js';
 
 // Safely get env vars
 let env: any = {};
-try { env = (import.meta as any).env || (globalThis as any).import?.meta?.env || {}; } catch(e) {}
+try { env = (globalThis as any).import?.meta?.env || (import.meta as any).env || process.env || {}; } catch(e) {}
 
-const supabaseUrl = env.VITE_SUPABASE_URL || 'https://mock.supabase.co';
-const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || 'mock-anon-key';
+const supabaseUrl = env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://mock.supabase.co';
+const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'mock-anon-key';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
