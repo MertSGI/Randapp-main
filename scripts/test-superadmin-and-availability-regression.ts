@@ -658,13 +658,18 @@ async function testAuthServiceResolution() {
     globalThis.import.meta.env.VITE_LARI_DATA_SOURCE = 'supabase_staging';
     globalThis.import.meta.env.VITE_SUPABASE_URL = 'https://rwedeejhjazwjthdjzrt.supabase.co';
     globalThis.import.meta.env.VITE_SUPABASE_ANON_KEY = 'valid-key';
-    
+
+    const origFetch = globalThis.fetch;
+    const origConsoleError = console.error;
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'Invalid credentials' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    console.error = () => {};
+
     try {
       const result = await authService.login('admin@randevulari.com', 'admin123');
       assert(result === null, 'supabase_staging must not fall back to mock admin user');
-    } catch (err) {
-      console.log('Note: supabase_staging login fetch failed as expected:', err.message);
-      assert(true, 'supabase_staging did not fall back to mock admin');
+    } finally {
+      globalThis.fetch = origFetch;
+      console.error = origConsoleError;
     }
   }
 
