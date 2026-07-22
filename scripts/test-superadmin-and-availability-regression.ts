@@ -731,8 +731,8 @@ await testAuthServiceResolution();
 
 if (failures > 0) {
   console.error(`\n🏁 Run completed with ${failures} failure(s).`);
-  process.exitCode = 1;
+  process.exit(1);
 } else {
   console.log('\n🎉 Super Admin & Availability Unit/Regression Suite Passed (Mock Mode)!');
-  process.exitCode = 0;
+  process.exit(0);
 }
