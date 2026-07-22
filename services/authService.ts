@@ -38,7 +38,10 @@ function getSupabaseClient() {
   const env = (import.meta as any).env || (globalThis as any).import?.meta?.env || {};
   const supabaseUrl = env.VITE_SUPABASE_URL || 'https://mock.supabase.co';
   const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || 'mock-anon-key';
-  return createClient(supabaseUrl, supabaseAnonKey);
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: (...args: any[]) => (globalThis as any).fetch(...args) }
+  });
 }
 
 export const authService = {
