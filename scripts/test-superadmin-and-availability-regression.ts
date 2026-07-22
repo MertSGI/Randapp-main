@@ -22,14 +22,18 @@ function loadEnvFile(filePath: string) {
 loadEnvFile(path.join(process.cwd(), '.env.local'));
 loadEnvFile(path.join(process.cwd(), '.env'));
 
+// Force mock mode for deterministic unit test execution
+process.env.VITE_DATA_MODE = 'mock';
+process.env.VITE_LARI_DATA_SOURCE = 'mock';
+
 // Polyfill globalThis.import.meta.env for test environment BEFORE any static imports
 (globalThis as any).import = {
   meta: {
     env: {
-      VITE_DATA_MODE: process.env.VITE_DATA_MODE || 'mock',
-      VITE_LARI_DATA_SOURCE: process.env.VITE_LARI_DATA_SOURCE || process.env.VITE_DATA_MODE || 'mock',
-      VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL || '',
-      VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY || ''
+      VITE_DATA_MODE: 'mock',
+      VITE_LARI_DATA_SOURCE: 'mock',
+      VITE_SUPABASE_URL: '',
+      VITE_SUPABASE_ANON_KEY: ''
     }
   }
 };
