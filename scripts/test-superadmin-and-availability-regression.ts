@@ -62,7 +62,9 @@ process.on('unhandledRejection', (reason) => {
 };
 
 // Dynamically import authService after environment setup
+console.log('[DIAG] About to dynamically import authService...');
 const { authService } = await import('../services/authService');
+console.log('[DIAG] authService imported successfully');
 
 console.log('🏁 Running super-admin and availability mapper regression test suite...');
 
