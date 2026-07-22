@@ -39,6 +39,16 @@ if (typeof globalThis.localStorage === 'undefined') {
 process.env.VITE_DATA_MODE = 'mock';
 process.env.VITE_LARI_DATA_SOURCE = 'mock';
 
+process.on('uncaughtException', (err) => {
+  console.error('❌ UNCAUGHT EXCEPTION:', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('❌ UNHANDLED REJECTION:', reason);
+  process.exit(1);
+});
+
 // Polyfill globalThis.import.meta.env for test environment BEFORE any static imports
 (globalThis as any).import = {
   meta: {
