@@ -22,6 +22,19 @@ function loadEnvFile(filePath: string) {
 loadEnvFile(path.join(process.cwd(), '.env.local'));
 loadEnvFile(path.join(process.cwd(), '.env'));
 
+// In-memory localStorage polyfill for Node.js runner
+if (typeof globalThis.localStorage === 'undefined') {
+  const store = new Map<string, string>();
+  (globalThis as any).localStorage = {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, val: string) => store.set(key, String(val)),
+    removeItem: (key: string) => store.delete(key),
+    clear: () => store.clear(),
+    key: (i: number) => Array.from(store.keys())[i] ?? null,
+    get length() { return store.size; }
+  };
+}
+
 // Force mock mode for deterministic unit test execution
 process.env.VITE_DATA_MODE = 'mock';
 process.env.VITE_LARI_DATA_SOURCE = 'mock';
