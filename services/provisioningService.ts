@@ -1,4 +1,4 @@
-﻿import { supabase } from './supabaseClient';
+import { supabase } from './supabaseClient';
 import { dataProvider } from './dataProvider';
 
 export type ProvisioningStatus = 
@@ -81,12 +81,12 @@ export const provisioningService = {
     if (mode.startsWith('supabase')) {
       const { data, error } = await supabase
         .from('tenants')
-        .select('provisioning_status')
+        .select('onboarding_status')
         .eq('id', tenantId)
-        .single();
+        .maybeSingle();
       
       if (error) return 'failed';
-      return data?.provisioning_status || 'setup_in_progress';
+      return (data?.onboarding_status as ProvisioningStatus) || 'setup_in_progress';
     }
 
     const status = await dataProvider.get<ProvisioningStatus>(`lari:${tenantId}:provisioning_status`);

@@ -106,9 +106,9 @@ export const goLiveService = {
         return { allowed: false, reason: 'Online randevu şu anda kullanılamıyor. Lütfen işletmeyle iletişime geçin.' };
       }
       try {
-        const { data, error } = await supabase.rpc('can_accept_public_booking', { p_slug: tenant.slug });
+        const { data, error } = await supabase.rpc('get_public_booking_eligibility', { p_slug: tenant.slug });
         if (error || !data) {
-          console.error('Error invoking can_accept_public_booking RPC:', error);
+          console.error('Error invoking get_public_booking_eligibility RPC:', error);
           return { allowed: false, reason: 'Online randevu şu anda kullanılamıyor. Lütfen işletmeyle iletişime geçin.' };
         }
         if (data.allowed) {
