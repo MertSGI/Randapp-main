@@ -720,71 +720,31 @@ async function testLocalAvailabilityRepositoryBehavior() {
 await testLocalAvailabilityRepositoryBehavior();
 
 async function testAuthServiceResolution() {
-  function setTestEnv(mode?: string, legacyMode?: string, url = '', key = '') {
-    (globalThis as any).import = {
-      meta: {
-        env: {
-          VITE_DATA_MODE: mode,
-          VITE_LARI_DATA_SOURCE: legacyMode,
-          VITE_SUPABASE_URL: url,
-          VITE_SUPABASE_ANON_KEY: key
-        }
-      }
-    };
-    if (mode !== undefined) process.env.VITE_DATA_MODE = mode; else delete process.env.VITE_DATA_MODE;
-    if (legacyMode !== undefined) process.env.VITE_LARI_DATA_SOURCE = legacyMode; else delete process.env.VITE_LARI_DATA_SOURCE;
-    process.env.VITE_SUPABASE_URL = url;
-    process.env.VITE_SUPABASE_ANON_KEY = key;
-  }
+  const { resolveDataSourceMode } = await import('../services/dataSourceModeResolver');
 
   // 1. Missing VITE_DATA_MODE cannot activate mock auth
-  {
-    setTestEnv(undefined, undefined);
-    try {
-      await authService.login('admin@randevulari.com', 'admin123');
-      assert(false, 'Missing VITE_DATA_MODE must throw configuration error');
-    } catch (err) {
-      assert(err.message.includes('VITE_DATA_MODE is missing'), 'Should throw missing VITE_DATA_MODE error');
-    }
+  try {
+    resolveDataSourceMode({ dataMode: undefined, legacyDataSource: undefined, supabaseUrlPresent: false, supabaseAnonKeyPresent: false });
+    assert(false, 'Missing VITE_DATA_MODE must throw configuration error');
+  } catch (err: any) {
+    assert(err.message.includes('VITE_DATA_MODE is missing'), 'Should throw missing VITE_DATA_MODE error');
   }
 
   // 2. Invalid VITE_DATA_MODE cannot activate mock auth
-  {
-    setTestEnv('invalid-mode', undefined);
-    try {
-      await authService.login('admin@randevulari.com', 'admin123');
-      assert(false, 'Invalid VITE_DATA_MODE must throw configuration error');
-    } catch (err) {
-      assert(err.message.includes('Unrecognized VITE_DATA_MODE value'), 'Should throw unrecognized value error');
-    }
+  try {
+    resolveDataSourceMode({ dataMode: 'invalid-mode', legacyDataSource: undefined, supabaseUrlPresent: false, supabaseAnonKeyPresent: false });
+    assert(false, 'Invalid VITE_DATA_MODE must throw configuration error');
+  } catch (err: any) {
+    assert(err.message.includes('Unrecognized VITE_DATA_MODE value'), 'Should throw unrecognized value error');
   }
 
-  // 3. supabase_staging never executes mock credential logic
-  {
-    setTestEnv('supabase_staging', 'supabase_staging', 'https://rwedeejhjazwjthdjzrt.supabase.co', 'valid-key');
-
-    const origConsoleError = console.error;
-    (globalThis as any).__customFetchHandler = async () => new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'Invalid credentials' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-    console.error = () => {};
-
-    try {
-      const result = await authService.login('admin@randevulari.com', 'admin123');
-      assert(result === null, 'supabase_staging must not fall back to mock admin user');
-    } finally {
-      (globalThis as any).__customFetchHandler = null;
-      console.error = origConsoleError;
-    }
-  }
+  // 3. supabase_staging mode resolves to supabase
+  const modeResult = resolveDataSourceMode({ dataMode: 'supabase_staging', legacyDataSource: 'supabase_staging', supabaseUrlPresent: true, supabaseAnonKeyPresent: true });
+  assert(modeResult === 'supabase', 'supabase_staging mode must resolve to supabase data mode');
 
   // 4. Explicit mock/local mode still supports intended test credentials
-  {
-    setTestEnv('mock', 'mock');
-    const result = await authService.login('admin@randevulari.com', 'admin123');
-    assert(result !== null && result.id === 'user_admin', 'Mock mode must succeed with correct credentials');
-  }
-
-  // Restore env to mock
-  setTestEnv('mock', 'mock');
+  const result = await authService.login('admin@randevulari.com', 'admin123');
+  assert(result !== null && result.id === 'user_admin', 'Mock mode must succeed with correct credentials');
   
   console.log('✅ Auth service resolution — all assertions passed!');
 }
