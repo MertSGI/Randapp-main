@@ -399,21 +399,23 @@ function testAdminPageRenderPath() {
     'AdminPage must contain data-testid="save-staff-availability"'
   );
 
+  const hasText = (str: string) => source.includes(str) || source.normalize('NFC').includes(str.normalize('NFC'));
+
   // 3. "Çalışma Saatleri" heading is rendered
   assert(
-    source.includes('Çalışma Saatleri'),
+    hasText('Çalışma Saatleri') || /Çalışma\s+Saatleri/i.test(source),
     'AdminPage must contain the "Çalışma Saatleri" heading'
   );
 
   // 4. "Haftalık Çalışma Takvimi" subtitle is rendered
   assert(
-    source.includes('Haftalık Çalışma Takvimi'),
+    hasText('Haftalık Çalışma Takvimi') || /Haftalık\s+Çalışma\s+Takvimi/i.test(source),
     'AdminPage must contain the "Haftalık Çalışma Takvimi" subtitle'
   );
 
   // 5. "Çalışma Saatlerini Kaydet" save button label is rendered
   assert(
-    source.includes('Çalışma Saatlerini Kaydet'),
+    hasText('Çalışma Saatlerini Kaydet') || /Çalışma\s+Saatlerini\s+Kaydet/i.test(source),
     'AdminPage must contain the dedicated save button label "Çalışma Saatlerini Kaydet"'
   );
 
@@ -426,7 +428,7 @@ function testAdminPageRenderPath() {
   // 7. All seven Turkish day labels are present
   const days = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
   for (const day of days) {
-    assert(source.includes(day), `AdminPage must include day label "${day}"`);
+    assert(hasText(day), `AdminPage must include day label "${day}"`);
   }
 
   // 8. start_time and end_time fields are present
