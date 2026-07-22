@@ -92,8 +92,8 @@ try {
 console.log('[DIAG] About to dynamically import authService...');
 let authService: any;
 try {
-  const mod = await import('../services/authService');
-  authService = mod.authService;
+  const modAuth = await import('../services/authService');
+  authService = modAuth.authService;
   console.log('[DIAG] authService imported successfully');
 } catch (importErr) {
   console.error('[DIAG] ❌ IMPORT FAILED:', importErr);
