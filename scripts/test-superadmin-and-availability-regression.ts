@@ -658,13 +658,26 @@ async function testLocalAvailabilityRepositoryBehavior() {
 await testLocalAvailabilityRepositoryBehavior();
 
 async function testAuthServiceResolution() {
-  // Save current env to restore later
-  const oldEnv = { ...globalThis.import.meta.env };
+  function setTestEnv(mode?: string, legacyMode?: string, url = '', key = '') {
+    (globalThis as any).import = {
+      meta: {
+        env: {
+          VITE_DATA_MODE: mode,
+          VITE_LARI_DATA_SOURCE: legacyMode,
+          VITE_SUPABASE_URL: url,
+          VITE_SUPABASE_ANON_KEY: key
+        }
+      }
+    };
+    if (mode !== undefined) process.env.VITE_DATA_MODE = mode; else delete process.env.VITE_DATA_MODE;
+    if (legacyMode !== undefined) process.env.VITE_LARI_DATA_SOURCE = legacyMode; else delete process.env.VITE_LARI_DATA_SOURCE;
+    process.env.VITE_SUPABASE_URL = url;
+    process.env.VITE_SUPABASE_ANON_KEY = key;
+  }
 
   // 1. Missing VITE_DATA_MODE cannot activate mock auth
   {
-    globalThis.import.meta.env.VITE_DATA_MODE = undefined;
-    globalThis.import.meta.env.VITE_LARI_DATA_SOURCE = undefined;
+    setTestEnv(undefined, undefined);
     try {
       await authService.login('admin@randevulari.com', 'admin123');
       assert(false, 'Missing VITE_DATA_MODE must throw configuration error');
@@ -675,8 +688,7 @@ async function testAuthServiceResolution() {
 
   // 2. Invalid VITE_DATA_MODE cannot activate mock auth
   {
-    globalThis.import.meta.env.VITE_DATA_MODE = 'invalid-mode';
-    globalThis.import.meta.env.VITE_LARI_DATA_SOURCE = undefined;
+    setTestEnv('invalid-mode', undefined);
     try {
       await authService.login('admin@randevulari.com', 'admin123');
       assert(false, 'Invalid VITE_DATA_MODE must throw configuration error');
@@ -687,10 +699,7 @@ async function testAuthServiceResolution() {
 
   // 3. supabase_staging never executes mock credential logic
   {
-    globalThis.import.meta.env.VITE_DATA_MODE = 'supabase_staging';
-    globalThis.import.meta.env.VITE_LARI_DATA_SOURCE = 'supabase_staging';
-    globalThis.import.meta.env.VITE_SUPABASE_URL = 'https://rwedeejhjazwjthdjzrt.supabase.co';
-    globalThis.import.meta.env.VITE_SUPABASE_ANON_KEY = 'valid-key';
+    setTestEnv('supabase_staging', 'supabase_staging', 'https://rwedeejhjazwjthdjzrt.supabase.co', 'valid-key');
 
     const origFetch = globalThis.fetch;
     const origConsoleError = console.error;
@@ -708,15 +717,13 @@ async function testAuthServiceResolution() {
 
   // 4. Explicit mock/local mode still supports intended test credentials
   {
-    globalThis.import.meta.env.VITE_DATA_MODE = 'mock';
-    globalThis.import.meta.env.VITE_LARI_DATA_SOURCE = 'mock';
+    setTestEnv('mock', 'mock');
     const result = await authService.login('admin@randevulari.com', 'admin123');
     assert(result !== null && result.id === 'user_admin', 'Mock mode must succeed with correct credentials');
   }
 
-  // Restore env
-  Object.keys(globalThis.import.meta.env).forEach(key => delete globalThis.import.meta.env[key]);
-  Object.assign(globalThis.import.meta.env, oldEnv);
+  // Restore env to mock
+  setTestEnv('mock', 'mock');
   
   console.log('✅ Auth service resolution — all assertions passed!');
 }
