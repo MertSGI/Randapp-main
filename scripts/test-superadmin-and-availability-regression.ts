@@ -57,10 +57,12 @@ import { authService } from '../services/authService';
 console.log('🏁 Running super-admin and availability mapper regression test suite...');
 
 let failures = 0;
+const failureMessages: string[] = [];
 
-function assert(condition, msg) {
+function assert(condition: any, msg: string) {
   if (!condition) {
     console.error(`❌ FAIL: ${msg}`);
+    failureMessages.push(msg);
     failures++;
     return false;
   }
@@ -743,7 +745,8 @@ async function testAuthServiceResolution() {
 await testAuthServiceResolution();
 
 if (failures > 0) {
-  console.error(`\n🏁 Run completed with ${failures} failure(s).`);
+  console.error(`\n🏁 Run completed with ${failures} failure(s):`);
+  failureMessages.forEach((m, i) => console.error(`  ${i + 1}. ${m}`));
   process.exit(1);
 } else {
   console.log('\n🎉 Super Admin & Availability Unit/Regression Suite Passed (Mock Mode)!');
