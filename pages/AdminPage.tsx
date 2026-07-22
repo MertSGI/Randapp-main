@@ -203,13 +203,14 @@ const AdminPage: React.FC = () => {
       console.error('[AdminPage] loadAppointments error:', err?.message || err);
       setAppointments([]);
       setAdminAppointmentsError(language === 'tr'
-        ? 'Randevular �xu anda yüklenemiyor. Lütfen tekrar deneyin.'
+        ? 'Randevular şu anda yüklenemiyor. Lütfen tekrar deneyin.'
         : 'Appointments could not be loaded right now. Please try again.');
     } finally {
       aptInFlightRef.current = false;
     }
+  }, [language]);
 
-    // Self-service auxiliary (does not trigger re-render loop � no state that feeds back into this effect)
+  const loadChangeRequests = useCallback(async (tid: string) => {
     try {
       const requests = await appointmentSelfServiceService.getAllChangeRequestsAsync(tid);
       setChangeRequests(requests);

@@ -29,6 +29,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 19. **`20260725_admin_bootstrap_and_runtime_consistency.sql`** — Stage B.2 authenticated server-scoped admin bootstrap RPC. Adds get_my_admin_bootstrap() which derives tenant from auth.uid() server-side and returns tenant profile, business profile, active services, active staff, branches, and subscription summary in a single SECURITY DEFINER call. Eliminates per-tab availability fanout. REVOKE/GRANT scoped to authenticated role only.
 20. **`20260726_admin_rpc_execute_acl_hardening.sql`** — Minimal forward-only EXECUTE ACL hardening for Stage B.1/B.2 admin RPCs (`get_my_admin_bootstrap`, `get_my_tenant_appointments`, `get_my_tenant_dashboard_summary`) and authorization helpers (`current_user_owns_customer`, `current_user_can_access_tenant`). Revokes EXECUTE privileges from PUBLIC and anon roles, granting EXECUTE strictly to authenticated.
 21. **`20260727_admin_runtime_schema_contract_fix.sql`** — Forward-only Stage B.2 runtime repair fixing PostgreSQL 42703 errors (`website` -> `website_url` in `get_my_admin_bootstrap` and `a.user_id` -> `a.customer_id` in `get_my_tenant_appointments`). Reasserts strict SECURITY DEFINER and EXECUTE ACL contracts.
+22. **`20260728_admin_rpc_live_schema_reconstruction.sql`** — Complete live-schema reconstruction of admin RPCs (`get_my_admin_bootstrap`, `get_my_tenant_appointments`, `get_my_tenant_dashboard_summary`) constructed strictly from verified database columns. Reasserts SECURITY DEFINER, search_path, and EXECUTE ACLs.
 
 
 

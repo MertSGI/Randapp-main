@@ -147,19 +147,21 @@ if (fs.existsSync(aclMigrationPath)) {
   console.log('  ✅ 20260726 EXECUTE ACL REVOKE/GRANT assertions passed.');
 }
 
-// Migration 20260727: Stage B.2 Runtime Schema-Contract Repair
-const repairMigrationPath = path.join(migrationDir, '20260727_admin_runtime_schema_contract_fix.sql');
-assert(fs.existsSync(repairMigrationPath), 'Migration 20260727_admin_runtime_schema_contract_fix.sql must exist');
+// Migration 20260728: Stage B.2 Admin RPC Live-Schema Reconstruction
+const reconstructionMigrationPath = path.join(migrationDir, '20260728_admin_rpc_live_schema_reconstruction.sql');
+assert(fs.existsSync(reconstructionMigrationPath), 'Migration 20260728_admin_rpc_live_schema_reconstruction.sql must exist');
 
-if (fs.existsSync(repairMigrationPath)) {
-  const repairSql = fs.readFileSync(repairMigrationPath, 'utf8');
-  const repairCode = repairSql.split('\n').filter(l => !l.trim().startsWith('--')).join('\n');
-  assert(repairSql.includes('website_url'), 'Repair migration must reference website_url');
-  assert(repairSql.includes('a.customer_id'), 'Repair migration must map a.customer_id');
-  assert(!/\ba\.user_id\b/.test(repairCode), 'Repair migration code must not select non-existent column a.user_id');
-  assert(repairSql.includes('SECURITY DEFINER'), 'Repaired functions must preserve SECURITY DEFINER');
-  assert(repairSql.includes('SET search_path = pg_catalog, public'), 'Repaired functions must preserve fixed search_path');
-  console.log('  ✅ 20260727 Repair Migration contracts passed.');
+if (fs.existsSync(reconstructionMigrationPath)) {
+  const reconSql = fs.readFileSync(reconstructionMigrationPath, 'utf8');
+  const reconCode = reconSql.split('\n').filter(l => !l.trim().startsWith('--')).join('\n');
+  assert(reconSql.includes('website_url'), 'Reconstruction migration must reference website_url');
+  assert(reconSql.includes('a.customer_id'), 'Reconstruction migration must map a.customer_id');
+  assert(!/\ba\.user_id\b/.test(reconCode), 'Reconstruction migration code must not select non-existent column a.user_id');
+  assert(!/\ba\.cancel_reason\b/.test(reconCode), 'Reconstruction migration code must not select non-existent column a.cancel_reason');
+  assert(!/\bpublic_display_name\b/.test(reconCode.replace(/'public_display_name'/g, '')), 'Reconstruction migration must not select non-existent column public_display_name');
+  assert(reconSql.includes('SECURITY DEFINER'), 'Reconstructed functions must preserve SECURITY DEFINER');
+  assert(reconSql.includes('SET search_path = pg_catalog, public'), 'Reconstructed functions must preserve fixed search_path');
+  console.log('  ✅ 20260728 Reconstruction Migration contracts passed.');
 }
 
 // ─────────────────────────────────────────────────────
