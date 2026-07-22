@@ -61,6 +61,19 @@ process.on('unhandledRejection', (reason) => {
   }
 };
 
+// Install a safe globalThis.fetch proxy BEFORE any module imports so @supabase/supabase-js captures it
+if (typeof globalThis.fetch === 'undefined' || !(globalThis as any).__safeFetchProxyInstalled) {
+  const defaultMockResponse = async () => new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'Invalid credentials' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  (globalThis as any).__customFetchHandler = null;
+  (globalThis as any).fetch = async (input: any, init: any) => {
+    if (typeof (globalThis as any).__customFetchHandler === 'function') {
+      return (globalThis as any).__customFetchHandler(input, init);
+    }
+    return defaultMockResponse();
+  };
+  (globalThis as any).__safeFetchProxyInstalled = true;
+}
+
 // === CI DIAGNOSTICS ===
 console.log('[DIAG] Node version:', process.version);
 console.log('[DIAG] Platform:', process.platform);
@@ -750,16 +763,15 @@ async function testAuthServiceResolution() {
   {
     setTestEnv('supabase_staging', 'supabase_staging', 'https://rwedeejhjazwjthdjzrt.supabase.co', 'valid-key');
 
-    const origFetch = globalThis.fetch;
     const origConsoleError = console.error;
-    globalThis.fetch = async () => new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'Invalid credentials' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    (globalThis as any).__customFetchHandler = async () => new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'Invalid credentials' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     console.error = () => {};
 
     try {
       const result = await authService.login('admin@randevulari.com', 'admin123');
       assert(result === null, 'supabase_staging must not fall back to mock admin user');
     } finally {
-      globalThis.fetch = origFetch;
+      (globalThis as any).__customFetchHandler = null;
       console.error = origConsoleError;
     }
   }
