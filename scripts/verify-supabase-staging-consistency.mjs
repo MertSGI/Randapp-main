@@ -56,6 +56,7 @@ const CANONICAL_MIGRATIONS = [
   '20260723_booking_lifecycle_foundation.sql',
   '20260724_admin_rls_and_read_model_fix.sql',
   '20260725_admin_bootstrap_and_runtime_consistency.sql',
+  '20260726_admin_rpc_execute_acl_hardening.sql',
 ];
 
 // Check actual migration files on disk

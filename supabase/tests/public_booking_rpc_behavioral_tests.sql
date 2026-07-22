@@ -1737,7 +1737,162 @@ BEGIN
   RAISE NOTICE 'TEST 56 PASS: get_my_tenant_dashboard_summary RPC exists and is SECURITY DEFINER.';
 
   RAISE NOTICE '=== STAGE B.1 FIX TESTS 52-56 COMPLETED SUCCESSFULLY ===';
+
+  -- -----------------------------------------------------------------------
+  -- STAGE B.2 ACL HARDENING TESTS (57-67)
+  -- -----------------------------------------------------------------------
+  RAISE NOTICE '=== STARTING STAGE B.2 ACL HARDENING TESTS 57-67 ===';
+
+  -- TEST 57: anon has NO EXECUTE privilege on 5 admin functions
+  IF has_function_privilege('anon', 'public.get_my_admin_bootstrap()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 57 FAIL: anon has EXECUTE on get_my_admin_bootstrap()';
+  END IF;
+  IF has_function_privilege('anon', 'public.get_my_tenant_appointments(uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 57 FAIL: anon has EXECUTE on get_my_tenant_appointments(uuid)';
+  END IF;
+  IF has_function_privilege('anon', 'public.get_my_tenant_dashboard_summary()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 57 FAIL: anon has EXECUTE on get_my_tenant_dashboard_summary()';
+  END IF;
+  IF has_function_privilege('anon', 'public.current_user_owns_customer(uuid, uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 57 FAIL: anon has EXECUTE on current_user_owns_customer(uuid, uuid)';
+  END IF;
+  IF has_function_privilege('anon', 'public.current_user_can_access_tenant(uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 57 FAIL: anon has EXECUTE on current_user_can_access_tenant(uuid)';
+  END IF;
+  RAISE NOTICE 'TEST 57 PASS: anon has no EXECUTE privilege on all 5 admin functions.';
+
+  -- TEST 58: authenticated HAS EXECUTE privilege on 5 admin functions
+  IF NOT has_function_privilege('authenticated', 'public.get_my_admin_bootstrap()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 58 FAIL: authenticated missing EXECUTE on get_my_admin_bootstrap()';
+  END IF;
+  IF NOT has_function_privilege('authenticated', 'public.get_my_tenant_appointments(uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 58 FAIL: authenticated missing EXECUTE on get_my_tenant_appointments(uuid)';
+  END IF;
+  IF NOT has_function_privilege('authenticated', 'public.get_my_tenant_dashboard_summary()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 58 FAIL: authenticated missing EXECUTE on get_my_tenant_dashboard_summary()';
+  END IF;
+  IF NOT has_function_privilege('authenticated', 'public.current_user_owns_customer(uuid, uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 58 FAIL: authenticated missing EXECUTE on current_user_owns_customer(uuid, uuid)';
+  END IF;
+  IF NOT has_function_privilege('authenticated', 'public.current_user_can_access_tenant(uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 58 FAIL: authenticated missing EXECUTE on current_user_can_access_tenant(uuid)';
+  END IF;
+  RAISE NOTICE 'TEST 58 PASS: authenticated has EXECUTE privilege on all 5 admin functions.';
+
+  -- TEST 59: service_role HAS EXECUTE privilege on 5 admin functions
+  IF NOT has_function_privilege('service_role', 'public.get_my_admin_bootstrap()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 59 FAIL: service_role missing EXECUTE on get_my_admin_bootstrap()';
+  END IF;
+  IF NOT has_function_privilege('service_role', 'public.get_my_tenant_appointments(uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 59 FAIL: service_role missing EXECUTE on get_my_tenant_appointments(uuid)';
+  END IF;
+  IF NOT has_function_privilege('service_role', 'public.get_my_tenant_dashboard_summary()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 59 FAIL: service_role missing EXECUTE on get_my_tenant_dashboard_summary()';
+  END IF;
+  IF NOT has_function_privilege('service_role', 'public.current_user_owns_customer(uuid, uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 59 FAIL: service_role missing EXECUTE on current_user_owns_customer(uuid, uuid)';
+  END IF;
+  IF NOT has_function_privilege('service_role', 'public.current_user_can_access_tenant(uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 59 FAIL: service_role missing EXECUTE on current_user_can_access_tenant(uuid)';
+  END IF;
+  RAISE NOTICE 'TEST 59 PASS: service_role retains EXECUTE privilege on all 5 admin functions.';
+
+  -- TEST 60: function owner / postgres HAS EXECUTE privilege
+  IF NOT has_function_privilege('postgres', 'public.get_my_admin_bootstrap()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 60 FAIL: postgres owner missing EXECUTE on get_my_admin_bootstrap()';
+  END IF;
+  IF NOT has_function_privilege('postgres', 'public.get_my_tenant_appointments(uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 60 FAIL: postgres owner missing EXECUTE on get_my_tenant_appointments(uuid)';
+  END IF;
+  IF NOT has_function_privilege('postgres', 'public.get_my_tenant_dashboard_summary()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 60 FAIL: postgres owner missing EXECUTE on get_my_tenant_dashboard_summary()';
+  END IF;
+  IF NOT has_function_privilege('postgres', 'current_user_owns_customer(uuid, uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 60 FAIL: postgres owner missing EXECUTE on current_user_owns_customer(uuid, uuid)';
+  END IF;
+  IF NOT has_function_privilege('postgres', 'current_user_can_access_tenant(uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 60 FAIL: postgres owner missing EXECUTE on current_user_can_access_tenant(uuid)';
+  END IF;
+  RAISE NOTICE 'TEST 60 PASS: function owner retains EXECUTE privilege on all 5 admin functions.';
+
+  -- TEST 61: get_my_admin_bootstrap remains SECURITY DEFINER
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public' AND p.proname = 'get_my_admin_bootstrap' AND p.prosecdef = true
+  ) THEN
+    RAISE EXCEPTION 'TEST 61 FAIL: get_my_admin_bootstrap is not SECURITY DEFINER';
+  END IF;
+  RAISE NOTICE 'TEST 61 PASS: get_my_admin_bootstrap remains SECURITY DEFINER.';
+
+  -- TEST 62: get_my_tenant_appointments remains SECURITY DEFINER
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public' AND p.proname = 'get_my_tenant_appointments' AND p.prosecdef = true
+  ) THEN
+    RAISE EXCEPTION 'TEST 62 FAIL: get_my_tenant_appointments is not SECURITY DEFINER';
+  END IF;
+  RAISE NOTICE 'TEST 62 PASS: get_my_tenant_appointments remains SECURITY DEFINER.';
+
+  -- TEST 63: get_my_tenant_dashboard_summary remains SECURITY DEFINER
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public' AND p.proname = 'get_my_tenant_dashboard_summary' AND p.prosecdef = true
+  ) THEN
+    RAISE EXCEPTION 'TEST 63 FAIL: get_my_tenant_dashboard_summary is not SECURITY DEFINER';
+  END IF;
+  RAISE NOTICE 'TEST 63 PASS: get_my_tenant_dashboard_summary remains SECURITY DEFINER.';
+
+  -- TEST 64: Authorization helpers remain SECURITY DEFINER
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public' AND p.proname = 'current_user_owns_customer' AND p.prosecdef = true
+  ) THEN
+    RAISE EXCEPTION 'TEST 64 FAIL: current_user_owns_customer is not SECURITY DEFINER';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public' AND p.proname = 'current_user_can_access_tenant' AND p.prosecdef = true
+  ) THEN
+    RAISE EXCEPTION 'TEST 64 FAIL: current_user_can_access_tenant is not SECURITY DEFINER';
+  END IF;
+  RAISE NOTICE 'TEST 64 PASS: both authorization helpers remain SECURITY DEFINER.';
+
+  -- TEST 65: All five functions retain fixed search_path = pg_catalog, public
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public'
+      AND p.proname IN ('get_my_admin_bootstrap', 'get_my_tenant_appointments', 'get_my_tenant_dashboard_summary', 'current_user_owns_customer', 'current_user_can_access_tenant')
+      AND (p.proconfig IS NULL OR NOT ARRAY['search_path=pg_catalog, public'] <@ p.proconfig)
+  ) THEN
+    RAISE EXCEPTION 'TEST 65 FAIL: One or more admin functions missing fixed search_path = pg_catalog, public';
+  END IF;
+  RAISE NOTICE 'TEST 65 PASS: All five functions retain fixed search_path = pg_catalog, public.';
+
+  -- TEST 66: Public booking RPC ACLs remain unchanged (anon retains EXECUTE)
+  IF NOT has_function_privilege('anon', 'public.create_public_booking(text,uuid,uuid,date,time,text,text,text,boolean,text,integer)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 66 FAIL: anon lost EXECUTE on create_public_booking';
+  END IF;
+  IF NOT has_function_privilege('anon', 'public.get_public_available_slots(text,uuid,uuid,date,date)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 66 FAIL: anon lost EXECUTE on get_public_available_slots';
+  END IF;
+  IF NOT has_function_privilege('anon', 'public.get_public_booking_eligibility_by_slug(text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 66 FAIL: anon lost EXECUTE on get_public_booking_eligibility_by_slug';
+  END IF;
+  RAISE NOTICE 'TEST 66 PASS: Public booking RPC ACLs remain unchanged (anon EXECUTE intact).';
+
+  -- TEST 67: Public booking RPCs remain SECURITY DEFINER
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public' AND p.proname IN ('create_public_booking', 'get_public_available_slots', 'get_public_booking_eligibility_by_slug')
+    HAVING COUNT(*) = 3 AND MIN(p.prosecdef::int) = 1
+  ) THEN
+    RAISE EXCEPTION 'TEST 67 FAIL: Public booking RPCs lost SECURITY DEFINER status';
+  END IF;
+  RAISE NOTICE 'TEST 67 PASS: Public booking RPCs remain SECURITY DEFINER.';
+
+  RAISE NOTICE '=== ALL STAGE B.2 ACL HARDENING TESTS 57-67 PASSED SUCCESSFULLY ===';
 END $$;
+
 
 
 
