@@ -834,7 +834,7 @@ const AdminPage: React.FC = () => {
               </div>
             </div>
             <div className="bg-white dark:bg-slate-800 rounded-lg shadow-sm p-6 border border-gray-100 dark:border-slate-700 transition-colors duration-300 cursor-pointer" onClick={() => setActiveTab('appointments')}>
-              <div className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase transition-colors duration-300">{language === 'tr' ? 'Tamamlanan Görü�xmeler' : 'Completed'}</div>
+              <div className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase transition-colors duration-300">{language === 'tr' ? 'Tamamlanan Görüşmeler' : 'Completed'}</div>
               <div className="mt-2 text-3xl font-bold text-green-600 dark:text-green-400 transition-colors duration-300">
                 {adminAppointmentsError ? '--' : (dashboardSummary ? dashboardSummary.completedTotal : appointments.filter(a => a.status === 'completed').length)}
               </div> 
@@ -949,8 +949,8 @@ const AdminPage: React.FC = () => {
                     <svg className="w-8 h-8 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                   </div>
                   <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">Henüz Randevu Yok</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mb-6">Mü�xterileriniz online rezervasyon yaptıkça randevularınız otomatik olarak burada görünecektir.</p>
-                  <button onClick={() => window.open('/#/book?preview=true', '_blank')} className="px-5 py-2 bg-white text-gray-700 border border-gray-300 dark:bg-slate-700 dark:text-gray-200 dark:border-slate-600 rounded-lg shadow-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors text-sm">Site �nizlemesini Aç</button>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mb-6">Müşterileriniz online rezervasyon yaptıkça randevularınız otomatik olarak burada görünecektir.</p>
+                  <button onClick={() => window.open('/#/book?preview=true', '_blank')} className="px-5 py-2 bg-white text-gray-700 border border-gray-300 dark:bg-slate-700 dark:text-gray-200 dark:border-slate-600 rounded-lg shadow-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors text-sm">Site Önizlemesini Aç</button>
                 </div>
               ) : (
                 appointments.filter(a => selectedBranchFilter === 'all' || a.branchId === selectedBranchFilter).map((apt) => {

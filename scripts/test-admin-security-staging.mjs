@@ -164,6 +164,20 @@ if (fs.existsSync(reconstructionMigrationPath)) {
   console.log('  ✅ 20260728 Reconstruction Migration contracts passed.');
 }
 
+// Migration 20260729: Stage B.2 Admin Bootstrap Subscription Contract Fix
+const subFixMigrationPath = path.join(migrationDir, '20260729_admin_bootstrap_subscription_contract_fix.sql');
+assert(fs.existsSync(subFixMigrationPath), 'Migration 20260729_admin_bootstrap_subscription_contract_fix.sql must exist');
+
+if (fs.existsSync(subFixMigrationPath)) {
+  const subSql = fs.readFileSync(subFixMigrationPath, 'utf8');
+  const subCode = subSql.split('\n').filter(l => !l.trim().startsWith('--')).join('\n');
+  assert(subSql.includes('sub.trial_ends_at'), 'Subscription fix migration must reference sub.trial_ends_at');
+  assert(!/\bsub\.trial_end\b/.test(subCode.replace(/'trial_end'/g, '')), 'Subscription fix migration code must not select non-existent column sub.trial_end');
+  assert(subSql.includes('SECURITY DEFINER'), 'Subscription fix function must preserve SECURITY DEFINER');
+  assert(subSql.includes('SET search_path = pg_catalog, public'), 'Subscription fix function must preserve fixed search_path');
+  console.log('  ✅ 20260729 Subscription Contract Fix Migration passed.');
+}
+
 // ─────────────────────────────────────────────────────
 // 3. ZERO CANONICAL TENANT MUTATION ASSERTION
 // ─────────────────────────────────────────────────────
