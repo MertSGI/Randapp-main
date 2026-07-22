@@ -51,8 +51,8 @@ process.env.VITE_LARI_DATA_SOURCE = 'mock';
   }
 };
 
-import { authService } from '../services/authService';
-
+// Dynamically import authService after environment setup
+const { authService } = await import('../services/authService');
 
 console.log('🏁 Running super-admin and availability mapper regression test suite...');
 
@@ -372,7 +372,8 @@ testLocalAvatarGeneration();
 // Reads AdminPage.tsx source and asserts the editor is
 // actually in the production render tree.
 // ─────────────────────────────────────────────────────
-import { LocalCatalogRepository } from '../services/repositories/localCatalogRepository';
+// Dynamically import LocalCatalogRepository after environment setup
+const { LocalCatalogRepository } = await import('../services/repositories/localCatalogRepository');
 
 const adminPagePath = path.resolve(process.cwd(), 'pages', 'AdminPage.tsx');
 
