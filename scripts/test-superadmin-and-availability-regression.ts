@@ -500,7 +500,7 @@ function testAdminPageRenderPath() {
 // ─────────────────────────────────────────────────────
 // PHASE 7 cont'd: Availability helper behavior tests
 // ─────────────────────────────────────────────────────
-function testExistingRuleMapping() {
+async function testExistingRuleMapping() {
   // Simulate what initiateEdit does: maps DB rows to 7-day editor state
   const dbRules = [
     { id: 'r-1', weekday: 1, is_active: true, start_time: '09:00:00', end_time: '17:00:00' },
@@ -573,15 +573,14 @@ function testExistingRuleMapping() {
     }
     return weeklyAvailability;
   };
-  simulateLoadError().then(result => {
-    assert(result.length === 0, 'Load error must leave weeklyAvailability empty (triggers error UI)');
-  });
+  const result = await simulateLoadError();
+  assert(result.length === 0, 'Load error must leave weeklyAvailability empty (triggers error UI)');
 
   console.log('✅ Existing rule mapping — all assertions passed!');
 }
 
 testAdminPageRenderPath();
-testExistingRuleMapping();
+await testExistingRuleMapping();
 
 
 function installMemoryLocalStorage() {
