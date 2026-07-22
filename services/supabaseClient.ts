@@ -11,5 +11,11 @@ try { env = (import.meta as any).env || (globalThis as any).import?.meta?.env ||
 const supabaseUrl = env.VITE_SUPABASE_URL || 'https://mock.supabase.co';
 const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || 'mock-anon-key';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false
+  }
+});
 
