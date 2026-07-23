@@ -364,6 +364,21 @@ check(
   'Found card_number/card_cvv fields in frontend code'
 );
 
+// Check goLiveService calls can_accept_public_booking and no file calls get_public_booking_eligibility
+const goLiveContent = readSafe('services/goLiveService.ts');
+if (goLiveContent) {
+  check(
+    'goLiveService calls can_accept_public_booking with p_slug',
+    goLiveContent.includes("can_accept_public_booking") && goLiveContent.includes("p_slug: tenant.slug"),
+    'goLiveService must call can_accept_public_booking with p_slug'
+  );
+  check(
+    'goLiveService does NOT call get_public_booking_eligibility',
+    !goLiveContent.includes("get_public_booking_eligibility"),
+    'goLiveService must not call get_public_booking_eligibility'
+  );
+}
+
 
 // =========================================================================
 // 6. BRAND & DOMAIN CONSISTENCY

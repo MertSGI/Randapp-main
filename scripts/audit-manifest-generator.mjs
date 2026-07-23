@@ -35,7 +35,7 @@ const rpcs = {
   current_user_can_access_tenant: { returnType: 'boolean', securityDefiner: true, anonExecute: false, authenticatedExecute: true },
   get_public_available_slots: { returnType: 'jsonb', securityDefiner: true, anonExecute: true, authenticatedExecute: true },
   create_public_booking: { returnType: 'jsonb', securityDefiner: true, anonExecute: true, authenticatedExecute: true },
-  get_public_booking_eligibility: { returnType: 'jsonb', securityDefiner: true, anonExecute: true, authenticatedExecute: true },
+  can_accept_public_booking: { returnType: 'jsonb', securityDefiner: true, anonExecute: true, authenticatedExecute: true },
   approve_and_publish_tenant: { returnType: 'jsonb', securityDefiner: true, anonExecute: false, authenticatedExecute: true },
   create_tenant_with_owner: { returnType: 'jsonb', securityDefiner: true, anonExecute: false, authenticatedExecute: true }
 };
