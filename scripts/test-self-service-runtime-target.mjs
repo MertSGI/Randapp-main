@@ -79,8 +79,8 @@ assert(
   'AppointmentSelfServicePage must render separate retryable UI for service_error'
 );
 assert(
-  selfServicePageCode.includes("Bağlantı Hatası"),
-  'AppointmentSelfServicePage must render Bağlantı Hatası heading for service_error'
+  selfServicePageCode.includes("Randevu Bilgilerine Ulaşılamıyor"),
+  'AppointmentSelfServicePage must render Randevu Bilgilerine Ulaşılamıyor heading for service_error'
 );
 assert(
   selfServicePageCode.includes("Bağlantı Geçersiz"),

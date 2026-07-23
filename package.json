@@ -63,6 +63,7 @@
     "qa:supabase-active-migration-path": "node scripts/verify-supabase-active-migration-path.mjs",
     "qa:supabase-auth-rls-bootstrap": "node scripts/verify-supabase-auth-rls-bootstrap-readiness.mjs",
     "qa:self-service-runtime-target": "node scripts/test-self-service-runtime-target.mjs",
+    "qa:self-service-detail-ui": "node scripts/test-self-service-detail-ui.mjs",
     "qa:real-supabase-staging-execution": "node scripts/verify-real-supabase-staging-execution-readiness.mjs",
     "qa:paymentless-go-no-go": "node scripts/verify-paymentless-production-go-no-go-readiness.mjs",
     "qa:supabase-staging-consistency": "node scripts/verify-supabase-staging-consistency.mjs",
