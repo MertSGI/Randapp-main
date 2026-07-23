@@ -95,17 +95,20 @@ const AppFlowSwitcher: React.FC = () => {
         <Route path="/support" element={<SupportPage />} />
       </Route>
 
-      {/* 2. Salon Booking Routes */}
+      {/* 2. Self-Service Routes (Must precede dynamic /:tenantSlug) */}
+      <Route path="/appointment/manage/:token" element={<AppointmentSelfServicePage />} />
+      <Route path="/appointment/manage" element={<AppointmentSelfServicePage />} />
+
+      {/* 2.1 Salon Booking Routes */}
       <Route element={<SalonBookingLayout />}>
         <Route path="/book" element={<BookingPage />} />
         {/* Dedicated Pilot Customer route */}
         <Route path="/pilot/customer" element={<BookingPage />} />
-        {/* Dynamic Tenant Routing */}
-        <Route path="/:tenantSlug" element={<BookingPage />} />
-        <Route path="/booking/:tenantSlug" element={<BookingPage />} />
         {/* AI Tool - Now part of the salon booking flow */}
         <Route path="/ai-visualizer" element={<AIVisualizerPage />} />
-        <Route path="/appointment/manage/:token" element={<AppointmentSelfServicePage />} />
+        {/* Dynamic Tenant Routing */}
+        <Route path="/booking/:tenantSlug" element={<BookingPage />} />
+        <Route path="/:tenantSlug" element={<BookingPage />} />
       </Route>
 
       {/* 2.5 Customer Routes */}

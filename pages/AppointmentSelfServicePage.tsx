@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { 
   appointmentSelfServiceService 
 } from '../services/appointmentSelfServiceService';
@@ -11,7 +11,10 @@ import { Appointment, AppointmentAccessToken, AppointmentChangeRequest, Service,
 
 const AppointmentSelfServicePage: React.FC = () => {
   const { token } = useParams<{ token: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+
+  const effectiveToken = token || searchParams.get('token') || '';
 
   const [loading, setLoading] = useState(true);
   const [isValid, setIsValid] = useState(false);
@@ -47,10 +50,13 @@ const AppointmentSelfServicePage: React.FC = () => {
   const [kvkkSuccess, setKvkkSuccess] = useState<string | null>(null);
 
   useEffect(() => {
-    if (token) {
+    if (effectiveToken) {
       loadSelfServiceDetails();
+    } else {
+      setLoading(false);
+      setIsValid(false);
     }
-  }, [token]);
+  }, [effectiveToken]);
 
   const loadSelfServiceDetails = async () => {
     setLoading(true);
@@ -59,7 +65,7 @@ const AppointmentSelfServicePage: React.FC = () => {
     setActionError(null);
 
     try {
-      const data = await appointmentSelfServiceService.getAppointmentByAccessToken(token || '');
+      const data = await appointmentSelfServiceService.getAppointmentByAccessToken(effectiveToken);
       if (data) {
         setIsValid(true);
         setTokenObj(data.tokenObj);

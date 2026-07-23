@@ -84,13 +84,25 @@ function verify() {
     console.log("✅ Verified: Customer self-service page exists.");
   }
 
-  // 5. Check route connection in App.tsx
-  const appContent = checkFileExists('src/App.tsx', true) || checkFileExists('App.tsx');
+  // 5. Check route connection and precedence in App.tsx
+  const appContent = checkFileExists('App.tsx');
   if (appContent) {
-    if (appContent.includes('/appointment/manage/:token')) {
-      console.log("✅ Verified: App.tsx registers the appointment self-service routing path /appointment/manage/:token.");
+    const manageIndex = appContent.indexOf('path="/appointment/manage/:token"');
+    const tenantSlugIndex = appContent.indexOf('path="/:tenantSlug"');
+    if (manageIndex !== -1 && tenantSlugIndex !== -1 && manageIndex < tenantSlugIndex) {
+      console.log("✅ Verified: App.tsx registers /appointment/manage/:token BEFORE generic /:tenantSlug.");
+    } else if (manageIndex !== -1) {
+      console.error("❌ App.tsx registers /appointment/manage/:token AFTER generic /:tenantSlug.");
+      passed = false;
     } else {
       console.error("❌ App.tsx is missing /appointment/manage/:token route.");
+      passed = false;
+    }
+
+    if (appContent.includes('/appointment/manage')) {
+      console.log("✅ Verified: App.tsx registers query-param fallback route /appointment/manage.");
+    } else {
+      console.error("❌ App.tsx is missing /appointment/manage query-param route.");
       passed = false;
     }
   }
