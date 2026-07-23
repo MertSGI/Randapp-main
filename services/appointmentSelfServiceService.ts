@@ -153,6 +153,62 @@ export const appointmentSelfServiceService = {
 
   // Part 3: getAppointmentByAccessToken
   async getAppointmentByAccessToken(token: string): Promise<{ appointment: Appointment; tokenObj: AppointmentAccessToken } | null> {
+    if (!token || typeof token !== 'string') return null;
+
+    try {
+      const { getDataSourceMode } = await import('./dataSourceConfig');
+      if (getDataSourceMode() === 'supabase') {
+        const { fetchSupabase } = await import('./repositories/supabaseClient');
+        const res = await fetchSupabase('/rest/v1/rpc/get_public_appointment_by_manage_token', {
+          method: 'POST',
+          body: JSON.stringify({ p_token: token })
+        });
+
+        if (!res.ok) return null;
+        const data = await res.json();
+
+        if (!data || !data.success || !data.appointment) {
+          return null;
+        }
+
+        const apt = data.appointment;
+        const appointment: Appointment = {
+          id: apt.id,
+          tenantId: apt.tenant_id || '',
+          branchId: apt.branch?.id || '',
+          serviceId: apt.service?.id || '',
+          staffId: apt.staff?.id || '',
+          customerId: apt.customer_id || '',
+          userId: apt.customer_id || '',
+          date: apt.appointment_date,
+          time: apt.appointment_time,
+          durationMinutes: apt.duration_minutes || 30,
+          status: apt.status || 'confirmed',
+          notes: apt.notes || '',
+          user_name: apt.customer_name || '',
+          user_email: apt.customer_email || '',
+          phone: apt.customer_phone || '',
+          createdAt: new Date().toISOString(),
+          syncedToGoogle: false
+        };
+
+        const tokenObj: AppointmentAccessToken = {
+          id: apt.id,
+          tenantId: apt.tenant_id || '',
+          appointmentId: apt.id,
+          tokenHash: '',
+          purpose: 'view',
+          status: 'active',
+          expiresAt: new Date(Date.now() + 30 * 86400 * 1000).toISOString(),
+          createdAt: new Date().toISOString()
+        };
+
+        return { appointment, tokenObj };
+      }
+    } catch (err) {
+      console.error('Error invoking get_public_appointment_by_manage_token RPC:', err);
+    }
+
     const repo = getSelfServiceRepository();
     const tokenObj = await repo.getTokenByHash(token);
     if (!tokenObj) return null;

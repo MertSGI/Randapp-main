@@ -178,6 +178,20 @@ if (fs.existsSync(subFixMigrationPath)) {
   console.log('  ✅ 20260729 Subscription Contract Fix Migration passed.');
 }
 
+// Migration 20260730: Stage C1 Self-Service Token Read RPC
+const tokenReadMigrationPath = path.join(migrationDir, '20260730_self_service_token_read_rpc.sql');
+assert(fs.existsSync(tokenReadMigrationPath), 'Migration 20260730_self_service_token_read_rpc.sql must exist');
+
+if (fs.existsSync(tokenReadMigrationPath)) {
+  const tokenSql = fs.readFileSync(tokenReadMigrationPath, 'utf8');
+  assert(tokenSql.includes('get_public_appointment_by_manage_token'), 'Self-service read migration must define get_public_appointment_by_manage_token');
+  assert(tokenSql.includes('encode(sha256(trim(p_token)::bytea), \'hex\')'), 'Self-service read migration must use sha256 hex encoding');
+  assert(tokenSql.includes('SECURITY DEFINER'), 'Self-service read function must use SECURITY DEFINER');
+  assert(tokenSql.includes('SET search_path = pg_catalog, public'), 'Self-service read function must preserve search_path');
+  assert(tokenSql.includes('GRANT EXECUTE ON FUNCTION public.get_public_appointment_by_manage_token(text) TO anon;'), 'Self-service read function must allow anon EXECUTE');
+  console.log('  ✅ 20260730 Self-Service Token Read Migration contracts passed.');
+}
+
 // ─────────────────────────────────────────────────────
 // 3. ZERO CANONICAL TENANT MUTATION ASSERTION
 // ─────────────────────────────────────────────────────
