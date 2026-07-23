@@ -27,6 +27,11 @@ export const DEFAULT_BOOKING_POLICY: BookingPolicy = {
   requireContactConsent: true
 };
 
+export type SelfServiceAppointmentResult = 
+  | { kind: 'success'; appointment: Appointment; tokenObj: AppointmentAccessToken; rawData: any }
+  | { kind: 'invalid_token'; reasonCode: string }
+  | { kind: 'service_error'; message: string };
+
 export const appointmentSelfServiceService = {
   // Asynchronous replacement for loaded tokens
   async getAllTokensAsync(tenantId: string): Promise<AppointmentAccessToken[]> {
@@ -151,9 +156,10 @@ export const appointmentSelfServiceService = {
     return true;
   },
 
-  // Part 3: getAppointmentByAccessToken
-  async getAppointmentByAccessToken(token: string): Promise<{ appointment: Appointment; tokenObj: AppointmentAccessToken } | null> {
-    if (!token || typeof token !== 'string') return null;
+  async getAppointmentByManageToken(token: string): Promise<SelfServiceAppointmentResult> {
+    if (!token || typeof token !== 'string' || token.trim().length === 0) {
+      return { kind: 'invalid_token', reasonCode: 'invalid_token' };
+    }
 
     try {
       const { getDataSourceMode } = await import('./dataSourceConfig');
@@ -161,17 +167,31 @@ export const appointmentSelfServiceService = {
         const { fetchSupabase } = await import('./repositories/supabaseClient');
         const res = await fetchSupabase('/rest/v1/rpc/get_public_appointment_by_manage_token', {
           method: 'POST',
-          body: JSON.stringify({ p_token: token })
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ p_token: token.trim() })
         });
 
-        if (!res.ok) return null;
-        const data = await res.json();
+        if (!res.ok) {
+          console.error(`[SelfService] RPC HTTP Error ${res.status}: ${res.statusText}`);
+          return { kind: 'service_error', message: `HTTP ${res.status}` };
+        }
 
-        if (!data || !data.success || !data.appointment) {
-          return null;
+        const data = await res.json();
+        if (!data || typeof data !== 'object') {
+          return { kind: 'service_error', message: 'Malformed server response' };
+        }
+
+        if (!data.success) {
+          return { kind: 'invalid_token', reasonCode: data.reason_code || 'invalid_token' };
         }
 
         const apt = data.appointment;
+        if (!apt || !apt.id) {
+          return { kind: 'invalid_token', reasonCode: 'invalid_token' };
+        }
+
         const appointment: Appointment = {
           id: apt.id,
           tenantId: apt.tenant_id || '',
@@ -203,22 +223,26 @@ export const appointmentSelfServiceService = {
           createdAt: new Date().toISOString()
         };
 
-        return { appointment, tokenObj };
+        return { kind: 'success', appointment, tokenObj, rawData: apt };
       }
-    } catch (err) {
-      console.error('Error invoking get_public_appointment_by_manage_token RPC:', err);
+    } catch (err: any) {
+      console.error('[SelfService] Transport exception:', err);
+      return { kind: 'service_error', message: err?.message || 'Network exception' };
     }
 
+    // Local / Mock fallback mode only
     const repo = getSelfServiceRepository();
     const tokenObj = await repo.getTokenByHash(token);
-    if (!tokenObj) return null;
+    if (!tokenObj) return { kind: 'invalid_token', reasonCode: 'invalid_token' };
     
     const isExpired = new Date(tokenObj.expiresAt).getTime() < Date.now();
-    if (isExpired || tokenObj.usedAt) return null;
+    if (isExpired || tokenObj.usedAt) return { kind: 'invalid_token', reasonCode: 'invalid_token' };
 
     try {
       const appointment = await getBookingRepository().getAppointmentById(tokenObj.appointmentId);
-      if (!appointment || appointment.tenantId !== tokenObj.tenantId) return null;
+      if (!appointment || appointment.tenantId !== tokenObj.tenantId) {
+        return { kind: 'invalid_token', reasonCode: 'invalid_token' };
+      }
       
       const mappedTokenObj: AppointmentAccessToken = {
         id: tokenObj.id,
@@ -231,11 +255,19 @@ export const appointmentSelfServiceService = {
         createdAt: tokenObj.createdAt || new Date().toISOString()
       };
 
-      return { appointment, tokenObj: mappedTokenObj };
+      return { kind: 'success', appointment, tokenObj: mappedTokenObj, rawData: null };
     } catch (e) {
-      console.error('Error fetching appointment by access token', e);
-      return null;
+      return { kind: 'service_error', message: 'Local lookup failed' };
     }
+  },
+
+  // Part 3: getAppointmentByAccessToken
+  async getAppointmentByAccessToken(token: string): Promise<{ appointment: Appointment; tokenObj: AppointmentAccessToken } | null> {
+    const result = await this.getAppointmentByManageToken(token);
+    if (result.kind === 'success') {
+      return { appointment: result.appointment, tokenObj: result.tokenObj };
+    }
+    return null;
   },
 
   // Part 3: revokeAppointmentAccessToken

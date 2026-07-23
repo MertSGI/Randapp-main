@@ -29,6 +29,7 @@ export const fetchSupabase = async (path: string, options: RequestInit = {}) => 
   const headers = {
     'apikey': supabaseKey,
     'Authorization': `Bearer ${supabaseKey}`, // Default: anon key; overridden if session exists
+    ...(options.body ? { 'Content-Type': 'application/json' } : {}),
     ...(options.headers || {}),
   } as Record<string, string>;
 

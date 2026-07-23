@@ -115,12 +115,17 @@ export const tenantService = {
   },
 
   async getCurrentTenant(): Promise<Tenant | null> {
+    const hash = window.location.hash || '';
+    const path = window.location.pathname || '';
+
+    if (hash.includes('/appointment/manage') || path.includes('/appointment/manage')) {
+      return null;
+    }
+
     const hostname = window.location.hostname;
     
     // Check if slug is present in URL hash or path (e.g. /booking/:slug or /:slug)
     let urlSlug = '';
-    const hash = window.location.hash || '';
-    const path = window.location.pathname || '';
     
     // Parse Hash Routing e.g. #/booking/melis-guzellik or #/melis-guzellik
     if (hash) {
@@ -129,7 +134,7 @@ export const tenantService = {
       // e.g. #, booking, melis-guzellik
       if (parts.length >= 3 && parts[1] === 'booking') {
         urlSlug = parts[2].split('?')[0];
-      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer') {
+      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment') {
         urlSlug = parts[1].split('?')[0];
       }
     }
@@ -139,7 +144,7 @@ export const tenantService = {
       const parts = path.split('/');
       if (parts.length >= 3 && parts[1] === 'booking') {
         urlSlug = parts[2];
-      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer') {
+      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment') {
         urlSlug = parts[1];
       }
     }

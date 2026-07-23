@@ -1,12 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { 
-  appointmentSelfServiceService 
+  appointmentSelfServiceService,
+  SelfServiceAppointmentResult
 } from '../services/appointmentSelfServiceService';
-import { tenantService } from '../services/tenantService';
-import { getServices } from '../services/serviceCatalogService';
-import { getStaffList } from '../services/staffService';
-import { branchService } from '../services/branchService';
 import { Appointment, AppointmentAccessToken, AppointmentChangeRequest, Service, Staff, BusinessBranch } from '../types';
 
 const AppointmentSelfServicePage: React.FC = () => {
@@ -17,16 +14,20 @@ const AppointmentSelfServicePage: React.FC = () => {
   const effectiveToken = token || searchParams.get('token') || '';
 
   const [loading, setLoading] = useState(true);
-  const [isValid, setIsValid] = useState(false);
+  const [resultKind, setResultKind] = useState<'success' | 'invalid_token' | 'service_error' | 'none'>('none');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [tokenObj, setTokenObj] = useState<AppointmentAccessToken | null>(null);
   const [appointment, setAppointment] = useState<Appointment | null>(null);
   const [businessName, setBusinessName] = useState('Güzellik Salonu');
   const [accentColor, setAccentColor] = useState('#2563eb');
   
-  const [services, setServices] = useState<Service[]>([]);
-  const [staffList, setStaffList] = useState<Staff[]>([]);
-  const [branches, setBranches] = useState<BusinessBranch[]>([]);
+  const [joinedService, setJoinedService] = useState<Service | null>(null);
+  const [joinedStaff, setJoinedStaff] = useState<Staff | null>(null);
+  const [joinedBranch, setJoinedBranch] = useState<BusinessBranch | null>(null);
   const [pendingRequests, setPendingRequests] = useState<AppointmentChangeRequest[]>([]);
+
+  // Deduplication ref to prevent duplicate RPC calls on re-renders / StrictMode
+  const loadedTokenRef = useRef<string>('');
 
   // Action states
   const [submittingAction, setSubmittingAction] = useState(false);
@@ -51,53 +52,77 @@ const AppointmentSelfServicePage: React.FC = () => {
 
   useEffect(() => {
     if (effectiveToken) {
-      loadSelfServiceDetails();
+      if (loadedTokenRef.current !== effectiveToken) {
+        loadedTokenRef.current = effectiveToken;
+        loadSelfServiceDetails(effectiveToken);
+      }
     } else {
       setLoading(false);
-      setIsValid(false);
+      setResultKind('invalid_token');
     }
   }, [effectiveToken]);
 
-  const loadSelfServiceDetails = async () => {
+  const loadSelfServiceDetails = async (targetToken?: string) => {
+    const tok = targetToken || effectiveToken;
     setLoading(true);
-    setIsValid(false);
+    setResultKind('none');
+    setErrorMessage(null);
     setActionSuccess(null);
     setActionError(null);
 
     try {
-      const data = await appointmentSelfServiceService.getAppointmentByAccessToken(effectiveToken);
-      if (data) {
-        setIsValid(true);
-        setTokenObj(data.tokenObj);
-        setAppointment(data.appointment);
+      const res: SelfServiceAppointmentResult = await appointmentSelfServiceService.getAppointmentByManageToken(tok);
+      
+      if (res.kind === 'success') {
+        setResultKind('success');
+        setTokenObj(res.tokenObj);
+        setAppointment(res.appointment);
 
-        // Fetch companion data
-        const [tObj, loadedServices, loadedStaff, loadedBranches] = await Promise.all([
-          tenantService.getTenantById(data.tokenObj.tenantId),
-          getServices(data.tokenObj.tenantId),
-          getStaffList(data.tokenObj.tenantId),
-          branchService.listBranches(data.tokenObj.tenantId)
-        ]);
-
-        if (tObj) {
-          setBusinessName(tObj.branding?.businessName || tObj.name || 'Güzellik Salonu');
-          setAccentColor(tObj.branding?.primaryColor || '#2563eb');
+        if (res.rawData) {
+          const raw = res.rawData;
+          if (raw.service) {
+            setJoinedService({
+              id: raw.service.id || '',
+              name: raw.service.name_tr || raw.service.name || 'Hizmet',
+              name_tr: raw.service.name_tr || raw.service.name || 'Hizmet',
+              duration: res.appointment.durationMinutes || 30,
+              price: raw.service.price || 0
+            });
+          }
+          if (raw.staff) {
+            setJoinedStaff({
+              id: raw.staff.id || '',
+              name: raw.staff.name || 'Personel',
+              title: raw.staff.title || '',
+              active: true
+            });
+          }
+          if (raw.branch) {
+            setJoinedBranch({
+              id: raw.branch.id || '',
+              tenantId: res.appointment.tenantId || '',
+              name: raw.branch.name || 'Şube',
+              slug: '',
+              isPrimary: true,
+              isActive: true,
+              createdAt: '',
+              updatedAt: ''
+            });
+            if (raw.branch.name) {
+              setBusinessName(raw.branch.name);
+            }
+          }
         }
-
-        setServices(loadedServices);
-        setStaffList(loadedStaff);
-        setBranches(loadedBranches);
-
-        // Fetch requests for this appointment
-        const allRequests = await appointmentSelfServiceService.getAllChangeRequestsAsync(data.appointment.tenantId);
-        const relevant = allRequests.filter(r => r.appointmentId === data.appointment.id);
-        setPendingRequests(relevant);
+      } else if (res.kind === 'invalid_token') {
+        setResultKind('invalid_token');
       } else {
-        setIsValid(false);
+        setResultKind('service_error');
+        setErrorMessage(res.message);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Error loading self-service details', e);
-      setIsValid(false);
+      setResultKind('service_error');
+      setErrorMessage(e?.message || 'Network error');
     } finally {
       setLoading(false);
     }
@@ -186,7 +211,39 @@ const AppointmentSelfServicePage: React.FC = () => {
     );
   }
 
-  if (!isValid || !appointment || !tokenObj) {
+  if (resultKind === 'service_error') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900 px-4">
+        <div className="max-w-md w-full bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 text-center">
+          <div className="w-16 h-16 bg-amber-50 dark:bg-amber-950/30 rounded-full flex items-center justify-center mx-auto mb-6">
+            <svg className="w-8 h-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Bağlantı Hatası</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+            Randevu bilgileri şu anda kontrol edilemiyor. Lütfen tekrar deneyin.
+          </p>
+          <div className="space-y-3">
+            <button 
+              onClick={() => loadSelfServiceDetails()}
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition"
+            >
+              Tekrar Dene
+            </button>
+            <button 
+              onClick={() => navigate('/')}
+              className="w-full py-2.5 bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-gray-800 dark:text-gray-200 rounded-lg font-medium transition"
+            >
+              İşletme Anasayfasına Git
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (resultKind !== 'success' || !appointment || !tokenObj) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900 px-4">
         <div className="max-w-md w-full bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 text-center">
@@ -210,9 +267,9 @@ const AppointmentSelfServicePage: React.FC = () => {
     );
   }
 
-  const selectedService = services.find(s => s.id === appointment.serviceId);
-  const selectedStaff = staffList.find(s => s.id === appointment.staffId);
-  const selectedBranch = branches.find(b => b.id === appointment.branchId);
+  const selectedService = joinedService || { id: appointment.serviceId, name: 'Hizmet', name_tr: 'Hizmet', duration: appointment.durationMinutes || 30, price: 0 };
+  const selectedStaff = joinedStaff || { id: appointment.staffId, name: 'Personel', title: '', active: true };
+  const selectedBranch = joinedBranch || { id: appointment.branchId || '', tenantId: appointment.tenantId || '', name: businessName, slug: '', isPrimary: true, isActive: true, createdAt: '', updatedAt: '' };
   const policy = appointmentSelfServiceService.getBookingPolicy(tokenObj.tenantId);
 
   const parsedAptDate = appointment.date;
