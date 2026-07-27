@@ -32,6 +32,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 22. **`20260728_admin_rpc_live_schema_reconstruction.sql`** — Complete live-schema reconstruction of admin RPCs (`get_my_admin_bootstrap`, `get_my_tenant_appointments`, `get_my_tenant_dashboard_summary`) constructed strictly from verified database columns. Reasserts SECURITY DEFINER, search_path, and EXECUTE ACLs.
 23. **`20260729_admin_bootstrap_subscription_contract_fix.sql`** — Stage B.2 Correction - Fixes PostgreSQL 42703 column reference in get_my_admin_bootstrap(): replaces non-existent sub.trial_end with canonical sub.trial_ends_at from public.subscriptions table, mapping both 'trial_end' and 'trial_ends_at' in returned JSON payload.
 24. **`20260730_self_service_token_read_rpc.sql`** — Stage C1 Secure Read-Only Appointment Self-Service Contract: Provides public.get_public_appointment_by_manage_token(p_token text) RETURNS jsonb. Hashes raw token server-side, matches token_hash, checks expiration, and returns sanitized appointment, service, staff, and branch details. Returns neutral invalid_token error response for invalid/expired tokens. Preserves SECURITY DEFINER, search_path, and EXECUTE ACLs for anon and authenticated roles.
+25. **`20260731_admin_appointment_status_mutation_rpc.sql`** — Stage D1 Server-Scoped Admin Appointment Mutation RPC: Creates admin_mutation_idempotency table and public.admin_update_appointment_status(UUID, TEXT, TEXT, TEXT) SECURITY DEFINER RPC. Resolves auth.uid() → users_profile for authorization, row-locks appointment FOR UPDATE, validates canonical status transitions (terminal states are immutable), writes audit_events within the same transaction, and supports 24h idempotency replay via p_idempotency_key. REVOKE FROM PUBLIC/anon, GRANT TO authenticated.
 
 
 
@@ -82,6 +83,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 | `policy_acceptances` | `20260620_paymentless_production_core_tables.sql`| — | `20260622_paymentless_production_rls_identity_alignment.sql` |
 | `consent_ledger` | `20260620_paymentless_production_core_tables.sql`| — | `20260622_paymentless_production_rls_identity_alignment.sql` |
 | `data_rights_requests` | `20260620_paymentless_production_core_tables.sql`| — | `20260622_paymentless_production_rls_identity_alignment.sql` |
+| `admin_mutation_idempotency` | `20260731_admin_appointment_status_mutation_rpc.sql`| — | `20260731_admin_appointment_status_mutation_rpc.sql` |
 
 ---
 

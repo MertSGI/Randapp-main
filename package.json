@@ -68,6 +68,7 @@
     "qa:paymentless-go-no-go": "node scripts/verify-paymentless-production-go-no-go-readiness.mjs",
     "qa:supabase-staging-consistency": "node scripts/verify-supabase-staging-consistency.mjs",
     "qa:admin-security-staging": "node scripts/test-admin-security-staging.mjs",
+    "qa:admin-mutation-rpc-staging": "node scripts/test-admin-mutation-rpc-staging.mjs",
     "smoke:supabase-paymentless-staging": "node scripts/smoke-supabase-paymentless-staging.mjs",
     "qa:cutover-runbook": "node scripts/verify-live-cutover-runbook.mjs",
     "qa:sales-funnel": "node scripts/verify-sales-funnel-navigation.mjs",
