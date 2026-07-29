@@ -62,6 +62,7 @@ const CANONICAL_MIGRATIONS = [
   '20260729_admin_bootstrap_subscription_contract_fix.sql',
   '20260730_self_service_token_read_rpc.sql',
   '20260731_admin_appointment_status_mutation_rpc.sql',
+  '20260801_cancel_public_appointment_by_manage_token_rpc.sql',
 ];
 
 // Check actual migration files on disk

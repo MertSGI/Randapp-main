@@ -327,6 +327,40 @@ export const appointmentSelfServiceService = {
     let autoApplied = false;
     let finalMessage = 'İptal talebiniz onay için işletmeye iletilmiştir.';
 
+    // In Supabase mode, execute via SECURITY DEFINER token cancellation RPC
+    const { getDataSourceMode } = await import('./dataSourceConfig');
+    if (getDataSourceMode() === 'supabase') {
+      try {
+        const { fetchSupabase } = await import('./repositories/supabaseClient');
+        const rpcRes = await fetchSupabase('/rest/v1/rpc/cancel_public_appointment_by_manage_token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            p_token: token.trim(),
+            p_reason: reason?.trim() || null
+          })
+        });
+
+        if (!rpcRes.ok) {
+          console.error(`[SelfService] cancel RPC HTTP ${rpcRes.status}`);
+          return { success: false, autoApplied: false, message: 'İşlem şu anda tamamlanamadı. Lütfen tekrar deneyin.' };
+        }
+
+        const rpcData = await rpcRes.json();
+        if (!rpcData?.success) {
+          if (rpcData?.reason_code === 'invalid_transition') {
+            return { success: false, autoApplied: false, message: 'Bu randevu mevcut durumundan iptal edilemez.' };
+          }
+          return { success: false, autoApplied: false, message: 'Geçersiz veya süresi dolmuş bağlantı.' };
+        }
+
+        return { success: true, autoApplied: true, message: 'Randevunuz iptal edilmiştir.' };
+      } catch (err: any) {
+        console.error('[SelfService] cancel RPC exception:', err);
+        return { success: false, autoApplied: false, message: 'İşlem şu anda tamamlanamadı. Lütfen tekrar deneyin.' };
+      }
+    }
+
     // If cancellation is within the free window (not late), we can auto-apply if the tenant settings allow 
     // or auto-apply by default for non-late cancellations.
     if (!isLate) {
