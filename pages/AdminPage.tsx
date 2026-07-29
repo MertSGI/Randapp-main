@@ -5,7 +5,8 @@ import * as GeminiService from '../services/geminiService';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useTenant } from '../contexts/TenantContext';
 import { useAuth } from '../contexts/AuthContext';
-import { getAppointments, updateAppointmentStatus } from '../services/appointmentService';
+import { getAppointments } from '../services/appointmentService';
+import { adminAppointmentService, isTerminalStatus, getAdminStatusReasonMessage, getStatusLabelTr } from '../services/adminAppointmentService';
 import { getStaffList, createStaff, updateStaff, deleteStaff, assignServiceToStaff, removeServiceFromStaff, listServicesForStaff } from '../services/staffService';
 import { getServices, createService, updateService, deleteService } from '../services/serviceCatalogService';
 import { Service, BusinessBranch } from '../types';
@@ -77,6 +78,7 @@ const AdminPage: React.FC = () => {
   // Bootstrap retry nonce � incrementing triggers exactly one new bootstrap request
   const [bootstrapRetryNonce, setBootstrapRetryNonce] = useState(0);
   const [appointmentRetryNonce, setAppointmentRetryNonce] = useState(0);
+  const [mutatingAppointments, setMutatingAppointments] = useState<Set<string>>(new Set());
 
   const currentUserId = currentUser?.id;
   const tenantId = tenant?.id;
@@ -233,27 +235,119 @@ const AdminPage: React.FC = () => {
     loadAppointments(currentUserId, tenantId, appointmentRetryNonce);
   }, [currentUserId, tenantId, appointmentRetryNonce, loadAppointments]);
 
+  // ── Stage D2: Admin Status Mutation via RPC ────────────────────────────────
+  // Each handler generates one idempotency key per new deliberate action.
+  // The same key is reused if the user retries the exact same failed action.
+  // Per-appointment pending state prevents double-clicks and concurrent mutations.
+
+  const pendingRetryKeys = useRef<Map<string, string>>(new Map()); // appointmentId -> retained idempotency key for retry
+
+  const isOwner = bootstrap.data?.user_role === 'tenant_owner';
+
+  const executeStatusMutation = async (
+    appointmentId: string,
+    targetStatus: 'confirmed' | 'completed' | 'no_show' | 'cancelled',
+    reason?: string | null
+  ) => {
+    // Double-click guard: if this appointment is already mutating, abort
+    if (mutatingAppointments.has(appointmentId)) return;
+
+    // Generate or reuse idempotency key
+    const retryMapKey = `${appointmentId}:${targetStatus}`;
+    let idempotencyKey = pendingRetryKeys.current.get(retryMapKey);
+    if (!idempotencyKey) {
+      idempotencyKey = crypto.randomUUID();
+      pendingRetryKeys.current.set(retryMapKey, idempotencyKey);
+    }
+
+    // Mark appointment as mutating
+    setMutatingAppointments(prev => new Set(prev).add(appointmentId));
+
+    try {
+      const result = await adminAppointmentService.updateAdminAppointmentStatus({
+        appointmentId,
+        targetStatus,
+        reason: reason?.trim() || null,
+        idempotencyKey,
+      });
+
+      if (result.success) {
+        // Clear the retry key on success
+        pendingRetryKeys.current.delete(retryMapKey);
+
+        if (result.changed) {
+          // Real mutation occurred — show success and refresh data
+          const statusLabel = getStatusLabelTr(result.status || targetStatus);
+          await showAlert(
+            language === 'tr'
+              ? `Randevu durumu başarıyla güncellendi: ${statusLabel}`
+              : `Appointment status updated: ${statusLabel}`
+          );
+          // Refresh appointments and dashboard
+          aptLoadedKeyRef.current = '';
+          setAppointmentRetryNonce(n => n + 1);
+          // Invalidate bootstrap dashboard data
+          bootstrap.invalidateAfterMutation();
+        } else if (result.reason_code === 'no_change') {
+          // Same status — safe no-op, just sync UI silently
+          aptLoadedKeyRef.current = '';
+          setAppointmentRetryNonce(n => n + 1);
+        }
+      } else {
+        // Failure — show safe Turkish error
+        const errorMsg = getAdminStatusReasonMessage(result.reason_code);
+        await showAlert(errorMsg, language === 'tr' ? 'Hata' : 'Error');
+
+        if (result.reason_code === 'idempotency_conflict') {
+          // Conflict: clear the key, refetch, require new deliberate action
+          pendingRetryKeys.current.delete(retryMapKey);
+          aptLoadedKeyRef.current = '';
+          setAppointmentRetryNonce(n => n + 1);
+        } else if (result.reason_code === 'invalid_transition') {
+          // Stale state: refetch to sync UI
+          pendingRetryKeys.current.delete(retryMapKey);
+          aptLoadedKeyRef.current = '';
+          setAppointmentRetryNonce(n => n + 1);
+        } else if (result.reason_code === 'service_error') {
+          // Network/service error: retain the idempotency key for user retry
+          // (key stays in pendingRetryKeys)
+        } else {
+          // Other failures (forbidden, unauthenticated, etc.): clear key
+          pendingRetryKeys.current.delete(retryMapKey);
+        }
+      }
+    } catch (err) {
+      // Unexpected error — retain key for retry
+      await showAlert(
+        language === 'tr'
+          ? 'İşlem şu anda tamamlanamadı. Lütfen tekrar deneyin.'
+          : 'Operation could not be completed. Please try again.'
+      );
+    } finally {
+      setMutatingAppointments(prev => {
+        const next = new Set(prev);
+        next.delete(appointmentId);
+        return next;
+      });
+    }
+  };
+
   const handleCancel = async (id: string) => {
-    if (!tenant) return;
+    if (!isOwner || mutatingAppointments.has(id)) return;
     const confirmed = await showConfirm({ message: t.admin.confirm_cancel });
     if (confirmed) {
-      await updateAppointmentStatus(tenant.id, id, 'cancelled_by_salon', '', 'salon');
-      aptLoadedKeyRef.current = '';
-      setAppointmentRetryNonce(n => n + 1);
+      await executeStatusMutation(id, 'cancelled');
     }
   };
 
   const handleComplete = async (id: string) => {
-    if (!tenant) return;
-    await updateAppointmentStatus(tenant.id, id, 'completed', '', 'salon');
-    aptLoadedKeyRef.current = '';
-    setAppointmentRetryNonce(n => n + 1);
+    if (!isOwner || mutatingAppointments.has(id)) return;
+    await executeStatusMutation(id, 'completed');
   };
 
   const handleNoShow = async (id: string) => {
-    if (!tenant) return;
-    await updateAppointmentStatus(tenant.id, id, 'no_show', '', 'salon');
-    setAppointmentRetryNonce(n => n + 1);
+    if (!isOwner || mutatingAppointments.has(id)) return;
+    await executeStatusMutation(id, 'no_show');
   };
 
   const runAnalysis = async () => {
@@ -998,26 +1092,37 @@ const AdminPage: React.FC = () => {
                               </span>
                             )}
                           </div>
-                          {apt.status === 'confirmed' && (
+                          {isOwner && apt.status === 'confirmed' && !isTerminalStatus(apt.status) && (
                             <div className="flex flex-col sm:flex-row items-center gap-2">
-                              <button
-                                onClick={() => handleComplete(apt.id)}
-                                className="text-green-600 hover:text-green-900 text-xs font-semibold px-2 py-1 bg-green-50 rounded"
-                              >
-                                {language === 'tr' ? 'Tamamlandı' : 'Complete'}
-                              </button>
-                              <button
-                                onClick={() => handleNoShow(apt.id)}
-                                className="text-orange-600 hover:text-orange-900 text-xs font-semibold px-2 py-1 bg-orange-50 rounded"
-                              >
-                                {language === 'tr' ? 'Gelmedi' : 'No Show'}
-                              </button>
-                              <button
-                                onClick={() => handleCancel(apt.id)}
-                                className="text-red-600 hover:text-red-900 text-xs font-semibold px-2 py-1 bg-red-50 rounded"
-                              >
-                                {t.admin.cancel}
-                              </button>
+                              {mutatingAppointments.has(apt.id) ? (
+                                <span className="text-xs text-gray-500 dark:text-gray-400 animate-pulse">
+                                  {language === 'tr' ? 'İşleniyor...' : 'Processing...'}
+                                </span>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => handleComplete(apt.id)}
+                                    disabled={mutatingAppointments.has(apt.id)}
+                                    className="text-green-600 hover:text-green-900 text-xs font-semibold px-2 py-1 bg-green-50 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    {language === 'tr' ? 'Tamamlandı' : 'Complete'}
+                                  </button>
+                                  <button
+                                    onClick={() => handleNoShow(apt.id)}
+                                    disabled={mutatingAppointments.has(apt.id)}
+                                    className="text-orange-600 hover:text-orange-900 text-xs font-semibold px-2 py-1 bg-orange-50 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    {language === 'tr' ? 'Gelmedi' : 'No Show'}
+                                  </button>
+                                  <button
+                                    onClick={() => handleCancel(apt.id)}
+                                    disabled={mutatingAppointments.has(apt.id)}
+                                    className="text-red-600 hover:text-red-900 text-xs font-semibold px-2 py-1 bg-red-50 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    {t.admin.cancel}
+                                  </button>
+                                </>
+                              )}
                             </div>
                           )}
                         </div>
