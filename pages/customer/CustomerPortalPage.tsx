@@ -3,26 +3,20 @@ import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { translations } from '../../utils/translations';
 import { useTenant } from '../../contexts/TenantContext';
-import { Appointment, CustomerProfile, Staff, Service, Role } from '../../types';
-import { getAppointments, updateAppointmentStatus } from '../../services/appointmentService';
+import { Appointment, Staff, Service } from '../../types';
+import { getAppointments } from '../../services/appointmentService';
 import { getStaffList } from '../../services/staffService';
 import { getServices } from '../../services/serviceCatalogService';
-import { useDialog } from '../../contexts/DialogContext';
 
 const CustomerPortalPage: React.FC = () => {
   const { language } = useLanguage();
   const t = translations[language];
   const { tenant } = useTenant();
   const navigate = useNavigate();
-  const { confirm: showConfirm, alert: showAlert } = useDialog();
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [servicesList, setServicesList] = useState<Service[]>([]);
-  
-  const [cancelModalOpen, setCancelModalOpen] = useState(false);
-  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [cancelReason, setCancelReason] = useState('');
 
   useEffect(() => {
     const authData = localStorage.getItem('lari_customer_auth');
@@ -74,44 +68,6 @@ const CustomerPortalPage: React.FC = () => {
     navigate('/customer/login');
   };
 
-  const handleCancelClick = (apt: Appointment) => {
-    // Check if cancellation is allowed (e.g., mock 12 hours before)
-    const aptDateTime = new Date(`${apt.date}T${apt.time}`).getTime();
-    const now = new Date().getTime();
-    const hoursDifference = (aptDateTime - now) / (1000 * 60 * 60);
-
-    if (hoursDifference < 12) {
-      showAlert(t.customer_portal.cancel_error_window);
-      return;
-    }
-
-    setSelectedAppointment(apt);
-    setCancelReason('');
-    setCancelModalOpen(true);
-  };
-
-  const confirmCancel = async () => {
-    if (!selectedAppointment || !tenant) return;
-    
-    const confirmed = await showConfirm({ message: t.customer_portal.cancel_confirm_msg });
-    if (confirmed) {
-      await updateAppointmentStatus(
-        tenant.id, 
-        selectedAppointment.id, 
-        'cancelled_by_customer',
-        cancelReason,
-        'customer'
-      );
-      
-      const authData = localStorage.getItem('lari_customer_auth');
-      if (authData) {
-        const auth = JSON.parse(authData);
-        loadData(auth);
-      }
-      setCancelModalOpen(false);
-    }
-  };
-
   const now = new Date();
   
   const upcomingApts = appointments.filter(a => {
@@ -158,6 +114,16 @@ const CustomerPortalPage: React.FC = () => {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-8">
+        {/* Safe Explanatory Turkish Banner */}
+        <div className="p-4 bg-blue-50/60 dark:bg-blue-950/20 rounded-xl border border-blue-100 dark:border-blue-900/40 text-xs text-blue-800 dark:text-blue-300 flex items-start gap-3">
+          <svg className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p>
+            Bu ekrandan güvenli iptal işlemi şu anda desteklenmiyor. Randevu oluşturulduğunda gönderilen yönetim bağlantısını kullanabilir veya işletmeyle iletişime geçebilirsiniz.
+          </p>
+        </div>
+
         {/* Upcoming Appointments */}
         <section>
           <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4 flex items-center gap-2">
@@ -188,12 +154,6 @@ const CustomerPortalPage: React.FC = () => {
                        </div>
                        <div className="flex flex-col items-end gap-3">
                          {getStatusBadge(apt.status)}
-                         <button 
-                           onClick={() => handleCancelClick(apt)}
-                           className="text-xs text-red-500 hover:text-red-700 font-medium underline px-2 py-1"
-                         >
-                           {t.customer_portal.cancel_appointment}
-                         </button>
                        </div>
                     </div>
                   </div>
@@ -234,46 +194,6 @@ const CustomerPortalPage: React.FC = () => {
           )}
         </section>
       </main>
-
-      {/* Cancel Modal */}
-      {cancelModalOpen && selectedAppointment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl max-w-sm w-full p-6">
-            <div className="flex items-center gap-3 text-red-600 mb-4">
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              <h3 className="font-bold text-lg">{t.customer_portal.cancel_appointment}</h3>
-            </div>
-            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-              {t.customer_portal.cancel_confirm_msg}
-            </p>
-            
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {t.customer_portal.cancel_reason}
-            </label>
-            <textarea 
-              value={cancelReason}
-              onChange={(e) => setCancelReason(e.target.value)}
-              className="w-full rounded-md border border-gray-300 dark:border-slate-600 p-2 text-sm dark:bg-slate-700 dark:text-white mb-6"
-              rows={3}
-            />
-
-            <div className="flex justify-end gap-3">
-              <button 
-                onClick={() => setCancelModalOpen(false)}
-                className="px-4 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg"
-              >
-                {t.admin.cancel || 'Cancel'}
-              </button>
-              <button 
-                onClick={confirmCancel}
-                className="px-4 py-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg"
-              >
-                {t.customer_portal.cancel_appointment}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
