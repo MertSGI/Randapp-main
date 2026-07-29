@@ -64,6 +64,7 @@ const CANONICAL_MIGRATIONS = [
   '20260731_admin_appointment_status_mutation_rpc.sql',
   '20260801_cancel_public_appointment_by_manage_token_rpc.sql',
   '20260802_cancel_public_appointment_by_manage_token_schema_fix.sql',
+  '20260803_cancel_public_appointment_by_manage_token_audit_outbox_fix.sql',
 ];
 
 // Check actual migration files on disk
