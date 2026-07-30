@@ -663,6 +663,115 @@ export const appointmentSelfServiceService = {
     return { success: true, reasonCode: 'ok', hasPendingRequest: false };
   },
 
+  /**
+   * Stage F3 — Secure RPC wrapper for public.admin_list_pending_reschedule_requests.
+   * Authenticated tenant_owner/super_admin RPC call for listing pending reschedule requests.
+   */
+  async adminListPendingRescheduleRequests(params?: {
+    limit?: number;
+    cursorCreatedAt?: string;
+    cursorId?: string;
+  }): Promise<{
+    success: boolean;
+    reasonCode: string;
+    requests?: any[];
+  }> {
+    try {
+      const { getDataSourceMode } = await import('./dataSourceConfig');
+      if (getDataSourceMode() === 'supabase') {
+        const { supabase } = await import('./supabaseClient');
+        const { data, error } = await supabase.rpc('admin_list_pending_reschedule_requests', {
+          p_limit: params?.limit || 50,
+          p_cursor_created_at: params?.cursorCreatedAt || null,
+          p_cursor_id: params?.cursorId || null
+        });
+
+        if (error) {
+          console.error('[appointmentSelfServiceService] adminListPendingRescheduleRequests RPC error:', error);
+          return { success: false, reasonCode: 'service_error' };
+        }
+
+        const res = data as any;
+        return {
+          success: res?.success || false,
+          reasonCode: res?.reason_code || 'unknown_error',
+          requests: res?.requests || []
+        };
+      }
+    } catch (e: any) {
+      console.error('[appointmentSelfServiceService] adminListPendingRescheduleRequests exception:', e);
+    }
+
+    return { success: false, reasonCode: 'service_error' };
+  },
+
+  /**
+   * Stage F3 — Secure RPC wrapper for public.admin_decide_reschedule_request.
+   * Authenticated tenant_owner/super_admin RPC call for approving or rejecting a customer reschedule request.
+   */
+  async adminDecideRescheduleRequest(params: {
+    changeRequestId: string;
+    decision: 'approved' | 'rejected';
+    reason?: string;
+    idempotencyKey?: string;
+  }): Promise<{
+    success: boolean;
+    reasonCode: string;
+    changed?: boolean;
+    decision?: string;
+    changeRequestId?: string;
+    appointmentId?: string;
+    previousDate?: string;
+    previousTime?: string;
+    appointmentDate?: string;
+    appointmentTime?: string;
+    requestStatus?: string;
+    appointmentStatus?: string;
+  }> {
+    if (!params.changeRequestId || !params.decision) {
+      return { success: false, reasonCode: 'invalid_parameters' };
+    }
+
+    try {
+      const { getDataSourceMode } = await import('./dataSourceConfig');
+      if (getDataSourceMode() === 'supabase') {
+        const { supabase } = await import('./supabaseClient');
+        const idempotencyKey = params.idempotencyKey || `admin_dec_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const { data, error } = await supabase.rpc('admin_decide_reschedule_request', {
+          p_change_request_id: params.changeRequestId,
+          p_decision: params.decision,
+          p_reason: params.reason ? params.reason.trim() : null,
+          p_idempotency_key: idempotencyKey
+        });
+
+        if (error) {
+          console.error('[appointmentSelfServiceService] adminDecideRescheduleRequest RPC error:', error);
+          return { success: false, reasonCode: 'service_error' };
+        }
+
+        const res = data as any;
+        return {
+          success: res?.success || false,
+          reasonCode: res?.reason_code || 'unknown_error',
+          changed: res?.changed,
+          decision: res?.decision,
+          changeRequestId: res?.change_request_id,
+          appointmentId: res?.appointment_id,
+          previousDate: res?.previous_date,
+          previousTime: res?.previous_time,
+          appointmentDate: res?.appointment_date,
+          appointmentTime: res?.appointment_time,
+          requestStatus: res?.request_status,
+          appointmentStatus: res?.appointment_status
+        };
+      }
+    } catch (e: any) {
+      console.error('[appointmentSelfServiceService] adminDecideRescheduleRequest exception:', e);
+    }
+
+    return { success: false, reasonCode: 'service_error' };
+  },
+
   // Part 3: confirmAppointmentByToken
   async confirmAppointmentByToken(token: string): Promise<boolean> {
     const validation = await this.getAppointmentByAccessToken(token);
