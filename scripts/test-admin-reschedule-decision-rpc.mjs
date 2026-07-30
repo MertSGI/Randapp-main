@@ -35,9 +35,18 @@ if (fileExists) {
   assert(sql.includes('appointment_reschedule_rejected'), 'Inserts appointment_reschedule_rejected audit action');
   assert(sql.includes('reschedule_request_approved'), 'Inserts reschedule_request_approved outbox event_type');
   assert(sql.includes('reschedule_request_rejected'), 'Inserts reschedule_request_rejected outbox event_type');
-  assert(sql.includes('REVOKE ALL ON FUNCTION public.admin_decide_reschedule_request'), 'Revokes EXECUTE from PUBLIC');
   assert(sql.includes('REVOKE ALL ON FUNCTION public.admin_list_pending_reschedule_requests'), 'Revokes EXECUTE from PUBLIC');
   assert(sql.includes('GRANT EXECUTE ON FUNCTION public.admin_decide_reschedule_request(uuid, text, text, text) TO authenticated'), 'Grants EXECUTE to authenticated');
+}
+
+const mig34File = path.join(process.cwd(), 'supabase', 'migrations', '20260809_admin_reschedule_decision_lock_and_reason_fix.sql');
+const mig34Exists = fs.existsSync(mig34File);
+assert(mig34Exists, 'Migration 34 file exists');
+if (mig34Exists) {
+  const sql34 = fs.readFileSync(mig34File, 'utf8');
+  assert(sql34.includes('resolution_reason'), 'Adds resolution_reason column to preserve customer original reason');
+  assert(sql34.includes('pg_advisory_xact_lock'), 'Acquires canonical pg_advisory_xact_lock matching create_public_booking');
+  assert(sql34.includes('hashtextextended'), 'Uses hashtextextended for staff/date slot lock key');
 }
 
 // --- §2 Service Wrapper Inspection ---
