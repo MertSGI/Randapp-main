@@ -548,7 +548,69 @@ export const appointmentSelfServiceService = {
     return {
       changeRequest: newRequest,
       success: true,
-      message: 'Randevu değişiklik talebiniz salon onayına iletilmiştir.'
+      message: 'Değişiklik talebiniz işletmeye iletildi.'
+    };
+  },
+
+  /**
+   * Stage F1 — Secure RPC wrapper for public.request_public_appointment_reschedule_by_manage_token.
+   * Unauthenticated/authenticated RPC call for requesting appointment rescheduling via manage token.
+   */
+  async requestRescheduleByManageToken(params: {
+    token: string;
+    requestedDate: string;
+    requestedTime: string;
+    reason?: string;
+    idempotencyKey?: string;
+  }): Promise<{
+    success: boolean;
+    reasonCode: string;
+    changed?: boolean;
+    appointmentId?: string;
+    changeRequestId?: string;
+    proposedDate?: string;
+    proposedTime?: string;
+    message?: string;
+  }> {
+    if (!params.token || !params.requestedDate || !params.requestedTime) {
+      return { success: false, reasonCode: 'invalid_parameters', message: 'Eksik veya geçersiz parametre.' };
+    }
+
+    const { supabase } = await import('./supabaseClient');
+
+    const idempotencyKey = params.idempotencyKey || `resched_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+    const { data, error } = await supabase.rpc('request_public_appointment_reschedule_by_manage_token', {
+      p_token: params.token.trim(),
+      p_requested_date: params.requestedDate,
+      p_requested_time: params.requestedTime,
+      p_reason: params.reason ? params.reason.trim() : null,
+      p_idempotency_key: idempotencyKey
+    });
+
+    if (error) {
+      console.error('[appointmentSelfServiceService] Reschedule RPC error:', error);
+      return { success: false, reasonCode: 'service_error', message: 'Değişiklik talebi işlenirken hata oluştu.' };
+    }
+
+    const result = data as {
+      success: boolean;
+      reason_code: string;
+      changed?: boolean;
+      appointment_id?: string;
+      change_request_id?: string;
+      proposed_date?: string;
+      proposed_time?: string;
+    };
+
+    return {
+      success: result?.success || false,
+      reasonCode: result?.reason_code || 'unknown_error',
+      changed: result?.changed,
+      appointmentId: result?.appointment_id,
+      changeRequestId: result?.change_request_id,
+      proposedDate: result?.proposed_date,
+      proposedTime: result?.proposed_time
     };
   },
 
