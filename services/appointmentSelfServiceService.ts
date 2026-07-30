@@ -614,6 +614,55 @@ export const appointmentSelfServiceService = {
     };
   },
 
+  /**
+   * Stage F2 — Secure RPC wrapper for public.get_public_pending_reschedule_request_by_manage_token.
+   */
+  async getPendingRescheduleRequestByManageToken(token: string): Promise<{
+    success: boolean;
+    reasonCode: string;
+    hasPendingRequest: boolean;
+    changeRequestId?: string;
+    proposedDate?: string;
+    proposedTime?: string;
+    status?: string;
+    createdAt?: string;
+  }> {
+    if (!token || typeof token !== 'string' || token.trim().length === 0) {
+      return { success: false, reasonCode: 'invalid_token', hasPendingRequest: false };
+    }
+
+    try {
+      const { getDataSourceMode } = await import('./dataSourceConfig');
+      if (getDataSourceMode() === 'supabase') {
+        const { supabase } = await import('./supabaseClient');
+        const { data, error } = await supabase.rpc('get_public_pending_reschedule_request_by_manage_token', {
+          p_token: token.trim()
+        });
+
+        if (error) {
+          console.error('[appointmentSelfServiceService] getPendingRescheduleRequest RPC error:', error);
+          return { success: false, reasonCode: 'service_error', hasPendingRequest: false };
+        }
+
+        const res = data as any;
+        return {
+          success: res?.success || false,
+          reasonCode: res?.reason_code || 'unknown_error',
+          hasPendingRequest: !!res?.has_pending_request,
+          changeRequestId: res?.change_request_id,
+          proposedDate: res?.proposed_date,
+          proposedTime: res?.proposed_time,
+          status: res?.status,
+          createdAt: res?.created_at
+        };
+      }
+    } catch (e: any) {
+      console.error('[appointmentSelfServiceService] getPendingRescheduleRequest exception:', e);
+    }
+
+    return { success: true, reasonCode: 'ok', hasPendingRequest: false };
+  },
+
   // Part 3: confirmAppointmentByToken
   async confirmAppointmentByToken(token: string): Promise<boolean> {
     const validation = await this.getAppointmentByAccessToken(token);

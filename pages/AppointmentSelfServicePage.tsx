@@ -4,6 +4,7 @@ import {
   appointmentSelfServiceService,
   SelfServiceAppointmentResult
 } from '../services/appointmentSelfServiceService';
+import { availabilityService, TimeSlot } from '../services/availabilityService';
 import { Appointment, AppointmentAccessToken, Service, Staff, BusinessBranch } from '../types';
 
 export function getStatusDisplayLabel(status?: string): string {
@@ -36,6 +37,21 @@ export function formatTurkishDate(dateStr?: string): string {
   }
 }
 
+export function mapRescheduleReasonCodeToMessage(reasonCode: string): string {
+  switch (reasonCode) {
+    case 'ok': return 'Randevu değişikliği talebiniz işletmeye iletildi.';
+    case 'no_change': return 'Seçtiğiniz tarih ve saat mevcut randevunuzla aynı.';
+    case 'request_already_pending': return 'Bu randevu için zaten bekleyen bir değişiklik talebi bulunuyor.';
+    case 'invalid_token': return 'Bu yönetim bağlantısı geçersiz veya süresi dolmuş.';
+    case 'invalid_transition': return 'Bu randevu için değişiklik talebi oluşturulamıyor.';
+    case 'invalid_date': return 'Lütfen geçerli bir tarih seçin.';
+    case 'invalid_time': return 'Lütfen geçerli bir saat seçin.';
+    case 'slot_unavailable': return 'Seçtiğiniz saat artık uygun değil. Lütfen başka bir saat seçin.';
+    case 'idempotency_conflict': return 'Talep bilgileri değişti. Lütfen seçiminizi kontrol edip yeniden deneyin.';
+    default: return 'Talebiniz şu anda iletilemedi. Lütfen tekrar deneyin.';
+  }
+}
+
 const AppointmentSelfServicePage: React.FC = () => {
   const { token } = useParams<{ token: string }>();
   const [searchParams] = useSearchParams();
@@ -54,6 +70,27 @@ const AppointmentSelfServicePage: React.FC = () => {
   const [joinedService, setJoinedService] = useState<Service | null>(null);
   const [joinedStaff, setJoinedStaff] = useState<Staff | null>(null);
   const [joinedBranch, setJoinedBranch] = useState<BusinessBranch | null>(null);
+
+  // Stage F2: Pending Reschedule Request state
+  const [pendingRequest, setPendingRequest] = useState<{
+    hasPending: boolean;
+    proposedDate?: string;
+    proposedTime?: string;
+    createdAt?: string;
+  } | null>(null);
+
+  // Stage F2: Reschedule Modal state
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [selectedDate, setSelectedDate] = useState('');
+  const [selectedTime, setSelectedTime] = useState('');
+  const [reason, setReason] = useState('');
+  const [availableSlots, setAvailableSlots] = useState<TimeSlot[]>([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState<string | null>(null);
+
+  // Idempotency ref per submission attempt
+  const idempotencyKeyRef = useRef<string>('');
 
   // KVKK / Data Rights Form state
   const [showKvkkForm, setShowKvkkForm] = useState(false);
@@ -125,6 +162,19 @@ const AppointmentSelfServicePage: React.FC = () => {
             }
           }
         }
+
+        // Query pending reschedule request state persistently
+        const pendingRes = await appointmentSelfServiceService.getPendingRescheduleRequestByManageToken(tok);
+        if (pendingRes.hasPendingRequest) {
+          setPendingRequest({
+            hasPending: true,
+            proposedDate: pendingRes.proposedDate,
+            proposedTime: pendingRes.proposedTime,
+            createdAt: pendingRes.createdAt
+          });
+        } else {
+          setPendingRequest({ hasPending: false });
+        }
       } else if (res.kind === 'invalid_token') {
         setResultKind('invalid_token');
       } else {
@@ -137,6 +187,95 @@ const AppointmentSelfServicePage: React.FC = () => {
       setErrorMessage(e?.message || 'Network error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Load available slots when modal opens or date changes
+  const loadAvailableSlots = async (dateStr: string) => {
+    if (!appointment || !dateStr) return;
+    setLoadingSlots(true);
+    setAvailableSlots([]);
+    setSelectedTime('');
+
+    try {
+      const slots = await availabilityService.getAvailableSlotsForStaff(
+        appointment.tenantId,
+        appointment.staffId,
+        appointment.serviceId,
+        dateStr
+      );
+      
+      // Filter out past slots if selecting current date and filter out same appointment time if same date
+      const filtered = slots.filter(s => {
+        if (!s.available) return false;
+        if (dateStr === appointment.date && s.time === appointment.time) return false;
+        return true;
+      });
+
+      setAvailableSlots(filtered);
+    } catch (err) {
+      console.error('Failed to load slots:', err);
+      setAvailableSlots([]);
+    } finally {
+      setLoadingSlots(false);
+    }
+  };
+
+  const handleOpenRescheduleModal = () => {
+    setRescheduleError(null);
+    setSelectedDate(appointment?.date || new Date().toISOString().split('T')[0]);
+    setSelectedTime('');
+    setReason('');
+    idempotencyKeyRef.current = '';
+    setShowRescheduleModal(true);
+    if (appointment?.date) {
+      loadAvailableSlots(appointment.date);
+    }
+  };
+
+  const handleRescheduleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedDate || !selectedTime || submitting) return;
+
+    setSubmitting(true);
+    setRescheduleError(null);
+
+    // Generate idempotency key if not already present
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `resched_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    }
+
+    try {
+      const res = await appointmentSelfServiceService.requestRescheduleByManageToken({
+        token: effectiveToken,
+        requestedDate: selectedDate,
+        requestedTime: selectedTime,
+        reason: reason.trim() || undefined,
+        idempotencyKey: idempotencyKeyRef.current
+      });
+
+      if (res.success && res.reasonCode === 'ok') {
+        setPendingRequest({
+          hasPending: true,
+          proposedDate: selectedDate,
+          proposedTime: selectedTime,
+          createdAt: new Date().toISOString()
+        });
+        setShowRescheduleModal(false);
+        idempotencyKeyRef.current = '';
+      } else {
+        if (res.reasonCode === 'slot_unavailable') {
+          loadAvailableSlots(selectedDate);
+        }
+        setRescheduleError(mapRescheduleReasonCodeToMessage(res.reasonCode));
+      }
+    } catch (err: any) {
+      console.error('Reschedule submit exception:', err);
+      setRescheduleError('Talebiniz şu anda iletilemedi. Lütfen tekrar deneyin.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -225,6 +364,7 @@ const AppointmentSelfServicePage: React.FC = () => {
 
   const statusLabel = getStatusDisplayLabel(appointment.status);
   const formattedDate = formatTurkishDate(appointment.date);
+  const isRescheduleEligible = appointment.status === 'confirmed' && (!pendingRequest || !pendingRequest.hasPending);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900 py-8 px-4 sm:px-6 lg:px-8">
@@ -267,6 +407,31 @@ const AppointmentSelfServicePage: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Stage F2: Pending Request Banner */}
+        {pendingRequest?.hasPending && (
+          <div className="mx-6 sm:mx-8 mt-6 p-5 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-800 space-y-3">
+            <div className="flex items-center gap-3">
+              <span className="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></span>
+              <h3 className="text-sm font-bold text-amber-900 dark:text-amber-200">
+                Değişiklik talebiniz işletmenin onayını bekliyor.
+              </h3>
+            </div>
+            <p className="text-xs text-amber-800 dark:text-amber-300">
+              Seçtiğiniz tarih ve saat işletmenin onayına gönderilmiştir. Randevunuz, işletme onaylayana kadar mevcut tarih ve saatinde kalır.
+            </p>
+            <div className="pt-2 border-t border-amber-200/60 dark:border-amber-800/60 flex flex-wrap gap-6 text-xs text-amber-950 dark:text-amber-100">
+              <div>
+                <span className="text-amber-700 dark:text-amber-400 block text-[10px] uppercase font-bold">Talep Edilen Tarih</span>
+                <span className="font-semibold">{formatTurkishDate(pendingRequest.proposedDate)}</span>
+              </div>
+              <div>
+                <span className="text-amber-700 dark:text-amber-400 block text-[10px] uppercase font-bold">Talep Edilen Saat</span>
+                <span className="font-semibold">{pendingRequest.proposedTime}</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Primary Appointment Details */}
         <div className="p-6 sm:p-8 space-y-6">
@@ -329,15 +494,21 @@ const AppointmentSelfServicePage: React.FC = () => {
             </div>
           </div>
 
-          {/* Read-only Information Notice */}
-          <div className="p-4 bg-blue-50/60 dark:bg-blue-950/20 rounded-xl border border-blue-100 dark:border-blue-900/40 text-xs text-blue-800 dark:text-blue-300 flex items-start gap-3">
-            <svg className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <p>
-              Bu sayfa şu anda randevu bilgilerinizi görüntülemek içindir. Randevu iptali ve saat değişikliği özellikleri henüz aktif değildir.
-            </p>
-          </div>
+          {/* Stage F2 Actions Area */}
+          {isRescheduleEligible && (
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={handleOpenRescheduleModal}
+                className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition min-h-[44px] shadow-sm flex items-center justify-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span>Randevu Değişikliği Talep Et</span>
+              </button>
+            </div>
+          )}
 
           {/* KVKK / Data Rights Option */}
           <div className="pt-2 border-t border-gray-100 dark:border-slate-700/60">
@@ -442,6 +613,157 @@ const AppointmentSelfServicePage: React.FC = () => {
 
         </div>
       </div>
+
+      {/* Stage F2: Reschedule Modal */}
+      {showRescheduleModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
+          <div 
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reschedule-modal-title"
+            className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-gray-100 dark:border-slate-700 overflow-hidden my-8"
+          >
+            {/* Modal Header */}
+            <div className="p-6 border-b border-gray-100 dark:border-slate-700 flex items-center justify-between">
+              <div>
+                <h2 id="reschedule-modal-title" className="text-xl font-bold text-gray-900 dark:text-white">
+                  Randevu Değişikliği Talebi
+                </h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Mevcut Randevu: {formattedDate} - {appointment.time}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRescheduleModal(false)}
+                disabled={submitting}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-2 rounded-lg transition"
+                aria-label="Kapat"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleRescheduleSubmit} className="p-6 space-y-5">
+              {/* Approval Disclaimer */}
+              <div className="p-3.5 bg-blue-50/80 dark:bg-blue-950/30 rounded-xl border border-blue-100 dark:border-blue-900/40 text-xs text-blue-800 dark:text-blue-300 flex items-start gap-2.5">
+                <svg className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p>
+                  Seçtiğiniz tarih ve saat işletmenin onayına gönderilecektir. Randevunuz, işletme onaylayana kadar mevcut tarih ve saatinde kalır. Talep edilen saat, işletme onayına kadar kesin olarak rezerve edilmez.
+                </p>
+              </div>
+
+              {/* Error Message */}
+              {rescheduleError && (
+                <div role="alert" className="p-3.5 bg-red-50 dark:bg-red-950/40 text-xs text-red-700 dark:text-red-300 rounded-xl border border-red-200 dark:border-red-800">
+                  {rescheduleError}
+                </div>
+              )}
+
+              {/* Date Selection */}
+              <div>
+                <label htmlFor="reschedule-date" className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1.5">
+                  Yeni Tarih Seçin
+                </label>
+                <input
+                  id="reschedule-date"
+                  type="date"
+                  min={new Date().toISOString().split('T')[0]}
+                  value={selectedDate}
+                  onChange={(e) => {
+                    setSelectedDate(e.target.value);
+                    loadAvailableSlots(e.target.value);
+                  }}
+                  required
+                  disabled={submitting}
+                  className="w-full p-3 text-sm rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Time Selection */}
+              <div>
+                <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1.5">
+                  Uygun Saat Seçin
+                </label>
+                {loadingSlots ? (
+                  <div className="p-4 text-center text-xs text-gray-500 animate-pulse">
+                    Saatler yükleniyor...
+                  </div>
+                ) : availableSlots.length === 0 ? (
+                  <div className="p-4 bg-gray-50 dark:bg-slate-900/50 rounded-xl text-center text-xs text-gray-500">
+                    Seçilen tarih için uygun saat bulunamadı. Lütfen başka bir tarih seçin.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-1">
+                    {availableSlots.map((slot) => (
+                      <button
+                        key={slot.time}
+                        type="button"
+                        onClick={() => setSelectedTime(slot.time)}
+                        disabled={submitting}
+                        className={`py-2 px-3 text-xs font-semibold rounded-lg border transition min-h-[38px] ${
+                          selectedTime === slot.time
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-gray-50 dark:bg-slate-900 text-gray-800 dark:text-gray-200 border-gray-200 dark:border-slate-700 hover:bg-blue-50 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        {slot.time}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Reason / Notes */}
+              <div>
+                <label htmlFor="reschedule-reason" className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1.5">
+                  Talep Nedeni (İsteğe Bağlı)
+                </label>
+                <textarea
+                  id="reschedule-reason"
+                  rows={2}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="İşletmeye iletmek istediğiniz not..."
+                  disabled={submitting}
+                  className="w-full p-3 text-xs rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Modal Footer Controls */}
+              <div className="pt-3 border-t border-gray-100 dark:border-slate-700 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowRescheduleModal(false)}
+                  disabled={submitting}
+                  className="py-2.5 px-4 text-xs font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600 rounded-xl transition min-h-[40px]"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={!selectedDate || !selectedTime || submitting}
+                  className="py-2.5 px-5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl transition min-h-[40px] flex items-center justify-center gap-2"
+                >
+                  {submitting ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                      <span>Gönderiliyor...</span>
+                    </>
+                  ) : (
+                    <span>Talebi Gönder</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

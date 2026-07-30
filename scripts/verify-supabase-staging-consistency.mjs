@@ -68,6 +68,7 @@ const CANONICAL_MIGRATIONS = [
   '20260804_appointments_direct_update_hardening.sql',
   '20260805_request_public_appointment_reschedule_by_manage_token_rpc.sql',
   '20260806_request_public_appointment_reschedule_outbox_fix.sql',
+  '20260807_get_public_pending_reschedule_request_by_manage_token_rpc.sql',
 ];
 
 // Check actual migration files on disk
