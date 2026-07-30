@@ -408,8 +408,8 @@ const AppointmentSelfServicePage: React.FC = () => {
           </div>
         </div>
 
-        {/* Stage F2: Pending Request Banner */}
-        {pendingRequest?.hasPending && (
+        {/* Stage F2: Pending Request Banner (Visible only for confirmed appointments) */}
+        {pendingRequest?.hasPending && appointment.status === 'confirmed' && (
           <div className="mx-6 sm:mx-8 mt-6 p-5 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-800 space-y-3">
             <div className="flex items-center gap-3">
               <span className="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></span>

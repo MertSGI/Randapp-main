@@ -33,8 +33,9 @@ assert(pageContent.includes('Talep Edilen Saat'), 'Proposed schedule rendered se
 assert(!pageContent.includes('Randevunuz değiştirildi'), 'NO immediate-reschedule wording "Randevunuz değiştirildi" present');
 assert(!pageContent.includes('Yeni randevunuz onaylandı'), 'NO immediate-reschedule wording "Yeni randevunuz onaylandı" present');
 
-// 5. Eligibility assertions
+// 5. Eligibility & Precedence assertions
 assert(pageContent.includes("appointment.status === 'confirmed'"), 'Action restricted to confirmed status only');
+assert(pageContent.includes("pendingRequest?.hasPending && appointment.status === 'confirmed'"), 'Pending banner suppressed when appointment status is terminal/cancelled');
 assert(pageContent.includes('pendingRequest'), 'Pending request state checked to hide action when request exists');
 
 // 6. Double-submit guard & Idempotency key handling
