@@ -145,6 +145,16 @@ async function main() {
     assert(sql.includes('communication_outbox'), 'Inserts transactional communication_outbox');
   }
 
+  const mig31File = path.join(process.cwd(), 'supabase', 'migrations', '20260806_request_public_appointment_reschedule_outbox_fix.sql');
+  const mig31Exists = fs.existsSync(mig31File);
+  assert(mig31Exists, 'Migration 31 file exists');
+  if (mig31Exists) {
+    const sql31 = fs.readFileSync(mig31File, 'utf8');
+    assert(sql31.includes('reschedule_request_created'), 'Uses correct reschedule_request_created outbox metadata event_type');
+    assert(sql31.includes('idx_appointment_change_requests_pending_reschedule'), 'Creates unique partial index for pending reschedule requests');
+    assert(sql31.includes('request_already_pending'), 'Returns reason_code request_already_pending for duplicate active pending requests');
+  }
+
   // --- §2 Remote RPC Execution Matrix ---
   console.log('\n--- §2 RPC Execution Matrix ---');
 
@@ -202,6 +212,15 @@ async function main() {
     });
     const repData = await repRes.json();
     assert(repData?.success === true && repData?.appointment_id === aptId, 'Idempotency replay returns cached response');
+
+    // Second Request with Different Key while Request is Pending
+    const pendRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/request_public_appointment_reschedule_by_manage_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}` },
+      body: JSON.stringify({ p_token: token, p_requested_date: '2026-11-20', p_requested_time: '16:00', p_reason: 'Second attempt', p_idempotency_key: 'r_idem_diff_' + Date.now() })
+    });
+    const pendData = await pendRes.json();
+    assert(pendData?.success === false && pendData?.reason_code === 'request_already_pending', 'Second request while pending returns success: false, reason_code: request_already_pending');
 
     // Idempotency Conflict
     const confRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/request_public_appointment_reschedule_by_manage_token`, {
