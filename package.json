@@ -77,6 +77,7 @@
     "qa:customer-rescheduling-ui": "node scripts/test-customer-rescheduling-ui.mjs",
     "qa:admin-reschedule-decision-rpc": "node scripts/test-admin-reschedule-decision-rpc.mjs",
     "qa:admin-reschedule-review-ui": "node scripts/test-admin-reschedule-review-ui.mjs",
+    "qa:pilot-readiness": "node scripts/verify-pilot-readiness.mjs",
     "qa:e1-token-cancellation-matrix": "node scripts/execute-e1-token-cancellation-matrix.mjs",
     "smoke:supabase-paymentless-staging": "node scripts/smoke-supabase-paymentless-staging.mjs",
     "qa:cutover-runbook": "node scripts/verify-live-cutover-runbook.mjs",
