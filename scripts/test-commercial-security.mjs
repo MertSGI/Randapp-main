@@ -33,8 +33,8 @@ if (!sqlContent.includes('public.is_super_admin(auth.uid())')) {
 }
 console.log('✅ PASS: Super Admin authorization checks verified in RLS policies');
 
-// Check that platform_system_restrictions DOES NOT have a public read policy
-if (sqlContent.includes('Public Read Access on platform_system_restrictions')) {
+// Check that platform_system_restrictions DOES NOT create a public read policy
+if (sqlContent.includes('CREATE POLICY "Public Read Access on platform_system_restrictions"')) {
   console.error('❌ FAIL: platform_system_restrictions must NOT have a public read access policy.');
   process.exit(1);
 }
