@@ -56,6 +56,9 @@ jobs:
       - name: Stage H1B Commercial Super Admin Mutations QA
         run: npm run qa:commercial-super-admin-mutations
 
+      - name: Stage H1C Commercial Eligibility Enforcement QA
+        run: npm run qa:commercial-eligibility-enforcement
+
       - name: Supabase Auth/RLS bootstrap QA
         run: npm run qa:supabase-auth-rls-bootstrap
 
