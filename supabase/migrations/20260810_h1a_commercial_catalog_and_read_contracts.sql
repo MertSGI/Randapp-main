@@ -1,19 +1,20 @@
 -- 20260810_h1a_commercial_catalog_and_read_contracts.sql
--- Stage H1A — Canonical Commercial Schema and Read Contracts
+-- Stage H1A — Canonical Commercial Schema, Immutable Catalog Versioning, and Read Contracts (Hardened)
 -- Description:
 -- Provisions:
 --   1. public.commercial_feature_definitions (registered keys, types, categories, maturity)
---   2. public.plans & public.plan_versions (canonical plans, immutable versioning & immutability triggers)
---   3. public.plan_entitlements (typed plan capabilities & immutability triggers)
+--   2. public.plans & public.plan_versions (canonical plans, immutable plan codes, single published version enforcement, immutable versioning)
+--   3. public.plan_entitlements & type consistency triggers
 --   4. public.subscriptions schema alignment (plan_version_id, billing_mode, grace_until, commercial_version)
---   5. public.tenant_entitlement_overrides (per-tenant override schema)
---   6. public.subscription_events & public.billing_transactions (append-only ledgers & database enforcement)
---   7. public.usage_counters (schema foundation)
---   8. Internal helper: public.resolve_effective_tenant_entitlements
---   9. Public RPC: public.get_public_commercial_plan_catalog
---  10. Authenticated RPC: public.get_my_commercial_subscription_snapshot
---  11. Super Admin RPCs: public.super_admin_get_commercial_catalog & public.super_admin_get_tenant_commercial_snapshot
---  12. Fail-closed RLS policies and execution grants.
+--   5. public.tenant_entitlement_overrides & type consistency triggers
+--   6. public.platform_system_restrictions (Level 1 platform restriction foundation)
+--   7. public.subscription_events & public.billing_transactions (append-only ledgers, financial integrity constraints)
+--   8. public.usage_counters (schema foundation)
+--   9. Internal helper: public.resolve_effective_tenant_entitlements (4-level precedence: platform_restriction -> tenant_override -> plan_version -> default_deny)
+--  10. Public RPC: public.get_public_commercial_plan_catalog
+--  11. Authenticated RPC: public.get_my_commercial_subscription_snapshot
+--  12. Super Admin RPCs: public.super_admin_get_commercial_catalog & public.super_admin_get_tenant_commercial_snapshot
+--  13. Fail-closed RLS policies and execution grants.
 
 -- =========================================================================
 -- 1. COMMERCIAL FEATURE DEFINITIONS TABLE
@@ -56,7 +57,7 @@ VALUES
     ('notification_allowance', 'integer', 'channels', 'Dış Bildirim Kotası', 'Aylık SMS/WhatsApp dış bildirim kotası', 'CODE_PRESENT', false, 'bildirim'),
     ('ai_allowance', 'integer', 'operations', 'Yapay Zeka Kullanım Kotası', 'Aylık AI stil asistanı kullanım hakkı', 'CODE_PRESENT', false, 'kullanım'),
     ('lari_minisite', 'boolean', 'customization', 'LARİ Mini-Site ve Profili', 'İşletmeye özel açılan online randevu ve tanıtım sayfası', 'LIVE_ENFORCED', true, NULL),
-    ('custom_domain_eligible', 'boolean', 'customization', 'Özel Alan Adı Desteği', 'Kendi özel alan adını (ör. randevu.salondomain.com) bağlama', 'MOCK_ONLY', false, NULL),
+    ('custom_domain_eligible', 'boolean', 'customization', 'Özel Alan Adı Desteği', 'Kendi özel alan adını bağlama', 'MOCK_ONLY', false, NULL),
     ('custom_domain_included', 'boolean', 'customization', 'Dahili Özel Alan Adı', 'Pakete dahil ücretsiz özel alan adı kurulumu', 'MOCK_ONLY', false, NULL),
     ('white_label', 'boolean', 'customization', 'Beyaz Etiket (White-Label)', 'LARİ markasını kaldırıp tamamen işletme markasını öne çıkarma', 'MOCK_ONLY', false, NULL),
     ('calendar_integration', 'boolean', 'integrations', 'Google Takvim Entegrasyonu', 'Dış takvimlerle iki yönlü randevu senkronizasyonu', 'CODE_PRESENT', false, NULL),
@@ -77,12 +78,12 @@ ON CONFLICT (feature_key) DO UPDATE SET
 
 
 -- =========================================================================
--- 2. PLANS TABLE
+-- 2. PLANS TABLE & PLAN CODE IMMUTABILITY TRIGGER
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.plans (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    code TEXT UNIQUE NOT NULL,
+    code TEXT UNIQUE NOT NULL CHECK (trim(code) != ''),
     public_name TEXT NOT NULL,
     internal_description TEXT,
     is_public BOOLEAN NOT NULL DEFAULT true,
@@ -97,6 +98,26 @@ CREATE TABLE IF NOT EXISTS public.plans (
 CREATE TRIGGER update_plans_modtime
     BEFORE UPDATE ON public.plans
     FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Plan Code Immutability Trigger
+CREATE OR REPLACE FUNCTION public.enforce_plan_code_immutability()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+    IF NEW.code IS DISTINCT FROM OLD.code THEN
+        RAISE EXCEPTION 'CANNOT_MUTATE_PLAN_CODE: Plan codes are immutable identifiers.' USING ERRCODE = 'P0001';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_enforce_plan_code_immutability ON public.plans;
+CREATE TRIGGER trg_enforce_plan_code_immutability
+    BEFORE UPDATE ON public.plans
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_plan_code_immutability();
 
 ALTER TABLE public.plans ENABLE ROW LEVEL SECURITY;
 
@@ -119,7 +140,7 @@ ON CONFLICT (code) DO UPDATE SET
 
 
 -- =========================================================================
--- 3. PLAN VERSIONS TABLE & IMMUTABILITY TRIGGER
+-- 3. PLAN VERSIONS TABLE, IMMUTABILITY & OVERLAP PREVENTION TRIGGERS
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.plan_versions (
@@ -145,7 +166,41 @@ CREATE TABLE IF NOT EXISTS public.plan_versions (
 
 ALTER TABLE public.plan_versions ENABLE ROW LEVEL SECURITY;
 
--- Immutability Enforcement Function for Plan Versions
+-- 3A. Single Effective Published Version Overlap Prevention Trigger
+CREATE OR REPLACE FUNCTION public.enforce_single_published_plan_version()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_overlap_count INTEGER;
+BEGIN
+    IF NEW.lifecycle_status = 'published' THEN
+        SELECT COUNT(*) INTO v_overlap_count
+        FROM public.plan_versions pv
+        WHERE pv.plan_id = NEW.plan_id
+          AND pv.id IS DISTINCT FROM NEW.id
+          AND pv.lifecycle_status = 'published'
+          AND (
+            (NEW.effective_from, COALESCE(NEW.effective_to, '9999-12-31 23:59:59+00'::timestamptz)) OVERLAPS
+            (pv.effective_from, COALESCE(pv.effective_to, '9999-12-31 23:59:59+00'::timestamptz))
+          );
+
+        IF v_overlap_count > 0 THEN
+            RAISE EXCEPTION 'OVERLAPPING_PUBLISHED_PLAN_VERSION: A plan cannot have two simultaneously effective published versions.' USING ERRCODE = 'P0001';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_enforce_single_published_plan_version ON public.plan_versions;
+CREATE TRIGGER trg_enforce_single_published_plan_version
+    BEFORE INSERT OR UPDATE ON public.plan_versions
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_single_published_plan_version();
+
+-- 3B. Published Plan Version Immutability & Retirement Integrity Trigger
 CREATE OR REPLACE FUNCTION public.enforce_plan_version_immutability()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -160,8 +215,19 @@ BEGIN
         RETURN OLD;
     ELSIF TG_OP = 'UPDATE' THEN
         IF OLD.lifecycle_status = 'published' THEN
-            -- Allow ONLY transition to 'retired' (setting lifecycle_status='retired', retired_at, effective_to)
-            IF NEW.lifecycle_status = 'retired' AND OLD.plan_id = NEW.plan_id AND OLD.version_number = NEW.version_number THEN
+            -- Verify that if transitioning to retired, NO commercial content field was mutated
+            IF NEW.lifecycle_status = 'retired' THEN
+                IF NEW.plan_id IS DISTINCT FROM OLD.plan_id OR
+                   NEW.version_number IS DISTINCT FROM OLD.version_number OR
+                   NEW.currency IS DISTINCT FROM OLD.currency OR
+                   NEW.monthly_price IS DISTINCT FROM OLD.monthly_price OR
+                   NEW.annual_price IS DISTINCT FROM OLD.annual_price OR
+                   NEW.annual_discount_percent IS DISTINCT FROM OLD.annual_discount_percent OR
+                   NEW.setup_fee IS DISTINCT FROM OLD.setup_fee OR
+                   NEW.trial_days IS DISTINCT FROM OLD.trial_days OR
+                   NEW.effective_from IS DISTINCT FROM OLD.effective_from THEN
+                    RAISE EXCEPTION 'CANNOT_MUTATE_PUBLISHED_PLAN_VERSION: Retirement transition cannot alter commercial content values.' USING ERRCODE = 'P0001';
+                END IF;
                 RETURN NEW;
             ELSE
                 RAISE EXCEPTION 'CANNOT_MUTATE_PUBLISHED_PLAN_VERSION: Published plan versions are immutable. Create a new version for pricing or entitlement changes.' USING ERRCODE = 'P0001';
@@ -180,7 +246,7 @@ CREATE TRIGGER trg_enforce_plan_version_immutability
 
 
 -- =========================================================================
--- 4. PLAN ENTITLEMENTS TABLE & IMMUTABILITY TRIGGER
+-- 4. PLAN ENTITLEMENTS TABLE & IMMUTABILITY / TYPE CONSISTENCY TRIGGERS
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.plan_entitlements (
@@ -206,6 +272,37 @@ CREATE TABLE IF NOT EXISTS public.plan_entitlements (
 );
 
 ALTER TABLE public.plan_entitlements ENABLE ROW LEVEL SECURITY;
+
+-- Entitlement & Feature Definition Type Consistency Function
+CREATE OR REPLACE FUNCTION public.enforce_entitlement_type_consistency()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_def_type TEXT;
+BEGIN
+    SELECT value_type INTO v_def_type
+    FROM public.commercial_feature_definitions
+    WHERE feature_key = NEW.feature_key;
+
+    IF v_def_type IS NULL THEN
+        RAISE EXCEPTION 'UNKNOWN_FEATURE_KEY: Feature key % is not registered.', NEW.feature_key USING ERRCODE = 'P0001';
+    END IF;
+
+    IF NEW.value_type != v_def_type THEN
+        RAISE EXCEPTION 'ENTITLEMENT_TYPE_MISMATCH: Entitlement value_type (%) does not match feature definition value_type (%).', NEW.value_type, v_def_type USING ERRCODE = 'P0001';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_enforce_plan_entitlements_type_consistency ON public.plan_entitlements;
+CREATE TRIGGER trg_enforce_plan_entitlements_type_consistency
+    BEFORE INSERT OR UPDATE ON public.plan_entitlements
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_entitlement_type_consistency();
 
 -- Immutability Enforcement Function for Plan Entitlements
 CREATE OR REPLACE FUNCTION public.enforce_plan_entitlement_immutability()
@@ -442,7 +539,7 @@ ALTER TABLE public.subscriptions
 ADD COLUMN IF NOT EXISTS plan_version_id UUID REFERENCES public.plan_versions(id) ON DELETE RESTRICT,
 ADD COLUMN IF NOT EXISTS billing_mode TEXT CHECK (billing_mode IS NULL OR billing_mode IN ('provider', 'manual', 'comped')),
 ADD COLUMN IF NOT EXISTS grace_until TIMESTAMPTZ,
-ADD COLUMN IF NOT EXISTS commercial_version BIGINT NOT NULL DEFAULT 1;
+ADD COLUMN IF NOT EXISTS commercial_version BIGINT NOT NULL DEFAULT 1 CHECK (commercial_version >= 1);
 
 -- Backfill plan_version_id deterministically for existing subscriptions rows
 UPDATE public.subscriptions s
@@ -455,7 +552,7 @@ WHERE s.plan_version_id IS NULL
 
 
 -- =========================================================================
--- 6. TENANT ENTITLEMENT OVERRIDES TABLE
+-- 6. TENANT ENTITLEMENT OVERRIDES TABLE & TYPE CONSISTENCY TRIGGER
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.tenant_entitlement_overrides (
@@ -473,7 +570,7 @@ CREATE TABLE IF NOT EXISTS public.tenant_entitlement_overrides (
     revoked_at TIMESTAMPTZ,
     created_by UUID REFERENCES auth.users(id),
     revoked_by UUID REFERENCES auth.users(id),
-    reason TEXT NOT NULL,
+    reason TEXT NOT NULL CHECK (trim(reason) != ''),
     revoke_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_tenant_overrides_value_shape CHECK (
@@ -491,20 +588,46 @@ WHERE revoked_at IS NULL;
 
 ALTER TABLE public.tenant_entitlement_overrides ENABLE ROW LEVEL SECURITY;
 
+DROP TRIGGER IF EXISTS trg_enforce_tenant_overrides_type_consistency ON public.tenant_entitlement_overrides;
+CREATE TRIGGER trg_enforce_tenant_overrides_type_consistency
+    BEFORE INSERT OR UPDATE ON public.tenant_entitlement_overrides
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_entitlement_type_consistency();
+
 
 -- =========================================================================
--- 7. SUBSCRIPTION EVENTS (APPEND-ONLY LEDGER)
+-- 7. PLATFORM SYSTEM RESTRICTIONS TABLE (LEVEL 1 PRECEDENCE)
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS public.platform_system_restrictions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE, -- NULL means global system-wide restriction
+    feature_key TEXT NOT NULL REFERENCES public.commercial_feature_definitions(feature_key) ON DELETE RESTRICT,
+    is_restricted BOOLEAN NOT NULL DEFAULT true,
+    reason TEXT NOT NULL CHECK (trim(reason) != ''),
+    starts_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ CHECK (expires_at IS NULL OR expires_at > starts_at),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_platform_restrictions_lookup
+ON public.platform_system_restrictions (tenant_id, feature_key, starts_at);
+
+ALTER TABLE public.platform_system_restrictions ENABLE ROW LEVEL SECURITY;
+
+
+-- =========================================================================
+-- 8. SUBSCRIPTION EVENTS (APPEND-ONLY LEDGER)
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.subscription_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     subscription_id UUID NOT NULL REFERENCES public.subscriptions(id) ON DELETE CASCADE,
     tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    event_type TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK (trim(event_type) != ''),
     previous_state JSONB,
     new_state JSONB,
-    internal_reason TEXT NOT NULL,
-    idempotency_key TEXT UNIQUE,
+    internal_reason TEXT NOT NULL CHECK (trim(internal_reason) != ''),
+    idempotency_key TEXT UNIQUE CHECK (idempotency_key IS NULL OR trim(idempotency_key) != ''),
     actor_user_id UUID REFERENCES auth.users(id),
     actor_role TEXT,
     effective_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -517,26 +640,40 @@ ON public.subscription_events (tenant_id, subscription_id, created_at DESC);
 
 ALTER TABLE public.subscription_events ENABLE ROW LEVEL SECURITY;
 
--- Database-level Append-Only Enforcement Trigger for subscription_events
+-- Append-Only Enforcement & Tenant Consistency Trigger for subscription_events
 CREATE OR REPLACE FUNCTION public.enforce_append_only_subscription_events()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
+DECLARE
+    v_sub_tenant UUID;
 BEGIN
-    RAISE EXCEPTION 'APPEND_ONLY_VIOLATION: subscription_events is an immutable append-only audit ledger. UPDATE and DELETE are prohibited.' USING ERRCODE = 'P0001';
+    IF TG_OP IN ('UPDATE', 'DELETE') THEN
+        RAISE EXCEPTION 'APPEND_ONLY_VIOLATION: subscription_events is an immutable append-only audit ledger. UPDATE and DELETE are prohibited.' USING ERRCODE = 'P0001';
+    END IF;
+
+    -- Verify tenant_id matches subscription tenant_id
+    SELECT tenant_id INTO v_sub_tenant
+    FROM public.subscriptions WHERE id = NEW.subscription_id;
+
+    IF v_sub_tenant IS DISTINCT FROM NEW.tenant_id THEN
+        RAISE EXCEPTION 'CROSS_TENANT_EVENT_VIOLATION: subscription_events tenant_id must match subscription tenant_id.' USING ERRCODE = 'P0001';
+    END IF;
+
+    RETURN NEW;
 END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_enforce_append_only_subscription_events ON public.subscription_events;
 CREATE TRIGGER trg_enforce_append_only_subscription_events
-    BEFORE UPDATE OR DELETE ON public.subscription_events
+    BEFORE INSERT OR UPDATE OR DELETE ON public.subscription_events
     FOR EACH ROW EXECUTE FUNCTION public.enforce_append_only_subscription_events();
 
 
 -- =========================================================================
--- 8. BILLING TRANSACTIONS (APPEND-ONLY FINANCIAL LEDGER)
+-- 9. BILLING TRANSACTIONS (APPEND-ONLY FINANCIAL LEDGER)
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.billing_transactions (
@@ -551,15 +688,16 @@ CREATE TABLE IF NOT EXISTS public.billing_transactions (
     related_transaction_id UUID REFERENCES public.billing_transactions(id) ON DELETE RESTRICT,
     external_provider_reference TEXT,
     reference_note TEXT,
-    internal_reason TEXT NOT NULL,
-    idempotency_key TEXT UNIQUE NOT NULL,
+    internal_reason TEXT NOT NULL CHECK (trim(internal_reason) != ''),
+    idempotency_key TEXT UNIQUE NOT NULL CHECK (trim(idempotency_key) != ''),
     billing_period_start TIMESTAMPTZ,
     billing_period_end TIMESTAMPTZ CHECK (billing_period_end IS NULL OR billing_period_start IS NULL OR billing_period_end > billing_period_start),
     occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     effective_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by UUID REFERENCES auth.users(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    CONSTRAINT chk_billing_transactions_self_ref CHECK (related_transaction_id IS NULL OR related_transaction_id != id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_billing_transactions_tenant
@@ -567,26 +705,52 @@ ON public.billing_transactions (tenant_id, occurred_at DESC);
 
 ALTER TABLE public.billing_transactions ENABLE ROW LEVEL SECURITY;
 
--- Database-level Append-Only Enforcement Trigger for billing_transactions
+-- Financial Ledger Integrity & Append-Only Trigger
 CREATE OR REPLACE FUNCTION public.enforce_append_only_billing_transactions()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
+DECLARE
+    v_rel_tenant UUID;
+    v_rel_sub    UUID;
 BEGIN
-    RAISE EXCEPTION 'APPEND_ONLY_VIOLATION: billing_transactions is an immutable append-only financial ledger. UPDATE and DELETE are prohibited.' USING ERRCODE = 'P0001';
+    IF TG_OP IN ('UPDATE', 'DELETE') THEN
+        RAISE EXCEPTION 'APPEND_ONLY_VIOLATION: billing_transactions is an immutable append-only financial ledger. UPDATE and DELETE are prohibited.' USING ERRCODE = 'P0001';
+    END IF;
+
+    -- Refund and Reversal MUST reference an original transaction
+    IF NEW.transaction_type IN ('refund', 'reversal') AND NEW.related_transaction_id IS NULL THEN
+        RAISE EXCEPTION 'REFUND_REVERSAL_MUST_REFERENCE_TRANSACTION: % transactions must reference a valid original transaction.', NEW.transaction_type USING ERRCODE = 'P0001';
+    END IF;
+
+    -- Check related_transaction belongs to same tenant
+    IF NEW.related_transaction_id IS NOT NULL THEN
+        SELECT tenant_id, subscription_id INTO v_rel_tenant, v_rel_sub
+        FROM public.billing_transactions WHERE id = NEW.related_transaction_id;
+
+        IF v_rel_tenant IS DISTINCT FROM NEW.tenant_id THEN
+            RAISE EXCEPTION 'CROSS_TENANT_TRANSACTION_VIOLATION: Related transaction must belong to the same tenant.' USING ERRCODE = 'P0001';
+        END IF;
+
+        IF NEW.subscription_id IS NOT NULL AND v_rel_sub IS NOT NULL AND v_rel_sub IS DISTINCT FROM NEW.subscription_id THEN
+            RAISE EXCEPTION 'SUBSCRIPTION_MISMATCH_TRANSACTION_VIOLATION: Related transaction must belong to the same subscription.' USING ERRCODE = 'P0001';
+        END IF;
+    END IF;
+
+    RETURN NEW;
 END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_enforce_append_only_billing_transactions ON public.billing_transactions;
 CREATE TRIGGER trg_enforce_append_only_billing_transactions
-    BEFORE UPDATE OR DELETE ON public.billing_transactions
+    BEFORE INSERT OR UPDATE OR DELETE ON public.billing_transactions
     FOR EACH ROW EXECUTE FUNCTION public.enforce_append_only_billing_transactions();
 
 
 -- =========================================================================
--- 9. USAGE COUNTERS TABLE
+-- 10. USAGE COUNTERS TABLE
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.usage_counters (
@@ -605,7 +769,7 @@ ALTER TABLE public.usage_counters ENABLE ROW LEVEL SECURITY;
 
 
 -- =========================================================================
--- 10. INTERNAL READ HELPER: resolve_effective_tenant_entitlements
+-- 11. INTERNAL READ HELPER: resolve_effective_tenant_entitlements (4-LEVEL PRECEDENCE)
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.resolve_effective_tenant_entitlements(
@@ -649,6 +813,18 @@ BEGIN
         SELECT f.feature_key AS fkey, f.value_type AS vtype
         FROM public.commercial_feature_definitions f
     ),
+    -- Level 1: Platform / System Restriction (Highest Precedence)
+    platform_rest AS (
+        SELECT DISTINCT ON (pr.feature_key)
+            pr.feature_key AS fkey
+        FROM public.platform_system_restrictions pr
+        WHERE (pr.tenant_id = p_tenant_id OR pr.tenant_id IS NULL)
+          AND pr.is_restricted = true
+          AND pr.starts_at <= p_at
+          AND (pr.expires_at IS NULL OR pr.expires_at > p_at)
+        ORDER BY pr.feature_key, pr.tenant_id NULLS LAST, pr.starts_at DESC
+    ),
+    -- Level 2: Active Tenant Override
     active_overrides AS (
         SELECT DISTINCT ON (o.feature_key)
             o.id AS ovr_id,
@@ -666,6 +842,7 @@ BEGIN
           AND o.revoked_at IS NULL
         ORDER BY o.feature_key, o.starts_at DESC, o.created_at DESC
     ),
+    -- Level 3: Assigned Plan Version Default
     plan_defaults AS (
         SELECT
             pe.feature_key AS fkey,
@@ -682,33 +859,41 @@ BEGIN
         k.fkey AS feature_key,
         k.vtype AS value_type,
         CASE
+            WHEN pr.fkey IS NOT NULL AND k.vtype = 'boolean' THEN false
+            WHEN pr.fkey IS NOT NULL AND k.vtype = 'integer' THEN 0::bigint
+            WHEN pr.fkey IS NOT NULL THEN NULL
             WHEN o.ovr_id IS NOT NULL THEN o.bval
             WHEN pd.fkey IS NOT NULL THEN pd.bval
             WHEN k.vtype = 'boolean' THEN false
             ELSE NULL
         END AS boolean_value,
         CASE
+            WHEN pr.fkey IS NOT NULL THEN 0::bigint
             WHEN o.ovr_id IS NOT NULL THEN o.ival
             WHEN pd.fkey IS NOT NULL THEN pd.ival
             WHEN k.vtype = 'integer' THEN 0::bigint
             ELSE NULL
         END AS integer_value,
         CASE
+            WHEN pr.fkey IS NOT NULL THEN NULL
             WHEN o.ovr_id IS NOT NULL THEN o.tval
             WHEN pd.fkey IS NOT NULL THEN pd.tval
             ELSE NULL
         END AS text_value,
         CASE
+            WHEN pr.fkey IS NOT NULL THEN NULL
             WHEN o.ovr_id IS NOT NULL THEN o.jval
             WHEN pd.fkey IS NOT NULL THEN pd.jval
             ELSE NULL
         END AS json_value,
         CASE
+            WHEN pr.fkey IS NOT NULL THEN false
             WHEN o.ovr_id IS NOT NULL THEN o.unlim
             WHEN pd.fkey IS NOT NULL THEN pd.unlim
             ELSE false
         END AS is_unlimited,
         CASE
+            WHEN pr.fkey IS NOT NULL THEN 'platform_restriction'
             WHEN o.ovr_id IS NOT NULL THEN 'tenant_override'
             WHEN pd.fkey IS NOT NULL THEN 'plan_version'
             ELSE 'default_deny'
@@ -716,6 +901,7 @@ BEGIN
         v_sub_plan_version_id AS plan_version_id,
         o.ovr_id AS override_id
     FROM all_keys k
+    LEFT JOIN platform_rest pr ON pr.fkey = k.fkey
     LEFT JOIN active_overrides o ON o.fkey = k.fkey
     LEFT JOIN plan_defaults pd ON pd.fkey = k.fkey;
 END;
@@ -725,7 +911,7 @@ REVOKE EXECUTE ON FUNCTION public.resolve_effective_tenant_entitlements(UUID, TI
 
 
 -- =========================================================================
--- 11. PUBLIC RPC: get_public_commercial_plan_catalog
+-- 12. PUBLIC RPC: get_public_commercial_plan_catalog
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.get_public_commercial_plan_catalog()
@@ -789,7 +975,7 @@ GRANT EXECUTE ON FUNCTION public.get_public_commercial_plan_catalog() TO anon, a
 
 
 -- =========================================================================
--- 12. AUTHENTICATED RPC: get_my_commercial_subscription_snapshot
+-- 13. AUTHENTICATED RPC: get_my_commercial_subscription_snapshot
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.get_my_commercial_subscription_snapshot()
@@ -946,7 +1132,7 @@ GRANT EXECUTE ON FUNCTION public.get_my_commercial_subscription_snapshot() TO au
 
 
 -- =========================================================================
--- 13. SUPER ADMIN RPC: super_admin_get_commercial_catalog
+-- 14. SUPER ADMIN RPC: super_admin_get_commercial_catalog
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.super_admin_get_commercial_catalog()
@@ -1028,7 +1214,7 @@ GRANT EXECUTE ON FUNCTION public.super_admin_get_commercial_catalog() TO authent
 
 
 -- =========================================================================
--- 14. SUPER ADMIN RPC: super_admin_get_tenant_commercial_snapshot
+-- 15. SUPER ADMIN RPC: super_admin_get_tenant_commercial_snapshot
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.super_admin_get_tenant_commercial_snapshot(
@@ -1199,7 +1385,7 @@ GRANT EXECUTE ON FUNCTION public.super_admin_get_tenant_commercial_snapshot(UUID
 
 
 -- =========================================================================
--- 15. RLS POLICIES & DEFAULT DENY PRIVILEGES FOR NEW TABLES
+-- 16. RLS POLICIES & DEFAULT DENY PRIVILEGES FOR NEW TABLES
 -- =========================================================================
 
 -- Commercial Feature Definitions
@@ -1279,6 +1465,19 @@ USING (
           AND up.tenant_id = tenant_entitlement_overrides.tenant_id
     )
 );
+
+-- Platform System Restrictions
+DROP POLICY IF EXISTS "Super Admin Full Access on platform_system_restrictions" ON public.platform_system_restrictions;
+DROP POLICY IF EXISTS "Public Read Access on platform_system_restrictions" ON public.platform_system_restrictions;
+
+CREATE POLICY "Super Admin Full Access on platform_system_restrictions"
+ON public.platform_system_restrictions FOR ALL TO authenticated
+USING (public.is_super_admin(auth.uid()))
+WITH CHECK (public.is_super_admin(auth.uid()));
+
+CREATE POLICY "Public Read Access on platform_system_restrictions"
+ON public.platform_system_restrictions FOR SELECT TO anon, authenticated
+USING (true);
 
 -- Subscription Events
 DROP POLICY IF EXISTS "Super Admin Full Access on subscription_events" ON public.subscription_events;
