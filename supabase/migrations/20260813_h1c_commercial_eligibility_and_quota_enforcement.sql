@@ -519,6 +519,8 @@ BEGIN
     RETURN jsonb_build_object('success', true, 'reason_code', 'commercial_allowed',
         'current_usage', v_current + p_delta, 'limit_value', v_limit, 'is_unlimited', false);
 END;
+$$;
+
 REVOKE EXECUTE ON FUNCTION public.consume_commercial_usage(UUID, TEXT, TEXT, INT) FROM PUBLIC, anon, authenticated;
 
 -- =========================================================================
