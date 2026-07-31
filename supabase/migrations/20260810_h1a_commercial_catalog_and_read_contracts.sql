@@ -567,7 +567,6 @@ BEGIN
         published_at = now()
     WHERE lifecycle_status = 'draft';
 END $$;
-END $$;
 
 
 -- =========================================================================
