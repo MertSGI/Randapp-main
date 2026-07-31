@@ -1,9 +1,9 @@
 -- 20260810_h1a_commercial_catalog_and_read_contracts.sql
--- Stage H1A — Canonical Commercial Schema, Immutable Catalog Versioning, and Read Contracts (Hardened)
+-- Stage H1A — Canonical Commercial Schema, Immutable Catalog Versioning, and Read Contracts (Hardened & Concurrency-Safe)
 -- Description:
 -- Provisions:
---   1. public.commercial_feature_definitions (registered keys, types, categories, maturity)
---   2. public.plans & public.plan_versions (canonical plans, immutable plan codes, single published version enforcement, immutable versioning)
+--   1. public.commercial_feature_definitions (registered keys, types, categories, maturity, immutable value_type trigger)
+--   2. public.plans & public.plan_versions (canonical plans, immutable plan codes, concurrency-safe single published version enforcement, immutable versioning)
 --   3. public.plan_entitlements & type consistency triggers
 --   4. public.subscriptions schema alignment (plan_version_id, billing_mode, grace_until, commercial_version)
 --   5. public.tenant_entitlement_overrides & type consistency triggers
@@ -17,7 +17,7 @@
 --  13. Fail-closed RLS policies and execution grants.
 
 -- =========================================================================
--- 1. COMMERCIAL FEATURE DEFINITIONS TABLE
+-- 1. COMMERCIAL FEATURE DEFINITIONS TABLE & VALUE TYPE IMMUTABILITY TRIGGER
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.commercial_feature_definitions (
@@ -36,6 +36,26 @@ CREATE TABLE IF NOT EXISTS public.commercial_feature_definitions (
 CREATE TRIGGER update_commercial_feature_definitions_modtime
     BEFORE UPDATE ON public.commercial_feature_definitions
     FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Enforce value_type Immutability Trigger
+CREATE OR REPLACE FUNCTION public.enforce_feature_definition_immutability()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+    IF NEW.value_type IS DISTINCT FROM OLD.value_type THEN
+        RAISE EXCEPTION 'CANNOT_MUTATE_FEATURE_VALUE_TYPE: Changing feature value_type is prohibited as it invalidates existing entitlements and restrictions.' USING ERRCODE = 'P0001';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_enforce_feature_definition_immutability ON public.commercial_feature_definitions;
+CREATE TRIGGER trg_enforce_feature_definition_immutability
+    BEFORE UPDATE ON public.commercial_feature_definitions
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_feature_definition_immutability();
 
 ALTER TABLE public.commercial_feature_definitions ENABLE ROW LEVEL SECURITY;
 
@@ -140,7 +160,7 @@ ON CONFLICT (code) DO UPDATE SET
 
 
 -- =========================================================================
--- 3. PLAN VERSIONS TABLE, IMMUTABILITY & OVERLAP PREVENTION TRIGGERS
+-- 3. PLAN VERSIONS TABLE, IMMUTABILITY & CONCURRENCY-SAFE OVERLAP TRIGGERS
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.plan_versions (
@@ -166,7 +186,7 @@ CREATE TABLE IF NOT EXISTS public.plan_versions (
 
 ALTER TABLE public.plan_versions ENABLE ROW LEVEL SECURITY;
 
--- 3A. Single Effective Published Version Overlap Prevention Trigger
+-- 3A. Concurrency-Safe Single Effective Published Version Overlap Prevention Trigger
 CREATE OR REPLACE FUNCTION public.enforce_single_published_plan_version()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -177,6 +197,9 @@ DECLARE
     v_overlap_count INTEGER;
 BEGIN
     IF NEW.lifecycle_status = 'published' THEN
+        -- Acquire plan-scoped advisory lock to serialize concurrent published version checks for this plan_id
+        PERFORM pg_advisory_xact_lock(hashtextextended(NEW.plan_id::text, 0));
+
         SELECT COUNT(*) INTO v_overlap_count
         FROM public.plan_versions pv
         WHERE pv.plan_id = NEW.plan_id
