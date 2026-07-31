@@ -53,6 +53,9 @@ jobs:
       - name: Stage H1A Commercial Legacy Compatibility QA
         run: npm run qa:commercial-legacy-compatibility
 
+      - name: Stage H1B Commercial Super Admin Mutations QA
+        run: npm run qa:commercial-super-admin-mutations
+
       - name: Supabase Auth/RLS bootstrap QA
         run: npm run qa:supabase-auth-rls-bootstrap
 
