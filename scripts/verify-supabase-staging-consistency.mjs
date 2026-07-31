@@ -73,6 +73,7 @@ const CANONICAL_MIGRATIONS = [
   '20260809_admin_reschedule_decision_lock_and_reason_fix.sql',
   '20260810_h1a_commercial_catalog_and_read_contracts.sql',
   '20260811_h1b_super_admin_commercial_mutations.sql',
+  '20260812_h1b_apply_due_scheduled_plan_change_rpc.sql',
 ];
 
 // Check actual migration files on disk

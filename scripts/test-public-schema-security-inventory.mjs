@@ -15,7 +15,7 @@ console.log('=== Stage G1B — Public Schema Security Inventory QA ===\n');
 // 1. Verify all 35 migration files exist
 const migDir = path.join(process.cwd(), 'supabase', 'migrations');
 const files = fs.readdirSync(migDir).filter(f => f.endsWith('.sql'));
-assert(files.length >= 35 && files.length <= 36, `Migration files present (found: ${files.length})`);
+assert(files.length >= 35 && files.length <= 37, `Migration files present (found: ${files.length})`);
 
 // 2. Check Security Definer Search Path Enforcement
 let definerFunctions = 0;

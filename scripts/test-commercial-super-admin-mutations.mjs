@@ -28,6 +28,7 @@ const rpcs = [
   'super_admin_change_subscription_status',
   'super_admin_schedule_plan_change',
   'super_admin_cancel_scheduled_plan_change',
+  'super_admin_apply_due_scheduled_plan_change',
   'super_admin_record_billing_transaction',
   'super_admin_manage_tenant_entitlement_override'
 ];
