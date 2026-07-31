@@ -719,6 +719,8 @@ $$;
 REVOKE ALL ON FUNCTION public.can_accept_public_booking(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.can_accept_public_booking(text) TO anon, authenticated;
 
+DROP FUNCTION IF EXISTS public.create_public_booking(text, uuid, uuid, date, time, text, text, text, boolean, boolean, boolean, text);
+
 -- 3b. Updated create_public_booking with commercial enforcement
 CREATE OR REPLACE FUNCTION public.create_public_booking(
     p_slug              text,
