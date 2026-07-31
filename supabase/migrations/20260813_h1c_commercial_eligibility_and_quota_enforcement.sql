@@ -19,15 +19,8 @@ DECLARE
     v_plan_ver_id  UUID;
     v_sub_exists   BOOLEAN;
 BEGIN
-    -- Check if canonical tenant already has a subscription
-    SELECT EXISTS (
-        SELECT 1 FROM public.subscriptions WHERE tenant_id = v_tenant_id
-    ) INTO v_sub_exists;
-
-    IF v_sub_exists THEN
-        RAISE NOTICE 'Canonical tenant already has subscription — skipping bootstrap';
-        RETURN;
-    END IF;
+    -- Delete existing if any, to ensure deterministic active state
+    DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
 
     -- Get baslangic Version 1 published plan_version_id
     SELECT pv.id INTO v_plan_ver_id
