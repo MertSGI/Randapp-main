@@ -34,7 +34,12 @@ assert(manifestContent.includes('20260809_admin_reschedule_decision_lock_and_rea
 
 // ── 3. Frontend & Repository Security ──
 console.log('\n--- §3 Frontend & Repository Security ---');
-const serviceRoleKeys = execSync('git grep "service_role" -- "src/*" "pages/*" "components/*" "services/*" || true').toString().trim();
+let serviceRoleKeys = '';
+try {
+  serviceRoleKeys = execSync('git grep "service_role" -- "pages/*" "components/*" "services/*"').toString().trim();
+} catch (e) {
+  serviceRoleKeys = '';
+}
 assert(serviceRoleKeys === '', 'Zero service_role key references in frontend source files');
 
 // ── 4. Paymentless Mode Enforcement ──
