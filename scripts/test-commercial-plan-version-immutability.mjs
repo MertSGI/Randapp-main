@@ -54,6 +54,7 @@ assert(sql.includes('ENTITLEMENT_TYPE_MISMATCH'), 'ENTITLEMENT_TYPE_MISMATCH exc
 // 6. Seed Lifecycle Draft-to-Published & Completeness Guard
 assert(sql.includes("VALUES (v_baslangic_plan_id, 1, 'draft'"), 'Plan versions initially inserted as draft during seed');
 assert(sql.includes('INCOMPLETE_VERSION_1_SEED'), 'Seed completeness guard verification defined');
+assert(sql.includes('UNEXPECTED_ENTITLEMENT_KEY_COUNT'), 'Exact 21-item key set completeness guard verified');
 assert(sql.includes("SET lifecycle_status = 'published'"), 'Atomic draft-to-published transition verified');
 
 // 7. Append-Only Ledgers & Financial Integrity

@@ -552,13 +552,35 @@ BEGIN
         (v_standart_ver_id, 'dedicated_support', 'boolean', false, NULL, NULL, false)
     ON CONFLICT (plan_version_id, feature_key) DO NOTHING;
 
-    -- Seed Completeness Guard Verification
-    IF (SELECT count(*) FROM public.plan_entitlements WHERE plan_version_id = v_baslangic_ver_id) < 21 OR
-       (SELECT count(*) FROM public.plan_entitlements WHERE plan_version_id = v_pro_ver_id) < 21 OR
-       (SELECT count(*) FROM public.plan_entitlements WHERE plan_version_id = v_premium_ver_id) < 21 OR
-       (SELECT count(*) FROM public.plan_entitlements WHERE plan_version_id = v_kurumsal_ver_id) < 21 OR
-       (SELECT count(*) FROM public.plan_entitlements WHERE plan_version_id = v_standart_ver_id) < 21 THEN
-        RAISE EXCEPTION 'INCOMPLETE_VERSION_1_SEED: Cannot publish Version 1 plan versions because entitlement seeding is incomplete.' USING ERRCODE = 'P0001';
+    -- Seed Completeness Guard Verification: Exact Key Set Validation
+    -- 1. Verify that every Version 1 plan version contains ALL 21 required canonical feature keys
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES (v_baslangic_ver_id), (v_pro_ver_id), (v_premium_ver_id), (v_kurumsal_ver_id), (v_standart_ver_id)
+        ) AS v(ver_id)
+        CROSS JOIN (
+            VALUES
+                ('core_booking'), ('customer_self_service'), ('customer_cancellation'), ('customer_reschedule_request'),
+                ('admin_appointment_operations'), ('staff_management'), ('service_management'),
+                ('max_staff'), ('max_services'), ('max_branches'), ('max_monthly_appointments'),
+                ('notification_allowance'), ('ai_allowance'), ('lari_minisite'),
+                ('custom_domain_eligible'), ('custom_domain_included'), ('multi_branch'), ('white_label'),
+                ('crm_level'), ('priority_support'), ('dedicated_support')
+        ) AS k(feature_key)
+        LEFT JOIN public.plan_entitlements pe ON pe.plan_version_id = v.ver_id AND pe.feature_key = k.feature_key
+        WHERE pe.id IS NULL
+    ) THEN
+        RAISE EXCEPTION 'INCOMPLETE_VERSION_1_SEED: Cannot publish Version 1 plan versions because expected entitlement keys are missing.' USING ERRCODE = 'P0001';
+    END IF;
+
+    -- 2. Verify exact canonical key count 21 per version (no unexpected key substitution)
+    IF (SELECT count(DISTINCT feature_key) FROM public.plan_entitlements WHERE plan_version_id = v_baslangic_ver_id) != 21 OR
+       (SELECT count(DISTINCT feature_key) FROM public.plan_entitlements WHERE plan_version_id = v_pro_ver_id) != 21 OR
+       (SELECT count(DISTINCT feature_key) FROM public.plan_entitlements WHERE plan_version_id = v_premium_ver_id) != 21 OR
+       (SELECT count(DISTINCT feature_key) FROM public.plan_entitlements WHERE plan_version_id = v_kurumsal_ver_id) != 21 OR
+       (SELECT count(DISTINCT feature_key) FROM public.plan_entitlements WHERE plan_version_id = v_standart_ver_id) != 21 THEN
+        RAISE EXCEPTION 'UNEXPECTED_ENTITLEMENT_KEY_COUNT: Version 1 plan version entitlement key set does not match exact canonical count 21.' USING ERRCODE = 'P0001';
     END IF;
 
     -- Atomic Transition from Draft to Published
