@@ -38,6 +38,21 @@ jobs:
       - name: Supabase staging consistency QA
         run: npm run qa:supabase-staging-consistency
 
+      - name: Stage H1A Commercial Schema Foundation QA
+        run: npm run qa:commercial-schema-foundation
+
+      - name: Stage H1A Commercial Plan Version Immutability QA
+        run: npm run qa:commercial-plan-version-immutability
+
+      - name: Stage H1A Commercial Read Contracts QA
+        run: npm run qa:commercial-read-contracts
+
+      - name: Stage H1A Commercial Security QA
+        run: npm run qa:commercial-security
+
+      - name: Stage H1A Commercial Legacy Compatibility QA
+        run: npm run qa:commercial-legacy-compatibility
+
       - name: Supabase Auth/RLS bootstrap QA
         run: npm run qa:supabase-auth-rls-bootstrap
 
