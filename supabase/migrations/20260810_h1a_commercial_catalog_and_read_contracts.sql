@@ -1489,14 +1489,12 @@ USING (
     )
 );
 
--- Platform System Restrictions (Strict Super Admin Access Only)
+-- Platform System Restrictions (Strict Client Default-Deny RLS; Internal SECURITY DEFINER Read Only)
 DROP POLICY IF EXISTS "Super Admin Full Access on platform_system_restrictions" ON public.platform_system_restrictions;
 DROP POLICY IF EXISTS "Public Read Access on platform_system_restrictions" ON public.platform_system_restrictions;
-
-CREATE POLICY "Super Admin Full Access on platform_system_restrictions"
-ON public.platform_system_restrictions FOR ALL TO authenticated
-USING (public.is_super_admin(auth.uid()))
-WITH CHECK (public.is_super_admin(auth.uid()));
+-- RLS remains enabled with ZERO permissive policies for anon or authenticated roles.
+-- Direct client/browser table access (SELECT/INSERT/UPDATE/DELETE) is 100% denied.
+-- Internal helper public.resolve_effective_tenant_entitlements reads this table via SECURITY DEFINER.
 
 -- Subscription Events
 DROP POLICY IF EXISTS "Super Admin Full Access on subscription_events" ON public.subscription_events;

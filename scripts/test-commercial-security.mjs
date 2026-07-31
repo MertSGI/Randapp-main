@@ -33,12 +33,13 @@ if (!sqlContent.includes('public.is_super_admin(auth.uid())')) {
 }
 console.log('✅ PASS: Super Admin authorization checks verified in RLS policies');
 
-// Check that platform_system_restrictions DOES NOT create a public read policy
-if (sqlContent.includes('CREATE POLICY "Public Read Access on platform_system_restrictions"')) {
-  console.error('❌ FAIL: platform_system_restrictions must NOT have a public read access policy.');
+// Check that platform_system_restrictions DOES NOT create a public or super_admin direct table policy (strict default-deny for browser clients)
+if (sqlContent.includes('CREATE POLICY "Public Read Access on platform_system_restrictions"') ||
+    sqlContent.includes('CREATE POLICY "Super Admin Full Access on platform_system_restrictions"')) {
+  console.error('❌ FAIL: platform_system_restrictions must NOT have direct client table policies (strict client default-deny required).');
   process.exit(1);
 }
-console.log('✅ PASS: platform_system_restrictions strictly lacks public read policy (Super Admin only direct access)');
+console.log('✅ PASS: platform_system_restrictions enforces strict client default-deny RLS (0 client policies; internal SECURITY DEFINER access only)');
 
 console.log('\n══════════════════════════════════════════════════════════');
 console.log('✅ Stage H1A Commercial Security QA PASSED.\n');
