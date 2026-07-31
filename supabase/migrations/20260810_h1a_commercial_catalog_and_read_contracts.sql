@@ -842,7 +842,7 @@ RETURNS TABLE (
     boolean_value BOOLEAN,
     integer_value BIGINT,
     text_value TEXT,
-    json_value JSONB,
+    "json_value" JSONB,
     is_unlimited BOOLEAN,
     source TEXT,
     plan_version_id UUID,
@@ -945,7 +945,7 @@ BEGIN
             WHEN o.ovr_id IS NOT NULL THEN o.jval
             WHEN pd.fkey IS NOT NULL THEN pd.jval
             ELSE NULL
-        END AS json_value,
+        END AS "json_value",
         CASE
             WHEN pr.fkey IS NOT NULL THEN false
             WHEN o.ovr_id IS NOT NULL THEN o.unlim
