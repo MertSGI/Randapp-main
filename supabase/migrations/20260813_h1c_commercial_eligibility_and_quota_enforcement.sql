@@ -449,22 +449,34 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-    v_quota      JSONB;
+    v_quota        JSONB;
     v_is_unlimited BOOLEAN;
-    v_limit      BIGINT;
-    v_current    BIGINT;
-    v_lock_key   BIGINT;
+    v_limit        BIGINT;
+    v_current      BIGINT;
+    v_lock_key     BIGINT;
+    v_pstart       TIMESTAMPTZ;
+    v_pend         TIMESTAMPTZ;
 BEGIN
+    -- Resolve period timestamps
+    IF p_period_key ~ '^\d{4}-\d{2}$' THEN
+        v_pstart := to_timestamp(p_period_key || '-01 00:00:00', 'YYYY-MM-DD HH24:MI:SS');
+        v_pend   := v_pstart + interval '1 month';
+    ELSE
+        v_pstart := '1970-01-01 00:00:00+00'::timestamptz;
+        v_pend   := '9999-12-31 23:59:59+00'::timestamptz;
+    END IF;
+
     -- Resolve quota
     v_quota := public.resolve_commercial_quota(p_tenant_id, p_feature_key);
     v_is_unlimited := (v_quota->>'is_unlimited')::boolean;
 
     IF v_is_unlimited THEN
         -- Still track usage but never reject
-        INSERT INTO public.usage_counters (tenant_id, feature_key, period_key, usage_count)
-        VALUES (p_tenant_id, p_feature_key, p_period_key, p_delta)
+        INSERT INTO public.usage_counters (tenant_id, feature_key, period_start, period_end, period_key, usage_count, used_count)
+        VALUES (p_tenant_id, p_feature_key, v_pstart, v_pend, p_period_key, p_delta, p_delta)
         ON CONFLICT (tenant_id, feature_key, period_key)
         DO UPDATE SET usage_count = public.usage_counters.usage_count + p_delta,
+                      used_count = public.usage_counters.used_count + p_delta,
                       updated_at = now();
 
         SELECT usage_count INTO v_current
@@ -482,8 +494,8 @@ BEGIN
     PERFORM pg_advisory_xact_lock(v_lock_key);
 
     -- Upsert with initial 0 if missing, then read current
-    INSERT INTO public.usage_counters (tenant_id, feature_key, period_key, usage_count)
-    VALUES (p_tenant_id, p_feature_key, p_period_key, 0)
+    INSERT INTO public.usage_counters (tenant_id, feature_key, period_start, period_end, period_key, usage_count, used_count)
+    VALUES (p_tenant_id, p_feature_key, v_pstart, v_pend, p_period_key, 0, 0)
     ON CONFLICT (tenant_id, feature_key, period_key) DO NOTHING;
 
     SELECT usage_count INTO v_current
@@ -499,14 +511,14 @@ BEGIN
 
     -- Consume
     UPDATE public.usage_counters
-    SET usage_count = usage_count + p_delta, updated_at = now()
+    SET usage_count = usage_count + p_delta,
+        used_count = used_count + p_delta,
+        updated_at = now()
     WHERE tenant_id = p_tenant_id AND feature_key = p_feature_key AND period_key = p_period_key;
 
     RETURN jsonb_build_object('success', true, 'reason_code', 'commercial_allowed',
         'current_usage', v_current + p_delta, 'limit_value', v_limit, 'is_unlimited', false);
 END;
-$$;
-
 REVOKE EXECUTE ON FUNCTION public.consume_commercial_usage(UUID, TEXT, TEXT, INT) FROM PUBLIC, anon, authenticated;
 
 -- =========================================================================
