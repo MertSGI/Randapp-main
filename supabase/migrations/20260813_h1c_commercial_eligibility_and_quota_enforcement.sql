@@ -963,9 +963,8 @@ BEGIN
         'appointment_id', v_appointment_id,
         'manage_token',   v_token,
         'reason_code',    'ok'
-    );
 EXCEPTION WHEN OTHERS THEN
-    RETURN jsonb_build_object('success', false, 'reason_code', 'temporary_failure');
+    RETURN jsonb_build_object('success', false, 'reason_code', 'temporary_failure', 'debug_stage', v_stage, 'debug_sqlerrm', SQLERRM);
 END;
 $$;
 
