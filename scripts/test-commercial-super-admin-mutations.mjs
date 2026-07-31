@@ -12,10 +12,13 @@ function assert(condition, message) {
 
 console.log('=== Stage H1B — Super Admin Commercial Mutation Backend QA ===\n');
 
-const migPath = path.join(process.cwd(), 'supabase', 'migrations', '20260811_h1b_super_admin_commercial_mutations.sql');
-assert(fs.existsSync(migPath), 'Migration 36 file 20260811_h1b_super_admin_commercial_mutations.sql exists');
-
-const sql = fs.readFileSync(migPath, 'utf8');
+const h1bFiles = ['20260811_h1b_super_admin_commercial_mutations.sql', '20260812_h1b_apply_due_scheduled_plan_change_rpc.sql'];
+let sql = '';
+for (const f of h1bFiles) {
+  const p = path.join(process.cwd(), 'supabase', 'migrations', f);
+  assert(fs.existsSync(p), `H1B migration file ${f} exists`);
+  sql += fs.readFileSync(p, 'utf8') + '\n';
+}
 
 // 1. Schema Extensions & Idempotency
 assert(sql.includes('scheduled_plan_version_id UUID'), 'scheduled_plan_version_id column added to subscriptions');
