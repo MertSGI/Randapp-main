@@ -51,14 +51,19 @@ assert(sql.includes('trg_enforce_plan_entitlement_immutability'), 'Immutability 
 assert(sql.includes('enforce_entitlement_type_consistency'), 'enforce_entitlement_type_consistency function verified');
 assert(sql.includes('ENTITLEMENT_TYPE_MISMATCH'), 'ENTITLEMENT_TYPE_MISMATCH exception defined');
 
-// 6. Append-Only Ledgers & Financial Integrity
+// 6. Seed Lifecycle Draft-to-Published & Completeness Guard
+assert(sql.includes("VALUES (v_baslangic_plan_id, 1, 'draft'"), 'Plan versions initially inserted as draft during seed');
+assert(sql.includes('INCOMPLETE_VERSION_1_SEED'), 'Seed completeness guard verification defined');
+assert(sql.includes("SET lifecycle_status = 'published'"), 'Atomic draft-to-published transition verified');
+
+// 7. Append-Only Ledgers & Financial Integrity
 assert(sql.includes('enforce_append_only_subscription_events'), 'enforce_append_only_subscription_events function verified');
 assert(sql.includes('enforce_append_only_billing_transactions'), 'enforce_append_only_billing_transactions function verified');
 assert(sql.includes('REFUND_REVERSAL_MUST_REFERENCE_TRANSACTION'), 'Refund/Reversal linkage check verified');
 assert(sql.includes('CROSS_TENANT_TRANSACTION_VIOLATION'), 'Cross-tenant transaction check verified');
 assert(sql.includes('CROSS_TENANT_EVENT_VIOLATION'), 'Cross-tenant event check verified');
 
-// 7. Platform System Restriction (Level 1 Precedence)
+// 8. Platform System Restriction (Level 1 Precedence)
 assert(sql.includes('platform_system_restrictions'), 'platform_system_restrictions table defined');
 assert(sql.includes('platform_restriction'), 'platform_restriction source precedence integrated into resolve_effective_tenant_entitlements');
 

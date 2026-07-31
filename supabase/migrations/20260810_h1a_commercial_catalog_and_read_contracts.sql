@@ -386,7 +386,7 @@ BEGIN
     SELECT id INTO v_baslangic_ver_id FROM public.plan_versions WHERE plan_id = v_baslangic_plan_id AND version_number = 1;
     IF v_baslangic_ver_id IS NULL THEN
         INSERT INTO public.plan_versions (plan_id, version_number, lifecycle_status, currency, monthly_price, annual_price, annual_discount_percent, setup_fee, trial_days, published_at, internal_note)
-        VALUES (v_baslangic_plan_id, 1, 'published', 'TRY', 990.00, 9504.00, 20.00, 0.00, 14, now(), 'Approved Version 1 Catalog')
+        VALUES (v_baslangic_plan_id, 1, 'draft', 'TRY', 990.00, 9504.00, 20.00, 0.00, 14, NULL, 'Approved Version 1 Catalog')
         RETURNING id INTO v_baslangic_ver_id;
     END IF;
 
@@ -394,7 +394,7 @@ BEGIN
     SELECT id INTO v_pro_ver_id FROM public.plan_versions WHERE plan_id = v_pro_plan_id AND version_number = 1;
     IF v_pro_ver_id IS NULL THEN
         INSERT INTO public.plan_versions (plan_id, version_number, lifecycle_status, currency, monthly_price, annual_price, annual_discount_percent, setup_fee, trial_days, published_at, internal_note)
-        VALUES (v_pro_plan_id, 1, 'published', 'TRY', 2490.00, 23904.00, 20.00, 0.00, 14, now(), 'Approved Version 1 Catalog')
+        VALUES (v_pro_plan_id, 1, 'draft', 'TRY', 2490.00, 23904.00, 20.00, 0.00, 14, NULL, 'Approved Version 1 Catalog')
         RETURNING id INTO v_pro_ver_id;
     END IF;
 
@@ -402,7 +402,7 @@ BEGIN
     SELECT id INTO v_premium_ver_id FROM public.plan_versions WHERE plan_id = v_premium_plan_id AND version_number = 1;
     IF v_premium_ver_id IS NULL THEN
         INSERT INTO public.plan_versions (plan_id, version_number, lifecycle_status, currency, monthly_price, annual_price, annual_discount_percent, setup_fee, trial_days, published_at, internal_note)
-        VALUES (v_premium_plan_id, 1, 'published', 'TRY', 4490.00, 43104.00, 20.00, 0.00, 14, now(), 'Approved Version 1 Catalog')
+        VALUES (v_premium_plan_id, 1, 'draft', 'TRY', 4490.00, 43104.00, 20.00, 0.00, 14, NULL, 'Approved Version 1 Catalog')
         RETURNING id INTO v_premium_ver_id;
     END IF;
 
@@ -410,7 +410,7 @@ BEGIN
     SELECT id INTO v_kurumsal_ver_id FROM public.plan_versions WHERE plan_id = v_kurumsal_plan_id AND version_number = 1;
     IF v_kurumsal_ver_id IS NULL THEN
         INSERT INTO public.plan_versions (plan_id, version_number, lifecycle_status, currency, monthly_price, annual_price, annual_discount_percent, setup_fee, trial_days, published_at, internal_note)
-        VALUES (v_kurumsal_plan_id, 1, 'published', NULL, NULL, NULL, NULL, NULL, NULL, now(), 'Enterprise Custom Agreements')
+        VALUES (v_kurumsal_plan_id, 1, 'draft', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'Enterprise Custom Agreements')
         RETURNING id INTO v_kurumsal_ver_id;
     END IF;
 
@@ -418,7 +418,7 @@ BEGIN
     SELECT id INTO v_standart_ver_id FROM public.plan_versions WHERE plan_id = v_standart_plan_id AND version_number = 1;
     IF v_standart_ver_id IS NULL THEN
         INSERT INTO public.plan_versions (plan_id, version_number, lifecycle_status, currency, monthly_price, annual_price, annual_discount_percent, setup_fee, trial_days, published_at, internal_note)
-        VALUES (v_standart_plan_id, 1, 'published', 'TRY', 2490.00, 23904.00, 20.00, 0.00, 14, now(), 'Legacy Standart compatibility snapshot')
+        VALUES (v_standart_plan_id, 1, 'draft', 'TRY', 2490.00, 23904.00, 20.00, 0.00, 14, NULL, 'Legacy Standart compatibility snapshot')
         RETURNING id INTO v_standart_ver_id;
     END IF;
 
@@ -551,6 +551,22 @@ BEGIN
         (v_standart_ver_id, 'priority_support', 'boolean', false, NULL, NULL, false),
         (v_standart_ver_id, 'dedicated_support', 'boolean', false, NULL, NULL, false)
     ON CONFLICT (plan_version_id, feature_key) DO NOTHING;
+
+    -- Seed Completeness Guard Verification
+    IF (SELECT count(*) FROM public.plan_entitlements WHERE plan_version_id = v_baslangic_ver_id) < 21 OR
+       (SELECT count(*) FROM public.plan_entitlements WHERE plan_version_id = v_pro_ver_id) < 21 OR
+       (SELECT count(*) FROM public.plan_entitlements WHERE plan_version_id = v_premium_ver_id) < 21 OR
+       (SELECT count(*) FROM public.plan_entitlements WHERE plan_version_id = v_kurumsal_ver_id) < 21 OR
+       (SELECT count(*) FROM public.plan_entitlements WHERE plan_version_id = v_standart_ver_id) < 21 THEN
+        RAISE EXCEPTION 'INCOMPLETE_VERSION_1_SEED: Cannot publish Version 1 plan versions because entitlement seeding is incomplete.' USING ERRCODE = 'P0001';
+    END IF;
+
+    -- Atomic Transition from Draft to Published
+    UPDATE public.plan_versions
+    SET lifecycle_status = 'published',
+        published_at = now()
+    WHERE lifecycle_status = 'draft';
+END $$;
 END $$;
 
 
