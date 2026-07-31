@@ -1489,7 +1489,7 @@ USING (
     )
 );
 
--- Platform System Restrictions
+-- Platform System Restrictions (Strict Super Admin Access Only)
 DROP POLICY IF EXISTS "Super Admin Full Access on platform_system_restrictions" ON public.platform_system_restrictions;
 DROP POLICY IF EXISTS "Public Read Access on platform_system_restrictions" ON public.platform_system_restrictions;
 
@@ -1497,10 +1497,6 @@ CREATE POLICY "Super Admin Full Access on platform_system_restrictions"
 ON public.platform_system_restrictions FOR ALL TO authenticated
 USING (public.is_super_admin(auth.uid()))
 WITH CHECK (public.is_super_admin(auth.uid()));
-
-CREATE POLICY "Public Read Access on platform_system_restrictions"
-ON public.platform_system_restrictions FOR SELECT TO anon, authenticated
-USING (true);
 
 -- Subscription Events
 DROP POLICY IF EXISTS "Super Admin Full Access on subscription_events" ON public.subscription_events;
