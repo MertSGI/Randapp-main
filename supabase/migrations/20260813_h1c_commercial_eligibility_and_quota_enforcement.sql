@@ -81,6 +81,26 @@ BEGIN
 END;
 $$;
 
+-- Ensure usage_counters has period_key and usage_count columns
+ALTER TABLE public.usage_counters
+ADD COLUMN IF NOT EXISTS period_key TEXT NOT NULL DEFAULT 'lifetime',
+ADD COLUMN IF NOT EXISTS usage_count BIGINT NOT NULL DEFAULT 0 CHECK (usage_count >= 0);
+
+-- Drop old primary key and recreate with period_key if needed
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'usage_counters_pkey_period_key'
+    ) THEN
+        ALTER TABLE public.usage_counters DROP CONSTRAINT IF EXISTS usage_counters_pkey;
+        ALTER TABLE public.usage_counters ADD CONSTRAINT usage_counters_pkey_period_key PRIMARY KEY (tenant_id, feature_key, period_key);
+    END IF;
+EXCEPTION WHEN OTHERS THEN
+    NULL; -- Ignore if constraint modification already applied
+END;
+$$;
+
 -- =========================================================================
 -- SECTION 1: INTERNAL HELPERS (NOT browser-callable)
 -- =========================================================================
