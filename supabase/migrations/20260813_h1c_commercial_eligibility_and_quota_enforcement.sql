@@ -17,11 +17,8 @@ DO $$
 DECLARE
     v_tenant_id    UUID := 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa';
     v_plan_ver_id  UUID;
-    v_sub_exists   BOOLEAN;
+    v_sub_id       UUID;
 BEGIN
-    -- Delete existing if any, to ensure deterministic active state
-    DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
-
     -- Get baslangic Version 1 published plan_version_id
     SELECT pv.id INTO v_plan_ver_id
     FROM public.plan_versions pv
@@ -35,14 +32,35 @@ BEGIN
         RAISE EXCEPTION 'Cannot bootstrap: baslangic Version 1 published plan not found';
     END IF;
 
-    -- Insert canonical subscription
-    INSERT INTO public.subscriptions (
-        tenant_id, plan_id, plan_version_id, status, billing_mode,
-        current_period_start, current_period_end
-    ) VALUES (
-        v_tenant_id, 'baslangic', v_plan_ver_id, 'active', 'manual',
-        now(), now() + interval '1 year'
-    );
+    -- Check if canonical tenant already has a subscription
+    SELECT id INTO v_sub_id
+    FROM public.subscriptions
+    WHERE tenant_id = v_tenant_id
+    ORDER BY created_at DESC
+    LIMIT 1;
+
+    IF v_sub_id IS NOT NULL THEN
+        -- Update existing subscription to active baslangic
+        UPDATE public.subscriptions
+        SET plan_id = 'baslangic',
+            plan_version_id = v_plan_ver_id,
+            status = 'active',
+            billing_mode = 'manual',
+            current_period_start = now(),
+            current_period_end = now() + interval '1 year',
+            updated_at = now()
+        WHERE id = v_sub_id;
+    ELSE
+        -- Insert new canonical subscription
+        INSERT INTO public.subscriptions (
+            tenant_id, plan_id, plan_version_id, status, billing_mode,
+            current_period_start, current_period_end
+        ) VALUES (
+            v_tenant_id, 'baslangic', v_plan_ver_id, 'active', 'manual',
+            now(), now() + interval '1 year'
+        )
+        RETURNING id INTO v_sub_id;
+    END IF;
 
     -- Record bootstrap event
     INSERT INTO public.subscription_events (
@@ -57,8 +75,7 @@ BEGIN
         'H1C staging commercial enforcement bootstrap',
         'system'
     FROM public.subscriptions s
-    WHERE s.tenant_id = v_tenant_id
-    LIMIT 1;
+    WHERE s.id = v_sub_id;
 
     RAISE NOTICE 'Canonical tenant bootstrapped with baslangic Version 1 active/manual';
 END;
