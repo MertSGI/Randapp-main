@@ -27,6 +27,9 @@ const adminPagePath = path.join(process.cwd(), 'pages', 'AdminPage.tsx');
 assert(fs.existsSync(adminPagePath), 'AdminPage.tsx exists');
 const adminPageContent = fs.readFileSync(adminPagePath, 'utf8');
 
+const mountCount = (adminPageContent.match(/<RescheduleRequestsTab/g) || []).length;
+assert(mountCount === 1, `RescheduleRequestsTab is mounted exactly once in AdminPage.tsx (found: ${mountCount})`);
+
 // 4. Role Authorization Assertions
 assert(compContent.includes("userRole === 'tenant_owner'"), 'Owner authorization check present');
 assert(compContent.includes("userRole === 'super_admin'"), 'Super admin authorization check present');

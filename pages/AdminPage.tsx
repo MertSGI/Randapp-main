@@ -958,13 +958,6 @@ const AdminPage: React.FC = () => {
         tabAvailability['appointments']?.isAccessible === false 
           ? renderLockedFeature(tabAvailability['appointments']!.lockReason!, tabAvailability['appointments']!.recommendedAction) 
           : <div className="space-y-6">
-              {(currentUser?.role === 'tenant_owner' || currentUser?.role === 'super_admin') && (
-                <RescheduleRequestsTab
-                  userRole={currentUser?.role || 'tenant_owner'}
-                  onAppointmentUpdated={() => setAppointmentRetryNonce(n => n + 1)}
-                />
-              )}
-
               <div className="bg-white dark:bg-slate-800 shadow overflow-hidden sm:rounded-md transition-colors duration-300">
             <div className="px-4 py-5 sm:px-6 bg-gray-50 dark:bg-slate-800/80 border-b border-gray-200 dark:border-slate-700 flex justify-between items-center transition-colors duration-300">
               <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white transition-colors duration-300">{t.admin.recent_title}</h3>
