@@ -76,6 +76,7 @@ const CANONICAL_MIGRATIONS = [
   '20260812_h1b_apply_due_scheduled_plan_change_rpc.sql',
   '20260813_h1c_commercial_eligibility_and_quota_enforcement.sql',
   '20260814_h1c_feature_gate_reason_code_fix.sql',
+  '20260815_h1c_usage_counters_invariant.sql',
 ];
 
 // Check actual migration files on disk
