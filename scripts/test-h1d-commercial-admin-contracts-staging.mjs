@@ -823,14 +823,22 @@ async function runCliAcceptance() {
   console.log(`Executed behavioral cases: ${executedBehavioralCasesCount}`);
   console.log(`Passed behavioral cases: ${passedBehavioralCasesCount}`);
   console.log(`Failed behavioral cases: ${failedBehavioralCasesCount}`);
+  // Honest Physical Fixture Accounting Output
   console.log(`Cleanup attempted: ${cleanupAttempted}`);
-  console.log(`Remaining fixtures: ${remainingFixtures}`);
+  console.log(`Restriction rows remaining: ${remainingFixtures}`);
+  console.log(`Audit rows remaining: UNKNOWN_PENDING_SQL`);
+  console.log(`Idempotency rows remaining: UNKNOWN_PENDING_SQL`);
+  console.log(`Billing rows remaining: NOT_CREATED`);
   console.log(`Manual cleanup required: ${manualCleanupRequired}`);
   console.log(`Manual verification required: ${manualVerificationRequired}`);
 
+  console.log('\n⚠️ AUDIT_IDEMPOTENCY_SIDE_EFFECT_SQL_VERIFICATION_REQUIRED');
+  console.log('Browser-safe REST endpoints cannot read audit or idempotency ledgers directly.');
+  console.log('Run the generated zero-count SQL verification query in Supabase SQL Editor to verify complete cleanup.\n');
+
   if (manualCleanupRequired) {
     const { sql, verifySql } = generateManualCleanupSql(runId, Array.from(trackedRestrictionSet), usedIdempotencyKeys, testTenantId);
-    console.log('\n' + sql);
+    console.log(sql);
     console.log('\n' + verifySql);
   }
 

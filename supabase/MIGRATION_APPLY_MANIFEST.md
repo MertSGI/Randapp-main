@@ -50,6 +50,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 40. **`20260815_h1c_usage_counters_invariant.sql`** — Stage H1C Counter Invariant Fix: Adds strict database-level CHECK constraint (chk_usage_counters_mirror_equality) requiring usage_count = used_count on public.usage_counters. Establishes used_count as canonical consumed counter and usage_count as compatibility read mirror.
 41. **`20260816_h1d_missing_commercial_admin_contracts.sql`** — Stage H1D Provisions missing super_admin commercial management contracts for fine-grained tenant plan adjustments and feature gate overrides.
 42. **`20260817_h1d_contract_truth_and_idempotency_fix.sql`** — Stage H1D Migration 42 redefines super_admin_create_platform_restriction, super_admin_end_platform_restriction, and super_admin_list_tenant_commercial_directory to enforce mandatory idempotency key, structured conflict/replay envelopes, and Boolean OR directory plan filter.
+43. **`20260818_h1d_idempotency_concurrency_and_filter_fix.sql`** — Stage H1D Migration 43 redefines super_admin_create_platform_restriction, super_admin_end_platform_restriction, and super_admin_list_tenant_commercial_directory to add transaction advisory locks, complete create fingerprints, and explicit 'none' directory filter semantics.
 
 ---
 

@@ -78,6 +78,8 @@ const CANONICAL_MIGRATIONS = [
   '20260814_h1c_feature_gate_reason_code_fix.sql',
   '20260815_h1c_usage_counters_invariant.sql',
   '20260816_h1d_missing_commercial_admin_contracts.sql',
+  '20260817_h1d_contract_truth_and_idempotency_fix.sql',
+  '20260818_h1d_idempotency_concurrency_and_filter_fix.sql',
 ];
 
 // Check actual migration files on disk
