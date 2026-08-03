@@ -8,8 +8,8 @@ const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort
 
 console.log(`Total migration files found: ${files.length}`);
 
-if (files.length < 35 || files.length > 40) {
-  console.error(`❌ FAIL: Expected between 35 and 40 migration files, found ${files.length}`);
+if (files.length < 35 || files.length > 41) {
+  console.error(`❌ FAIL: Expected between 35 and 41 migration files, found ${files.length}`);
   process.exit(1);
 }
 console.log(`✅ PASS: Migration count is ${files.length} (Parity ${files.length}/${files.length})`);
