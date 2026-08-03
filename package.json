@@ -86,6 +86,7 @@
     "qa:commercial-legacy-compatibility": "node scripts/test-commercial-legacy-compatibility.mjs",
     "qa:commercial-super-admin-mutations": "node scripts/test-commercial-super-admin-mutations.mjs",
     "qa:commercial-eligibility-enforcement": "node scripts/test-commercial-eligibility-enforcement.mjs",
+    "qa:commercial-super-admin-ui": "node scripts/test-super-admin-commercial-ui.mjs",
     "qa:e1-token-cancellation-matrix": "node scripts/execute-e1-token-cancellation-matrix.mjs",
     "smoke:supabase-paymentless-staging": "node scripts/smoke-supabase-paymentless-staging.mjs",
     "qa:cutover-runbook": "node scripts/verify-live-cutover-runbook.mjs",

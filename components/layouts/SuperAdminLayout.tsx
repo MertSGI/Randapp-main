@@ -41,6 +41,7 @@ const SuperAdminLayout: React.FC = () => {
     { label: 'Sandbox ve Yayın Hazırlığı', path: '/super-admin/go-live' },
     { label: 'Pilot Müşteriler', path: '/super-admin/pilots' },
     { label: 'Zamanlayıcı & Arka Plan', path: '/super-admin/scheduler' },
+    { label: 'Ticari Yönetim & Lisans', path: '/super-admin/commercial' },
     { label: 'Gözlemlenebilirlik & Destek', path: '/super-admin/observability' },
     { label: 'Hukuk & KVKK Paneli', path: '/super-admin/legal' },
   ];
