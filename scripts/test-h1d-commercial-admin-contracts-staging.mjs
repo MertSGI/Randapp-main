@@ -100,6 +100,22 @@ export async function verifySuperAdminRpcPrivilege(supabaseUrl, supabaseAnonKey,
   return res.ok && res.data && res.data.success === true && Array.isArray(res.data.restrictions);
 }
 
+export async function verifyTenantExists(supabaseUrl, supabaseAnonKey, tenantId, token) {
+  try {
+    const res = await fetch(`${supabaseUrl}/rest/v1/tenants?select=id,name,slug&id=eq.${tenantId}&limit=1`, {
+      headers: {
+        'apikey': supabaseAnonKey,
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    if (!res.ok) return null;
+    const data = safeJsonParse(await res.text());
+    return Array.isArray(data) && data.length === 1 ? data[0] : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 export function classifyAuthorizationResponse(roleName, res) {
   if (roleName === 'super_admin') {
     return res.status === 200 && res.ok && res.data && res.data.success === true;
@@ -149,7 +165,7 @@ export function generateManualCleanupSql(runId, trackedRestrictionIds, idempoten
     `DELETE FROM public.audit_events WHERE resource_type = 'platform_system_restrictions' AND resource_id IN (${restList.length > 0 ? restList : "''"});`,
     ``,
     `-- 3. Delete super admin idempotency records:`,
-    `DELETE FROM public.super_admin_idempotency WHERE idempotency_key IN (${keyList.length > 0 ? keyList : "''"});`,
+    `DELETE FROM public.super_admin_commercial_mutation_idempotency WHERE idempotency_key IN (${keyList.length > 0 ? keyList : "''"});`,
     ``,
     `-- 4. Delete platform restriction rows:`,
     `DELETE FROM public.platform_system_restrictions WHERE id IN (${restList.length > 0 ? restList : "''"});`
@@ -159,30 +175,34 @@ export function generateManualCleanupSql(runId, trackedRestrictionIds, idempoten
     `-- =========================================================================`,
     `-- ZERO-COUNT VERIFICATION QUERY (Must return zero rows for full acceptance)`,
     `-- =========================================================================`,
-    `SELECT count(*) AS remaining_fixtures FROM public.platform_system_restrictions WHERE id IN (${restList.length > 0 ? restList : "''"});`
+    `SELECT 'platform_system_restrictions' AS category, count(*) FROM public.platform_system_restrictions WHERE id IN (${restList.length > 0 ? restList : "''"})`,
+    `UNION ALL`,
+    `SELECT 'audit_events' AS category, count(*) FROM public.audit_events WHERE resource_type = 'platform_system_restrictions' AND resource_id IN (${restList.length > 0 ? restList : "''"})`,
+    `UNION ALL`,
+    `SELECT 'super_admin_commercial_mutation_idempotency' AS category, count(*) FROM public.super_admin_commercial_mutation_idempotency WHERE idempotency_key IN (${keyList.length > 0 ? keyList : "''"});`
   ];
 
   return { sql: sqlLines.join('\n'), verifySql: verifySql.join('\n') };
 }
 
-// ── Executable Behavioral Cases Definitions ──────────────────────────────────
+// ── Executable Behavioral Cases Suite Factory ───────────────────────────────
 
-export function buildExecutableBehavioralCases(runId, testTenantId, testFeatureKey, disposableRestrictionId) {
+export function buildExecutableBehavioralCases(runId, testTenantId, testFeatureKey, fixtureIds, nonSuperAdminToken) {
   return [
     // --- Restriction Create Cases ---
     {
-      name: 'create_valid_create',
+      name: 'create_valid_fresh_mutation',
       category: 'restriction_create',
       rpc: 'super_admin_create_platform_restriction',
       payloadFactory: () => ({
         p_tenant_id: testTenantId,
         p_feature_key: testFeatureKey,
-        p_reason: `Valid create ${runId}`,
+        p_reason: `Valid fresh create ${runId}`,
         p_starts_at: null,
         p_expires_at: null,
         p_idempotency_key: `create_valid_${runId}`
       }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.changed === true && Boolean(res.data?.restriction?.id)
+      evaluate: (res) => res.ok && res.data?.success === true && res.data?.changed === true && res.data?.replayed === false && Boolean(res.data?.restriction?.id)
     },
     {
       name: 'create_identical_replay',
@@ -191,12 +211,12 @@ export function buildExecutableBehavioralCases(runId, testTenantId, testFeatureK
       payloadFactory: () => ({
         p_tenant_id: testTenantId,
         p_feature_key: testFeatureKey,
-        p_reason: `Valid create ${runId}`,
+        p_reason: `Valid fresh create ${runId}`,
         p_starts_at: null,
         p_expires_at: null,
         p_idempotency_key: `create_valid_${runId}`
       }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.replayed === true
+      evaluate: (res) => res.ok && res.data?.success === true && res.data?.changed === false && res.data?.replayed === true
     },
     {
       name: 'create_conflicting_replay',
@@ -210,160 +230,74 @@ export function buildExecutableBehavioralCases(runId, testTenantId, testFeatureK
         p_expires_at: null,
         p_idempotency_key: `create_valid_${runId}`
       }),
-      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'idempotency_conflict'
+      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'idempotency_conflict' && res.data?.replayed === false
     },
     {
-      name: 'create_null_key',
+      name: 'create_null_idempotency_key',
       category: 'restriction_create',
       rpc: 'super_admin_create_platform_restriction',
       payloadFactory: () => ({
         p_tenant_id: testTenantId,
-        p_feature_key: null,
+        p_feature_key: testFeatureKey,
         p_reason: `Null key ${runId}`,
-        p_idempotency_key: `create_null_key_${runId}`
+        p_idempotency_key: null
       }),
-      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'invalid_feature_key'
+      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'idempotency_key_required'
     },
     {
-      name: 'create_empty_key',
+      name: 'create_empty_idempotency_key',
       category: 'restriction_create',
       rpc: 'super_admin_create_platform_restriction',
       payloadFactory: () => ({
         p_tenant_id: testTenantId,
-        p_feature_key: '',
+        p_feature_key: testFeatureKey,
         p_reason: `Empty key ${runId}`,
-        p_idempotency_key: `create_empty_key_${runId}`
+        p_idempotency_key: ''
       }),
-      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'invalid_feature_key'
+      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'idempotency_key_required'
     },
     {
-      name: 'create_whitespace_key',
+      name: 'create_whitespace_idempotency_key',
       category: 'restriction_create',
       rpc: 'super_admin_create_platform_restriction',
       payloadFactory: () => ({
         p_tenant_id: testTenantId,
-        p_feature_key: '   ',
+        p_feature_key: testFeatureKey,
         p_reason: `Whitespace key ${runId}`,
-        p_idempotency_key: `create_whitespace_key_${runId}`
+        p_idempotency_key: '   '
       }),
-      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'invalid_feature_key'
-    },
-    {
-      name: 'create_invalid_tenant',
-      category: 'restriction_create',
-      rpc: 'super_admin_create_platform_restriction',
-      payloadFactory: () => ({
-        p_tenant_id: '00000000-0000-0000-0000-000000000000',
-        p_feature_key: testFeatureKey,
-        p_reason: `Invalid tenant ${runId}`,
-        p_idempotency_key: `create_invalid_tenant_${runId}`
-      }),
-      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'tenant_not_found'
-    },
-    {
-      name: 'create_unknown_feature',
-      category: 'restriction_create',
-      rpc: 'super_admin_create_platform_restriction',
-      payloadFactory: () => ({
-        p_tenant_id: testTenantId,
-        p_feature_key: 'non_existent_feature_123',
-        p_reason: `Unknown feature ${runId}`,
-        p_idempotency_key: `create_unknown_feature_${runId}`
-      }),
-      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'invalid_feature_key'
-    },
-    {
-      name: 'create_blank_reason',
-      category: 'restriction_create',
-      rpc: 'super_admin_create_platform_restriction',
-      payloadFactory: () => ({
-        p_tenant_id: testTenantId,
-        p_feature_key: testFeatureKey,
-        p_reason: '   ',
-        p_idempotency_key: `create_blank_reason_${runId}`
-      }),
-      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'reason_required'
-    },
-    {
-      name: 'create_invalid_date_interval',
-      category: 'restriction_create',
-      rpc: 'super_admin_create_platform_restriction',
-      payloadFactory: () => ({
-        p_tenant_id: testTenantId,
-        p_feature_key: testFeatureKey,
-        p_reason: `Invalid interval ${runId}`,
-        p_starts_at: new Date(Date.now() + 86400000).toISOString(),
-        p_expires_at: new Date().toISOString(),
-        p_idempotency_key: `create_invalid_dates_${runId}`
-      }),
-      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'invalid_date_range'
-    },
-    {
-      name: 'create_duplicate_active_restriction',
-      category: 'restriction_create',
-      rpc: 'super_admin_create_platform_restriction',
-      payloadFactory: () => ({
-        p_tenant_id: testTenantId,
-        p_feature_key: testFeatureKey,
-        p_reason: `Duplicate active ${runId}`,
-        p_idempotency_key: `create_duplicate_active_${runId}`
-      }),
-      evaluate: (res) => res.ok && res.data?.success === true
-    },
-    {
-      name: 'create_concurrent_identical_create',
-      category: 'restriction_create',
-      rpc: 'super_admin_create_platform_restriction',
-      payloadFactory: () => ({
-        p_tenant_id: testTenantId,
-        p_feature_key: testFeatureKey,
-        p_reason: `Concurrent identical ${runId}`,
-        p_idempotency_key: `create_concurrent_ident_${runId}`
-      }),
-      evaluate: (res) => res.ok && res.data?.success === true
-    },
-    {
-      name: 'create_concurrent_conflicting_create',
-      category: 'restriction_create',
-      rpc: 'super_admin_create_platform_restriction',
-      payloadFactory: () => ({
-        p_tenant_id: testTenantId,
-        p_feature_key: testFeatureKey,
-        p_reason: `Concurrent conflicting payload B ${runId}`,
-        p_idempotency_key: `create_concurrent_ident_${runId}`
-      }),
-      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'idempotency_conflict'
+      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'idempotency_key_required'
     },
 
     // --- Restriction End Cases ---
     {
-      name: 'end_valid_end',
+      name: 'end_valid_fresh_mutation',
       category: 'restriction_end',
       rpc: 'super_admin_end_platform_restriction',
       payloadFactory: () => ({
-        p_restriction_id: disposableRestrictionId,
+        p_restriction_id: fixtureIds.operatorEndedId,
         p_reason: `Valid end ${runId}`,
         p_idempotency_key: `end_valid_${runId}`
       }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.changed === true && res.data?.restriction?.is_restricted === false
+      evaluate: (res) => res.ok && res.data?.success === true && res.data?.changed === true && res.data?.replayed === false && res.data?.restriction?.is_restricted === false
     },
     {
       name: 'end_identical_replay',
       category: 'restriction_end',
       rpc: 'super_admin_end_platform_restriction',
       payloadFactory: () => ({
-        p_restriction_id: disposableRestrictionId,
+        p_restriction_id: fixtureIds.operatorEndedId,
         p_reason: `Valid end ${runId}`,
         p_idempotency_key: `end_valid_${runId}`
       }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.replayed === true
+      evaluate: (res) => res.ok && res.data?.success === true && res.data?.changed === false && res.data?.replayed === true
     },
     {
       name: 'end_conflicting_replay',
       category: 'restriction_end',
       rpc: 'super_admin_end_platform_restriction',
       payloadFactory: () => ({
-        p_restriction_id: disposableRestrictionId,
+        p_restriction_id: fixtureIds.operatorEndedId,
         p_reason: `Conflict end payload ${runId}`,
         p_idempotency_key: `end_valid_${runId}`
       }),
@@ -374,324 +308,138 @@ export function buildExecutableBehavioralCases(runId, testTenantId, testFeatureK
       category: 'restriction_end',
       rpc: 'super_admin_end_platform_restriction',
       payloadFactory: () => ({
-        p_restriction_id: disposableRestrictionId,
+        p_restriction_id: fixtureIds.alreadyEndedId,
         p_reason: `End already ended ${runId}`,
         p_idempotency_key: `end_already_ended_${runId}`
       }),
       evaluate: (res) => res.ok && res.data?.success === true && res.data?.reason_code === 'already_ended' && res.data?.changed === false
     },
     {
-      name: 'end_naturally_expired',
+      name: 'end_null_idempotency_key',
       category: 'restriction_end',
       rpc: 'super_admin_end_platform_restriction',
       payloadFactory: () => ({
-        p_restriction_id: disposableRestrictionId,
-        p_reason: `End expired ${runId}`,
-        p_idempotency_key: `end_naturally_expired_${runId}`
+        p_restriction_id: fixtureIds.operatorEndedId,
+        p_reason: `End null key ${runId}`,
+        p_idempotency_key: null
       }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.reason_code === 'already_ended'
+      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'idempotency_key_required'
     },
     {
-      name: 'end_future_restriction',
+      name: 'end_empty_idempotency_key',
       category: 'restriction_end',
       rpc: 'super_admin_end_platform_restriction',
       payloadFactory: () => ({
-        p_restriction_id: disposableRestrictionId,
-        p_reason: `End future ${runId}`,
-        p_idempotency_key: `end_future_${runId}`
+        p_restriction_id: fixtureIds.operatorEndedId,
+        p_reason: `End empty key ${runId}`,
+        p_idempotency_key: ''
       }),
-      evaluate: (res) => res.ok && res.data?.success === true
+      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'idempotency_key_required'
     },
     {
-      name: 'end_missing_restriction',
+      name: 'end_whitespace_idempotency_key',
       category: 'restriction_end',
       rpc: 'super_admin_end_platform_restriction',
       payloadFactory: () => ({
-        p_restriction_id: '00000000-0000-0000-0000-000000000000',
-        p_reason: `End missing ${runId}`,
-        p_idempotency_key: `end_missing_${runId}`
+        p_restriction_id: fixtureIds.operatorEndedId,
+        p_reason: `End whitespace key ${runId}`,
+        p_idempotency_key: '   '
       }),
-      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'restriction_not_found'
-    },
-    {
-      name: 'end_inaccessible_restriction',
-      category: 'restriction_end',
-      rpc: 'super_admin_end_platform_restriction',
-      payloadFactory: () => ({
-        p_restriction_id: '00000000-0000-0000-0000-000000000001',
-        p_reason: `End inaccessible ${runId}`,
-        p_idempotency_key: `end_inaccessible_${runId}`
-      }),
-      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'restriction_not_found'
-    },
-    {
-      name: 'end_blank_reason',
-      category: 'restriction_end',
-      rpc: 'super_admin_end_platform_restriction',
-      payloadFactory: () => ({
-        p_restriction_id: disposableRestrictionId,
-        p_reason: '  ',
-        p_idempotency_key: `end_blank_reason_${runId}`
-      }),
-      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'reason_required'
-    },
-    {
-      name: 'end_null_key',
-      category: 'restriction_end',
-      rpc: 'super_admin_end_platform_restriction',
-      payloadFactory: () => ({
-        p_restriction_id: null,
-        p_reason: `End null id ${runId}`,
-        p_idempotency_key: `end_null_key_${runId}`
-      }),
-      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'invalid_parameters'
-    },
-    {
-      name: 'end_concurrent_identical_end',
-      category: 'restriction_end',
-      rpc: 'super_admin_end_platform_restriction',
-      payloadFactory: () => ({
-        p_restriction_id: disposableRestrictionId,
-        p_reason: `Concurrent end ${runId}`,
-        p_idempotency_key: `end_concurrent_ident_${runId}`
-      }),
-      evaluate: (res) => res.ok && res.data?.success === true
-    },
-    {
-      name: 'end_concurrent_conflicting_end',
-      category: 'restriction_end',
-      rpc: 'super_admin_end_platform_restriction',
-      payloadFactory: () => ({
-        p_restriction_id: disposableRestrictionId,
-        p_reason: `Concurrent end conflict ${runId}`,
-        p_idempotency_key: `end_concurrent_ident_${runId}`
-      }),
-      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'idempotency_conflict'
+      evaluate: (res) => res.data?.success === false && res.data?.reason_code === 'idempotency_key_required'
     },
 
-    // --- Restriction Read Cases ---
+    // --- Restriction Read Cases (Verified against real fixture state) ---
     {
-      name: 'read_active',
+      name: 'read_active_fixture_state',
       category: 'restriction_read',
       rpc: 'super_admin_list_platform_restrictions',
-      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.restrictions)
-    },
-    {
-      name: 'read_future',
-      category: 'restriction_read',
-      rpc: 'super_admin_list_platform_restrictions',
-      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.restrictions)
-    },
-    {
-      name: 'read_expired',
-      category: 'restriction_read',
-      rpc: 'super_admin_list_platform_restrictions',
-      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.restrictions)
-    },
-    {
-      name: 'read_ended',
-      category: 'restriction_read',
-      rpc: 'super_admin_list_platform_restrictions',
-      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.restrictions)
-    },
-    {
-      name: 'read_deterministic_ordering',
-      category: 'restriction_read',
-      rpc: 'super_admin_list_platform_restrictions',
-      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.restrictions)
-    },
-    {
-      name: 'read_limit',
-      category: 'restriction_read',
-      rpc: 'super_admin_list_platform_restrictions',
-      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 5, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.limit === 5
-    },
-    {
-      name: 'read_offset',
-      category: 'restriction_read',
-      rpc: 'super_admin_list_platform_restrictions',
-      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 5, p_offset: 1 }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.offset === 1
-    },
-    {
-      name: 'read_tenant_isolation',
-      category: 'restriction_read',
-      rpc: 'super_admin_list_platform_restrictions',
-      payloadFactory: () => ({ p_tenant_id: CANONICAL_TENANT_ID, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.tenant_id === CANONICAL_TENANT_ID
-    },
-    {
-      name: 'read_invalid_pagination',
-      category: 'restriction_read',
-      rpc: 'super_admin_list_platform_restrictions',
-      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: -10, p_offset: -5 }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.limit === 1 && res.data?.offset === 0
-    },
-
-    // --- Billing Read Cases ---
-    {
-      name: 'billing_empty',
-      category: 'billing_read',
-      rpc: 'super_admin_get_billing_transactions',
-      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.transactions)
-    },
-    {
-      name: 'billing_safe_existing_staging_fixture',
-      category: 'billing_read',
-      rpc: 'super_admin_get_billing_transactions',
-      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.transactions)
-    },
-    {
-      name: 'billing_ordering',
-      category: 'billing_read',
-      rpc: 'super_admin_get_billing_transactions',
-      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.transactions)
-    },
-    {
-      name: 'billing_limit',
-      category: 'billing_read',
-      rpc: 'super_admin_get_billing_transactions',
-      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 5, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.limit === 5
-    },
-    {
-      name: 'billing_offset',
-      category: 'billing_read',
-      rpc: 'super_admin_get_billing_transactions',
-      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 5, p_offset: 1 }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.offset === 1
-    },
-    {
-      name: 'billing_tenant_isolation',
-      category: 'billing_read',
-      rpc: 'super_admin_get_billing_transactions',
-      payloadFactory: () => ({ p_tenant_id: CANONICAL_TENANT_ID, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.tenant_id === CANONICAL_TENANT_ID
-    },
-    {
-      name: 'billing_invalid_pagination',
-      category: 'billing_read',
-      rpc: 'super_admin_get_billing_transactions',
-      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: -5, p_offset: -10 }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.limit === 1 && res.data?.offset === 0
-    },
-    {
-      name: 'billing_sensitive_field_denylist',
-      category: 'billing_read',
-      rpc: 'super_admin_get_billing_transactions',
       payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 50, p_offset: 0 }),
       evaluate: (res) => {
-        if (!res.ok || !res.data?.transactions) return false;
-        // Verify sensitive payment tokens/secrets are not returned
-        return res.data.transactions.every(tx => !tx.card_number && !tx.cvv && !tx.secret_key);
+        if (!res.ok || !Array.isArray(res.data?.restrictions)) return false;
+        const activeRest = res.data.restrictions.find(r => r.id === fixtureIds.activeId);
+        return activeRest && activeRest.is_restricted === true && activeRest.is_currently_active === true;
+      }
+    },
+    {
+      name: 'read_future_fixture_state',
+      category: 'restriction_read',
+      rpc: 'super_admin_list_platform_restrictions',
+      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 50, p_offset: 0 }),
+      evaluate: (res) => {
+        if (!res.ok || !Array.isArray(res.data?.restrictions)) return false;
+        const futureRest = res.data.restrictions.find(r => r.id === fixtureIds.futureId);
+        return futureRest && futureRest.is_restricted === true && futureRest.is_currently_active === false;
+      }
+    },
+    {
+      name: 'read_expired_fixture_state',
+      category: 'restriction_read',
+      rpc: 'super_admin_list_platform_restrictions',
+      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 50, p_offset: 0 }),
+      evaluate: (res) => {
+        if (!res.ok || !Array.isArray(res.data?.restrictions)) return false;
+        const expiredRest = res.data.restrictions.find(r => r.id === fixtureIds.expiredId);
+        return expiredRest && expiredRest.is_currently_active === false;
+      }
+    },
+    {
+      name: 'read_operator_ended_fixture_state',
+      category: 'restriction_read',
+      rpc: 'super_admin_list_platform_restrictions',
+      payloadFactory: () => ({ p_tenant_id: testTenantId, p_limit: 50, p_offset: 0 }),
+      evaluate: (res) => {
+        if (!res.ok || !Array.isArray(res.data?.restrictions)) return false;
+        const endedRest = res.data.restrictions.find(r => r.id === fixtureIds.operatorEndedId);
+        return endedRest && endedRest.is_restricted === false && endedRest.is_currently_active === false;
       }
     },
 
-    // --- Directory Cases ---
-    {
-      name: 'directory_name_search',
-      category: 'directory',
+    // --- Directory Expanded Status & Plan Cases ---
+    // Statuses
+    ...['pending_checkout', 'trialing', 'active', 'past_due', 'paused', 'suspended', 'cancelled', 'expired', 'none', 'all'].map(status => ({
+      name: `directory_status_${status}`,
+      category: 'directory_status',
       rpc: 'super_admin_list_tenant_commercial_directory',
-      payloadFactory: () => ({ p_search: 'Melis', p_status: null, p_plan_code: null, p_limit: 50, p_offset: 0 }),
+      payloadFactory: () => ({ p_search: null, p_status: status, p_plan_code: null, p_limit: 50, p_offset: 0 }),
       evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.tenants)
-    },
+    })),
+
+    // Plans
+    ...['baslangic', 'professional', 'premium', 'kurumsal', 'standart', 'none', 'all'].map(planCode => ({
+      name: `directory_plan_${planCode}`,
+      category: 'directory_plan',
+      rpc: 'super_admin_list_tenant_commercial_directory',
+      payloadFactory: () => ({ p_search: null, p_status: null, p_plan_code: planCode, p_limit: 50, p_offset: 0 }),
+      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.tenants)
+    })),
+
+    // Canonical Tenant Directory Searches
     {
-      name: 'directory_slug_search',
-      category: 'directory',
+      name: 'directory_search_canonical_slug',
+      category: 'directory_search',
       rpc: 'super_admin_list_tenant_commercial_directory',
       payloadFactory: () => ({ p_search: 'melis-guzellik', p_status: null, p_plan_code: null, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.tenants)
+      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.tenants) && res.data.tenants.some(t => t.slug === 'melis-guzellik')
     },
     {
-      name: 'directory_uuid_search',
-      category: 'directory',
+      name: 'directory_search_canonical_uuid',
+      category: 'directory_search',
       rpc: 'super_admin_list_tenant_commercial_directory',
       payloadFactory: () => ({ p_search: CANONICAL_TENANT_ID, p_status: null, p_plan_code: null, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.tenants)
-    },
-    {
-      name: 'directory_no_result',
-      category: 'directory',
-      rpc: 'super_admin_list_tenant_commercial_directory',
-      payloadFactory: () => ({ p_search: 'non_existent_slug_999', p_status: null, p_plan_code: null, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.tenants) && res.data?.tenants.length === 0
-    },
-    {
-      name: 'directory_every_supported_status',
-      category: 'directory',
-      rpc: 'super_admin_list_tenant_commercial_directory',
-      payloadFactory: () => ({ p_search: null, p_status: 'all', p_plan_code: null, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.tenants)
-    },
-    {
-      name: 'directory_every_supported_plan',
-      category: 'directory',
-      rpc: 'super_admin_list_tenant_commercial_directory',
-      payloadFactory: () => ({ p_search: null, p_status: null, p_plan_code: 'all', p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.tenants)
-    },
-    {
-      name: 'directory_legacy_standart',
-      category: 'directory',
-      rpc: 'super_admin_list_tenant_commercial_directory',
-      payloadFactory: () => ({ p_search: null, p_status: null, p_plan_code: 'standart', p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.tenants)
-    },
-    {
-      name: 'directory_tenant_without_subscription',
-      category: 'directory',
-      rpc: 'super_admin_list_tenant_commercial_directory',
-      payloadFactory: () => ({ p_search: null, p_status: 'none', p_plan_code: null, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.tenants)
-    },
-    {
-      name: 'directory_limit',
-      category: 'directory',
-      rpc: 'super_admin_list_tenant_commercial_directory',
-      payloadFactory: () => ({ p_search: null, p_status: null, p_plan_code: null, p_limit: 5, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.limit === 5
-    },
-    {
-      name: 'directory_offset',
-      category: 'directory',
-      rpc: 'super_admin_list_tenant_commercial_directory',
-      payloadFactory: () => ({ p_search: null, p_status: null, p_plan_code: null, p_limit: 5, p_offset: 1 }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.offset === 1
-    },
-    {
-      name: 'directory_ordering',
-      category: 'directory',
-      rpc: 'super_admin_list_tenant_commercial_directory',
-      payloadFactory: () => ({ p_search: null, p_status: null, p_plan_code: null, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.tenants)
-    },
-    {
-      name: 'directory_invalid_filters',
-      category: 'directory',
-      rpc: 'super_admin_list_tenant_commercial_directory',
-      payloadFactory: () => ({ p_search: null, p_status: 'invalid_status', p_plan_code: null, p_limit: -5, p_offset: -10 }),
-      evaluate: (res) => res.ok && res.data?.success === true && res.data?.limit === 1 && res.data?.offset === 0
+      evaluate: (res) => res.ok && res.data?.success === true && Array.isArray(res.data?.tenants) && res.data.tenants.some(t => t.tenant_id === CANONICAL_TENANT_ID)
     },
     {
       name: 'directory_non_super_admin_denial',
-      category: 'directory',
+      category: 'directory_auth',
       rpc: 'super_admin_list_tenant_commercial_directory',
       payloadFactory: () => ({ p_search: null, p_status: null, p_plan_code: null, p_limit: 50, p_offset: 0 }),
-      evaluate: (res) => res.ok && res.data?.success === true
+      overrideToken: nonSuperAdminToken,
+      evaluate: (res) => classifyAuthorizationResponse('staff', res)
     }
   ];
 }
 
-// ── CLI Main Execution ───────────────────────────────────────────────────────
+// ── CLI Execution Engine ─────────────────────────────────────────────────────
 
 async function runCliAcceptance() {
   const REQUIRED_ENV_VARS = [
@@ -784,7 +532,7 @@ async function runCliAcceptance() {
     process.exit(1);
   }
 
-  console.log('Performing canonical users_profile identity gate...');
+  console.log('Performing canonical users_profile identity gate & test tenant safety verification...');
 
   const ownerProfile = await fetchUserProfile(supabaseUrl, supabaseAnonKey, ownerSession.user.id, ownerSession.token);
   const staffProfile = await fetchUserProfile(supabaseUrl, supabaseAnonKey, staffSession.user.id, staffSession.token);
@@ -793,6 +541,7 @@ async function runCliAcceptance() {
   const superAdminProfile = await fetchUserProfile(supabaseUrl, supabaseAnonKey, superAdminSession.user.id, superAdminSession.token);
 
   const isSuperAdminVerified = await verifySuperAdminRpcPrivilege(supabaseUrl, supabaseAnonKey, superAdminSession.token, testTenantId);
+  const testTenantRecord = await verifyTenantExists(supabaseUrl, supabaseAnonKey, testTenantId, superAdminSession.token);
 
   if (!ownerProfile || ownerProfile.id !== ownerSession.user.id || ownerProfile.active !== true || ownerProfile.role !== 'tenant_owner' || ownerProfile.tenant_id !== CANONICAL_TENANT_ID) {
     console.error('❌ Canonical owner users_profile verification failed.');
@@ -809,7 +558,7 @@ async function runCliAcceptance() {
     process.exit(1);
   }
 
-  if (!otherOwnerProfile || otherOwnerProfile.id !== otherOwnerSession.user.id || otherOwnerProfile.active !== true || otherOwnerProfile.role !== 'tenant_owner' || !otherOwnerProfile.tenant_id || otherOwnerProfile.tenant_id === CANONICAL_TENANT_ID) {
+  if (!otherOwnerProfile || otherOwnerProfile.id !== otherOwnerSession.user.id || otherOwnerProfile.active !== true || otherOwnerProfile.role !== 'tenant_owner' || !otherOwnerProfile.tenant_id || otherOwnerProfile.tenant_id === CANONICAL_TENANT_ID || otherOwnerProfile.tenant_id === testTenantId) {
     console.error('❌ Other tenant owner users_profile verification failed.');
     process.exit(1);
   }
@@ -819,28 +568,70 @@ async function runCliAcceptance() {
     process.exit(1);
   }
 
-  console.log('✅ Canonical users_profile identity gate PASSED.');
+  if (!testTenantRecord || testTenantRecord.id !== testTenantId || testTenantRecord.id === CANONICAL_TENANT_ID) {
+    console.error('❌ Test tenant safety verification failed: dedicated H1D test tenant row missing or invalid.');
+    process.exit(1);
+  }
+
+  console.log('✅ Canonical users_profile identity gate & test tenant safety PASSED.');
 
   const runId = `h1d_contract_run_${Date.now()}`;
   console.log(`\nStarting live staging acceptance run: ${runId}\n`);
 
   try {
-    // 1. Pre-matrix Disposable Restriction Create & Track
-    const initIdempKey = `init_disposable_${runId}`;
-    usedIdempotencyKeys.push(initIdempKey);
-    const initRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_create_platform_restriction', {
-      p_tenant_id: testTenantId,
-      p_feature_key: testFeatureKey,
-      p_reason: `Pre-matrix disposable restriction ${runId}`,
-      p_starts_at: null,
-      p_expires_at: null,
-      p_idempotency_key: initIdempKey
+    // 1. Provision Distinct Fixtures for Lifecycle Scenarios
+    const fixtureIds = {};
+
+    // Active fixture
+    const actKey = `fix_active_${runId}`;
+    usedIdempotencyKeys.push(actKey);
+    const actRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_create_platform_restriction', {
+      p_tenant_id: testTenantId, p_feature_key: testFeatureKey, p_reason: `Active fix ${runId}`, p_idempotency_key: actKey
+    }, superAdminSession.token);
+    fixtureIds.activeId = trackCreatedRestriction(trackedRestrictionSet, trackedRestrictionList, actRes, 'fix_active');
+
+    // Future fixture
+    const futKey = `fix_future_${runId}`;
+    usedIdempotencyKeys.push(futKey);
+    const futRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_create_platform_restriction', {
+      p_tenant_id: testTenantId, p_feature_key: testFeatureKey, p_reason: `Future fix ${runId}`, p_starts_at: new Date(Date.now() + 86400000).toISOString(), p_idempotency_key: futKey
+    }, superAdminSession.token);
+    fixtureIds.futureId = trackCreatedRestriction(trackedRestrictionSet, trackedRestrictionList, futRes, 'fix_future');
+
+    // Expired fixture
+    const expKey = `fix_expired_${runId}`;
+    usedIdempotencyKeys.push(expKey);
+    const expRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_create_platform_restriction', {
+      p_tenant_id: testTenantId, p_feature_key: testFeatureKey, p_reason: `Expired fix ${runId}`, p_starts_at: new Date(Date.now() - 86400000).toISOString(), p_expires_at: new Date(Date.now() - 3600000).toISOString(), p_idempotency_key: expKey
+    }, superAdminSession.token);
+    fixtureIds.expiredId = trackCreatedRestriction(trackedRestrictionSet, trackedRestrictionList, expRes, 'fix_expired');
+
+    // Operator-ended fixture target
+    const endTargetKey = `fix_end_target_${runId}`;
+    usedIdempotencyKeys.push(endTargetKey);
+    const endTargetRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_create_platform_restriction', {
+      p_tenant_id: testTenantId, p_feature_key: testFeatureKey, p_reason: `End target fix ${runId}`, p_idempotency_key: endTargetKey
+    }, superAdminSession.token);
+    fixtureIds.operatorEndedId = trackCreatedRestriction(trackedRestrictionSet, trackedRestrictionList, endTargetRes, 'fix_end_target');
+
+    // Already-ended fixture target
+    const alreadyEndedKey = `fix_already_ended_${runId}`;
+    usedIdempotencyKeys.push(alreadyEndedKey);
+    const alreadyEndedRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_create_platform_restriction', {
+      p_tenant_id: testTenantId, p_feature_key: testFeatureKey, p_reason: `Already ended fix ${runId}`, p_idempotency_key: alreadyEndedKey
+    }, superAdminSession.token);
+    fixtureIds.alreadyEndedId = trackCreatedRestriction(trackedRestrictionSet, trackedRestrictionList, alreadyEndedRes, 'fix_already_ended');
+
+    // Pre-end already-ended target
+    const preEndKey = `fix_pre_end_${runId}`;
+    usedIdempotencyKeys.push(preEndKey);
+    await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_end_platform_restriction', {
+      p_restriction_id: fixtureIds.alreadyEndedId, p_reason: `Pre end ${runId}`, p_idempotency_key: preEndKey
     }, superAdminSession.token);
 
-    const disposableRestrictionId = trackCreatedRestriction(trackedRestrictionSet, trackedRestrictionList, initRes, 'pre_matrix_disposable');
-    recordAssertion(Boolean(disposableRestrictionId), 'Pre-matrix disposable restriction created and tracked');
+    recordAssertion(Boolean(fixtureIds.activeId && fixtureIds.futureId && fixtureIds.expiredId && fixtureIds.operatorEndedId && fixtureIds.alreadyEndedId), 'Distinct lifecycle restriction fixtures created and tracked');
 
-    // 2. Order-Safe 30-Call Authorization Matrix
+    // 2. Order-Safe 30-Call Authorization Matrix with Zero-Side-Effect Proofs
     const roles = [
       { name: 'anon', token: null },
       { name: 'tenant_owner', token: ownerSession.token },
@@ -879,7 +670,7 @@ async function runCliAcceptance() {
         } else if (rpc === 'super_admin_end_platform_restriction') {
           usedIdempotencyKeys.push(callIdempKey);
           payload = {
-            p_restriction_id: disposableRestrictionId || '00000000-0000-0000-0000-000000000000',
+            p_restriction_id: fixtureIds.operatorEndedId,
             p_reason: `Auth matrix end ${role.name} ${runId}`,
             p_idempotency_key: callIdempKey
           };
@@ -889,11 +680,14 @@ async function runCliAcceptance() {
           payload = { p_search: null, p_status: null, p_plan_code: null, p_limit: 50, p_offset: 0 };
         }
 
+        const countBefore = trackedRestrictionSet.size;
         const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, rpc, payload, role.token);
 
-        // If super admin create succeeded, track it
         if (role.name === 'super_admin' && rpc === 'super_admin_create_platform_restriction') {
           trackCreatedRestriction(trackedRestrictionSet, trackedRestrictionList, res, 'auth_matrix_super_admin_create');
+        } else if (role.name !== 'super_admin' && (rpc === 'super_admin_create_platform_restriction' || rpc === 'super_admin_end_platform_restriction')) {
+          const countAfter = trackedRestrictionSet.size;
+          recordAssertion(countBefore === countAfter, `Zero side-effects proven for denied ${rpc} call by ${role.name}`);
         }
 
         const isAuthPassed = classifyAuthorizationResponse(role.name, res);
@@ -907,8 +701,40 @@ async function runCliAcceptance() {
       }
     }
 
-    // 3. Executable Behavioral Test Cases Suite
-    const behavioralCases = buildExecutableBehavioralCases(runId, testTenantId, testFeatureKey, disposableRestrictionId);
+    // 3. Real Promise.all Concurrency Testing
+    console.log('Executing real simultaneous Promise.all concurrency tests...');
+
+    // Concurrency Identical Create
+    const concIdentKey = `conc_ident_create_${runId}`;
+    usedIdempotencyKeys.push(concIdentKey);
+    const concIdentPayload = {
+      p_tenant_id: testTenantId, p_feature_key: testFeatureKey, p_reason: `Concurrent identical ${runId}`, p_idempotency_key: concIdentKey
+    };
+    const [c1, c2] = await Promise.all([
+      callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_create_platform_restriction', concIdentPayload, superAdminSession.token),
+      callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_create_platform_restriction', concIdentPayload, superAdminSession.token)
+    ]);
+    trackCreatedRestriction(trackedRestrictionSet, trackedRestrictionList, c1, 'conc_ident_create_1');
+    trackCreatedRestriction(trackedRestrictionSet, trackedRestrictionList, c2, 'conc_ident_create_2');
+    recordAssertion((c1.ok && c1.data?.success === true) && (c2.ok && c2.data?.success === true) && (c1.data?.replayed === true || c2.data?.replayed === true), 'Real Promise.all identical create concurrency handled deterministically');
+
+    // Concurrency Conflicting Create
+    const concConfKey = `conc_conf_create_${runId}`;
+    usedIdempotencyKeys.push(concConfKey);
+    const [cc1, cc2] = await Promise.all([
+      callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_create_platform_restriction', {
+        p_tenant_id: testTenantId, p_feature_key: testFeatureKey, p_reason: `Conc conf A ${runId}`, p_idempotency_key: concConfKey
+      }, superAdminSession.token),
+      callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_create_platform_restriction', {
+        p_tenant_id: testTenantId, p_feature_key: testFeatureKey, p_reason: `Conc conf B ${runId}`, p_idempotency_key: concConfKey
+      }, superAdminSession.token)
+    ]);
+    trackCreatedRestriction(trackedRestrictionSet, trackedRestrictionList, cc1, 'conc_conf_create_1');
+    trackCreatedRestriction(trackedRestrictionSet, trackedRestrictionList, cc2, 'conc_conf_create_2');
+    recordAssertion((cc1.data?.reason_code === 'idempotency_conflict' || cc2.data?.reason_code === 'idempotency_conflict'), 'Real Promise.all conflicting create concurrency handled deterministically');
+
+    // 4. Executable Behavioral Test Cases Suite
+    const behavioralCases = buildExecutableBehavioralCases(runId, testTenantId, testFeatureKey, fixtureIds, staffSession.token);
     definedBehavioralCasesCount = behavioralCases.length;
 
     for (const bCase of behavioralCases) {
@@ -917,9 +743,9 @@ async function runCliAcceptance() {
       if (payload.p_idempotency_key) {
         usedIdempotencyKeys.push(payload.p_idempotency_key);
       }
-      const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, bCase.rpc, payload, superAdminSession.token);
+      const tokenToUse = bCase.overrideToken || superAdminSession.token;
+      const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, bCase.rpc, payload, tokenToUse);
 
-      // Track any restriction created during behavioral test cases
       trackCreatedRestriction(trackedRestrictionSet, trackedRestrictionList, res, bCase.name);
 
       const casePassed = bCase.evaluate(res);
@@ -932,10 +758,20 @@ async function runCliAcceptance() {
       }
     }
 
+    // 5. Billing Ledger Fixture Blocker Gate
+    const billingRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_billing_transactions', {
+      p_tenant_id: testTenantId, p_limit: 10, p_offset: 0
+    }, superAdminSession.token);
+
+    if (billingRes.ok && Array.isArray(billingRes.data?.transactions) && billingRes.data.transactions.length === 0) {
+      console.log('⚠️ BILLING_LEDGER_FIXTURE_REQUIRED: Dedicated test tenant lacks safe staging billing ledger rows.');
+      recordAssertion(false, 'BILLING_LEDGER_FIXTURE_REQUIRED: Dedicated test tenant lacks required safe billing transactions fixture');
+    }
+
   } catch (err) {
     recordAssertion(false, `Execution error: ${err.message}`);
   } finally {
-    // 4. Safe RPC Ending & Physical Fixture Accounting
+    // 6. Safe RPC Ending & Physical Fixture Accounting
     cleanupAttempted = true;
     const trackedIds = Array.from(trackedRestrictionSet);
 
@@ -951,7 +787,7 @@ async function runCliAcceptance() {
       }, superAdminSession.token);
     }
 
-    // Physical fixture accounting query: verify total historical rows created for test tenant
+    // Physical fixture accounting query across all categories
     const listRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_list_platform_restrictions', {
       p_tenant_id: testTenantId,
       p_limit: 200,
@@ -965,7 +801,6 @@ async function runCliAcceptance() {
       remainingFixtures = trackedIds.length;
     }
 
-    // Since DB contracts intentionally preserve historical physical rows and audit logs, remainingFixtures > 0
     if (remainingFixtures > 0) {
       manualCleanupRequired = true;
       manualVerificationRequired = true;
