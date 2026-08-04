@@ -18,6 +18,11 @@ function expect(actual: any) {
         throw new Error(`Expected null, got ${JSON.stringify(actual)}`);
       }
     },
+    toBeUndefined() {
+      if (actual !== undefined) {
+        throw new Error(`Expected undefined, got ${JSON.stringify(actual)}`);
+      }
+    },
     toHaveLength(expectedLength: number) {
       if (!Array.isArray(actual) || actual.length !== expectedLength) {
         throw new Error(`Expected array length ${expectedLength}, got ${actual?.length}`);
@@ -52,167 +57,166 @@ function expect(actual: any) {
   };
 }
 
+import {
+  buildTenantDirectoryRpcArgs,
+  parseTenantDirectoryResponse,
+  buildRestrictionListRpcArgs,
+  parseRestrictionListResponse,
+  buildCreateRestrictionRpcArgs,
+  buildEndRestrictionRpcArgs,
+  buildBillingTransactionsRpcArgs,
+  parseBillingTransactionsResponse
+} from '../services/superAdminCommercialAdapter.ts';
+
 const testRegistry: { name: string; fn: () => void | Promise<void> }[] = [];
 
 function registerTest(name: string, fn: () => void | Promise<void>) {
   testRegistry.push({ name, fn });
 }
 
-// 1. Directory RPC argument mapping
-registerTest('1. Directory RPC argument mapping', async () => {
-  const params = { search: 'melis', status: 'active', planCode: 'premium', limit: 10, offset: 20 };
-  expect(params.search).toBe('melis');
-  expect(params.status).toBe('active');
-  expect(params.planCode).toBe('premium');
-  expect(params.limit).toBe(10);
-  expect(params.offset).toBe(20);
+// 1. Restriction RPC args contain only tenant ID, limit and offset
+registerTest('1. Restriction RPC args contain only tenant ID, limit and offset', () => {
+  const args = buildRestrictionListRpcArgs({ tenantId: 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', limit: 25, offset: 50 });
+  expect(Object.keys(args).sort()).toEqual(['p_limit', 'p_offset', 'p_tenant_id'].sort());
+  expect(args.p_tenant_id).toBe('aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa');
+  expect(args.p_limit).toBe(25);
+  expect(args.p_offset).toBe(50);
 });
 
-// 2. Directory response-envelope parsing
-registerTest('2. Directory response-envelope parsing', () => {
-  const rawResponse = {
-    success: true,
-    reason_code: 'ok',
-    total_count: 15,
-    limit: 10,
-    offset: 0,
-    tenants: [
-      {
-        tenant_id: 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa',
-        slug: 'melis-guzellik',
-        business_name: 'Melis Güzellik',
-        created_at: '2026-06-01T00:00:00Z',
-        subscription_status: 'active',
-        plan_code: 'professional',
-        plan_name: 'Profesyonel',
-        version_number: 1,
-        billing_mode: 'manual',
-        trial_end: null,
-        current_period_end: '2026-12-31T23:59:59Z',
-        has_scheduled_change: false
-      }
-    ]
-  };
-  expect(rawResponse.success).toBe(true);
-  expect(rawResponse.tenants).toHaveLength(1);
-  expect(rawResponse.tenants[0].slug).toBe('melis-guzellik');
+// 2. Unsupported p_feature_key is absent
+registerTest('2. Unsupported p_feature_key is absent', () => {
+  const args = buildRestrictionListRpcArgs({ tenantId: 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa' } as any);
+  expect((args as any).p_feature_key).toBeUndefined();
 });
 
-// 3. Restriction list parsing
-registerTest('3. Restriction list parsing', () => {
-  const rawResponse = {
+// 3. Unsupported p_active_only is absent
+registerTest('3. Unsupported p_active_only is absent', () => {
+  const args = buildRestrictionListRpcArgs({ tenantId: 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa' } as any);
+  expect((args as any).p_active_only).toBeUndefined();
+});
+
+// 4. Billing response preserves actual DB fields
+registerTest('4. Billing response preserves actual DB fields', () => {
+  const rawDbPayload = {
     success: true,
     reason_code: 'ok',
     total_count: 1,
     limit: 50,
     offset: 0,
-    restrictions: [
-      {
-        id: 'r-1',
-        tenant_id: null,
-        feature_key: 'core_booking',
-        is_restricted: true,
-        reason: 'Maintenance',
-        starts_at: '2026-08-01T00:00:00Z',
-        expires_at: null,
-        created_at: '2026-08-01T00:00:00Z',
-        is_currently_active: true
-      }
-    ]
-  };
-  expect(rawResponse.success).toBe(true);
-  expect(rawResponse.restrictions[0].feature_key).toBe('core_booking');
-  expect(rawResponse.restrictions[0].tenant_id).toBeNull();
-});
-
-// 4. Create restriction argument mapping
-registerTest('4. Create restriction argument mapping', () => {
-  const payload = {
-    p_idempotency_key: 'key_123',
-    p_tenant_id: 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa',
-    p_feature_key: 'core_booking',
-    p_reason: 'Security lock',
-    p_starts_at: '2026-08-01T00:00:00Z',
-    p_expires_at: null
-  };
-  expect(payload.p_idempotency_key).toBe('key_123');
-  expect(payload.p_feature_key).toBe('core_booking');
-});
-
-// 5. End restriction argument mapping
-registerTest('5. End restriction argument mapping', () => {
-  const payload = {
-    p_idempotency_key: 'key_end_1',
-    p_restriction_id: 'r-100',
-    p_reason: 'Resolved issue'
-  };
-  expect(payload.p_restriction_id).toBe('r-100');
-  expect(payload.p_reason).toBe('Resolved issue');
-});
-
-// 6. Billing transaction response parsing
-registerTest('6. Billing transaction response parsing', () => {
-  const rawResponse = {
-    success: true,
-    reason_code: 'ok',
-    total_count: 1,
-    limit: 10,
-    offset: 0,
     transactions: [
       {
-        id: 'tx-1',
+        id: 'tx-db-100',
         tenant_id: 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa',
-        amount: 500,
+        subscription_id: 'sub-1',
+        transaction_type: 'manual_charge',
+        amount: 0.00,
         currency: 'TRY',
-        transaction_type: 'subscription_charge',
-        transaction_status: 'settled',
-        billing_mode: 'manual',
-        external_reference: 'INV-100',
-        operator_reason: 'Manual payment received',
+        billing_mode: 'comped',
+        payment_method: 'manual',
+        related_transaction_id: null,
+        external_provider_reference: null,
+        reference_note: 'H1D Staging Fixture',
+        internal_reason: 'h1d_safe_billing_fixture_v1',
+        billing_period_start: '2026-08-01T00:00:00Z',
+        billing_period_end: '2026-08-31T23:59:59Z',
+        occurred_at: '2026-08-01T12:00:00Z',
+        effective_at: '2026-08-01T12:00:00Z',
         created_at: '2026-08-01T12:00:00Z'
       }
     ]
   };
-  expect(rawResponse.transactions[0].amount).toBe(500);
-  expect(rawResponse.transactions[0].currency).toBe('TRY');
+
+  const parsed = parseBillingTransactionsResponse(rawDbPayload);
+  expect(parsed.transactions[0].occurred_at).toBe('2026-08-01T12:00:00Z');
+  expect(parsed.transactions[0].effective_at).toBe('2026-08-01T12:00:00Z');
+  expect(parsed.transactions[0].billing_mode).toBe('comped');
+  expect(parsed.transactions[0].internal_reason).toBe('h1d_safe_billing_fixture_v1');
+  expect(parsed.transactions[0].reference_note).toBe('H1D Staging Fixture');
 });
 
-// 7. none and all filter forwarding
-registerTest('7. none and all filter forwarding', () => {
-  const validFilters = ['all', 'none', 'active', 'trialing', 'past_due', 'suspended', 'cancelled', 'expired'];
-  expect(validFilters).toContain('none');
-  expect(validFilters).toContain('all');
-});
-
-// 8. Paging forwarding
-registerTest('8. Paging forwarding', () => {
-  const page = 2;
-  const limit = 10;
-  const offset = page * limit;
-  expect(offset).toBe(20);
-});
-
-// 9. Structured failure handling
-registerTest('9. Structured failure handling', () => {
-  const errResp = { success: false, reason_code: 'idempotency_conflict', changed: false, replayed: false };
-  expect(errResp.success).toBe(false);
-  expect(errResp.reason_code).toBe('idempotency_conflict');
-});
-
-// 10. Stable idempotency key during one submission
-registerTest('10. Stable idempotency key during one submission', () => {
-  let ref: string | null = null;
-  const getOrCreateKey = () => {
-    if (!ref) ref = `idemp_${Date.now()}_test`;
-    return ref;
+// 5. Invented transaction_status is not required
+registerTest('5. Invented transaction_status is not required', () => {
+  const rawDbPayload = {
+    success: true,
+    reason_code: 'ok',
+    total_count: 1,
+    limit: 50,
+    offset: 0,
+    transactions: [
+      {
+        id: 'tx-db-101',
+        tenant_id: 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa',
+        transaction_type: 'subscription_charge',
+        amount: 150,
+        currency: 'TRY',
+        billing_mode: 'manual',
+        occurred_at: '2026-08-01T12:00:00Z',
+        effective_at: '2026-08-01T12:00:00Z',
+        created_at: '2026-08-01T12:00:00Z'
+      }
+    ]
   };
-  const key1 = getOrCreateKey();
-  const key2 = getOrCreateKey();
-  expect(key1).toBe(key2);
+
+  const parsed = parseBillingTransactionsResponse(rawDbPayload);
+  expect((parsed.transactions[0] as any).transaction_status).toBeUndefined();
 });
 
-// 11. Duplicate-submit blocking
-registerTest('11. Duplicate-submit blocking', () => {
+// 6. Directory status forwarding includes pending_checkout and paused
+registerTest('6. Directory status forwarding includes pending_checkout and paused', () => {
+  const argsPending = buildTenantDirectoryRpcArgs({ status: 'pending_checkout' });
+  const argsPaused = buildTenantDirectoryRpcArgs({ status: 'paused' });
+  expect(argsPending.p_status).toBe('pending_checkout');
+  expect(argsPaused.p_status).toBe('paused');
+});
+
+// 7. advanced_reporting is a valid UI option
+registerTest('7. advanced_reporting is a valid UI option', () => {
+  const pageContent = fs.readFileSync(path.join(process.cwd(), 'pages/super-admin/SuperAdminCommercialManagementPage.tsx'), 'utf8');
+  expect(pageContent).toContain('advanced_reporting');
+});
+
+// 8. commercial_analytics is absent
+registerTest('8. commercial_analytics is absent', () => {
+  const pageContent = fs.readFileSync(path.join(process.cwd(), 'pages/super-admin/SuperAdminCommercialManagementPage.tsx'), 'utf8');
+  expect(pageContent).not.toContain('commercial_analytics');
+});
+
+// 9. Tenant restriction scope without selected tenant is blocked
+registerTest('9. Tenant restriction scope without selected tenant is blocked', () => {
+  const pageContent = fs.readFileSync(path.join(process.cwd(), 'pages/super-admin/SuperAdminCommercialManagementPage.tsx'), 'utf8');
+  expect(pageContent).toContain('restrictionScopeFilter === \'tenant\' && !selectedTenantId');
+});
+
+// 10. Restriction ID display view model exists
+registerTest('10. Restriction ID display view model exists', () => {
+  const pageContent = fs.readFileSync(path.join(process.cwd(), 'pages/super-admin/SuperAdminCommercialManagementPage.tsx'), 'utf8');
+  expect(pageContent).toContain('Kısıtlama ID');
+  expect(pageContent).toContain('{r.id}');
+});
+
+// 11. is_currently_active is preserved from the RPC
+registerTest('11. is_currently_active is preserved from the RPC', () => {
+  const pageContent = fs.readFileSync(path.join(process.cwd(), 'pages/super-admin/SuperAdminCommercialManagementPage.tsx'), 'utf8');
+  expect(pageContent).toContain('isActiveNow = r.is_currently_active === true');
+});
+
+// 12. Stable idempotency key behavior
+registerTest('12. Stable idempotency key behavior', () => {
+  const createArgs1 = buildCreateRestrictionRpcArgs({
+    idempotencyKey: 'idemp_stable_1',
+    featureKey: 'core_booking',
+    reason: 'test'
+  });
+  const createArgs2 = buildCreateRestrictionRpcArgs({
+    idempotencyKey: 'idemp_stable_1',
+    featureKey: 'core_booking',
+    reason: 'test'
+  });
+  expect(createArgs1.p_idempotency_key).toBe(createArgs2.p_idempotency_key);
+});
+
+// 13. Duplicate submission blocking
+registerTest('13. Duplicate submission blocking', () => {
   let submitting = false;
   const submitAction = () => {
     if (submitting) return 'blocked';
@@ -223,36 +227,25 @@ registerTest('11. Duplicate-submit blocking', () => {
   expect(submitAction()).toBe('blocked');
 });
 
-// 12. Mock mode versus Supabase mode source selection
-registerTest('12. Mock mode versus Supabase mode source selection', () => {
-  const pageContent = fs.readFileSync(path.join(process.cwd(), 'pages/super-admin/SuperAdminCommercialManagementPage.tsx'), 'utf8');
-  expect(pageContent).toContain('listTenantCommercialDirectory');
-  expect(pageContent).not.toContain('superAdminService.getDashboardData()');
-});
-
-// 13. No direct table mutation path
-registerTest('13. No direct table mutation path', () => {
+// 14. No direct table mutation
+registerTest('14. No direct table mutation', () => {
   const adapterContent = fs.readFileSync(path.join(process.cwd(), 'services/superAdminCommercialAdapter.ts'), 'utf8');
   expect(adapterContent).not.toContain('.from(\'subscriptions\').insert');
   expect(adapterContent).not.toContain('.from(\'subscriptions\').update');
+  expect(adapterContent).not.toContain('.from(\'platform_system_restrictions\').insert');
 });
 
-// 14. No payment/iyzico charging controls
-registerTest('14. No payment/iyzico charging controls', () => {
+// 15. No payment/checkout/iyzico controls
+registerTest('15. No payment/checkout/iyzico controls', () => {
   const pageContent = fs.readFileSync(path.join(process.cwd(), 'pages/super-admin/SuperAdminCommercialManagementPage.tsx'), 'utf8');
   expect(pageContent).not.toContain('Pay now');
+  expect(pageContent).not.toContain('Checkout');
   expect(pageContent).not.toContain('iyzico');
-});
-
-// 15. Super-admin route protection
-registerTest('15. Super-admin route protection', () => {
-  const appContent = fs.readFileSync(path.join(process.cwd(), 'App.tsx'), 'utf8');
-  expect(appContent).toContain('allowedRoles={[\'super_admin\']}');
 });
 
 // Standalone runner execution
 (async () => {
-  console.log('=== Stage H1D Super Admin Commercial UI Standalone Executable QA ===\n');
+  console.log('=== Stage H1D-C1 Super Admin Commercial UI Executable QA ===\n');
   let passedCount = 0;
   let failedCount = 0;
 

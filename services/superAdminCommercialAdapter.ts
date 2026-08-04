@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient';
+import { supabase } from './supabaseClient.ts';
 
 export interface CommercialPlanCatalogItem {
   plan_id: string;
@@ -104,6 +104,8 @@ export interface ListTenantCommercialDirectoryResponse {
 export interface PlatformRestrictionItem {
   id: string;
   tenant_id: string | null;
+  tenant_slug?: string | null;
+  tenant_name?: string | null;
   feature_key: string;
   is_restricted: boolean;
   reason: string;
@@ -125,13 +127,20 @@ export interface ListPlatformRestrictionsResponse {
 export interface BillingTransactionItem {
   id: string;
   tenant_id: string;
+  subscription_id: string | null;
+  transaction_type: string;
   amount: number;
   currency: string;
-  transaction_type: string;
-  transaction_status: string;
   billing_mode: string;
-  external_reference: string | null;
-  operator_reason: string | null;
+  payment_method: string | null;
+  related_transaction_id: string | null;
+  external_provider_reference: string | null;
+  reference_note: string | null;
+  internal_reason: string | null;
+  billing_period_start: string | null;
+  billing_period_end: string | null;
+  occurred_at: string;
+  effective_at: string;
   created_at: string;
 }
 
@@ -142,6 +151,111 @@ export interface GetBillingTransactionsResponse {
   limit: number;
   offset: number;
   transactions: BillingTransactionItem[];
+}
+
+// ── Pure Adapter Helper Builders & Parsers ───────────────────────────────────
+
+export function buildTenantDirectoryRpcArgs(params?: {
+  search?: string | null;
+  status?: string | null;
+  planCode?: string | null;
+  limit?: number;
+  offset?: number;
+}) {
+  return {
+    p_search: params?.search ?? null,
+    p_status: params?.status ?? null,
+    p_plan_code: params?.planCode ?? null,
+    p_limit: params?.limit ?? 50,
+    p_offset: params?.offset ?? 0
+  };
+}
+
+export function parseTenantDirectoryResponse(data: any, params?: { limit?: number; offset?: number }): ListTenantCommercialDirectoryResponse {
+  return data || {
+    success: false,
+    reason_code: 'empty_response',
+    total_count: 0,
+    limit: params?.limit ?? 50,
+    offset: params?.offset ?? 0,
+    tenants: []
+  };
+}
+
+export function buildRestrictionListRpcArgs(params?: {
+  tenantId?: string | null;
+  limit?: number;
+  offset?: number;
+}) {
+  return {
+    p_tenant_id: params?.tenantId ?? null,
+    p_limit: params?.limit ?? 50,
+    p_offset: params?.offset ?? 0
+  };
+}
+
+export function parseRestrictionListResponse(data: any, params?: { limit?: number; offset?: number }): ListPlatformRestrictionsResponse {
+  return data || {
+    success: false,
+    reason_code: 'empty_response',
+    total_count: 0,
+    limit: params?.limit ?? 50,
+    offset: params?.offset ?? 0,
+    restrictions: []
+  };
+}
+
+export function buildCreateRestrictionRpcArgs(params: {
+  idempotencyKey: string;
+  tenantId?: string | null;
+  featureKey: string;
+  reason: string;
+  startsAt?: string | null;
+  expiresAt?: string | null;
+}) {
+  return {
+    p_idempotency_key: params.idempotencyKey,
+    p_tenant_id: params.tenantId ?? null,
+    p_feature_key: params.featureKey,
+    p_reason: params.reason,
+    p_starts_at: params.startsAt ?? null,
+    p_expires_at: params.expiresAt ?? null
+  };
+}
+
+export function buildEndRestrictionRpcArgs(params: {
+  idempotencyKey: string;
+  restrictionId: string;
+  reason: string;
+}) {
+  return {
+    p_idempotency_key: params.idempotencyKey,
+    p_restriction_id: params.restrictionId,
+    p_reason: params.reason
+  };
+}
+
+export function buildBillingTransactionsRpcArgs(params?: {
+  tenantId?: string | null;
+  limit?: number;
+  offset?: number;
+}) {
+  return {
+    p_tenant_id: params?.tenantId ?? null,
+    p_limit: params?.limit ?? 50,
+    p_offset: params?.offset ?? 0
+  };
+}
+
+export function parseBillingTransactionsResponse(data: any, params?: { limit?: number; offset?: number }): GetBillingTransactionsResponse {
+  return data || {
+    success: false,
+    reason_code: 'empty_response',
+    total_count: 0,
+    limit: params?.limit ?? 50,
+    offset: params?.offset ?? 0,
+    transactions: []
+  };
 }
 
 export const superAdminCommercialAdapter = {
@@ -175,36 +289,25 @@ export const superAdminCommercialAdapter = {
     limit?: number;
     offset?: number;
   }): Promise<ListTenantCommercialDirectoryResponse> {
-    const { data, error } = await supabase.rpc('super_admin_list_tenant_commercial_directory', {
-      p_search: params?.search ?? null,
-      p_status: params?.status ?? null,
-      p_plan_code: params?.planCode ?? null,
-      p_limit: params?.limit ?? 50,
-      p_offset: params?.offset ?? 0
-    });
+    const rpcArgs = buildTenantDirectoryRpcArgs(params);
+    const { data, error } = await supabase.rpc('super_admin_list_tenant_commercial_directory', rpcArgs);
     if (error) throw new Error(error.message);
-    return data || { success: false, reason_code: 'empty_response', total_count: 0, limit: params?.limit ?? 50, offset: params?.offset ?? 0, tenants: [] };
+    return parseTenantDirectoryResponse(data, params);
   },
 
   /**
    * H1D Read RPC 2: List Platform Restrictions
+   * Note: RPC accepts strictly p_tenant_id, p_limit, p_offset.
    */
   async listPlatformRestrictions(params?: {
     tenantId?: string | null;
-    featureKey?: string | null;
-    activeOnly?: boolean | null;
     limit?: number;
     offset?: number;
   }): Promise<ListPlatformRestrictionsResponse> {
-    const { data, error } = await supabase.rpc('super_admin_list_platform_restrictions', {
-      p_tenant_id: params?.tenantId ?? null,
-      p_feature_key: params?.featureKey ?? null,
-      p_active_only: params?.activeOnly ?? null,
-      p_limit: params?.limit ?? 50,
-      p_offset: params?.offset ?? 0
-    });
+    const rpcArgs = buildRestrictionListRpcArgs(params);
+    const { data, error } = await supabase.rpc('super_admin_list_platform_restrictions', rpcArgs);
     if (error) throw new Error(error.message);
-    return data || { success: false, reason_code: 'empty_response', total_count: 0, limit: params?.limit ?? 50, offset: params?.offset ?? 0, restrictions: [] };
+    return parseRestrictionListResponse(data, params);
   },
 
   /**
@@ -218,14 +321,8 @@ export const superAdminCommercialAdapter = {
     startsAt?: string | null;
     expiresAt?: string | null;
   }): Promise<MutationResult> {
-    const { data, error } = await supabase.rpc('super_admin_create_platform_restriction', {
-      p_idempotency_key: params.idempotencyKey,
-      p_tenant_id: params.tenantId ?? null,
-      p_feature_key: params.featureKey,
-      p_reason: params.reason,
-      p_starts_at: params.startsAt ?? null,
-      p_expires_at: params.expiresAt ?? null
-    });
+    const rpcArgs = buildCreateRestrictionRpcArgs(params);
+    const { data, error } = await supabase.rpc('super_admin_create_platform_restriction', rpcArgs);
     if (error) throw new Error(error.message);
     return data;
   },
@@ -238,11 +335,8 @@ export const superAdminCommercialAdapter = {
     restrictionId: string;
     reason: string;
   }): Promise<MutationResult> {
-    const { data, error } = await supabase.rpc('super_admin_end_platform_restriction', {
-      p_idempotency_key: params.idempotencyKey,
-      p_restriction_id: params.restrictionId,
-      p_reason: params.reason
-    });
+    const rpcArgs = buildEndRestrictionRpcArgs(params);
+    const { data, error } = await supabase.rpc('super_admin_end_platform_restriction', rpcArgs);
     if (error) throw new Error(error.message);
     return data;
   },
@@ -255,13 +349,10 @@ export const superAdminCommercialAdapter = {
     limit?: number;
     offset?: number;
   }): Promise<GetBillingTransactionsResponse> {
-    const { data, error } = await supabase.rpc('super_admin_get_billing_transactions', {
-      p_tenant_id: params?.tenantId ?? null,
-      p_limit: params?.limit ?? 50,
-      p_offset: params?.offset ?? 0
-    });
+    const rpcArgs = buildBillingTransactionsRpcArgs(params);
+    const { data, error } = await supabase.rpc('super_admin_get_billing_transactions', rpcArgs);
     if (error) throw new Error(error.message);
-    return data || { success: false, reason_code: 'empty_response', total_count: 0, limit: params?.limit ?? 50, offset: params?.offset ?? 0, transactions: [] };
+    return parseBillingTransactionsResponse(data, params);
   },
 
   /**
@@ -372,7 +463,7 @@ export const superAdminCommercialAdapter = {
     amount: number;
     currency?: string;
     transactionType: string;
-    transactionStatus: string;
+    transactionStatus?: string;
     billingMode?: string;
     externalReference?: string;
     operatorReason: string;
@@ -383,7 +474,7 @@ export const superAdminCommercialAdapter = {
       p_amount: params.amount,
       p_currency: params.currency ?? 'TRY',
       p_transaction_type: params.transactionType,
-      p_transaction_status: params.transactionStatus,
+      p_transaction_status: params.transactionStatus ?? 'settled',
       p_billing_mode: params.billingMode ?? 'manual',
       p_external_reference: params.externalReference ?? null,
       p_operator_reason: params.operatorReason

@@ -18,7 +18,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
   const [directoryPage, setDirectoryPage] = useState(0);
   const directoryLimit = 10;
 
-  // Search and Filter State
+  // Search and Filter State (Directory)
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [planFilter, setPlanFilter] = useState('all');
@@ -33,7 +33,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
 
   // Platform Restrictions State
-  const [loadingRestrictions, setLoadingRestrictions] = useState(true);
+  const [loadingRestrictions, setLoadingRestrictions] = useState(false);
   const [restrictionsError, setRestrictionsError] = useState<string | null>(null);
   const [restrictions, setRestrictions] = useState<PlatformRestrictionItem[]>([]);
   const [restrictionsTotalCount, setRestrictionsTotalCount] = useState(0);
@@ -42,7 +42,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
   const [restrictionActiveOnly, setRestrictionActiveOnly] = useState(false);
 
   // Billing Ledger State
-  const [loadingBilling, setLoadingBilling] = useState(true);
+  const [loadingBilling, setLoadingBilling] = useState(false);
   const [billingError, setBillingError] = useState<string | null>(null);
   const [billingTransactions, setBillingTransactions] = useState<BillingTransactionItem[]>([]);
   const [billingTotalCount, setBillingTotalCount] = useState(0);
@@ -69,7 +69,6 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
   const [formOverrideUnlimited, setFormOverrideUnlimited] = useState(false);
   const [formAmount, setFormAmount] = useState('0');
   const [formTxType, setFormTxType] = useState('subscription_charge');
-  const [formTxStatus, setFormTxStatus] = useState('settled');
 
   // Restriction Form Inputs
   const [formRestrictionScope, setFormRestrictionScope] = useState<'global' | 'tenant'>('tenant');
@@ -118,8 +117,15 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
     }
   }, [searchQuery, statusFilter, planFilter, directoryPage]);
 
-  // 2. Fetch Platform Restrictions
+  // 2. Fetch Platform Restrictions (Requires tenantId when in tenant scope mode)
   const loadRestrictions = useCallback(async () => {
+    if (restrictionScopeFilter === 'tenant' && !selectedTenantId) {
+      setRestrictions([]);
+      setRestrictionsTotalCount(0);
+      setLoadingRestrictions(false);
+      return;
+    }
+
     setLoadingRestrictions(true);
     setRestrictionsError(null);
     try {
@@ -130,17 +136,28 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
 
       const res = await superAdminCommercialAdapter.listPlatformRestrictions({
         tenantId: targetTenantId,
-        featureKey: restrictionFeatureFilter === 'all' ? null : restrictionFeatureFilter,
-        activeOnly: restrictionActiveOnly || null,
         limit: 50,
         offset: 0
       });
 
       if (res.success) {
         let items = res.restrictions || [];
+
+        // Client-side filtering for scope, feature_key, and active_only
         if (restrictionScopeFilter === 'global') {
           items = items.filter(r => r.tenant_id === null);
+        } else if (restrictionScopeFilter === 'tenant' && selectedTenantId) {
+          items = items.filter(r => r.tenant_id === selectedTenantId);
         }
+
+        if (restrictionFeatureFilter !== 'all') {
+          items = items.filter(r => r.feature_key === restrictionFeatureFilter);
+        }
+
+        if (restrictionActiveOnly) {
+          items = items.filter(r => r.is_currently_active === true);
+        }
+
         setRestrictions(items);
         setRestrictionsTotalCount(items.length);
       } else {
@@ -153,13 +170,20 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
     }
   }, [selectedTenantId, restrictionScopeFilter, restrictionFeatureFilter, restrictionActiveOnly]);
 
-  // 3. Fetch Billing Ledger Transactions
+  // 3. Fetch Billing Ledger Transactions (Only when a tenant is selected)
   const loadBillingTransactions = useCallback(async () => {
+    if (!selectedTenantId) {
+      setBillingTransactions([]);
+      setBillingTotalCount(0);
+      setLoadingBilling(false);
+      return;
+    }
+
     setLoadingBilling(true);
     setBillingError(null);
     try {
       const res = await superAdminCommercialAdapter.getBillingTransactions({
-        tenantId: selectedTenantId || null,
+        tenantId: selectedTenantId,
         limit: billingLimit,
         offset: billingPage * billingLimit
       });
@@ -206,7 +230,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
     loadDirectory();
   }, [loadDirectory]);
 
-  // Restrictions & Billing Effect when selected tenant or filters change
+  // Restrictions & Billing Effect
   useEffect(() => {
     loadRestrictions();
     loadBillingTransactions();
@@ -437,7 +461,6 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
         amount: parseFloat(formAmount) || 0,
         currency: 'TRY',
         transactionType: formTxType,
-        transactionStatus: formTxStatus,
         operatorReason: formOperatorReason
       });
       if (res.success) {
@@ -568,7 +591,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
               className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
 
-            {/* Filter Controls with explicit 'none' & 'all' support */}
+            {/* Filter Controls with exact accepted values */}
             <div className="grid grid-cols-2 gap-2 text-xs">
               <select
                 value={statusFilter}
@@ -577,9 +600,11 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
               >
                 <option value="all">Tüm Durumlar (all)</option>
                 <option value="none">Aboneliksiz (none)</option>
-                <option value="active">Aktif (active)</option>
+                <option value="pending_checkout">Ödeme Bekliyor (pending_checkout)</option>
                 <option value="trialing">Deneme (trialing)</option>
+                <option value="active">Aktif (active)</option>
                 <option value="past_due">Gecikmiş (past_due)</option>
+                <option value="paused">Duraklatıldı (paused)</option>
                 <option value="suspended">Askıda (suspended)</option>
                 <option value="cancelled">İptal (cancelled)</option>
                 <option value="expired">Süresi Dolmuş (expired)</option>
@@ -883,7 +908,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
               <option value="all">Tüm Özellikler</option>
               <option value="core_booking">Online Randevu (core_booking)</option>
               <option value="customer_cancellation">Müşteri İptali (customer_cancellation)</option>
-              <option value="commercial_analytics">Ticari Analitik (commercial_analytics)</option>
+              <option value="advanced_reporting">Gelişmiş Raporlama (advanced_reporting)</option>
               <option value="staff_management">Personel Yönetimi (staff_management)</option>
             </select>
           </div>
@@ -899,8 +924,12 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Restrictions List Table */}
-        {loadingRestrictions ? (
+        {/* Restrictions Selection Prompt for Tenant Scope */}
+        {restrictionScopeFilter === 'tenant' && !selectedTenantId ? (
+          <div className="p-8 text-center text-gray-500 dark:text-gray-400 bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 text-sm">
+            İşletme bazlı kısıtlamaları listelemek için lütfen yukarıdaki işletme rehberinden bir işletme seçiniz.
+          </div>
+        ) : loadingRestrictions ? (
           <div className="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
             <div className="animate-spin w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full mx-auto mb-2"></div>
             Platform Kısıtlamaları Yükleniyor...
@@ -915,23 +944,25 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700 text-gray-500 dark:text-gray-400 font-semibold">
+                  <th className="py-2.5 px-3">Kısıtlama ID</th>
                   <th className="py-2.5 px-3">Kapsam / Tenant</th>
                   <th className="py-2.5 px-3">Özellik Anahtarı</th>
                   <th className="py-2.5 px-3">Gerekçe (Reason)</th>
                   <th className="py-2.5 px-3">Başlangıç</th>
                   <th className="py-2.5 px-3">Bitiş</th>
-                  <th className="py-2.5 px-3">Durum</th>
+                  <th className="py-2.5 px-3">Durum (RPC Truth)</th>
                   <th className="py-2.5 px-3 text-right">Eylem</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-slate-700/50 text-gray-800 dark:text-gray-200">
                 {restrictions.map(r => {
-                  const isActiveNow = r.is_restricted && (!r.expires_at || new Date(r.expires_at) > new Date()) && new Date(r.starts_at) <= new Date();
+                  const isActiveNow = r.is_currently_active === true;
                   const isFuture = r.is_restricted && new Date(r.starts_at) > new Date();
                   const isEnded = !r.is_restricted || (r.expires_at && new Date(r.expires_at) <= new Date());
 
                   return (
                     <tr key={r.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/30">
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-gray-500 dark:text-gray-400">{r.id}</td>
                       <td className="py-2.5 px-3 font-mono">
                         {r.tenant_id ? (
                           <span className="text-blue-600 dark:text-blue-400 truncate max-w-[120px] inline-block">{r.tenant_id}</span>
@@ -972,7 +1003,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
 
                 {restrictions.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-gray-500 dark:text-gray-400">
+                    <td colSpan={8} className="py-8 text-center text-gray-500 dark:text-gray-400">
                       Gösterilecek platform kısıtlaması kaydı bulunmamaktadır.
                     </td>
                   </tr>
@@ -997,8 +1028,11 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Ledger Table */}
-        {loadingBilling ? (
+        {!selectedTenantId ? (
+          <div className="p-8 text-center text-gray-500 dark:text-gray-400 bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 text-sm">
+            Cari hareket kayıtlarını listelemek için lütfen yukarıdaki işletme rehberinden bir işletme seçiniz.
+          </div>
+        ) : loadingBilling ? (
           <div className="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
             <div className="animate-spin w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full mx-auto mb-2"></div>
             Cari Kayıtlar Yükleniyor...
@@ -1013,39 +1047,37 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700 text-gray-500 dark:text-gray-400 font-semibold">
-                  <th className="py-2.5 px-3">Tarih</th>
+                  <th className="py-2.5 px-3">İşlem Tarihi (Occurred)</th>
+                  <th className="py-2.5 px-3">Yürürlük (Effective)</th>
                   <th className="py-2.5 px-3">İşletme ID</th>
                   <th className="py-2.5 px-3">İşlem Tipi</th>
                   <th className="py-2.5 px-3">Tutar</th>
                   <th className="py-2.5 px-3">Faturalama Modu</th>
-                  <th className="py-2.5 px-3">Durum</th>
-                  <th className="py-2.5 px-3">Operasyonel Not</th>
+                  <th className="py-2.5 px-3">Ödeme Yöntemi</th>
+                  <th className="py-2.5 px-3">Sağlayıcı Ref</th>
+                  <th className="py-2.5 px-3">Referans Notu / İç Gerekçe</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-slate-700/50 text-gray-800 dark:text-gray-200">
                 {billingTransactions.map(tx => (
                   <tr key={tx.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/30">
-                    <td className="py-2.5 px-3 font-mono text-[11px]">{new Date(tx.created_at).toLocaleString('tr-TR')}</td>
+                    <td className="py-2.5 px-3 font-mono text-[11px]">{new Date(tx.occurred_at).toLocaleString('tr-TR')}</td>
+                    <td className="py-2.5 px-3 font-mono text-[11px]">{tx.effective_at !== tx.occurred_at ? new Date(tx.effective_at).toLocaleString('tr-TR') : '-'}</td>
                     <td className="py-2.5 px-3 font-mono text-blue-600 dark:text-blue-400 truncate max-w-[120px]">{tx.tenant_id}</td>
                     <td className="py-2.5 px-3 font-medium capitalize">{tx.transaction_type}</td>
-                    <td className="py-2.5 px-3 font-bold">{tx.amount} {tx.currency}</td>
+                    <td className="py-2.5 px-3 font-bold">{Number(tx.amount).toFixed(2)} {tx.currency}</td>
                     <td className="py-2.5 px-3 capitalize">{tx.billing_mode}</td>
-                    <td className="py-2.5 px-3">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                        tx.transaction_status === 'settled' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
-                        tx.transaction_status === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                        'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
-                      }`}>
-                        {tx.transaction_status}
-                      </span>
+                    <td className="py-2.5 px-3 capitalize">{tx.payment_method || '-'}</td>
+                    <td className="py-2.5 px-3 font-mono text-[11px] text-gray-500 dark:text-gray-400">{tx.external_provider_reference || '-'}</td>
+                    <td className="py-2.5 px-3 max-w-[200px] truncate text-gray-600 dark:text-gray-300 font-mono text-[11px]">
+                      {tx.internal_reason || tx.reference_note || '-'}
                     </td>
-                    <td className="py-2.5 px-3 max-w-[200px] truncate text-gray-500 dark:text-gray-400">{tx.operator_reason || tx.external_reference || '-'}</td>
                   </tr>
                 ))}
 
                 {billingTransactions.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-gray-500 dark:text-gray-400">
+                    <td colSpan={9} className="py-8 text-center text-gray-500 dark:text-gray-400">
                       Gösterilecek cari hareket kaydı bulunmamaktadır.
                     </td>
                   </tr>
@@ -1253,18 +1285,6 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
                       <option value="adjustment">Düzeltme / İade Kaydı</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="block font-medium text-gray-700 dark:text-gray-300 mb-1">İşlem Durumu</label>
-                    <select
-                      value={formTxStatus}
-                      onChange={e => setFormTxStatus(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg bg-gray-50 dark:bg-slate-900 dark:border-slate-700 dark:text-white"
-                    >
-                      <option value="settled">Tamamlandı (Settled)</option>
-                      <option value="pending">Bekliyor (Pending)</option>
-                      <option value="failed">Başarısız (Failed)</option>
-                    </select>
-                  </div>
                 </>
               )}
 
@@ -1304,7 +1324,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
                     >
                       <option value="core_booking">Online Randevu Alımı (core_booking)</option>
                       <option value="customer_cancellation">Müşteri İptali (customer_cancellation)</option>
-                      <option value="commercial_analytics">Ticari Analitik (commercial_analytics)</option>
+                      <option value="advanced_reporting">Gelişmiş Raporlama (advanced_reporting)</option>
                       <option value="staff_management">Personel Yönetimi (staff_management)</option>
                       <option value="service_management">Hizmet Yönetimi (service_management)</option>
                     </select>

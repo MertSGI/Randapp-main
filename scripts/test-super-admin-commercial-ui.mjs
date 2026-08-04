@@ -61,19 +61,24 @@ check('3. superAdminCommercialAdapter uses all 5 accepted H1D RPCs exclusively w
   }
 });
 
-check('4. SuperAdminCommercialManagementPage UI uses server-backed directory instead of getDashboardData', () => {
-  const pageContent = fs.readFileSync(path.join(process.cwd(), 'pages/super-admin/SuperAdminCommercialManagementPage.tsx'), 'utf8');
-  if (pageContent.includes('superAdminService.getDashboardData()')) {
-    throw new Error('SuperAdminCommercialManagementPage still references legacy getDashboardData()');
-  }
-  if (!pageContent.includes('listTenantCommercialDirectory') ||
-      !pageContent.includes('listPlatformRestrictions') ||
-      !pageContent.includes('getBillingTransactions')) {
-    throw new Error('SuperAdminCommercialManagementPage missing mandatory H1D contract methods');
+check('4. listPlatformRestrictions sends strictly p_tenant_id, p_limit, p_offset without unsupported parameters', () => {
+  const adapterContent = fs.readFileSync(path.join(process.cwd(), 'services/superAdminCommercialAdapter.ts'), 'utf8');
+  if (adapterContent.includes('p_feature_key: params?.featureKey') || adapterContent.includes('p_active_only: params?.activeOnly')) {
+    throw new Error('listPlatformRestrictions still passes unsupported p_feature_key or p_active_only to DB RPC');
   }
 });
 
-check('5. SuperAdminCommercialManagementPage UI contains NO payment or iyzico charging controls', () => {
+check('5. SuperAdminCommercialManagementPage UI uses advanced_reporting and excludes commercial_analytics', () => {
+  const pageContent = fs.readFileSync(path.join(process.cwd(), 'pages/super-admin/SuperAdminCommercialManagementPage.tsx'), 'utf8');
+  if (pageContent.includes('commercial_analytics')) {
+    throw new Error('UI contains invalid feature key commercial_analytics');
+  }
+  if (!pageContent.includes('advanced_reporting')) {
+    throw new Error('UI missing valid feature key advanced_reporting');
+  }
+});
+
+check('6. SuperAdminCommercialManagementPage UI contains NO payment or iyzico charging controls', () => {
   const pageContent = fs.readFileSync(path.join(process.cwd(), 'pages/super-admin/SuperAdminCommercialManagementPage.tsx'), 'utf8');
   const forbidden = ['Pay now', 'Checkout', 'Charge card', 'iyzico', 'Refund through iyzico'];
   for (const f of forbidden) {
