@@ -27,11 +27,16 @@ check('2. SuperAdminLayout contains Ticari Yönetim & Lisans navigation link', (
   }
 });
 
-check('3. superAdminCommercialAdapter uses RPCs exclusively without direct table writes', () => {
+check('3. superAdminCommercialAdapter uses all 5 accepted H1D RPCs exclusively without direct table writes', () => {
   const adapterContent = fs.readFileSync(path.join(process.cwd(), 'services/superAdminCommercialAdapter.ts'), 'utf8');
   const requiredRPCs = [
     'get_public_commercial_plan_catalog',
     'super_admin_get_tenant_commercial_enforcement_snapshot',
+    'super_admin_list_tenant_commercial_directory',
+    'super_admin_list_platform_restrictions',
+    'super_admin_create_platform_restriction',
+    'super_admin_end_platform_restriction',
+    'super_admin_get_billing_transactions',
     'super_admin_assign_commercial_plan',
     'super_admin_change_subscription_status',
     'super_admin_schedule_plan_change',
@@ -45,14 +50,30 @@ check('3. superAdminCommercialAdapter uses RPCs exclusively without direct table
       throw new Error(`Missing required RPC invocation: ${rpc}`);
     }
   }
+
+  // Verify zero direct table writes
   if (adapterContent.includes('.from(\'subscriptions\').insert') ||
       adapterContent.includes('.from(\'subscriptions\').update') ||
-      adapterContent.includes('.from(\'subscriptions\').delete')) {
-    throw new Error('Adapter contains direct table write against subscriptions');
+      adapterContent.includes('.from(\'subscriptions\').delete') ||
+      adapterContent.includes('.from(\'platform_system_restrictions\').insert') ||
+      adapterContent.includes('.from(\'platform_system_restrictions\').update')) {
+    throw new Error('Adapter contains direct table write against subscriptions or restrictions');
   }
 });
 
-check('4. SuperAdminCommercialManagementPage UI contains NO payment or iyzico charging controls', () => {
+check('4. SuperAdminCommercialManagementPage UI uses server-backed directory instead of getDashboardData', () => {
+  const pageContent = fs.readFileSync(path.join(process.cwd(), 'pages/super-admin/SuperAdminCommercialManagementPage.tsx'), 'utf8');
+  if (pageContent.includes('superAdminService.getDashboardData()')) {
+    throw new Error('SuperAdminCommercialManagementPage still references legacy getDashboardData()');
+  }
+  if (!pageContent.includes('listTenantCommercialDirectory') ||
+      !pageContent.includes('listPlatformRestrictions') ||
+      !pageContent.includes('getBillingTransactions')) {
+    throw new Error('SuperAdminCommercialManagementPage missing mandatory H1D contract methods');
+  }
+});
+
+check('5. SuperAdminCommercialManagementPage UI contains NO payment or iyzico charging controls', () => {
   const pageContent = fs.readFileSync(path.join(process.cwd(), 'pages/super-admin/SuperAdminCommercialManagementPage.tsx'), 'utf8');
   const forbidden = ['Pay now', 'Checkout', 'Charge card', 'iyzico', 'Refund through iyzico'];
   for (const f of forbidden) {

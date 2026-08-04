@@ -65,14 +65,83 @@ export interface TenantCommercialEnforcementSnapshot {
 export interface MutationResult {
   success: boolean;
   reason_code: string;
+  changed?: boolean;
   replayed?: boolean;
   subscription_id?: string;
   transaction_id?: string;
   override_id?: string;
   restriction_id?: string;
+  restriction?: PlatformRestrictionItem;
   applied?: boolean;
   previous_status?: string;
   new_status?: string;
+}
+
+export interface CommercialDirectoryTenantItem {
+  tenant_id: string;
+  slug: string;
+  business_name: string;
+  created_at: string;
+  subscription_status: string;
+  plan_code: string;
+  plan_name: string;
+  version_number: number | null;
+  billing_mode: string | null;
+  trial_end: string | null;
+  current_period_end: string | null;
+  has_scheduled_change: boolean;
+}
+
+export interface ListTenantCommercialDirectoryResponse {
+  success: boolean;
+  reason_code: string;
+  total_count: number;
+  limit: number;
+  offset: number;
+  tenants: CommercialDirectoryTenantItem[];
+}
+
+export interface PlatformRestrictionItem {
+  id: string;
+  tenant_id: string | null;
+  feature_key: string;
+  is_restricted: boolean;
+  reason: string;
+  starts_at: string;
+  expires_at: string | null;
+  created_at: string;
+  is_currently_active?: boolean;
+}
+
+export interface ListPlatformRestrictionsResponse {
+  success: boolean;
+  reason_code: string;
+  total_count: number;
+  limit: number;
+  offset: number;
+  restrictions: PlatformRestrictionItem[];
+}
+
+export interface BillingTransactionItem {
+  id: string;
+  tenant_id: string;
+  amount: number;
+  currency: string;
+  transaction_type: string;
+  transaction_status: string;
+  billing_mode: string;
+  external_reference: string | null;
+  operator_reason: string | null;
+  created_at: string;
+}
+
+export interface GetBillingTransactionsResponse {
+  success: boolean;
+  reason_code: string;
+  total_count: number;
+  limit: number;
+  offset: number;
+  transactions: BillingTransactionItem[];
 }
 
 export const superAdminCommercialAdapter = {
@@ -94,6 +163,105 @@ export const superAdminCommercialAdapter = {
     });
     if (error) throw new Error(error.message);
     return data || { success: false, reason_code: 'unknown_error' };
+  },
+
+  /**
+   * H1D Read RPC 1: List Tenant Commercial Directory
+   */
+  async listTenantCommercialDirectory(params?: {
+    search?: string | null;
+    status?: string | null;
+    planCode?: string | null;
+    limit?: number;
+    offset?: number;
+  }): Promise<ListTenantCommercialDirectoryResponse> {
+    const { data, error } = await supabase.rpc('super_admin_list_tenant_commercial_directory', {
+      p_search: params?.search ?? null,
+      p_status: params?.status ?? null,
+      p_plan_code: params?.planCode ?? null,
+      p_limit: params?.limit ?? 50,
+      p_offset: params?.offset ?? 0
+    });
+    if (error) throw new Error(error.message);
+    return data || { success: false, reason_code: 'empty_response', total_count: 0, limit: params?.limit ?? 50, offset: params?.offset ?? 0, tenants: [] };
+  },
+
+  /**
+   * H1D Read RPC 2: List Platform Restrictions
+   */
+  async listPlatformRestrictions(params?: {
+    tenantId?: string | null;
+    featureKey?: string | null;
+    activeOnly?: boolean | null;
+    limit?: number;
+    offset?: number;
+  }): Promise<ListPlatformRestrictionsResponse> {
+    const { data, error } = await supabase.rpc('super_admin_list_platform_restrictions', {
+      p_tenant_id: params?.tenantId ?? null,
+      p_feature_key: params?.featureKey ?? null,
+      p_active_only: params?.activeOnly ?? null,
+      p_limit: params?.limit ?? 50,
+      p_offset: params?.offset ?? 0
+    });
+    if (error) throw new Error(error.message);
+    return data || { success: false, reason_code: 'empty_response', total_count: 0, limit: params?.limit ?? 50, offset: params?.offset ?? 0, restrictions: [] };
+  },
+
+  /**
+   * H1D Mutation RPC 1: Create Platform Restriction
+   */
+  async createPlatformRestriction(params: {
+    idempotencyKey: string;
+    tenantId?: string | null;
+    featureKey: string;
+    reason: string;
+    startsAt?: string | null;
+    expiresAt?: string | null;
+  }): Promise<MutationResult> {
+    const { data, error } = await supabase.rpc('super_admin_create_platform_restriction', {
+      p_idempotency_key: params.idempotencyKey,
+      p_tenant_id: params.tenantId ?? null,
+      p_feature_key: params.featureKey,
+      p_reason: params.reason,
+      p_starts_at: params.startsAt ?? null,
+      p_expires_at: params.expiresAt ?? null
+    });
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  /**
+   * H1D Mutation RPC 2: End Platform Restriction
+   */
+  async endPlatformRestriction(params: {
+    idempotencyKey: string;
+    restrictionId: string;
+    reason: string;
+  }): Promise<MutationResult> {
+    const { data, error } = await supabase.rpc('super_admin_end_platform_restriction', {
+      p_idempotency_key: params.idempotencyKey,
+      p_restriction_id: params.restrictionId,
+      p_reason: params.reason
+    });
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  /**
+   * H1D Read RPC 3: Get Billing Transactions Ledger
+   */
+  async getBillingTransactions(params?: {
+    tenantId?: string | null;
+    limit?: number;
+    offset?: number;
+  }): Promise<GetBillingTransactionsResponse> {
+    const { data, error } = await supabase.rpc('super_admin_get_billing_transactions', {
+      p_tenant_id: params?.tenantId ?? null,
+      p_limit: params?.limit ?? 50,
+      p_offset: params?.offset ?? 0
+    });
+    if (error) throw new Error(error.message);
+    return data || { success: false, reason_code: 'empty_response', total_count: 0, limit: params?.limit ?? 50, offset: params?.offset ?? 0, transactions: [] };
   },
 
   /**
