@@ -188,6 +188,9 @@ export function generateManualCleanupSql(runId, trackedRestrictionIds, idempoten
 // ── Executable Behavioral Cases Suite Factory ───────────────────────────────
 
 export function buildExecutableBehavioralCases(runId, testTenantId, testFeatureKey, fixtureIds, nonSuperAdminToken) {
+  const stableCreateStartsAt =
+    new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
   return [
     // --- Restriction Create Cases ---
     {
@@ -198,7 +201,7 @@ export function buildExecutableBehavioralCases(runId, testTenantId, testFeatureK
         p_tenant_id: testTenantId,
         p_feature_key: testFeatureKey,
         p_reason: `Valid fresh create ${runId}`,
-        p_starts_at: null,
+        p_starts_at: stableCreateStartsAt,
         p_expires_at: null,
         p_idempotency_key: `create_valid_${runId}`
       }),
@@ -212,7 +215,7 @@ export function buildExecutableBehavioralCases(runId, testTenantId, testFeatureK
         p_tenant_id: testTenantId,
         p_feature_key: testFeatureKey,
         p_reason: `Valid fresh create ${runId}`,
-        p_starts_at: null,
+        p_starts_at: stableCreateStartsAt,
         p_expires_at: null,
         p_idempotency_key: `create_valid_${runId}`
       }),
@@ -226,7 +229,7 @@ export function buildExecutableBehavioralCases(runId, testTenantId, testFeatureK
         p_tenant_id: testTenantId,
         p_feature_key: testFeatureKey,
         p_reason: `Different payload conflict ${runId}`,
-        p_starts_at: null,
+        p_starts_at: stableCreateStartsAt,
         p_expires_at: null,
         p_idempotency_key: `create_valid_${runId}`
       }),
@@ -670,7 +673,7 @@ async function runCliAcceptance() {
         } else if (rpc === 'super_admin_end_platform_restriction') {
           usedIdempotencyKeys.push(callIdempKey);
           payload = {
-            p_restriction_id: fixtureIds.operatorEndedId,
+            p_restriction_id: fixtureIds.alreadyEndedId,
             p_reason: `Auth matrix end ${role.name} ${runId}`,
             p_idempotency_key: callIdempKey
           };
@@ -707,8 +710,16 @@ async function runCliAcceptance() {
     // Concurrency Identical Create
     const concIdentKey = `conc_ident_create_${runId}`;
     usedIdempotencyKeys.push(concIdentKey);
+    const concIdentStartsAt =
+      new Date(Date.now() + 20 * 60 * 1000).toISOString();
+
     const concIdentPayload = {
-      p_tenant_id: testTenantId, p_feature_key: testFeatureKey, p_reason: `Concurrent identical ${runId}`, p_idempotency_key: concIdentKey
+      p_tenant_id: testTenantId,
+      p_feature_key: testFeatureKey,
+      p_reason: `Concurrent identical ${runId}`,
+      p_starts_at: concIdentStartsAt,
+      p_expires_at: null,
+      p_idempotency_key: concIdentKey
     };
     const [c1, c2] = await Promise.all([
       callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_create_platform_restriction', concIdentPayload, superAdminSession.token),
@@ -721,12 +732,16 @@ async function runCliAcceptance() {
     // Concurrency Conflicting Create
     const concConfKey = `conc_conf_create_${runId}`;
     usedIdempotencyKeys.push(concConfKey);
+
+    const concConfStartsAt =
+      new Date(Date.now() + 25 * 60 * 1000).toISOString();
+
     const [cc1, cc2] = await Promise.all([
       callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_create_platform_restriction', {
-        p_tenant_id: testTenantId, p_feature_key: testFeatureKey, p_reason: `Conc conf A ${runId}`, p_idempotency_key: concConfKey
+        p_tenant_id: testTenantId, p_feature_key: testFeatureKey, p_reason: `Conc conf A ${runId}`, p_starts_at: concConfStartsAt, p_expires_at: null, p_idempotency_key: concConfKey
       }, superAdminSession.token),
       callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_create_platform_restriction', {
-        p_tenant_id: testTenantId, p_feature_key: testFeatureKey, p_reason: `Conc conf B ${runId}`, p_idempotency_key: concConfKey
+        p_tenant_id: testTenantId, p_feature_key: testFeatureKey, p_reason: `Conc conf B ${runId}`, p_starts_at: concConfStartsAt, p_expires_at: null, p_idempotency_key: concConfKey
       }, superAdminSession.token)
     ]);
     trackCreatedRestriction(trackedRestrictionSet, trackedRestrictionList, cc1, 'conc_conf_create_1');
