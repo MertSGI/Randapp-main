@@ -390,7 +390,7 @@ BEGIN
             t.id::text = v_search
           ))
       AND (p_status IS NULL OR p_status = 'all' OR s.status = p_status)
-      AND (p_plan_code IS NULL OR p_plan_code = 'all' || p.code = p_plan_code);
+      AND (p_plan_code IS NULL OR p_plan_code = 'all' OR p.code = p_plan_code);
 
     SELECT COALESCE(jsonb_agg(td_row), '[]'::jsonb) INTO v_items
     FROM (
