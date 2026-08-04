@@ -342,9 +342,16 @@ export async function runBrowserAcceptance() {
         await ownerPage.goto(`${baseUrl}/super-admin/commercial`);
         await ownerPage.waitForTimeout(1000);
 
-        const ownerUrl = ownerPage.url();
-        if (ownerUrl.includes('/super-admin/commercial')) {
-          throw new Error(`Tenant owner remained on protected route: ${ownerUrl}`);
+        const ownerPath = await ownerPage.evaluate(() => window.location.pathname);
+        const denialVisible = await ownerPage.evaluate(() => {
+          return document.body.innerText.includes('Bu alana erişim yetkiniz yok.');
+        });
+
+        // Access denial is valid if browser redirects away OR remains at /super-admin/commercial displaying denial text
+        const isRedirected = ownerPath !== '/super-admin/commercial';
+
+        if (!isRedirected && !denialVisible) {
+          throw new Error(`Tenant owner remained on /super-admin/commercial without displaying access denial text`);
         }
 
         const titleCount = await ownerPage.locator('[data-testid="commercial-page-title"]').count();

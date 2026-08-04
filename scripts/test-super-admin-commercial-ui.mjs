@@ -98,5 +98,21 @@ check('7. SuperAdminCommercialManagementPage UI option value is canonical "tenan
   }
 });
 
+check('8. Playwright runner accepts same-route access denial text without redirect-only error', () => {
+  const runnerContent = fs.readFileSync(path.join(process.cwd(), 'scripts/test-super-admin-commercial-browser.mjs'), 'utf8');
+  if (runnerContent.includes('Tenant owner remained on protected route')) {
+    throw new Error('Playwright runner still contains invalid redirect-only error string');
+  }
+  if (!runnerContent.includes('Bu alana erişim yetkiniz yok.')) {
+    throw new Error('Playwright runner missing accepted access denial text check');
+  }
+  if (!runnerContent.includes('commercial-page-title')) {
+    throw new Error('Playwright runner missing commercial-page-title absence assertion');
+  }
+  if (!runnerContent.includes('super_admin_')) {
+    throw new Error('Playwright runner missing super_admin_ RPC check');
+  }
+});
+
 console.log('\n══════════════════════════════════════════════════════════');
 console.log('✅ Stage H1D Super Admin Commercial UI QA PASSED.');
