@@ -1,20 +1,20 @@
 // scripts/test-super-admin-commercial-browser.mjs
 // ═══════════════════════════════════════════════════════════════════════════
-// Stage H1D-C1 — Operator Local Playwright Browser Acceptance Runner
+// Stage H1D-C2 — Operator Local Playwright Browser Acceptance Runner
 // Scenarios:
-//   1. Missing credentials fail-closed check (No browser launch, Exit 1)
-//   2. Chromium launch & Super-admin login
-//   3. Open /super-admin/commercial & verify route
-//   4. Search canonical slug melis-guzellik
-//   5. Search canonical tenant UUID
-//   6. Search dedicated H1D test tenant UUID
-//   7. Status none & Plan none filter evaluation
-//   8. Select H1D test tenant & verify snapshot
-//   9. Zero-amount TRY comped billing row & internal_reason/reference_note assertion
+//   1. Super-admin login & navigation to /super-admin/commercial
+//   2. Search canonical slug melis-guzellik
+//   3. Search canonical tenant UUID
+//   4. Search dedicated H1D test tenant UUID
+//   5. Filter status=none & plan=all
+//   6. Filter status=all & plan=none
+//   7. Filter status=none & plan=none
+//   8. Select dedicated test tenant & verify snapshot
+//   9. Verify zero-amount TRY comped billing row
 //  10. Restrictions section load assertion
-//  11. Create restriction modal validation (no mutation)
-//  12. Log out & Tenant-owner login access denial verification
-//  13. Desktop & Mobile screenshot capture (No secrets exposed)
+//  11. Create restriction modal validation without mutation
+//  12. Isolated tenant-owner access denial test
+//  13. Safety & desktop/mobile screenshot capture (No secrets exposed)
 // ═══════════════════════════════════════════════════════════════════════════
 
 import fs from 'fs';
@@ -51,7 +51,7 @@ export async function runBrowserAcceptance() {
   loadEnvFile(path.join(process.cwd(), '.env.local'));
   loadEnvFile(path.join(process.cwd(), '.env'));
 
-  console.log('=== Stage H1D-C1 — Operator Playwright Browser Acceptance Runner ===\n');
+  console.log('=== Stage H1D-C2 — Operator Playwright Browser Acceptance Runner ===\n');
 
   const missingVars = REQUIRED_ENV_VARS.filter(v => !process.env[v] || !process.env[v].trim());
 
@@ -70,112 +70,253 @@ export async function runBrowserAcceptance() {
   console.log(`Run ID: ${runId}`);
   console.log(`Target Base URL: ${baseUrl}`);
 
-  // Dynamic import of Playwright when credentials are present
   const { chromium } = await import('playwright');
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-  const page = await context.newPage();
 
-  let definedScenarios = 13;
+  const scenarioRegistry = [];
   let executedScenarios = 0;
   let passedScenarios = 0;
   let failedScenarios = 0;
   const screenshotPaths = [];
 
+  async function runScenario(name, fn) {
+    executedScenarios++;
+    try {
+      await fn();
+      passedScenarios++;
+      console.log(`  ✅ SCENARIO PASS: ${name}`);
+      scenarioRegistry.push({ name, status: 'PASSED' });
+    } catch (err) {
+      failedScenarios++;
+      console.error(`  ❌ SCENARIO FAIL: ${name} — ${err.message}`);
+      scenarioRegistry.push({ name, status: 'FAILED', error: err.message });
+    }
+  }
+
+  // Primary Super Admin Context
+  const saContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const saPage = await saContext.newPage();
+
+  // Attach Request Observer to catch forbidden mutations
+  saPage.on('request', req => {
+    const url = req.url();
+    if (url.includes('super_admin_create_platform_restriction') || url.includes('super_admin_end_platform_restriction')) {
+      throw new Error(`FORBIDDEN_LIVE_MUTATION_REQUEST_DETECTED: ${url}`);
+    }
+  });
+
   try {
-    // 1. Super-admin login
-    await page.goto(`${baseUrl}/login`);
-    executedScenarios++;
-    await page.fill('input[type="email"]', process.env.LARI_STAGE_H1D_SUPER_ADMIN_EMAIL);
-    await page.fill('input[type="password"]', process.env.LARI_STAGE_H1D_SUPER_ADMIN_PASSWORD);
-    await page.click('button[type="submit"]');
-    await page.waitForURL(`${baseUrl}/super-admin/commercial`, { timeout: 10000 });
-    passedScenarios++;
+    // 1. Super admin login & navigation
+    await runScenario('1. Super-admin login & navigate to /super-admin/commercial', async () => {
+      await saPage.goto(`${baseUrl}/login`);
+      await saPage.fill('input[type="email"]', process.env.LARI_STAGE_H1D_SUPER_ADMIN_EMAIL);
+      await saPage.fill('input[type="password"]', process.env.LARI_STAGE_H1D_SUPER_ADMIN_PASSWORD);
+      await saPage.click('button[type="submit"]');
 
-    // 2. Open /super-admin/commercial & verify
-    executedScenarios++;
-    const pageTitle = await page.textContent('h1');
-    if (pageTitle.includes('Ticari Yönetim & Abonelik Paneli')) passedScenarios++;
+      // Wait for /super-admin redirect
+      await saPage.waitForURL(url => url.pathname.startsWith('/super-admin'), { timeout: 10000 });
 
-    // 3. Search canonical slug melis-guzellik
-    executedScenarios++;
-    await page.fill('input[placeholder*="İşletme Adı"]', 'melis-guzellik');
-    await page.waitForTimeout(500);
-    passedScenarios++;
+      // Navigate explicitly to /super-admin/commercial
+      await saPage.goto(`${baseUrl}/super-admin/commercial`);
+      await saPage.waitForSelector('[data-testid="commercial-page-title"]', { timeout: 10000 });
+      const title = await saPage.textContent('[data-testid="commercial-page-title"]');
+      if (!title.includes('Ticari Yönetim & Abonelik Paneli')) {
+        throw new Error('Commercial page title not matched');
+      }
+    });
 
-    // 4. Search canonical tenant UUID
-    executedScenarios++;
-    await page.fill('input[placeholder*="İşletme Adı"]', 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa');
-    await page.waitForTimeout(500);
-    passedScenarios++;
+    // 2. Search canonical slug melis-guzellik
+    await runScenario('2. Search canonical slug melis-guzellik', async () => {
+      await saPage.fill('[data-testid="commercial-directory-search"]', 'melis-guzellik');
+      await saPage.waitForSelector('[data-testid="commercial-directory-results"]', { timeout: 5000 });
+      const content = await saPage.textContent('[data-testid="commercial-directory-results"]');
+      if (!content.includes('Melis Güzellik') && !content.includes('melis-guzellik')) {
+        throw new Error('Canonical slug melis-guzellik not found in directory results');
+      }
+    });
 
-    // 5. Search dedicated H1D test tenant UUID
-    executedScenarios++;
-    await page.fill('input[placeholder*="İşletme Adı"]', process.env.LARI_STAGE_H1D_TEST_TENANT_ID);
-    await page.waitForTimeout(500);
-    passedScenarios++;
+    // 3. Search canonical tenant UUID
+    await runScenario('3. Search canonical tenant UUID', async () => {
+      await saPage.fill('[data-testid="commercial-directory-search"]', 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa');
+      await saPage.waitForSelector('[data-testid="commercial-directory-results"]', { timeout: 5000 });
+      const card = await saPage.locator('[data-testid="commercial-tenant-card-aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa"]');
+      if (await card.count() === 0) {
+        throw new Error('Canonical tenant UUID card not found in directory');
+      }
+    });
 
-    // 6. Filter status none & plan none
-    executedScenarios++;
-    await page.fill('input[placeholder*="İşletme Adı"]', '');
-    await page.selectOption('select:has-option[value="none"]', 'none');
-    await page.waitForTimeout(500);
-    passedScenarios++;
+    // 4. Search dedicated H1D test tenant UUID
+    await runScenario('4. Search dedicated H1D test tenant UUID', async () => {
+      const testTenantId = process.env.LARI_STAGE_H1D_TEST_TENANT_ID;
+      await saPage.fill('[data-testid="commercial-directory-search"]', testTenantId);
+      await saPage.waitForSelector(`[data-testid="commercial-tenant-card-${testTenantId}"]`, { timeout: 5000 });
+      const card = await saPage.locator(`[data-testid="commercial-tenant-card-${testTenantId}"]`);
+      if (await card.count() === 0) {
+        throw new Error(`Dedicated H1D test tenant card [data-testid="commercial-tenant-card-${testTenantId}"] not found`);
+      }
+    });
 
-    // 7. Select test tenant & verify snapshot
-    executedScenarios++;
-    await page.click(`text=${process.env.LARI_STAGE_H1D_TEST_TENANT_ID}`);
-    await page.waitForSelector('text=Kota Teşhis ve Kullanım Sayaçları', { timeout: 10000 });
-    passedScenarios++;
+    // 5. Filter status=none & plan=all
+    await runScenario('5. Filter status=none & plan=all', async () => {
+      await saPage.fill('[data-testid="commercial-directory-search"]', '');
+      await saPage.selectOption('[data-testid="commercial-status-filter"]', 'none');
+      await saPage.selectOption('[data-testid="commercial-plan-filter"]', 'all');
+      await saPage.waitForSelector('[data-testid="commercial-directory-results"]', { timeout: 5000 });
+    });
 
-    // 8. Verify zero-amount TRY comped billing row
-    executedScenarios++;
-    const billingText = await page.textContent('tbody');
-    if (billingText.includes('0.00 TRY') && billingText.includes('comped')) passedScenarios++;
+    // 6. Filter status=all & plan=none
+    await runScenario('6. Filter status=all & plan=none', async () => {
+      await saPage.selectOption('[data-testid="commercial-status-filter"]', 'all');
+      await saPage.selectOption('[data-testid="commercial-plan-filter"]', 'none');
+      await saPage.waitForSelector('[data-testid="commercial-directory-results"]', { timeout: 5000 });
+    });
 
-    // 9. Restrictions section load assertion
-    executedScenarios++;
-    const restrictionText = await page.textContent('h2:has-text("Platform Kısıtlamaları")');
-    if (restrictionText) passedScenarios++;
+    // 7. Filter status=none & plan=none
+    await runScenario('7. Filter status=none & plan=none', async () => {
+      await saPage.selectOption('[data-testid="commercial-status-filter"]', 'none');
+      await saPage.selectOption('[data-testid="commercial-plan-filter"]', 'none');
+      await saPage.waitForSelector('[data-testid="commercial-directory-results"]', { timeout: 5000 });
+    });
 
-    // 10. Open create restriction modal & verify reason validation without submitting
-    executedScenarios++;
-    await page.click('button:has-text("+ Yeni Kısıtlama Ekle")');
-    await page.click('button:has-text("Onayla ve Kaydet")');
-    await page.click('button:has-text("Vazgeç")');
-    passedScenarios++;
+    // 8. Select dedicated test tenant & verify snapshot
+    await runScenario('8. Select dedicated test tenant & verify snapshot', async () => {
+      const testTenantId = process.env.LARI_STAGE_H1D_TEST_TENANT_ID;
+      await saPage.fill('[data-testid="commercial-directory-search"]', testTenantId);
+      await saPage.waitForSelector(`[data-testid="commercial-tenant-card-${testTenantId}"]`, { timeout: 5000 });
+      await saPage.click(`[data-testid="commercial-tenant-card-${testTenantId}"]`);
 
-    // 11. Desktop screenshot
-    executedScenarios++;
-    const desktopPath = path.join(process.cwd(), `h1d_browser_desktop_${runId}.png`);
-    await page.screenshot({ path: desktopPath, fullPage: true });
-    screenshotPaths.push(desktopPath);
-    passedScenarios++;
+      await saPage.waitForSelector('[data-testid="commercial-snapshot"]', { timeout: 10000 });
+      const selTenantId = await saPage.getAttribute('[data-testid="commercial-selected-tenant"]', 'data-tenant-id');
+      if (selTenantId !== testTenantId) {
+        throw new Error(`Expected selected tenant ${testTenantId}, got ${selTenantId}`);
+      }
+    });
 
-    // 12. Mobile screenshot
-    executedScenarios++;
-    await page.setViewportSize({ width: 375, height: 812 });
-    const mobilePath = path.join(process.cwd(), `h1d_browser_mobile_${runId}.png`);
-    await page.screenshot({ path: mobilePath, fullPage: true });
-    screenshotPaths.push(mobilePath);
-    passedScenarios++;
+    // 9. Verify zero-amount TRY comped billing row
+    await runScenario('9. Verify zero-amount TRY comped billing row', async () => {
+      await saPage.waitForSelector('[data-testid="commercial-billing-table"]', { timeout: 10000 });
+      const tableText = await saPage.textContent('[data-testid="commercial-billing-table"]');
+      if (!tableText.includes('0.00 TRY')) {
+        throw new Error('Billing table missing 0.00 TRY text');
+      }
+      if (!tableText.includes('comped')) {
+        throw new Error('Billing table missing comped billing_mode text');
+      }
+      if (!tableText.includes('h1d_safe_billing_fixture_v1') && !tableText.includes('H1D Staging Fixture') && !tableText.includes('Permanent zero-amount H1D staging read fixture') && !tableText.includes('H1D commercial billing read acceptance fixture')) {
+        throw new Error('Billing table missing fixture internal_reason/reference_note text');
+      }
+    });
 
-    // 13. Tenant-owner access denial
-    executedScenarios++;
-    await page.goto(`${baseUrl}/login`);
-    await page.fill('input[type="email"]', process.env.LARI_STAGE_D1_OWNER_EMAIL);
-    await page.fill('input[type="password"]', process.env.LARI_STAGE_D1_OWNER_PASSWORD);
-    await page.click('button[type="submit"]');
-    await page.goto(`${baseUrl}/super-admin/commercial`);
-    const currentUrl = page.url();
-    if (!currentUrl.includes('/super-admin/commercial')) passedScenarios++;
+    // 10. Restrictions section load assertion
+    await runScenario('10. Restrictions section load assertion', async () => {
+      await saPage.waitForSelector('[data-testid="commercial-restrictions-section"]', { timeout: 10000 });
+      const errorCount = await saPage.locator('[data-testid="commercial-restrictions-error"]').count();
+      if (errorCount > 0) {
+        throw new Error('Platform restrictions section returned RPC error');
+      }
+      const loadedCount = await saPage.locator('[data-testid="commercial-restrictions-loaded"]').count();
+      if (loadedCount === 0) {
+        throw new Error('Platform restrictions section failed to present loaded content/table');
+      }
+    });
+
+    // 11. Create restriction modal validation without mutation
+    await runScenario('11. Create restriction modal validation without mutation', async () => {
+      await saPage.click('[data-testid="commercial-create-restriction"]');
+      await saPage.waitForSelector('[data-testid="commercial-create-modal"]', { timeout: 5000 });
+
+      // Verify option value="tenant"
+      const optionValue = await saPage.locator('option:has-text("Seçili / Belirli İşletme")').getAttribute('value');
+      if (optionValue !== 'tenant') {
+        throw new Error(`Expected option value="tenant", got ${optionValue}`);
+      }
+
+      // Verify reason is empty
+      const reasonVal = await saPage.inputValue('[data-testid="commercial-create-reason"]');
+      if (reasonVal.trim() !== '') {
+        throw new Error('Expected restriction reason textarea to be empty');
+      }
+
+      // Click submit & verify modal stays open
+      await saPage.click('[data-testid="commercial-submit"]');
+      await saPage.waitForTimeout(300);
+      const modalOpen = await saPage.locator('[data-testid="commercial-create-modal"]').count();
+      if (modalOpen === 0) {
+        throw new Error('Modal closed unexpectedly during empty reason submit');
+      }
+
+      // Cancel closes modal
+      await saPage.click('[data-testid="commercial-cancel"]');
+      await saPage.waitForSelector('[data-testid="commercial-create-modal"]', { state: 'detached', timeout: 5000 });
+    });
+
+    // 12. Safety & desktop/mobile screenshot capture
+    await runScenario('12. Safety & desktop/mobile screenshot capture', async () => {
+      // Assert forbidden payment strings
+      const bodyText = await saPage.textContent('body');
+      const forbidden = ['Pay now', 'Checkout', 'Charge card', 'iyzico', 'Refund through iyzico'];
+      for (const f of forbidden) {
+        if (bodyText.includes(f)) {
+          throw new Error(`Forbidden payment control string detected: ${f}`);
+        }
+      }
+
+      const desktopPath = path.join(process.cwd(), `h1d_browser_desktop_${runId}.png`);
+      await saPage.screenshot({ path: desktopPath, fullPage: true });
+      screenshotPaths.push(desktopPath);
+
+      await saPage.setViewportSize({ width: 375, height: 812 });
+      const mobilePath = path.join(process.cwd(), `h1d_browser_mobile_${runId}.png`);
+      await saPage.screenshot({ path: mobilePath, fullPage: true });
+      screenshotPaths.push(mobilePath);
+    });
+
+    // Close super-admin context before isolated tenant owner test
+    await saContext.close();
+
+    // 13. Isolated tenant-owner access denial test
+    await runScenario('13. Isolated tenant-owner access denial test', async () => {
+      const ownerContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+      const ownerPage = await ownerContext.newPage();
+
+      ownerPage.on('request', req => {
+        if (req.url().includes('super_admin_')) {
+          throw new Error(`FORBIDDEN_SUPER_ADMIN_RPC_EXECUTED_FOR_TENANT_OWNER: ${req.url()}`);
+        }
+      });
+
+      await ownerPage.goto(`${baseUrl}/login`);
+      await ownerPage.fill('input[type="email"]', process.env.LARI_STAGE_D1_OWNER_EMAIL);
+      await ownerPage.fill('input[type="password"]', process.env.LARI_STAGE_D1_OWNER_PASSWORD);
+      await ownerPage.click('button[type="submit"]');
+
+      await ownerPage.waitForURL(url => url.pathname.startsWith('/admin'), { timeout: 10000 });
+
+      // Attempt navigation to /super-admin/commercial
+      await ownerPage.goto(`${baseUrl}/super-admin/commercial`);
+      await ownerPage.waitForTimeout(1000);
+
+      const ownerUrl = ownerPage.url();
+      if (ownerUrl.includes('/super-admin/commercial')) {
+        throw new Error('Tenant owner was not denied/redirected from /super-admin/commercial');
+      }
+
+      const titleCount = await ownerPage.locator('[data-testid="commercial-page-title"]').count();
+      if (titleCount > 0) {
+        throw new Error('Protected commercial page title rendered for tenant owner');
+      }
+
+      await ownerContext.close();
+    });
 
   } catch (err) {
-    failedScenarios++;
-    console.error('Browser scenario error:', err.message);
+    console.error('Unhandled acceptance runner error:', err);
   } finally {
     await browser.close();
   }
+
+  const definedScenarios = 13;
+  const exitCode = (executedScenarios === definedScenarios && passedScenarios === definedScenarios && failedScenarios === 0) ? 0 : 1;
 
   console.log('\n══════════════════════════════════════════════════════════');
   console.log(`Run ID: ${runId}`);
@@ -185,9 +326,9 @@ export async function runBrowserAcceptance() {
   console.log(`Failed: ${failedScenarios}`);
   console.log(`Total: ${passedScenarios + failedScenarios}`);
   console.log(`Screenshot paths: ${screenshotPaths.join(', ')}`);
-  console.log(`Final exit code: ${failedScenarios > 0 ? 1 : 0}`);
+  console.log(`Final exit code: ${exitCode}`);
 
-  process.exit(failedScenarios > 0 ? 1 : 0);
+  process.exit(exitCode);
 }
 
 if (import.meta.url === `file:///${process.argv[1].replace(/\\/g, '/')}` || process.argv[1]?.endsWith('test-super-admin-commercial-browser.mjs')) {

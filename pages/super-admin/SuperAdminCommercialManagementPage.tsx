@@ -561,7 +561,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
       {/* Header Banner */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Ticari Yönetim & Abonelik Paneli</h1>
+          <h1 data-testid="commercial-page-title" className="text-2xl font-bold text-gray-900 dark:text-white">Ticari Yönetim & Abonelik Paneli</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Sunucu yetkili Super Admin ticari rehber, lisanslama, platform kısıtlamaları ve cari finans yönetim araçları.
           </p>
@@ -584,6 +584,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
             
             {/* Search Input */}
             <input
+              data-testid="commercial-directory-search"
               type="text"
               placeholder="İşletme Adı, Slug veya ID ile Ara..."
               value={searchQuery}
@@ -594,6 +595,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
             {/* Filter Controls with exact accepted values */}
             <div className="grid grid-cols-2 gap-2 text-xs">
               <select
+                data-testid="commercial-status-filter"
                 value={statusFilter}
                 onChange={e => { setStatusFilter(e.target.value); setDirectoryPage(0); }}
                 className="px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-900 text-gray-800 dark:text-gray-200"
@@ -611,6 +613,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
               </select>
 
               <select
+                data-testid="commercial-plan-filter"
                 value={planFilter}
                 onChange={e => { setPlanFilter(e.target.value); setDirectoryPage(0); }}
                 className="px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-900 text-gray-800 dark:text-gray-200"
@@ -638,12 +641,14 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
               <button onClick={loadDirectory} className="px-3 py-1 bg-red-600 text-white rounded font-semibold hover:bg-red-700 transition">Tekrar Dene</button>
             </div>
           ) : (
-            <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+            <div data-testid="commercial-directory-results" className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
               {tenants.map(t => {
                 const isSelected = t.tenant_id === selectedTenantId;
                 return (
                   <div
                     key={t.tenant_id}
+                    data-testid={`commercial-tenant-card-${t.tenant_id}`}
+                    data-tenant-id={t.tenant_id}
                     onClick={() => loadTenantSnapshot(t.tenant_id)}
                     className={`p-4 rounded-xl border transition-all cursor-pointer ${
                       isSelected
@@ -721,10 +726,10 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
               <button onClick={() => loadTenantSnapshot(selectedTenantId)} className="px-3 py-1 bg-red-600 text-white rounded font-semibold text-xs hover:bg-red-700 transition">Tekrar Dene</button>
             </div>
           ) : snapshot && (
-            <div className="space-y-6">
+            <div data-testid="commercial-snapshot" className="space-y-6">
               
               {/* Tenant Overview Card */}
-              <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm space-y-4">
+              <div data-testid="commercial-selected-tenant" data-tenant-id={selectedTenantId} className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm space-y-4">
                 <div className="flex justify-between items-start">
                   <div>
                     <h2 className="text-xl font-bold text-gray-900 dark:text-white">
@@ -862,7 +867,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
       </div>
 
       {/* SECTION 2: PLATFORM RESTRICTIONS SECTION (H1D CONTRACT) */}
-      <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm space-y-4">
+      <div data-testid="commercial-restrictions-section" className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h2 className="text-xl font-bold text-gray-900 dark:text-white">Platform Kısıtlamaları (Platform Restrictions)</h2>
@@ -871,6 +876,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
             </p>
           </div>
           <button
+            data-testid="commercial-create-restriction"
             onClick={() => {
               clearIdempotencyKey();
               setFormRestrictionScope(selectedTenantId ? 'tenant' : 'global');
@@ -926,7 +932,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
 
         {/* Restrictions Selection Prompt for Tenant Scope */}
         {restrictionScopeFilter === 'tenant' && !selectedTenantId ? (
-          <div className="p-8 text-center text-gray-500 dark:text-gray-400 bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 text-sm">
+          <div data-testid="commercial-restrictions-loaded" className="p-8 text-center text-gray-500 dark:text-gray-400 bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700 text-sm">
             İşletme bazlı kısıtlamaları listelemek için lütfen yukarıdaki işletme rehberinden bir işletme seçiniz.
           </div>
         ) : loadingRestrictions ? (
@@ -935,12 +941,12 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
             Platform Kısıtlamaları Yükleniyor...
           </div>
         ) : restrictionsError ? (
-          <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 text-red-800 text-xs rounded-xl flex justify-between items-center">
+          <div data-testid="commercial-restrictions-error" className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 text-red-800 text-xs rounded-xl flex justify-between items-center">
             <span>Yükleme Hatası: {restrictionsError}</span>
             <button onClick={loadRestrictions} className="px-2.5 py-1 bg-red-600 text-white rounded font-semibold">Tekrar Dene</button>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div data-testid="commercial-restrictions-loaded" className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700 text-gray-500 dark:text-gray-400 font-semibold">
@@ -1015,7 +1021,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
       </div>
 
       {/* SECTION 3: READ-ONLY BILLING LEDGER SECTION (H1D CONTRACT) */}
-      <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm space-y-4">
+      <div data-testid="commercial-billing-section" className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h2 className="text-xl font-bold text-gray-900 dark:text-white">Cari Hareketler (Billing Ledger)</h2>
@@ -1038,13 +1044,13 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
             Cari Kayıtlar Yükleniyor...
           </div>
         ) : billingError ? (
-          <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 text-red-800 text-xs rounded-xl flex justify-between items-center">
+          <div data-testid="commercial-billing-error" className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 text-red-800 text-xs rounded-xl flex justify-between items-center">
             <span>Cari Hareket Hatası: {billingError}</span>
             <button onClick={loadBillingTransactions} className="px-2.5 py-1 bg-red-600 text-white rounded font-semibold">Tekrar Dene</button>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+            <table data-testid="commercial-billing-table" className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700 text-gray-500 dark:text-gray-400 font-semibold">
                   <th className="py-2.5 px-3">İşlem Tarihi (Occurred)</th>
@@ -1112,7 +1118,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
       {/* MODAL DIALOGS FOR OPERATOR MUTATIONS */}
       {activeModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 border border-gray-100 dark:border-slate-700 shadow-2xl">
+          <div data-testid={activeModal === 'create_restriction' ? 'commercial-create-modal' : undefined} className="bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 border border-gray-100 dark:border-slate-700 shadow-2xl">
             
             {/* Modal Title */}
             <div className="flex justify-between items-center border-b border-gray-100 dark:border-slate-700 pb-3">
@@ -1297,7 +1303,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
                       onChange={e => setFormRestrictionScope(e.target.value as any)}
                       className="w-full px-3 py-2 border rounded-lg bg-gray-50 dark:bg-slate-900 dark:border-slate-700 dark:text-white"
                     >
-                      <option value="tenant font-bold">Seçili / Belirli İşletme (Tenant)</option>
+                      <option value="tenant">Seçili / Belirli İşletme (Tenant)</option>
                       <option value="global">Platform Geneli (Global)</option>
                     </select>
                   </div>
@@ -1353,6 +1359,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
                   <div>
                     <label className="block font-semibold text-gray-900 dark:text-white mb-1">Kısıtlama Nedeni (Zorunlu Gerekçe)</label>
                     <textarea
+                      data-testid="commercial-create-reason"
                       rows={2}
                       value={formRestrictionReason}
                       onChange={e => setFormRestrictionReason(e.target.value)}
@@ -1391,6 +1398,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
             {/* Modal Actions */}
             <div className="flex justify-end gap-2 border-t border-gray-100 dark:border-slate-700 pt-3">
               <button
+                data-testid="commercial-cancel"
                 onClick={() => setActiveModal(null)}
                 disabled={submitting}
                 className="px-4 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition"
@@ -1398,6 +1406,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
                 Vazgeç
               </button>
               <button
+                data-testid="commercial-submit"
                 onClick={() => {
                   if (activeModal === 'assign') handleAssignPlan();
                   if (activeModal === 'status') handleChangeStatus();

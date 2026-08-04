@@ -88,5 +88,15 @@ check('6. SuperAdminCommercialManagementPage UI contains NO payment or iyzico ch
   }
 });
 
+check('7. SuperAdminCommercialManagementPage UI option value is canonical "tenant" without styling in value', () => {
+  const pageContent = fs.readFileSync(path.join(process.cwd(), 'pages/super-admin/SuperAdminCommercialManagementPage.tsx'), 'utf8');
+  if (pageContent.includes('value="tenant font-bold"')) {
+    throw new Error('Option value contains invalid styling string "tenant font-bold"');
+  }
+  if (!pageContent.includes('<option value="tenant">Seçili / Belirli İşletme (Tenant)</option>')) {
+    throw new Error('Option value missing canonical <option value="tenant">');
+  }
+});
+
 console.log('\n══════════════════════════════════════════════════════════');
 console.log('✅ Stage H1D Super Admin Commercial UI QA PASSED.');
