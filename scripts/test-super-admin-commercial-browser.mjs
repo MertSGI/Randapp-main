@@ -220,36 +220,98 @@ export async function runBrowserAcceptance() {
       }
     });
 
+
     // 11. Create restriction modal validation without mutation
-    await runScenario('11. Create restriction modal validation without mutation', async () => {
-      await saPage.click('[data-testid="commercial-create-restriction"]');
-      await saPage.waitForSelector('[data-testid="commercial-create-modal"]', { timeout: 5000 });
+    await runScenario(
+      '11. Create restriction modal validation without mutation',
+      async () => {
+        await saPage.click(
+          '[data-testid="commercial-create-restriction"]'
+        );
 
-      // Verify option value="tenant"
-      const optionValue = await saPage.locator('option:has-text("Seçili / Belirli İşletme")').getAttribute('value');
-      if (optionValue !== 'tenant') {
-        throw new Error(`Expected option value="tenant", got ${optionValue}`);
+        await saPage.waitForSelector(
+          '[data-testid="commercial-create-modal"]',
+          { timeout: 5000 }
+        );
+
+        const optionValue =
+          await saPage
+            .locator(
+              'option:has-text("Seçili / Belirli İşletme")'
+            )
+            .getAttribute('value');
+
+        if (optionValue !== 'tenant') {
+          throw new Error(
+            `Expected option value="tenant", got ${optionValue}`
+          );
+        }
+
+        const reasonValue =
+          await saPage.inputValue(
+            '[data-testid="commercial-create-reason"]'
+          );
+
+        if (reasonValue.trim() !== '') {
+          throw new Error(
+            'Expected restriction reason textarea to be empty'
+          );
+        }
+
+        await saPage.click(
+          '[data-testid="commercial-submit"]'
+        );
+
+        const validationMessage =
+          saPage.getByText(
+            'Lütfen kısıtlama koyma nedenini belirtiniz.',
+            { exact: true }
+          );
+
+        await validationMessage.waitFor({
+          state: 'visible',
+          timeout: 5000
+        });
+
+        const modalCount =
+          await saPage
+            .locator(
+              '[data-testid="commercial-create-modal"]'
+            )
+            .count();
+
+        if (modalCount === 0) {
+          throw new Error(
+            'Commercial modal closed during validation'
+          );
+        }
+
+        // DialogContext alert is above the commercial modal.
+        await saPage
+          .getByRole('button', {
+            name: 'Tamam',
+            exact: true
+          })
+          .click();
+
+        await validationMessage.waitFor({
+          state: 'hidden',
+          timeout: 5000
+        });
+
+        await saPage.click(
+          '[data-testid="commercial-cancel"]'
+        );
+
+        await saPage.waitForSelector(
+          '[data-testid="commercial-create-modal"]',
+          {
+            state: 'detached',
+            timeout: 5000
+          }
+        );
       }
-
-      // Verify reason is empty
-      const reasonVal = await saPage.inputValue('[data-testid="commercial-create-reason"]');
-      if (reasonVal.trim() !== '') {
-        throw new Error('Expected restriction reason textarea to be empty');
-      }
-
-      // Click submit & verify modal stays open
-      await saPage.click('[data-testid="commercial-submit"]');
-      await saPage.waitForTimeout(300);
-      const modalOpen = await saPage.locator('[data-testid="commercial-create-modal"]').count();
-      if (modalOpen === 0) {
-        throw new Error('Modal closed unexpectedly during empty reason submit');
-      }
-
-      // Cancel closes modal
-      await saPage.click('[data-testid="commercial-cancel"]');
-      await saPage.waitForSelector('[data-testid="commercial-create-modal"]', { state: 'detached', timeout: 5000 });
-    });
-
+    );
     // 12. Safety & desktop/mobile screenshot capture
     await runScenario('12. Safety & desktop/mobile screenshot capture', async () => {
       // Assert forbidden payment strings
@@ -274,41 +336,123 @@ export async function runBrowserAcceptance() {
     // Close super-admin context before isolated tenant owner test
     await saContext.close();
 
+
     // 13. Isolated tenant-owner access denial test
-    await runScenario('13. Isolated tenant-owner access denial test', async () => {
-      const ownerContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-      const ownerPage = await ownerContext.newPage();
+    await runScenario(
+      '13. Isolated tenant-owner access denial test',
+      async () => {
+        const ownerContext =
+          await browser.newContext({
+            viewport: {
+              width: 1280,
+              height: 800
+            }
+          });
 
-      ownerPage.on('request', req => {
-        if (req.url().includes('super_admin_')) {
-          throw new Error(`FORBIDDEN_SUPER_ADMIN_RPC_EXECUTED_FOR_TENANT_OWNER: ${req.url()}`);
+        try {
+          const ownerPage =
+            await ownerContext.newPage();
+
+          const ownerCommercialRpcRequests = [];
+
+          ownerPage.on('request', request => {
+            if (
+              request.url().includes('super_admin_')
+            ) {
+              ownerCommercialRpcRequests.push(
+                request.url()
+              );
+            }
+          });
+
+          await ownerPage.goto(
+            `${baseUrl}/login`
+          );
+
+          await ownerPage.fill(
+            'input[type="email"]',
+            process.env.LARI_STAGE_D1_OWNER_EMAIL
+          );
+
+          await ownerPage.fill(
+            'input[type="password"]',
+            process.env.LARI_STAGE_D1_OWNER_PASSWORD
+          );
+
+          await ownerPage.click(
+            'button[type="submit"]'
+          );
+
+          await ownerPage.waitForURL(
+            url =>
+              url.pathname.startsWith('/admin'),
+            { timeout: 10000 }
+          );
+
+          await ownerPage.goto(
+            `${baseUrl}/super-admin/commercial`
+          );
+
+          await ownerPage.waitForFunction(
+            () =>
+              window.location.pathname !==
+                '/super-admin/commercial' ||
+              document.body.innerText.includes(
+                'Bu alana erişim yetkiniz yok.'
+              ),
+            null,
+            { timeout: 5000 }
+          );
+
+          const ownerPath =
+            new URL(ownerPage.url()).pathname;
+
+          const denialVisible =
+            await ownerPage
+              .getByRole('heading', {
+                name:
+                  'Bu alana erişim yetkiniz yok.',
+                exact: true
+              })
+              .isVisible()
+              .catch(() => false);
+
+          const commercialTitleCount =
+            await ownerPage
+              .locator(
+                '[data-testid="commercial-page-title"]'
+              )
+              .count();
+
+          if (commercialTitleCount > 0) {
+            throw new Error(
+              'Protected commercial page rendered for tenant owner'
+            );
+          }
+
+          if (
+            ownerPath ===
+              '/super-admin/commercial' &&
+            !denialVisible
+          ) {
+            throw new Error(
+              'Tenant owner received neither redirect nor access-denied screen'
+            );
+          }
+
+          if (
+            ownerCommercialRpcRequests.length > 0
+          ) {
+            throw new Error(
+              `Tenant owner executed ${ownerCommercialRpcRequests.length} forbidden commercial RPC request(s)`
+            );
+          }
         }
-      });
-
-      await ownerPage.goto(`${baseUrl}/login`);
-      await ownerPage.fill('input[type="email"]', process.env.LARI_STAGE_D1_OWNER_EMAIL);
-      await ownerPage.fill('input[type="password"]', process.env.LARI_STAGE_D1_OWNER_PASSWORD);
-      await ownerPage.click('button[type="submit"]');
-
-      await ownerPage.waitForURL(url => url.pathname.startsWith('/admin'), { timeout: 10000 });
-
-      // Attempt navigation to /super-admin/commercial
-      await ownerPage.goto(`${baseUrl}/super-admin/commercial`);
-      await ownerPage.waitForTimeout(1000);
-
-      const ownerUrl = ownerPage.url();
-      if (ownerUrl.includes('/super-admin/commercial')) {
-        throw new Error('Tenant owner was not denied/redirected from /super-admin/commercial');
+        finally {
+          await ownerContext.close();
+        }
       }
-
-      const titleCount = await ownerPage.locator('[data-testid="commercial-page-title"]').count();
-      if (titleCount > 0) {
-        throw new Error('Protected commercial page title rendered for tenant owner');
-      }
-
-      await ownerContext.close();
-    });
-
+    );
   } catch (err) {
     console.error('Unhandled acceptance runner error:', err);
   } finally {
