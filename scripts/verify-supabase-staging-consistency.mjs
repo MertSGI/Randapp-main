@@ -83,6 +83,7 @@ const CANONICAL_MIGRATIONS = [
   '20260819_h1d_idempotency_helper_record_fix.sql',
   '20260820_h1d_audit_events_schema_alignment_fix.sql',
   '20260821_h1d_future_restriction_end_fix.sql',
+  '20260822_h1e_release_control_and_eligibility_read_contracts.sql'
 ];
 
 // Check actual migration files on disk

@@ -1,4 +1,5 @@
 # LARİ Supabase Migration Apply Manifest
+47. **20260822_h1e_release_control_and_eligibility_read_contracts.sql** — Stage H1E-A Global Release Control Singleton Table with Safe Default Row & Super Admin Eligibility Snapshot Read RPC.
 
 This manifest documents the active canonical migration graph, database schema ownership, and execution procedures for LARİ.
 
