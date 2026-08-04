@@ -80,6 +80,7 @@ const CANONICAL_MIGRATIONS = [
   '20260816_h1d_missing_commercial_admin_contracts.sql',
   '20260817_h1d_contract_truth_and_idempotency_fix.sql',
   '20260818_h1d_idempotency_concurrency_and_filter_fix.sql',
+  '20260819_h1d_idempotency_helper_record_fix.sql',
 ];
 
 // Check actual migration files on disk
