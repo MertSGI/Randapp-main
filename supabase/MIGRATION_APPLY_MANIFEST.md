@@ -53,6 +53,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 43. **`20260818_h1d_idempotency_concurrency_and_filter_fix.sql`** — Stage H1D Migration 43 redefines super_admin_create_platform_restriction, super_admin_end_platform_restriction, and super_admin_list_tenant_commercial_directory to add transaction advisory locks, complete create fingerprints, and explicit 'none' directory filter semantics.
 44. **`20260819_h1d_idempotency_helper_record_fix.sql`** — Stage H1D Migration 44 fixes the check_super_admin_idempotency runtime record-shape defect by selecting the complete idempotency ledger record and handling the no-row case explicitly.
 45. **`20260820_h1d_audit_events_schema_alignment_fix.sql`** — Stage H1D Migration 45 aligns platform restriction create/end audit writes with canonical audit_events columns: actor_id, actor_role, and action.
+46. **`20260821_h1d_future_restriction_end_fix.sql`** — Stage H1D Migration 46 allows future scheduled restrictions to be safely ended without violating the starts_at/expires_at date-range constraint.
 
 ---
 
