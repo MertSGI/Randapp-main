@@ -557,29 +557,29 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 min-w-0">
       {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700">
-        <div>
-          <h1 data-testid="commercial-page-title" className="text-2xl font-bold text-gray-900 dark:text-white">Ticari Yönetim & Abonelik Paneli</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 min-w-0">
+        <div className="min-w-0">
+          <h1 data-testid="commercial-page-title" className="text-2xl font-bold text-gray-900 dark:text-white break-words">Ticari Yönetim & Abonelik Paneli</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 break-words">
             Sunucu yetkili Super Admin ticari rehber, lisanslama, platform kısıtlamaları ve cari finans yönetim araçları.
           </p>
         </div>
-        <span className="px-3 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 rounded-full text-xs font-semibold border border-purple-200 dark:border-purple-800">
+        <span className="shrink-0 px-3 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 rounded-full text-xs font-semibold border border-purple-200 dark:border-purple-800">
           SECURE RPC BACKED (H1D CONTRACT)
         </span>
       </div>
 
       {/* SECTION 1: SERVER-BACKED TENANT DIRECTORY & SNAPSHOT DETAIL */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 min-w-0">
         
         {/* Left Column: Server-Backed Tenant Directory (5 cols) */}
-        <div className="lg:col-span-5 space-y-4">
-          <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 space-y-3">
-            <div className="flex justify-between items-center">
-              <h2 className="font-bold text-gray-900 dark:text-white text-base">İşletme Rehberi (Server-Backed)</h2>
-              <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">Toplam: {totalTenantsCount}</span>
+        <div className="lg:col-span-5 space-y-4 min-w-0">
+          <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 space-y-3 min-w-0">
+            <div className="flex justify-between items-center min-w-0">
+              <h2 className="font-bold text-gray-900 dark:text-white text-base truncate">İşletme Rehberi (Server-Backed)</h2>
+              <span className="text-xs text-gray-500 dark:text-gray-400 font-mono shrink-0">Toplam: {totalTenantsCount}</span>
             </div>
             
             {/* Search Input */}
@@ -589,16 +589,16 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
               placeholder="İşletme Adı, Slug veya ID ile Ara..."
               value={searchQuery}
               onChange={e => { setSearchQuery(e.target.value); setDirectoryPage(0); }}
-              className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0"
             />
 
             {/* Filter Controls with exact accepted values */}
-            <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="grid grid-cols-2 gap-2 text-xs min-w-0">
               <select
                 data-testid="commercial-status-filter"
                 value={statusFilter}
                 onChange={e => { setStatusFilter(e.target.value); setDirectoryPage(0); }}
-                className="px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-900 text-gray-800 dark:text-gray-200"
+                className="w-full min-w-0 px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-900 text-gray-800 dark:text-gray-200"
               >
                 <option value="all">Tüm Durumlar (all)</option>
                 <option value="none">Aboneliksiz (none)</option>
@@ -616,7 +616,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
                 data-testid="commercial-plan-filter"
                 value={planFilter}
                 onChange={e => { setPlanFilter(e.target.value); setDirectoryPage(0); }}
-                className="px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-900 text-gray-800 dark:text-gray-200"
+                className="w-full min-w-0 px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-900 text-gray-800 dark:text-gray-200"
               >
                 <option value="all">Tüm Planlar (all)</option>
                 <option value="none">Plansız (none)</option>
@@ -641,7 +641,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
               <button onClick={loadDirectory} className="px-3 py-1 bg-red-600 text-white rounded font-semibold hover:bg-red-700 transition">Tekrar Dene</button>
             </div>
           ) : (
-            <div data-testid="commercial-directory-results" className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+            <div data-testid="commercial-directory-results" className="space-y-2 max-h-[500px] overflow-y-auto pr-1 min-w-0">
               {tenants.map(t => {
                 const isSelected = t.tenant_id === selectedTenantId;
                 return (
@@ -650,17 +650,17 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
                     data-testid={`commercial-tenant-card-${t.tenant_id}`}
                     data-tenant-id={t.tenant_id}
                     onClick={() => loadTenantSnapshot(t.tenant_id)}
-                    className={`p-4 rounded-xl border transition-all cursor-pointer ${
+                    className={`p-4 rounded-xl border transition-all cursor-pointer min-w-0 ${
                       isSelected
                         ? 'bg-blue-50/50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-500 shadow-sm'
                         : 'bg-white dark:bg-slate-800 border-gray-100 dark:border-slate-700 hover:border-gray-300 dark:hover:border-slate-600'
                     }`}
                   >
-                    <div className="flex justify-between items-start mb-1">
-                      <div className="font-bold text-sm text-gray-900 dark:text-white truncate">
+                    <div className="flex justify-between items-start mb-1 gap-2 min-w-0">
+                      <div className="font-bold text-sm text-gray-900 dark:text-white truncate min-w-0">
                         {t.business_name || 'İsimsiz İşletme'}
                       </div>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                      <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                         t.subscription_status === 'active' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
                         t.subscription_status === 'trialing' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
                         t.subscription_status === 'past_due' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
@@ -670,9 +670,9 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
                       </span>
                     </div>
 
-                    <div className="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400">
-                      <span>Slug: {t.slug || 'N/A'}</span>
-                      <span className="font-medium text-gray-700 dark:text-gray-300">Plan: {t.plan_code}</span>
+                    <div className="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 gap-2 min-w-0">
+                      <span className="truncate min-w-0">Slug: {t.slug || 'N/A'}</span>
+                      <span className="font-medium text-gray-700 dark:text-gray-300 shrink-0">Plan: {t.plan_code}</span>
                     </div>
                   </div>
                 );
@@ -686,7 +686,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
 
               {/* Directory Pagination Controls */}
               {totalTenantsCount > directoryLimit && (
-                <div className="flex justify-between items-center pt-2 px-1 text-xs text-gray-600 dark:text-gray-400">
+                <div className="flex justify-between items-center pt-2 px-1 text-xs text-gray-600 dark:text-gray-400 min-w-0">
                   <button
                     onClick={() => setDirectoryPage(p => Math.max(0, p - 1))}
                     disabled={directoryPage === 0}
@@ -709,7 +709,7 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
         </div>
 
         {/* Right Column: Tenant Commercial Detail & Actions (7 cols) */}
-        <div className="lg:col-span-7 space-y-6">
+        <div className="lg:col-span-7 space-y-6 min-w-0">
           {!selectedTenantId ? (
             <div className="bg-white dark:bg-slate-800 p-12 rounded-2xl border border-gray-100 dark:border-slate-700 text-center text-gray-500 dark:text-gray-400 text-sm">
               Ticari detaylarını, abonelik durumunu ve kota teşhislerini görüntülemek için sol listeden bir işletme seçiniz.
@@ -726,22 +726,22 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
               <button onClick={() => loadTenantSnapshot(selectedTenantId)} className="px-3 py-1 bg-red-600 text-white rounded font-semibold text-xs hover:bg-red-700 transition">Tekrar Dene</button>
             </div>
           ) : snapshot && (
-            <div data-testid="commercial-snapshot" className="space-y-6">
+            <div data-testid="commercial-snapshot" className="space-y-6 min-w-0">
               
               {/* Tenant Overview Card */}
-              <div data-testid="commercial-selected-tenant" data-tenant-id={selectedTenantId} className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm space-y-4">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+              <div data-testid="commercial-selected-tenant" data-tenant-id={selectedTenantId} className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm space-y-4 min-w-0">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 min-w-0">
+                  <div className="min-w-0 max-w-full">
+                    <h2 className="text-xl font-bold text-gray-900 dark:text-white [overflow-wrap:anywhere] break-words">
                       {selectedTenantData?.business_name || 'Seçili İşletme'}
                     </h2>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5 [overflow-wrap:anywhere] break-words">
                       ID: {selectedTenantId} | Slug: {selectedTenantData?.slug || 'N/A'}
                     </p>
                   </div>
 
                   {/* Operation Actions Bar */}
-                  <div className="flex gap-2 flex-wrap">
+                  <div className="flex gap-2 flex-wrap min-w-0">
                     <button
                       onClick={() => { clearIdempotencyKey(); setActiveModal('assign'); }}
                       className="px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
@@ -776,28 +776,28 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
                 </div>
 
                 {/* Subscription Details Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-gray-50 dark:bg-slate-900 rounded-xl text-xs">
-                  <div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 bg-gray-50 dark:bg-slate-900 rounded-xl text-xs min-w-0">
+                  <div className="min-w-0">
                     <span className="text-gray-500 dark:text-gray-400 block">Abonelik Durumu</span>
                     <span className="font-bold text-gray-900 dark:text-white capitalize">
                       {snapshot.eligibility?.status || 'Yok'}
                     </span>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <span className="text-gray-500 dark:text-gray-400 block">Aktif Plan / Sürüm</span>
                     <span className="font-bold text-gray-900 dark:text-white">
                       {snapshot.eligibility?.plan_code || 'N/A'} (v{snapshot.eligibility?.version_number || 1})
                     </span>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <span className="text-gray-500 dark:text-gray-400 block">Faturalama Modu</span>
                     <span className="font-bold text-gray-900 dark:text-white capitalize">
                       {snapshot.eligibility?.billing_mode || 'manual'}
                     </span>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <span className="text-gray-500 dark:text-gray-400 block">Ticari Uygunluk</span>
-                    <span className={`font-bold ${snapshot.eligibility?.eligible ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    <span className={`font-bold [overflow-wrap:anywhere] break-words ${snapshot.eligibility?.eligible ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                       {snapshot.eligibility?.eligible ? 'UYGUN (ELIGIBLE)' : `ENGELLEME (${snapshot.eligibility?.reason_code})`}
                     </span>
                   </div>
@@ -805,11 +805,11 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
 
                 {/* Scheduled Plan Change Banner if present */}
                 {snapshot.eligibility?.scheduled_plan_id && (
-                  <div className="p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl flex justify-between items-center text-xs text-purple-900 dark:text-purple-300">
-                    <div>
+                  <div className="p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs text-purple-900 dark:text-purple-300 min-w-0">
+                    <div className="min-w-0 [overflow-wrap:anywhere] break-words">
                       <span className="font-bold">Planlanmış Plan Değişikliği Mevcut:</span> Target Plan: {snapshot.eligibility.scheduled_plan_id} | Yürürlük: {snapshot.eligibility.scheduled_change_at}
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 shrink-0">
                       <button
                         onClick={handleApplyDueScheduledChange}
                         disabled={submitting}
@@ -830,28 +830,28 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
               </div>
 
               {/* Usage & Quota Diagnostic Panel */}
-              <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm space-y-4">
+              <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm space-y-4 min-w-0">
                 <h3 className="font-bold text-base text-gray-900 dark:text-white">Kota Teşhis ve Kullanım Sayaçları</h3>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 min-w-0">
                   {Object.entries(snapshot.feature_gates || {}).map(([key, gate]) => {
                     const usageVal = snapshot.usage?.[`${key}:${new Date().toISOString().substring(0, 7)}`] ?? 0;
                     const isUnlimited = gate.is_unlimited;
                     const limitVal = isUnlimited ? 'Sınırsız (Unlimited)' : gate.integer_value ?? (gate.boolean_value ? 'Etkin' : 'Devre Dışı');
 
                     return (
-                      <div key={key} className="p-3 bg-gray-50 dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 text-xs space-y-1">
-                        <div className="flex justify-between items-center">
-                          <span className="font-semibold text-gray-900 dark:text-white">{key}</span>
-                          <span className="px-1.5 py-0.5 bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded text-[10px]">
+                      <div key={key} className="p-3 bg-gray-50 dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 text-xs space-y-1 min-w-0">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1 min-w-0">
+                          <span className="font-semibold text-gray-900 dark:text-white [overflow-wrap:anywhere] break-words min-w-0">{key}</span>
+                          <span className="shrink-0 px-1.5 py-0.5 bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded text-[10px]">
                             Kaynak: {gate.source}
                           </span>
                         </div>
-                        <div className="text-gray-600 dark:text-gray-400">
+                        <div className="text-gray-600 dark:text-gray-400 [overflow-wrap:anywhere] break-words">
                           Limit / Değer: <span className="font-medium text-gray-900 dark:text-white">{String(limitVal)}</span>
                         </div>
                         {key === 'max_monthly_appointments' && (
-                          <div className="text-gray-600 dark:text-gray-400">
+                          <div className="text-gray-600 dark:text-gray-400 [overflow-wrap:anywhere] break-words">
                             Cari Ay Kullanım (used_count / usage_count): <span className="font-bold text-blue-600 dark:text-blue-400">{usageVal}</span>
                           </div>
                         )}
@@ -867,9 +867,9 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
       </div>
 
       {/* SECTION 2: PLATFORM RESTRICTIONS SECTION (H1D CONTRACT) */}
-      <div data-testid="commercial-restrictions-section" className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
+      <div data-testid="commercial-restrictions-section" className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm space-y-4 min-w-0">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 min-w-0">
+          <div className="min-w-0">
             <h2 className="text-xl font-bold text-gray-900 dark:text-white">Platform Kısıtlamaları (Platform Restrictions)</h2>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
               İşletme veya platform genelindeki aktif/pasif engelleyici kısıtlama kuralları. Total: {restrictionsTotalCount}
@@ -883,20 +883,20 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
               setFormRestrictionTenantId(selectedTenantId || '');
               setActiveModal('create_restriction');
             }}
-            className="px-4 py-2 text-xs font-semibold bg-red-600 text-white rounded-xl hover:bg-red-700 transition"
+            className="shrink-0 px-4 py-2 text-xs font-semibold bg-red-600 text-white rounded-xl hover:bg-red-700 transition"
           >
             + Yeni Kısıtlama Ekle
           </button>
         </div>
 
         {/* Filter Controls for Restrictions */}
-        <div className="flex flex-wrap gap-3 text-xs bg-gray-50 dark:bg-slate-900 p-3 rounded-xl border border-gray-100 dark:border-slate-800">
-          <div>
+        <div className="flex flex-wrap gap-3 text-xs bg-gray-50 dark:bg-slate-900 p-3 rounded-xl border border-gray-100 dark:border-slate-800 min-w-0">
+          <div className="min-w-0">
             <label className="text-gray-500 dark:text-gray-400 mr-1.5">Kapsam:</label>
             <select
               value={restrictionScopeFilter}
               onChange={e => setRestrictionScopeFilter(e.target.value as any)}
-              className="px-2.5 py-1 border border-gray-200 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-gray-800 dark:text-gray-200"
+              className="px-2.5 py-1 border border-gray-200 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-gray-800 dark:text-gray-200 min-w-0"
             >
               <option value="all">Tümü (Global + İşletme)</option>
               <option value="global">Sadece Global</option>
@@ -904,12 +904,12 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
             </select>
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label className="text-gray-500 dark:text-gray-400 mr-1.5">Özellik:</label>
             <select
               value={restrictionFeatureFilter}
               onChange={e => setRestrictionFeatureFilter(e.target.value)}
-              className="px-2.5 py-1 border border-gray-200 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-gray-800 dark:text-gray-200"
+              className="px-2.5 py-1 border border-gray-200 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-gray-800 dark:text-gray-200 min-w-0"
             >
               <option value="all">Tüm Özellikler</option>
               <option value="core_booking">Online Randevu (core_booking)</option>
@@ -946,90 +946,164 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
             <button onClick={loadRestrictions} className="px-2.5 py-1 bg-red-600 text-white rounded font-semibold">Tekrar Dene</button>
           </div>
         ) : (
-          <div data-testid="commercial-restrictions-loaded" className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-gray-200 dark:border-slate-700 text-gray-500 dark:text-gray-400 font-semibold">
-                  <th className="py-2.5 px-3">Kısıtlama ID</th>
-                  <th className="py-2.5 px-3">Kapsam / Tenant</th>
-                  <th className="py-2.5 px-3">Özellik Anahtarı</th>
-                  <th className="py-2.5 px-3">Gerekçe (Reason)</th>
-                  <th className="py-2.5 px-3">Başlangıç</th>
-                  <th className="py-2.5 px-3">Bitiş</th>
-                  <th className="py-2.5 px-3">Durum (RPC Truth)</th>
-                  <th className="py-2.5 px-3 text-right">Eylem</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-slate-700/50 text-gray-800 dark:text-gray-200">
-                {restrictions.map(r => {
-                  const isActiveNow = r.is_currently_active === true;
-                  const isFuture = r.is_restricted && new Date(r.starts_at) > new Date();
-                  const isEnded = !r.is_restricted || (r.expires_at && new Date(r.expires_at) <= new Date());
+          <div data-testid="commercial-restrictions-loaded" className="min-w-0">
+            {/* Desktop Table View (md and larger) */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-gray-200 dark:border-slate-700 text-gray-500 dark:text-gray-400 font-semibold">
+                    <th className="py-2.5 px-3">Kısıtlama ID</th>
+                    <th className="py-2.5 px-3">Kapsam / Tenant</th>
+                    <th className="py-2.5 px-3">Özellik Anahtarı</th>
+                    <th className="py-2.5 px-3">Gerekçe (Reason)</th>
+                    <th className="py-2.5 px-3">Başlangıç</th>
+                    <th className="py-2.5 px-3">Bitiş</th>
+                    <th className="py-2.5 px-3">Durum (RPC Truth)</th>
+                    <th className="py-2.5 px-3 text-right">Eylem</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-slate-700/50 text-gray-800 dark:text-gray-200">
+                  {restrictions.map(r => {
+                    const isActiveNow = r.is_currently_active === true;
+                    const isFuture = r.is_restricted && new Date(r.starts_at) > new Date();
+                    const isEnded = !r.is_restricted || (r.expires_at && new Date(r.expires_at) <= new Date());
 
-                  return (
-                    <tr key={r.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/30">
-                      <td className="py-2.5 px-3 font-mono text-[11px] text-gray-500 dark:text-gray-400">{r.id}</td>
-                      <td className="py-2.5 px-3 font-mono">
-                        {r.tenant_id ? (
-                          <span className="text-blue-600 dark:text-blue-400 truncate max-w-[120px] inline-block">{r.tenant_id}</span>
-                        ) : (
-                          <span className="px-1.5 py-0.5 bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 rounded font-semibold text-[10px]">GLOBAL</span>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-3 font-semibold">{r.feature_key}</td>
-                      <td className="py-2.5 px-3 max-w-[200px] truncate">{r.reason}</td>
-                      <td className="py-2.5 px-3 font-mono text-[11px]">{new Date(r.starts_at).toLocaleString('tr-TR')}</td>
-                      <td className="py-2.5 px-3 font-mono text-[11px]">{r.expires_at ? new Date(r.expires_at).toLocaleString('tr-TR') : 'Sonsuz'}</td>
-                      <td className="py-2.5 px-3">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                          isActiveNow ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
-                          isFuture ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                          'bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-400'
-                        }`}>
-                          {isActiveNow ? 'AKTİF KISITLAMA' : isFuture ? 'GELECEK KISITLAMA' : 'SONLANDI'}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-right">
-                        {!isEnded && (
-                          <button
-                            onClick={() => {
-                              clearIdempotencyKey();
-                              setSelectedRestriction(r);
-                              setActiveModal('end_restriction');
-                            }}
-                            className="px-2.5 py-1 bg-slate-700 text-white rounded text-[11px] font-medium hover:bg-slate-800 transition"
-                          >
-                            Sonlandır
-                          </button>
-                        )}
+                    return (
+                      <tr key={r.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/30">
+                        <td className="py-2.5 px-3 font-mono text-[11px] text-gray-500 dark:text-gray-400">{r.id}</td>
+                        <td className="py-2.5 px-3 font-mono">
+                          {r.tenant_id ? (
+                            <span className="text-blue-600 dark:text-blue-400 truncate max-w-[120px] inline-block">{r.tenant_id}</span>
+                          ) : (
+                            <span className="px-1.5 py-0.5 bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 rounded font-semibold text-[10px]">GLOBAL</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 font-semibold">{r.feature_key}</td>
+                        <td className="py-2.5 px-3 max-w-[200px] truncate">{r.reason}</td>
+                        <td className="py-2.5 px-3 font-mono text-[11px]">{new Date(r.starts_at).toLocaleString('tr-TR')}</td>
+                        <td className="py-2.5 px-3 font-mono text-[11px]">{r.expires_at ? new Date(r.expires_at).toLocaleString('tr-TR') : 'Sonsuz'}</td>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            isActiveNow ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                            isFuture ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                            'bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-400'
+                          }`}>
+                            {isActiveNow ? 'AKTİF KISITLAMA' : isFuture ? 'GELECEK KISITLAMA' : 'SONLANDI'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          {!isEnded && (
+                            <button
+                              onClick={() => {
+                                clearIdempotencyKey();
+                                setSelectedRestriction(r);
+                                setActiveModal('end_restriction');
+                              }}
+                              className="px-2.5 py-1 bg-slate-700 text-white rounded text-[11px] font-medium hover:bg-slate-800 transition"
+                            >
+                              Sonlandır
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {restrictions.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-gray-500 dark:text-gray-400">
+                        Gösterilecek platform kısıtlaması kaydı bulunmamaktadır.
                       </td>
                     </tr>
-                  );
-                })}
+                  )}
+                </tbody>
+              </table>
+            </div>
 
-                {restrictions.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="py-8 text-center text-gray-500 dark:text-gray-400">
-                      Gösterilecek platform kısıtlaması kaydı bulunmamaktadır.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+            {/* Mobile Card View (below md) */}
+            <div className="md:hidden space-y-3">
+              {restrictions.map(r => {
+                const isActiveNow = r.is_currently_active === true;
+                const isFuture = r.is_restricted && new Date(r.starts_at) > new Date();
+                const isEnded = !r.is_restricted || (r.expires_at && new Date(r.expires_at) <= new Date());
+
+                return (
+                  <div key={r.id} className="p-4 bg-gray-50 dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 text-xs space-y-2 min-w-0">
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="font-mono text-[11px] text-gray-500 dark:text-gray-400 [overflow-wrap:anywhere] break-words min-w-0">
+                        ID: {r.id}
+                      </div>
+                      <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                        isActiveNow ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                        isFuture ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                        'bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-400'
+                      }`}>
+                        {isActiveNow ? 'AKTİF KISITLAMA' : isFuture ? 'GELECEK KISITLAMA' : 'SONLANDI'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400 block">Kapsam / Tenant</span>
+                        <span className="font-mono text-blue-600 dark:text-blue-400 [overflow-wrap:anywhere] break-words">
+                          {r.tenant_id ? r.tenant_id : 'GLOBAL'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400 block">Özellik</span>
+                        <span className="font-semibold text-gray-900 dark:text-white">{r.feature_key}</span>
+                      </div>
+                    </div>
+
+                    <div className="text-[11px]">
+                      <span className="text-gray-500 dark:text-gray-400 block">Gerekçe</span>
+                      <span className="text-gray-800 dark:text-gray-200 [overflow-wrap:anywhere] break-words">{r.reason}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-500 dark:text-gray-400 font-mono pt-1 border-t border-gray-200/50 dark:border-slate-800">
+                      <div>Başlangıç: {new Date(r.starts_at).toLocaleString('tr-TR')}</div>
+                      <div>Bitiş: {r.expires_at ? new Date(r.expires_at).toLocaleString('tr-TR') : 'Sonsuz'}</div>
+                    </div>
+
+                    {!isEnded && (
+                      <div className="pt-2 text-right">
+                        <button
+                          onClick={() => {
+                            clearIdempotencyKey();
+                            setSelectedRestriction(r);
+                            setActiveModal('end_restriction');
+                          }}
+                          className="px-3 py-1 bg-slate-700 text-white rounded text-[11px] font-medium hover:bg-slate-800 transition"
+                        >
+                          Sonlandır
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {restrictions.length === 0 && (
+                <div className="p-6 text-center text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 text-xs">
+                  Gösterilecek platform kısıtlaması kaydı bulunmamaktadır.
+                </div>
+              )}
+            </div>
+
           </div>
         )}
       </div>
 
       {/* SECTION 3: READ-ONLY BILLING LEDGER SECTION (H1D CONTRACT) */}
-      <div data-testid="commercial-billing-section" className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
+      <div data-testid="commercial-billing-section" className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm space-y-4 min-w-0">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 min-w-0">
+          <div className="min-w-0">
             <h2 className="text-xl font-bold text-gray-900 dark:text-white">Cari Hareketler (Billing Ledger)</h2>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
               Super Admin yetkili finansal hareket geçmişi. Total: {billingTotalCount}
             </p>
           </div>
-          <div className="p-2.5 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl text-yellow-900 dark:text-yellow-300 text-xs">
+          <div className="p-2.5 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl text-yellow-900 dark:text-yellow-300 text-xs shrink-0">
             <span className="font-bold">⚠️ Bilgilendirme:</span> Bu ekran karttan ödeme almaz. Yalnızca manuel cari kayıt oluşturur.
           </div>
         </div>
@@ -1049,51 +1123,105 @@ export const SuperAdminCommercialManagementPage: React.FC = () => {
             <button onClick={loadBillingTransactions} className="px-2.5 py-1 bg-red-600 text-white rounded font-semibold">Tekrar Dene</button>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table data-testid="commercial-billing-table" className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-gray-200 dark:border-slate-700 text-gray-500 dark:text-gray-400 font-semibold">
-                  <th className="py-2.5 px-3">İşlem Tarihi (Occurred)</th>
-                  <th className="py-2.5 px-3">Yürürlük (Effective)</th>
-                  <th className="py-2.5 px-3">İşletme ID</th>
-                  <th className="py-2.5 px-3">İşlem Tipi</th>
-                  <th className="py-2.5 px-3">Tutar</th>
-                  <th className="py-2.5 px-3">Faturalama Modu</th>
-                  <th className="py-2.5 px-3">Ödeme Yöntemi</th>
-                  <th className="py-2.5 px-3">Sağlayıcı Ref</th>
-                  <th className="py-2.5 px-3">Referans Notu / İç Gerekçe</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-slate-700/50 text-gray-800 dark:text-gray-200">
-                {billingTransactions.map(tx => (
-                  <tr key={tx.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/30">
-                    <td className="py-2.5 px-3 font-mono text-[11px]">{new Date(tx.occurred_at).toLocaleString('tr-TR')}</td>
-                    <td className="py-2.5 px-3 font-mono text-[11px]">{tx.effective_at !== tx.occurred_at ? new Date(tx.effective_at).toLocaleString('tr-TR') : '-'}</td>
-                    <td className="py-2.5 px-3 font-mono text-blue-600 dark:text-blue-400 truncate max-w-[120px]">{tx.tenant_id}</td>
-                    <td className="py-2.5 px-3 font-medium capitalize">{tx.transaction_type}</td>
-                    <td className="py-2.5 px-3 font-bold">{Number(tx.amount).toFixed(2)} {tx.currency}</td>
-                    <td className="py-2.5 px-3 capitalize">{tx.billing_mode}</td>
-                    <td className="py-2.5 px-3 capitalize">{tx.payment_method || '-'}</td>
-                    <td className="py-2.5 px-3 font-mono text-[11px] text-gray-500 dark:text-gray-400">{tx.external_provider_reference || '-'}</td>
-                    <td className="py-2.5 px-3 max-w-[200px] truncate text-gray-600 dark:text-gray-300 font-mono text-[11px]">
-                      {tx.internal_reason || tx.reference_note || '-'}
-                    </td>
+          <div className="min-w-0">
+            {/* Desktop Table View (md and larger) */}
+            <div className="hidden md:block overflow-x-auto">
+              <table data-testid="commercial-billing-table" className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-gray-200 dark:border-slate-700 text-gray-500 dark:text-gray-400 font-semibold">
+                    <th className="py-2.5 px-3">İşlem Tarihi (Occurred)</th>
+                    <th className="py-2.5 px-3">Yürürlük (Effective)</th>
+                    <th className="py-2.5 px-3">İşletme ID</th>
+                    <th className="py-2.5 px-3">İşlem Tipi</th>
+                    <th className="py-2.5 px-3">Tutar</th>
+                    <th className="py-2.5 px-3">Faturalama Modu</th>
+                    <th className="py-2.5 px-3">Ödeme Yöntemi</th>
+                    <th className="py-2.5 px-3">Sağlayıcı Ref</th>
+                    <th className="py-2.5 px-3">Referans Notu / İç Gerekçe</th>
                   </tr>
-                ))}
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-slate-700/50 text-gray-800 dark:text-gray-200">
+                  {billingTransactions.map(tx => (
+                    <tr key={tx.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-700/30">
+                      <td className="py-2.5 px-3 font-mono text-[11px]">{new Date(tx.occurred_at).toLocaleString('tr-TR')}</td>
+                      <td className="py-2.5 px-3 font-mono text-[11px]">{tx.effective_at !== tx.occurred_at ? new Date(tx.effective_at).toLocaleString('tr-TR') : '-'}</td>
+                      <td className="py-2.5 px-3 font-mono text-blue-600 dark:text-blue-400 truncate max-w-[120px]">{tx.tenant_id}</td>
+                      <td className="py-2.5 px-3 font-medium capitalize">{tx.transaction_type}</td>
+                      <td className="py-2.5 px-3 font-bold">{Number(tx.amount).toFixed(2)} {tx.currency}</td>
+                      <td className="py-2.5 px-3 capitalize">{tx.billing_mode}</td>
+                      <td className="py-2.5 px-3 capitalize">{tx.payment_method || '-'}</td>
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-gray-500 dark:text-gray-400">{tx.external_provider_reference || '-'}</td>
+                      <td className="py-2.5 px-3 max-w-[250px] [overflow-wrap:anywhere] break-words text-gray-600 dark:text-gray-300 font-mono text-[11px]">
+                        {tx.internal_reason || tx.reference_note || '-'}
+                      </td>
+                    </tr>
+                  ))}
 
-                {billingTransactions.length === 0 && (
-                  <tr>
-                    <td colSpan={9} className="py-8 text-center text-gray-500 dark:text-gray-400">
-                      Gösterilecek cari hareket kaydı bulunmamaktadır.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                  {billingTransactions.length === 0 && (
+                    <tr>
+                      <td colSpan={9} className="py-8 text-center text-gray-500 dark:text-gray-400">
+                        Gösterilecek cari hareket kaydı bulunmamaktadır.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Card View (below md) */}
+            <div data-testid="commercial-billing-mobile-list" className="md:hidden space-y-3">
+              {billingTransactions.map(tx => (
+                <div key={tx.id} className="p-4 bg-gray-50 dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 text-xs space-y-2 min-w-0">
+                  <div className="flex justify-between items-center gap-2">
+                    <span className="font-bold text-sm text-gray-900 dark:text-white">{Number(tx.amount).toFixed(2)} {tx.currency}</span>
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 rounded text-[10px] font-semibold capitalize">{tx.transaction_type}</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div>
+                      <span className="text-gray-500 dark:text-gray-400 block">Faturalama Modu</span>
+                      <span className="capitalize font-medium text-gray-800 dark:text-gray-200">{tx.billing_mode}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 dark:text-gray-400 block">Ödeme Yöntemi</span>
+                      <span className="capitalize font-medium text-gray-800 dark:text-gray-200">{tx.payment_method || '-'}</span>
+                    </div>
+                  </div>
+
+                  <div className="text-[11px]">
+                    <span className="text-gray-500 dark:text-gray-400 block">İşletme ID</span>
+                    <span className="font-mono text-blue-600 dark:text-blue-400 [overflow-wrap:anywhere] break-words">{tx.tenant_id}</span>
+                  </div>
+
+                  {tx.external_provider_reference && (
+                    <div className="text-[11px]">
+                      <span className="text-gray-500 dark:text-gray-400 block">Sağlayıcı Ref</span>
+                      <span className="font-mono text-gray-700 dark:text-gray-300 [overflow-wrap:anywhere] break-words">{tx.external_provider_reference}</span>
+                    </div>
+                  )}
+
+                  <div className="text-[11px]">
+                    <span className="text-gray-500 dark:text-gray-400 block">Referans Notu / İç Gerekçe</span>
+                    <span className="font-mono text-gray-700 dark:text-gray-300 [overflow-wrap:anywhere] break-words">{tx.internal_reason || tx.reference_note || '-'}</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-500 dark:text-gray-400 font-mono pt-1 border-t border-gray-200/50 dark:border-slate-800">
+                    <div>İşlem: {new Date(tx.occurred_at).toLocaleString('tr-TR')}</div>
+                    <div>Yürürlük: {tx.effective_at !== tx.occurred_at ? new Date(tx.effective_at).toLocaleString('tr-TR') : '-'}</div>
+                  </div>
+                </div>
+              ))}
+
+              {billingTransactions.length === 0 && (
+                <div className="p-6 text-center text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 text-xs">
+                  Gösterilecek cari hareket kaydı bulunmamaktadır.
+                </div>
+              )}
+            </div>
 
             {/* Billing Pagination */}
             {billingTotalCount > billingLimit && (
-              <div className="flex justify-between items-center pt-3 text-xs text-gray-600 dark:text-gray-400">
+              <div className="flex justify-between items-center pt-3 text-xs text-gray-600 dark:text-gray-400 min-w-0">
                 <button
                   onClick={() => setBillingPage(p => Math.max(0, p - 1))}
                   disabled={billingPage === 0}
