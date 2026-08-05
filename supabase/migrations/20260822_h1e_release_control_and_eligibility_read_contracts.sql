@@ -41,7 +41,7 @@ RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, public
-AS $
+AS $eligibility_snapshot$
 DECLARE
     v_actor_user_id             UUID;
     v_tenant                    RECORD;
@@ -164,7 +164,7 @@ BEGIN
         'pilot_authorization', v_transitional_auth
     );
 END;
-;
+$eligibility_snapshot$;
 
 REVOKE ALL ON FUNCTION public.super_admin_get_tenant_pilot_eligibility_snapshot(UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.super_admin_get_tenant_pilot_eligibility_snapshot(UUID) TO authenticated;
