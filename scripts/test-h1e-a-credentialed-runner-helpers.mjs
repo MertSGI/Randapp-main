@@ -30,15 +30,29 @@ export function safeJsonParse(str) {
 }
 
 export function redactSecrets(obj) {
+  if (!obj) return obj;
+  if (typeof obj === 'object') {
+    return JSON.parse(JSON.stringify(obj, (key, value) => {
+      if (typeof value === 'string') {
+        if (/password|token|secret|apikey|authorization|cookie/i.test(key)) return '[REDACTED]';
+        return value.replace(/bearer\s+[a-zA-Z0-9\._\-]+/gi, 'Bearer [REDACTED]')
+                    .replace(/eyJ[a-zA-Z0-9\._\-]+/g, '[JWT_REDACTED]')
+                    .replace(/sbp_[a-zA-Z0-9]+/g, '[KEY_REDACTED]');
+      }
+      return value;
+    }));
+  }
   if (typeof obj === 'string') {
     return obj.replace(/bearer\s+[a-zA-Z0-9\._\-]+/gi, 'Bearer [REDACTED]')
-              .replace(/eyJ[a-zA-Z0-9\._\-]+/g, '[JWT_REDACTED]');
+              .replace(/eyJ[a-zA-Z0-9\._\-]+/g, '[JWT_REDACTED]')
+              .replace(/sbp_[a-zA-Z0-9]+/g, '[KEY_REDACTED]');
   }
   return obj;
 }
 
 export class NetworkObserver {
-  constructor() {
+  constructor(allowedOrigin = null) {
+    this.allowedOrigin = allowedOrigin;
     this.requests = [];
     this.mutationAttemptsDetected = 0;
     this.forbiddenRequestsDetected = 0;
@@ -51,6 +65,11 @@ export class NetworkObserver {
     } catch (e) {
       return false;
     }
+
+    if (this.allowedOrigin && url.origin !== this.allowedOrigin) {
+      return false;
+    }
+
     const pathname = url.pathname;
 
     if (pathname.includes('/auth/v1/token') || pathname.includes('/auth/v1/logout')) {
@@ -98,8 +117,10 @@ export function createMonitoredFetch(observer, customFetch = fetch) {
   };
 }
 
-export async function authenticateUser(supabaseUrl, supabaseAnonKey, email, password, monitoredFetch = fetch) {
-  if (!email || !password) return null;
+export async function authenticateUser(supabaseUrl, supabaseAnonKey, email, password, expectedRole = null, monitoredFetch = fetch) {
+  if (!email || !password) {
+    return { ok: false, token: null, user: null, status: 0, failure_category: 'missing_credentials' };
+  }
   try {
     const res = await monitoredFetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
       method: 'POST',
@@ -109,13 +130,24 @@ export async function authenticateUser(supabaseUrl, supabaseAnonKey, email, pass
       },
       body: JSON.stringify({ email, password })
     });
-    if (!res.ok) return null;
+    const status = res.status;
+    if (!res.ok) {
+      const category = status === 400 || status === 401 ? 'invalid_credentials' : 'unexpected_status';
+      return { ok: false, token: null, user: null, status, failure_category: category };
+    }
     const text = await res.text();
     const data = safeJsonParse(text);
-    if (!data || !data.access_token || !data.user) return null;
-    return { token: data.access_token, user: data.user };
+    if (!data || !data.access_token || !data.user) {
+      return { ok: false, token: null, user: null, status, failure_category: 'malformed_auth_response' };
+    }
+
+    if (email && data.user.email && data.user.email.toLowerCase() !== email.toLowerCase()) {
+      return { ok: false, token: null, user: null, status, failure_category: 'email_mismatch' };
+    }
+
+    return { ok: true, token: data.access_token, user: data.user, status, failure_category: null };
   } catch (err) {
-    return null;
+    return { ok: false, token: null, user: null, status: 500, failure_category: 'network_failure' };
   }
 }
 
