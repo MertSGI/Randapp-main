@@ -113,6 +113,13 @@ export class NetworkObserver {
 
     return allowed;
   }
+  getForbiddenRequestsDetected() {
+    return this.forbiddenRequestsDetected;
+  }
+
+  getForbiddenMutationAttemptsDetected() {
+    return this.mutationAttemptsDetected;
+  }
 }
 
 export function createMonitoredFetch(observer, customFetch = fetch) {
@@ -217,6 +224,7 @@ export function assertAnonAclDenied(res) {
   if (res.data.readiness_facts || res.data.global_release_control || res.data.pilot_authorization) {
     throw new Error('Anon ACL denial response leaked tenant snapshot data!');
   }
+  return true;
 }
 
 export function assertAuthenticatedUnauthorized(res, roleLabel) {
@@ -234,6 +242,7 @@ export function assertAuthenticatedUnauthorized(res, roleLabel) {
   if (res.data.readiness_facts || res.data.global_release_control || res.data.pilot_authorization) {
     throw new Error(roleLabel + ' call leaked tenant snapshot data!');
   }
+  return true;
 }
 
 export function assertSuperAdminEligibilityEnvelope(res) {

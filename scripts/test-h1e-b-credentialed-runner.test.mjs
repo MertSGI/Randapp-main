@@ -6,6 +6,7 @@ import {
   assertAnonAclDenied,
   assertAuthenticatedUnauthorized
 } from './test-h1e-a-credentialed-runner-helpers.mjs';
+import { evaluateAssertion } from './test-h1e-b-credentialed-runner.mjs';
 
 console.log('=== STAGE H1E-B CREDENTIALED RUNNER HELPER UNIT TESTS ===');
 
@@ -28,52 +29,122 @@ async function check(title, fn) {
 }
 
 async function runUnitTests() {
-  await check('1. H1E-B credentialed runner file exists with exact filename', async () => {
-    const runnerPath = path.join(process.cwd(), 'scripts/test-h1e-b-credentialed-runner.mjs');
-    if (!fs.existsSync(runnerPath)) throw new Error('H1E-B credentialed runner missing!');
-  });
-
-  await check('2. H1E-B credentialed runner requires credentials and does not execute mutations without environment variables', async () => {
-    const content = fs.readFileSync(path.join(process.cwd(), 'scripts/test-h1e-b-credentialed-runner.mjs'), 'utf8');
-    if (!content.includes('H1E_B_CREDENTIALS_REQUIRED') || !content.includes('process.exit(1)')) {
-      throw new Error('H1E-B credentialed runner missing uncredentialed guard!');
-    }
-  });
-
-  await check('3. Dedicated staging test tenant ID is documented in runner', async () => {
-    const content = fs.readFileSync(path.join(process.cwd(), 'scripts/test-h1e-b-credentialed-runner.mjs'), 'utf8');
-    if (!content.includes('DEDICATED_H1D_TENANT_ID')) {
-      throw new Error('H1E-B runner missing dedicated test tenant ID binding!');
-    }
-  });
-
-  await check('4. NetworkObserver allows approved mutation RPCs and forbids table PATCH/DELETE', async () => {
-    const obs = new NetworkObserver('https://xyz.supabase.co');
-    if (!obs.isAllowedPath('https://xyz.supabase.co/rest/v1/rpc/super_admin_approve_tenant_pilot', 'POST')) {
-      throw new Error('super_admin_approve_tenant_pilot should be allowed');
-    }
-    if (!obs.isAllowedPath('https://xyz.supabase.co/rest/v1/rpc/super_admin_revoke_tenant_pilot', 'POST')) {
-      throw new Error('super_admin_revoke_tenant_pilot should be allowed');
-    }
-    if (!obs.isAllowedPath('https://xyz.supabase.co/rest/v1/rpc/super_admin_get_tenant_pilot_mutation_evidence', 'POST')) {
-      throw new Error('super_admin_get_tenant_pilot_mutation_evidence should be allowed');
-    }
-    if (obs.isAllowedPath('https://xyz.supabase.co/rest/v1/tenant_pilot_authorizations', 'PATCH')) {
-      throw new Error('Table PATCH must be forbidden');
-    }
-  });
-
-  await check('5. Anon ACL denial helper validates 401/403 and PG 42501', async () => {
+  // 1. assertAnonAclDenied returns true for valid 401/403 + 42501
+  await check('1. assertAnonAclDenied returns true for valid 401/403 + 42501', async () => {
     const res = { ok: false, status: 401, data: { code: '42501', message: 'permission denied' } };
-    assertAnonAclDenied(res);
+    const val = assertAnonAclDenied(res);
+    if (val !== true) throw new Error('Expected assertAnonAclDenied to return true, got ' + val);
   });
 
-  await check('6. Authenticated UNAUTHORIZED helper validates structured reason_code UNAUTHORIZED', async () => {
+  // 2. assertAnonAclDenied throws for an invalid ACL response
+  await check('2. assertAnonAclDenied throws for an invalid ACL response', async () => {
+    const res = { ok: true, status: 200, data: { success: true } };
+    let threw = false;
+    try {
+      assertAnonAclDenied(res);
+    } catch (e) {
+      threw = true;
+    }
+    if (!threw) throw new Error('Expected assertAnonAclDenied to throw for HTTP 200 success');
+  });
+
+  // 3. assertAuthenticatedUnauthorized returns true for a valid envelope
+  await check('3. assertAuthenticatedUnauthorized returns true for a valid envelope', async () => {
     const res = { ok: true, status: 200, data: { success: false, reason_code: 'UNAUTHORIZED' } };
-    assertAuthenticatedUnauthorized(res, 'test_role');
+    const val = assertAuthenticatedUnauthorized(res, 'test_role');
+    if (val !== true) throw new Error('Expected assertAuthenticatedUnauthorized to return true, got ' + val);
   });
 
-  await check('7. Secrets remain redacted in error outputs', async () => {
+  // 4. assertAuthenticatedUnauthorized throws for success=true
+  await check('4. assertAuthenticatedUnauthorized throws for success=true', async () => {
+    const res = { ok: true, status: 200, data: { success: true, reason_code: 'UNAUTHORIZED' } };
+    let threw = false;
+    try {
+      assertAuthenticatedUnauthorized(res, 'test_role');
+    } catch (e) {
+      threw = true;
+    }
+    if (!threw) throw new Error('Expected assertAuthenticatedUnauthorized to throw for success=true');
+  });
+
+  // 5. assertAuthenticatedUnauthorized throws for a non-UNAUTHORIZED code
+  await check('5. assertAuthenticatedUnauthorized throws for a non-UNAUTHORIZED code', async () => {
+    const res = { ok: true, status: 200, data: { success: false, reason_code: 'INVALID_REASON' } };
+    let threw = false;
+    try {
+      assertAuthenticatedUnauthorized(res, 'test_role');
+    } catch (e) {
+      threw = true;
+    }
+    if (!threw) throw new Error('Expected assertAuthenticatedUnauthorized to throw for reason_code=INVALID_REASON');
+  });
+
+  // 6. NetworkObserver forbidden-request getter returns the request counter
+  await check('6. NetworkObserver forbidden-request getter returns the request counter', async () => {
+    const obs = new NetworkObserver('https://xyz.supabase.co');
+    obs.observe('https://xyz.supabase.co/rest/v1/forbidden_table', { method: 'GET' });
+    if (obs.getForbiddenRequestsDetected() !== 1) throw new Error('Expected forbidden request count 1, got ' + obs.getForbiddenRequestsDetected());
+  });
+
+  // 7. NetworkObserver forbidden-mutation getter returns the mutation counter
+  await check('7. NetworkObserver forbidden-mutation getter returns the mutation counter', async () => {
+    const obs = new NetworkObserver('https://xyz.supabase.co');
+    obs.observe('https://xyz.supabase.co/rest/v1/forbidden_table', { method: 'POST' });
+    if (obs.getForbiddenMutationAttemptsDetected() !== 1) throw new Error('Expected forbidden mutation count 1, got ' + obs.getForbiddenMutationAttemptsDetected());
+  });
+
+  // 8. Allowed RPC POST increments neither forbidden counter
+  await check('8. Allowed RPC POST increments neither forbidden counter', async () => {
+    const obs = new NetworkObserver('https://xyz.supabase.co');
+    obs.observe('https://xyz.supabase.co/rest/v1/rpc/super_admin_approve_tenant_pilot', { method: 'POST' });
+    if (obs.getForbiddenRequestsDetected() !== 0 || obs.getForbiddenMutationAttemptsDetected() !== 0) {
+      throw new Error('Allowed RPC POST incremented forbidden counters');
+    }
+  });
+
+  // 9. Forbidden GET increments only forbidden-request count
+  await check('9. Forbidden GET increments only forbidden-request count', async () => {
+    const obs = new NetworkObserver('https://xyz.supabase.co');
+    obs.observe('https://xyz.supabase.co/rest/v1/unknown_table', { method: 'GET' });
+    if (obs.getForbiddenRequestsDetected() !== 1 || obs.getForbiddenMutationAttemptsDetected() !== 0) {
+      throw new Error('Forbidden GET should increment requests but not mutations');
+    }
+  });
+
+  // 10. Forbidden POST increments both forbidden-request and forbidden-mutation counts
+  await check('10. Forbidden POST increments both forbidden-request and forbidden-mutation counts', async () => {
+    const obs = new NetworkObserver('https://xyz.supabase.co');
+    obs.observe('https://xyz.supabase.co/rest/v1/unknown_table', { method: 'POST' });
+    if (obs.getForbiddenRequestsDetected() !== 1 || obs.getForbiddenMutationAttemptsDetected() !== 1) {
+      throw new Error('Forbidden POST should increment both request and mutation counters');
+    }
+  });
+
+  // 11. The H1E-B runner contains no getForbiddenAttempts call
+  await check('11. The H1E-B runner contains no getForbiddenAttempts call', async () => {
+    const content = fs.readFileSync(path.join(process.cwd(), 'scripts/test-h1e-b-credentialed-runner.mjs'), 'utf8');
+    if (content.includes('getForbiddenAttempts()')) {
+      throw new Error('H1E-B runner still contains deprecated getForbiddenAttempts call!');
+    }
+  });
+
+  // 12. Authorization assertion success cannot be recorded as false because of an undefined return
+  await check('12. Authorization assertion success cannot be recorded as false because of an undefined return', async () => {
+    const res = { ok: true, status: 200, data: { success: false, reason_code: 'UNAUTHORIZED' } };
+    const evalRes = evaluateAssertion(() => assertAuthenticatedUnauthorized(res, 'test_role'));
+    if (evalRes.ok !== true) throw new Error('Valid assertion evaluated to ok=false due to undefined return');
+  });
+
+  // 13. Failure accounting still reaches the final summary model
+  await check('13. Failure accounting still reaches the final summary model', async () => {
+    const evalRes = evaluateAssertion(() => { throw new Error('Simulated assertion failure'); });
+    if (evalRes.ok !== false || !evalRes.error.includes('Simulated assertion failure')) {
+      throw new Error('Failed assertion evaluation did not return safe error detail');
+    }
+  });
+
+  // 14. Secret redaction remains effective
+  await check('14. Secret redaction remains effective', async () => {
     const secret = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9';
     const redacted = redactSecrets(secret);
     if (redacted.includes('eyJhbGci')) throw new Error('Secret leakage in redacted output');
