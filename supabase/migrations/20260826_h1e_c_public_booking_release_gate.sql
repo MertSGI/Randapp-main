@@ -168,14 +168,15 @@ BEGIN
 
         -- 6. Required Entitlement Check (core_booking)
         SELECT * INTO v_core_entitlement
-        FROM public.tenant_entitlements
-        WHERE tenant_id = v_tenant_id
-          AND feature_key = 'core_booking'
-          AND active = true
-          AND (expires_at IS NULL OR expires_at > now());
+        FROM public.resolve_effective_tenant_entitlements(v_tenant_id)
+        WHERE feature_key = 'core_booking';
 
-        v_core_entitlement_found := (v_core_entitlement.id IS NOT NULL);
-        IF NOT v_core_entitlement_found THEN
+        IF FOUND THEN
+            v_core_entitlement_found := true;
+            IF v_core_entitlement.value_type = 'boolean' AND v_core_entitlement.boolean_value IS NOT TRUE THEN
+                v_blocking_reasons := array_append(v_blocking_reasons, 'REQUIRED_ENTITLEMENT_BLOCKED');
+            END IF;
+        ELSE
             v_blocking_reasons := array_append(v_blocking_reasons, 'REQUIRED_ENTITLEMENT_BLOCKED');
         END IF;
 
@@ -551,14 +552,17 @@ BEGIN
     v_comm_eligible := COALESCE((v_comm_elig->>'eligible')::boolean, false);
 
     SELECT * INTO v_core_entitlement
-    FROM public.tenant_entitlements
-    WHERE tenant_id = v_tenant_id
-      AND feature_key = 'core_booking'
-      AND active = true
-      AND (expires_at IS NULL OR expires_at > now());
+    FROM public.resolve_effective_tenant_entitlements(v_tenant_id)
+    WHERE feature_key = 'core_booking';
 
-    v_core_entitlement_found := (v_core_entitlement.id IS NOT NULL);
-    v_core_entitlement_blocked := NOT v_core_entitlement_found;
+    IF FOUND THEN
+        v_core_entitlement_found := true;
+        IF v_core_entitlement.value_type = 'boolean' AND v_core_entitlement.boolean_value IS NOT TRUE THEN
+            v_core_entitlement_blocked := true;
+        END IF;
+    ELSE
+        v_core_entitlement_blocked := true;
+    END IF;
 
     v_entitlement_facts := jsonb_build_object(
         'commercial_eligibility', v_comm_elig,
