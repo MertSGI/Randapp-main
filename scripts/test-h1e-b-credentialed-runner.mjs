@@ -73,6 +73,78 @@ if (process.argv[1] && process.argv[1].endsWith('test-h1e-b-credentialed-runner.
   process.exit(1);
 }
 
+export function evaluateMutationEvidenceDelta(initialEvidence, finalEvidence) {
+  const errors = [];
+
+  function parseField(obj, name, fieldName) {
+    if (!obj || typeof obj !== 'object') {
+      errors.push(`${name} evidence object is invalid`);
+      return NaN;
+    }
+    const val = obj[fieldName];
+    if (val === null || val === undefined || typeof val !== 'number' || !Number.isFinite(val) || val < 0) {
+      errors.push(`Invalid non-finite or negative count for ${name} ${fieldName}: ${val}`);
+      return NaN;
+    }
+    return val;
+  }
+
+  const initActive = parseField(initialEvidence, 'initial', 'active_authorization_count');
+  const initTotal = parseField(initialEvidence, 'initial', 'total_authorization_count');
+  const initApprove = parseField(initialEvidence, 'initial', 'approved_audit_count');
+  const initRevoke = parseField(initialEvidence, 'initial', 'revoked_audit_count');
+  const initIdem = parseField(initialEvidence, 'initial', 'idempotency_record_count');
+
+  const finalActive = parseField(finalEvidence, 'final', 'active_authorization_count');
+  const finalTotal = parseField(finalEvidence, 'final', 'total_authorization_count');
+  const finalApprove = parseField(finalEvidence, 'final', 'approved_audit_count');
+  const finalRevoke = parseField(finalEvidence, 'final', 'revoked_audit_count');
+  const finalIdem = parseField(finalEvidence, 'final', 'idempotency_record_count');
+
+  if (errors.length > 0) {
+    return { ok: false, initial: initialEvidence, final: finalEvidence, delta: null, errors };
+  }
+
+  const delta = {
+    activeAuthorization: finalActive - initActive,
+    totalAuthorization: finalTotal - initTotal,
+    approvedAudit: finalApprove - initApprove,
+    revokedAudit: finalRevoke - initRevoke,
+    idempotencyRecords: finalIdem - initIdem
+  };
+
+  if (initActive > 0) errors.push(`Initial active_authorization_count must be 0, got ${initActive}`);
+  if (finalActive !== 0) errors.push(`Final active_authorization_count must be 0, got ${finalActive}`);
+
+  if (delta.totalAuthorization !== 1) errors.push(`Expected total_authorization_count delta +1, got ${delta.totalAuthorization}`);
+  if (delta.approvedAudit !== 1) errors.push(`Expected approved_audit_count delta +1, got ${delta.approvedAudit}`);
+  if (delta.revokedAudit !== 1) errors.push(`Expected revoked_audit_count delta +1, got ${delta.revokedAudit}`);
+
+  if (initIdem !== 0) errors.push(`Initial run-scoped idempotency_record_count must be 0, got ${initIdem}`);
+  if (finalIdem !== 3) errors.push(`Final run-scoped idempotency_record_count must be 3, got ${finalIdem}`);
+  if (delta.idempotencyRecords !== 3) errors.push(`Expected run-scoped idempotency_record_count delta +3, got ${delta.idempotencyRecords}`);
+
+  return {
+    ok: errors.length === 0,
+    initial: {
+      active_authorization_count: initActive,
+      total_authorization_count: initTotal,
+      approved_audit_count: initApprove,
+      revoked_audit_count: initRevoke,
+      idempotency_record_count: initIdem
+    },
+    final: {
+      active_authorization_count: finalActive,
+      total_authorization_count: finalTotal,
+      approved_audit_count: finalApprove,
+      revoked_audit_count: finalRevoke,
+      idempotency_record_count: finalIdem
+    },
+    delta,
+    errors
+  };
+}
+
 export function evaluateAssertion(assertion) {
   try {
     const res = assertion();
@@ -168,11 +240,13 @@ export async function runCredentialedMutationAcceptanceH1EB() {
     }
 
     if (!loginFailed) {
-      // 2. Precondition check: Tenant must exist and have 0 active authorizations
-      const initialEvidenceRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_mutation_evidence', { p_tenant_id: DEDICATED_H1D_TENANT_ID }, sessions.superAdmin, monitoredFetch);
-      if (!initialEvidenceRes.ok || initialEvidenceRes.data.active_authorization_count > 0) {
-        cleanupRequired = true;
-        trackResult('behavioral', false, 'Precondition: Dedicated tenant must have 0 active authorizations', 'Dedicated tenant contaminated with active authorization count ' + (initialEvidenceRes.data?.active_authorization_count ?? 'unknown'));
+      // 2. Precondition check: Fetch initial evidence baseline including p_run_prefix
+      const initialEvidenceRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_mutation_evidence', { p_tenant_id: DEDICATED_H1D_TENANT_ID, p_run_prefix: runId }, sessions.superAdmin, monitoredFetch);
+      const initialData = initialEvidenceRes.ok ? initialEvidenceRes.data : null;
+
+      if (!initialData || initialData.active_authorization_count > 0) {
+        cleanupRequired = (initialData?.active_authorization_count ?? 0) > 0;
+        trackResult('behavioral', false, 'Precondition: Dedicated tenant must have 0 active authorizations', 'Dedicated tenant contaminated with active authorization count ' + (initialData?.active_authorization_count ?? 'unknown'));
       } else {
         // 3. Five-role Authorization Matrix
         // Anon ACL denial check on read RPC
@@ -261,16 +335,24 @@ export async function runCredentialedMutationAcceptanceH1EB() {
         const revokeConflictOk = revokeConflictRes.ok && revokeConflictRes.data.success === false && revokeConflictRes.data.reason_code === 'IDEMPOTENCY_CONFLICT';
         trackResult('mutation', revokeConflictOk, 'Stage 12: Revoke conflict returns IDEMPOTENCY_CONFLICT');
 
-        // Stage 13: Mutation Evidence Verification
+        // Stage 13: Mutation Evidence Verification by Run Delta
         const finalEvidenceRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_mutation_evidence', { p_tenant_id: DEDICATED_H1D_TENANT_ID, p_run_prefix: runId }, sessions.superAdmin, monitoredFetch);
-        finalActiveAuthCount = finalEvidenceRes.data?.active_authorization_count ?? -1;
+        const finalData = finalEvidenceRes.ok ? finalEvidenceRes.data : null;
+        finalActiveAuthCount = finalData?.active_authorization_count ?? -1;
 
-        const evidenceOk = finalEvidenceRes.ok && finalEvidenceRes.data.success &&
-          finalEvidenceRes.data.active_authorization_count === 0 &&
-          finalEvidenceRes.data.approved_audit_count === 1 &&
-          finalEvidenceRes.data.revoked_audit_count === 1;
+        const evalDelta = evaluateMutationEvidenceDelta(initialData, finalData);
 
-        trackResult('behavioral', evidenceOk, 'Stage 13: Mutation evidence confirms exactly 1 approval audit, 1 revoke audit, and 0 active authorizations');
+        if (evalDelta.ok) {
+          console.log(`\n  --- Evidence Numeric Diagnostics ---`);
+          console.log(`  Total Authorization Count: Initial ${evalDelta.initial.total_authorization_count}, Final ${evalDelta.final.total_authorization_count}, Delta +${evalDelta.delta.totalAuthorization}`);
+          console.log(`  Approval Audit Count: Initial ${evalDelta.initial.approved_audit_count}, Final ${evalDelta.final.approved_audit_count}, Delta +${evalDelta.delta.approvedAudit}`);
+          console.log(`  Revocation Audit Count: Initial ${evalDelta.initial.revoked_audit_count}, Final ${evalDelta.final.revoked_audit_count}, Delta +${evalDelta.delta.revokedAudit}`);
+          console.log(`  Run-Scoped Idempotency Count: Initial ${evalDelta.initial.idempotency_record_count}, Final ${evalDelta.final.idempotency_record_count}, Delta +${evalDelta.delta.idempotencyRecords}`);
+          console.log(`  Final Active Authorization Count: ${evalDelta.final.active_authorization_count}`);
+        }
+
+        cleanupRequired = (finalActiveAuthCount > 0);
+        trackResult('behavioral', evalDelta.ok, 'Stage 13: Mutation evidence delta verification (total auth +1, approval audit +1, revoke audit +1, idempotency +3)', evalDelta.errors.join('; '));
       }
     }
   } catch (topErr) {

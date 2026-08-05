@@ -6,7 +6,7 @@ import {
   assertAnonAclDenied,
   assertAuthenticatedUnauthorized
 } from './test-h1e-a-credentialed-runner-helpers.mjs';
-import { evaluateAssertion } from './test-h1e-b-credentialed-runner.mjs';
+import { evaluateAssertion, evaluateMutationEvidenceDelta } from './test-h1e-b-credentialed-runner.mjs';
 
 console.log('=== STAGE H1E-B CREDENTIALED RUNNER HELPER UNIT TESTS ===');
 
@@ -148,6 +148,140 @@ async function runUnitTests() {
     const secret = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9';
     const redacted = redactSecrets(secret);
     if (redacted.includes('eyJhbGci')) throw new Error('Secret leakage in redacted output');
+  });
+
+  // --- EVIDENCE DELTA TESTS ---
+
+  // 15. Initial historical counts 1/1 and final counts 2/2 pass
+  await check('15. Initial historical counts 1/1 and final counts 2/2 pass', async () => {
+    const init = { active_authorization_count: 0, total_authorization_count: 1, approved_audit_count: 1, revoked_audit_count: 1, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 0, total_authorization_count: 2, approved_audit_count: 2, revoked_audit_count: 2, idempotency_record_count: 3 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (!res.ok) throw new Error('Expected pass for historical baseline 1/1, got errors: ' + res.errors.join('; '));
+  });
+
+  // 16. Initial historical counts 5/5 and final counts 6/6 pass
+  await check('16. Initial historical counts 5/5 and final counts 6/6 pass', async () => {
+    const init = { active_authorization_count: 0, total_authorization_count: 5, approved_audit_count: 5, revoked_audit_count: 5, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 0, total_authorization_count: 6, approved_audit_count: 6, revoked_audit_count: 6, idempotency_record_count: 3 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (!res.ok) throw new Error('Expected pass for historical baseline 5/5, got errors: ' + res.errors.join('; '));
+  });
+
+  // 17. total_authorization_count delta +1 passes
+  await check('17. total_authorization_count delta +1 passes', async () => {
+    const init = { active_authorization_count: 0, total_authorization_count: 10, approved_audit_count: 0, revoked_audit_count: 0, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 0, total_authorization_count: 11, approved_audit_count: 1, revoked_audit_count: 1, idempotency_record_count: 3 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (!res.ok) throw new Error('Expected total_authorization_count delta +1 to pass');
+  });
+
+  // 18. approval audit delta 0 fails
+  await check('18. approval audit delta 0 fails', async () => {
+    const init = { active_authorization_count: 0, total_authorization_count: 0, approved_audit_count: 1, revoked_audit_count: 0, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 0, total_authorization_count: 1, approved_audit_count: 1, revoked_audit_count: 1, idempotency_record_count: 3 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (res.ok) throw new Error('Expected approval audit delta 0 to fail');
+  });
+
+  // 19. approval audit delta +2 fails
+  await check('19. approval audit delta +2 fails', async () => {
+    const init = { active_authorization_count: 0, total_authorization_count: 0, approved_audit_count: 0, revoked_audit_count: 0, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 0, total_authorization_count: 1, approved_audit_count: 2, revoked_audit_count: 1, idempotency_record_count: 3 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (res.ok) throw new Error('Expected approval audit delta +2 to fail');
+  });
+
+  // 20. revocation audit delta 0 fails
+  await check('20. revocation audit delta 0 fails', async () => {
+    const init = { active_authorization_count: 0, total_authorization_count: 0, approved_audit_count: 0, revoked_audit_count: 1, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 0, total_authorization_count: 1, approved_audit_count: 1, revoked_audit_count: 1, idempotency_record_count: 3 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (res.ok) throw new Error('Expected revocation audit delta 0 to fail');
+  });
+
+  // 21. revocation audit delta +2 fails
+  await check('21. revocation audit delta +2 fails', async () => {
+    const init = { active_authorization_count: 0, total_authorization_count: 0, approved_audit_count: 0, revoked_audit_count: 0, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 0, total_authorization_count: 1, approved_audit_count: 1, revoked_audit_count: 2, idempotency_record_count: 3 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (res.ok) throw new Error('Expected revocation audit delta +2 to fail');
+  });
+
+  // 22. final active authorization count 1 fails
+  await check('22. final active authorization count 1 fails', async () => {
+    const init = { active_authorization_count: 0, total_authorization_count: 0, approved_audit_count: 0, revoked_audit_count: 0, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 1, total_authorization_count: 1, approved_audit_count: 1, revoked_audit_count: 1, idempotency_record_count: 3 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (res.ok) throw new Error('Expected final active authorization count 1 to fail');
+  });
+
+  // 23. initial active authorization count 1 is contamination
+  await check('23. initial active authorization count 1 is contamination', async () => {
+    const init = { active_authorization_count: 1, total_authorization_count: 1, approved_audit_count: 1, revoked_audit_count: 0, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 0, total_authorization_count: 2, approved_audit_count: 2, revoked_audit_count: 1, idempotency_record_count: 3 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (res.ok) throw new Error('Expected initial active authorization count 1 to be flagged as contamination');
+  });
+
+  // 24. initial idempotency count 0 and final count 3 pass
+  await check('24. initial idempotency count 0 and final count 3 pass', async () => {
+    const init = { active_authorization_count: 0, total_authorization_count: 0, approved_audit_count: 0, revoked_audit_count: 0, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 0, total_authorization_count: 1, approved_audit_count: 1, revoked_audit_count: 1, idempotency_record_count: 3 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (!res.ok) throw new Error('Expected run-scoped idempotency count 0 -> 3 to pass');
+  });
+
+  // 25. final idempotency count 2 fails
+  await check('25. final idempotency count 2 fails', async () => {
+    const init = { active_authorization_count: 0, total_authorization_count: 0, approved_audit_count: 0, revoked_audit_count: 0, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 0, total_authorization_count: 1, approved_audit_count: 1, revoked_audit_count: 1, idempotency_record_count: 2 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (res.ok) throw new Error('Expected final idempotency count 2 to fail');
+  });
+
+  // 26. final idempotency count 4 fails
+  await check('26. final idempotency count 4 fails', async () => {
+    const init = { active_authorization_count: 0, total_authorization_count: 0, approved_audit_count: 0, revoked_audit_count: 0, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 0, total_authorization_count: 1, approved_audit_count: 1, revoked_audit_count: 1, idempotency_record_count: 4 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (res.ok) throw new Error('Expected final idempotency count 4 to fail');
+  });
+
+  // 27. missing numeric evidence fails safely
+  await check('27. missing numeric evidence fails safely', async () => {
+    const init = null;
+    const final = { active_authorization_count: 0, total_authorization_count: 1, approved_audit_count: 1, revoked_audit_count: 1, idempotency_record_count: 3 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (res.ok) throw new Error('Expected null initial evidence to fail safely');
+  });
+
+  // 28. non-numeric evidence fails safely
+  await check('28. non-numeric evidence fails safely', async () => {
+    const init = { active_authorization_count: 'zero', total_authorization_count: 0, approved_audit_count: 0, revoked_audit_count: 0, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 0, total_authorization_count: 1, approved_audit_count: 1, revoked_audit_count: 1, idempotency_record_count: 3 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (res.ok) throw new Error('Expected non-numeric active count to fail safely');
+  });
+
+  // 29. absolute audit total of 1 is not required
+  await check('29. absolute audit total of 1 is not required when baseline starts at 3/3', async () => {
+    const init = { active_authorization_count: 0, total_authorization_count: 3, approved_audit_count: 3, revoked_audit_count: 3, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 0, total_authorization_count: 4, approved_audit_count: 4, revoked_audit_count: 4, idempotency_record_count: 3 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    if (!res.ok) throw new Error('Absolute audit totals should not fail baseline 3 -> 4 transition');
+  });
+
+  // 30. safe diagnostic output contains no idempotency key or raw payload
+  await check('30. safe diagnostic output contains no idempotency key or raw payload', async () => {
+    const secretKey = 'h1e_b_mutation_run_secret_key_123';
+    const init = { active_authorization_count: 0, total_authorization_count: 0, approved_audit_count: 0, revoked_audit_count: 0, idempotency_record_count: 0 };
+    const final = { active_authorization_count: 0, total_authorization_count: 1, approved_audit_count: 1, revoked_audit_count: 1, idempotency_record_count: 3 };
+    const res = evaluateMutationEvidenceDelta(init, final);
+    const serialized = JSON.stringify(res);
+    if (serialized.includes(secretKey) || serialized.includes('Bearer')) {
+      throw new Error('Diagnostic evidence payload leaked secret or key string');
+    }
   });
 
   console.log('\n══════════════════════════════════════════════════════════');
