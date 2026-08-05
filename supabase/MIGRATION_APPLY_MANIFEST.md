@@ -60,6 +60,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 49. **`20260824_h1e_b_pilot_authorization_history.sql`** — Stage H1E-B Pilot Authorization History & Management Contracts: Provisions tenant_pilot_authorizations table with partial unique index, super_admin_get_tenant_pilot_authorization, super_admin_approve_tenant_pilot, super_admin_revoke_tenant_pilot RPCs, and updates eligibility snapshot for H1E-B.
 50. **`20260825_h1e_b_authorization_contract_hardening.sql`** — Stage H1E-B1 Authorization Contract Hardening: Revokes all direct table client access on tenant_pilot_authorizations, normalizes reason codes to uppercase, hashes raw idempotency keys in audit payloads, and provisions super_admin_get_tenant_pilot_mutation_evidence read RPC.
 51. **`20260826_h1e_c_public_booking_release_gate.sql`** — Stage H1E-C Public Booking Release & Pilot Enforcement Gate: Provisions internal eligibility evaluator, integrates release control & pilot authorization into can_accept_public_booking RPC and super_admin_get_tenant_pilot_eligibility_snapshot RPC.
+52. **`20260827_h1e_c_public_booking_release_gate_runtime_fix.sql`** — Stage H1E-C1 Public Booking Release Gate Runtime Forward Fix: Provisions single slug-aware 2-argument internal evaluator, drops obsolete 1-argument evaluator, corrects snapshot pilot authorization columns to approved_*, aligns restrictions query with platform_system_restrictions schema, and enforces pre_pilot unknown slug precedence without early return.
 
 ---
 

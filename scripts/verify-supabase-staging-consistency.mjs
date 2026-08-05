@@ -87,7 +87,8 @@ const CANONICAL_MIGRATIONS = [
   '20260823_h1e_a_eligibility_runtime_contract_fix.sql',
   '20260824_h1e_b_pilot_authorization_history.sql',
   '20260825_h1e_b_authorization_contract_hardening.sql',
-  '20260826_h1e_c_public_booking_release_gate.sql'
+  '20260826_h1e_c_public_booking_release_gate.sql',
+  '20260827_h1e_c_public_booking_release_gate_runtime_fix.sql'
 ];
 
 // Check actual migration files on disk
