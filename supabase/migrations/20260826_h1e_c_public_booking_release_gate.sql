@@ -50,6 +50,7 @@ DECLARE
     v_comm_eligible             BOOLEAN := false;
 
     -- Entitlement facts
+    v_core_entitlement          RECORD;
     v_core_entitlement_found    BOOLEAN := false;
 
     -- Platform restriction facts
