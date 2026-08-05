@@ -135,14 +135,11 @@ BEGIN
         END IF;
 
         -- 4. Pilot Authorization Check
-        SELECT * INTO v_active_auth_rec
+        PERFORM 1
         FROM public.tenant_pilot_authorizations
         WHERE tenant_id = v_tenant_id
-          AND revoked_at IS NULL
-        ORDER BY created_at DESC
-        LIMIT 1;
-
-        v_active_auth_found := (v_active_auth_rec.id IS NOT NULL);
+          AND revoked_at IS NULL;
+        v_active_auth_found := FOUND;
         v_authorized := v_active_auth_found;
 
         SELECT EXISTS (
@@ -486,14 +483,15 @@ BEGIN
     END IF;
 
     -- 6. Pilot Authorization Facts
-    SELECT * INTO v_active_auth_rec
+    SELECT id, authorized_at, authorized_by, authorization_reason
+    INTO v_active_auth_rec
     FROM public.tenant_pilot_authorizations
     WHERE tenant_id = v_tenant_id
       AND revoked_at IS NULL
     ORDER BY created_at DESC
     LIMIT 1;
 
-    v_active_auth_found := (v_active_auth_rec.id IS NOT NULL);
+    v_active_auth_found := FOUND;
 
     SELECT EXISTS (
         SELECT 1 FROM public.tenant_pilot_authorizations
