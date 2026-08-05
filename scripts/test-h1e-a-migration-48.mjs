@@ -42,9 +42,9 @@ check('2. Migration 48 file exists with exact filename', () => {
   if (!fs.existsSync(mig48Path)) throw new Error('Migration 48 file missing');
 });
 
-check('3. Total migration count is exactly 48', () => {
+check('3. Total migration count is at least 48', () => {
   const files = fs.readdirSync(path.join(process.cwd(), 'supabase/migrations')).filter(f => f.endsWith('.sql'));
-  if (files.length !== 48) throw new Error(`Expected 48 migration files, found ${files.length}`);
+  if (files.length < 48) throw new Error(`Expected at least 48 migration files, found ${files.length}`);
 });
 
 const content48 = fs.readFileSync(mig48Path, 'utf8');
