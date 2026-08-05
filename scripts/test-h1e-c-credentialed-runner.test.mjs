@@ -325,21 +325,21 @@ async function runExecutableUnitTests() {
     }
   });
 
-  // 28. Forbidden approve RPC increments request and mutation
-  await check('28. Forbidden approve RPC increments request and mutation', async () => {
+  // 28. Forbidden custom mutation RPC increments request and mutation
+  await check('28. Forbidden custom mutation RPC increments request and mutation', async () => {
     const obs = new H1ECNetworkObserver('https://test.supabase.co');
-    obs.observe('https://test.supabase.co/rest/v1/rpc/super_admin_approve_tenant_pilot', { method: 'POST' });
+    obs.observe('https://test.supabase.co/rest/v1/rpc/custom_forbidden_rpc', { method: 'POST' });
     if (obs.getForbiddenRequestsDetected() !== 1 || obs.getForbiddenMutationAttemptsDetected() !== 1) {
-      throw new Error('Forbidden approve RPC counts incorrect');
+      throw new Error('Forbidden custom RPC counts incorrect');
     }
   });
 
-  // 29. Forbidden revoke RPC increments request and mutation
-  await check('29. Forbidden revoke RPC increments request and mutation', async () => {
+  // 29. Forbidden GET endpoint increments request but not mutation
+  await check('29. Forbidden GET endpoint increments request but not mutation', async () => {
     const obs = new H1ECNetworkObserver('https://test.supabase.co');
-    obs.observe('https://test.supabase.co/rest/v1/rpc/super_admin_revoke_tenant_pilot', { method: 'POST' });
-    if (obs.getForbiddenRequestsDetected() !== 1 || obs.getForbiddenMutationAttemptsDetected() !== 1) {
-      throw new Error('Forbidden revoke RPC counts incorrect');
+    obs.observe('https://test.supabase.co/rest/v1/rpc/custom_forbidden_rpc', { method: 'GET' });
+    if (obs.getForbiddenRequestsDetected() !== 1 || obs.getForbiddenMutationAttemptsDetected() !== 0) {
+      throw new Error('Forbidden GET endpoint counts incorrect');
     }
   });
 

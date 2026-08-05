@@ -196,7 +196,12 @@ export class H1ECNetworkObserver {
 
     const allowedRpcs = [
       '/rest/v1/rpc/can_accept_public_booking',
-      '/rest/v1/rpc/super_admin_get_tenant_pilot_eligibility_snapshot'
+      '/rest/v1/rpc/super_admin_get_tenant_pilot_eligibility_snapshot',
+      '/rest/v1/rpc/super_admin_transition_release_phase',
+      '/rest/v1/rpc/super_admin_approve_tenant_pilot',
+      '/rest/v1/rpc/super_admin_revoke_tenant_pilot',
+      '/rest/v1/rpc/super_admin_get_tenant_pilot_mutation_evidence',
+      '/rest/v1/rpc/super_admin_get_release_transition_evidence'
     ];
 
     if (allowedRpcs.includes(pathname) && upperMethod === 'POST') {
