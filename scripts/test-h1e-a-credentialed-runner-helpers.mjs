@@ -173,3 +173,46 @@ export async function callRpcEndpoint(supabaseUrl, supabaseAnonKey, rpcName, par
     return { status: 500, data: null, ok: false, error: err.message };
   }
 }
+
+export function assertAnonAclDenied(res) {
+  if (res.ok) throw new Error('Anon call returned HTTP success when function EXECUTE is revoked!');
+  if (res.status !== 401 && res.status !== 403) {
+    throw new Error('Expected HTTP status 401 or 403 for anon ACL denial, got ' + res.status);
+  }
+  if (!res.data || typeof res.data !== 'object') {
+    throw new Error('Anon ACL denial response body must parse as valid JSON');
+  }
+  if (res.data.code !== '42501') {
+    throw new Error('Expected PostgreSQL error code 42501 (insufficient privilege), got ' + (res.data.code || 'none'));
+  }
+  if (res.data.readiness_facts || res.data.global_release_control || res.data.pilot_authorization) {
+    throw new Error('Anon ACL denial response leaked tenant snapshot data!');
+  }
+}
+
+export function assertAuthenticatedUnauthorized(res, roleLabel) {
+  if (!res.ok) throw new Error('Transport or HTTP error during ' + roleLabel + ' call (HTTP ' + res.status + ')');
+  if (!res.data || typeof res.data !== 'object') {
+    throw new Error(roleLabel + ' call returned invalid JSON response');
+  }
+  if (res.data.success !== false) {
+    throw new Error('Expected success=false for ' + roleLabel + ', got ' + res.data.success);
+  }
+  if (res.data.reason_code !== 'unauthorized') {
+    throw new Error('Expected reason_code=unauthorized for ' + roleLabel + ', got ' + res.data.reason_code);
+  }
+  if (res.data.readiness_facts || res.data.global_release_control || res.data.pilot_authorization) {
+    throw new Error(roleLabel + ' call leaked tenant snapshot data!');
+  }
+}
+
+export function assertSuperAdminEligibilityEnvelope(res) {
+  if (!res.ok) throw new Error('Super Admin eligibility call failed with HTTP status ' + res.status);
+  if (!res.data || typeof res.data !== 'object') throw new Error('Super Admin call returned invalid JSON');
+  const snap = res.data;
+  if (snap.success !== true) throw new Error('Expected success=true for Super Admin');
+  if (!snap.readiness_facts || typeof snap.readiness_facts !== 'object') throw new Error('Missing readiness_facts subsection');
+  if (!snap.global_release_control || typeof snap.global_release_control !== 'object') throw new Error('Missing global_release_control subsection');
+  if (!snap.pilot_authorization || typeof snap.pilot_authorization !== 'object') throw new Error('Missing pilot_authorization subsection');
+  return snap;
+}

@@ -8,7 +8,10 @@ import {
   createMonitoredFetch,
   authenticateUser,
   callRpcEndpoint,
-  redactSecrets
+  redactSecrets,
+  assertAnonAclDenied,
+  assertAuthenticatedUnauthorized,
+  assertSuperAdminEligibilityEnvelope
 } from './test-h1e-a-credentialed-runner-helpers.mjs';
 
 loadEnvFile(path.join(process.cwd(), '.env'));
@@ -94,6 +97,8 @@ async function runCredentialedAcceptance() {
   let behavioralAttempted = 0;
   let behavioralPassed = 0;
   let behavioralFailed = 0;
+  let topLevelFailed = false;
+  let setupFailed = false;
   let firstError = null;
 
   async function test(name, category, fn) {
@@ -136,194 +141,171 @@ async function runCredentialedAcceptance() {
 
     for (const item of loginCheck) {
       if (!item.auth.ok || !item.auth.token) {
-        console.error(`❌ Authentication failed for ${item.name}: ${item.auth.failure_category || 'unknown_failure'}`);
-        process.exit(1);
+        setupFailed = true;
+        const msg = `Authentication setup failed for ${item.name}: ${item.auth.failure_category || 'unknown_failure'}`;
+        if (!firstError) firstError = { name: 'Setup: ' + item.name, error: msg };
+        console.error('  ❌ SETUP FAIL: ' + msg);
       }
     }
 
-    console.log('── 1. Five-Role Authorization Acceptance Matrix ──');
+    if (!setupFailed) {
+      console.log('── 1. Five-Role Authorization Acceptance Matrix ──');
 
-    await test('1. Anon call denied with exact structured error without data leakage', 'auth', async () => {
-      const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, null, monitoredFetch);
-      if (!res.ok) throw new Error('Transport or network failure during anon test (HTTP ' + res.status + ')');
-      if (!res.data || typeof res.data !== 'object') throw new Error('Anon call returned invalid JSON response');
-      if (res.data.success !== false) throw new Error('Expected success=false for anon call, got ' + res.data.success);
-      if (res.data.reason_code !== 'unauthorized') throw new Error('Expected reason_code=unauthorized for anon call, got ' + res.data.reason_code);
-      if (res.data.readiness_facts || res.data.global_release_control || res.data.pilot_authorization) {
-        throw new Error('Anon call leaked tenant snapshot data!');
-      }
-    });
+      await test('1. Anon call denied with PostgreSQL code 42501 (insufficient EXECUTE privilege)', 'auth', async () => {
+        const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, null, monitoredFetch);
+        assertAnonAclDenied(res);
+      });
 
-    await test('2. Authenticated non-member call denied with exact structured error', 'auth', async () => {
-      const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, nonmemberAuth.token, monitoredFetch);
-      if (!res.ok) throw new Error('Transport failure during nonmember test (HTTP ' + res.status + ')');
-      if (!res.data || res.data.success !== false || res.data.reason_code !== 'unauthorized') {
-        throw new Error('Expected success=false & reason_code=unauthorized for nonmember call');
-      }
-      if (res.data.readiness_facts || res.data.global_release_control || res.data.pilot_authorization) {
-        throw new Error('Nonmember call leaked tenant snapshot data!');
-      }
-    });
+      await test('2. Authenticated non-member call denied with exact structured error', 'auth', async () => {
+        const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, nonmemberAuth.token, monitoredFetch);
+        assertAuthenticatedUnauthorized(res, 'nonmember');
+      });
 
-    await test('3. Staff call denied with exact structured error', 'auth', async () => {
-      const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, staffAuth.token, monitoredFetch);
-      if (!res.ok || !res.data || res.data.success !== false || res.data.reason_code !== 'unauthorized') {
-        throw new Error('Expected success=false & reason_code=unauthorized for staff call');
-      }
-      if (res.data.readiness_facts) throw new Error('Staff call leaked snapshot data!');
-    });
+      await test('3. Staff call denied with exact structured error', 'auth', async () => {
+        const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, staffAuth.token, monitoredFetch);
+        assertAuthenticatedUnauthorized(res, 'staff');
+      });
 
-    await test('4. Canonical tenant owner call denied with exact structured error', 'auth', async () => {
-      const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, ownerAuth.token, monitoredFetch);
-      if (!res.ok || !res.data || res.data.success !== false || res.data.reason_code !== 'unauthorized') {
-        throw new Error('Expected success=false & reason_code=unauthorized for tenant owner call');
-      }
-      if (res.data.readiness_facts) throw new Error('Tenant owner call leaked snapshot data!');
-    });
+      await test('4. Canonical tenant owner call denied with exact structured error', 'auth', async () => {
+        const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, ownerAuth.token, monitoredFetch);
+        assertAuthenticatedUnauthorized(res, 'canonical tenant owner');
+      });
 
-    await test('5. Other tenant owner call denied with exact structured error', 'auth', async () => {
-      const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, otherOwnerAuth.token, monitoredFetch);
-      if (!res.ok || !res.data || res.data.success !== false || res.data.reason_code !== 'unauthorized') {
-        throw new Error('Expected success=false & reason_code=unauthorized for other tenant owner call');
-      }
-      if (res.data.readiness_facts) throw new Error('Other tenant owner call leaked snapshot data!');
-    });
+      await test('5. Other tenant owner call denied with exact structured error', 'auth', async () => {
+        const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, otherOwnerAuth.token, monitoredFetch);
+        assertAuthenticatedUnauthorized(res, 'other tenant owner');
+      });
 
-    await test('6. Super Admin call allowed with full structured envelope', 'auth', async () => {
-      const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, superAdminAuth.token, monitoredFetch);
-      if (!res.ok || !res.data || res.data.success !== true) throw new Error('Super Admin eligibility snapshot call failed');
-    });
+      await test('6. Super Admin call allowed with full structured envelope', 'auth', async () => {
+        const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, superAdminAuth.token, monitoredFetch);
+        assertSuperAdminEligibilityEnvelope(res);
+      });
 
-    console.log('\n── 2. Behavioral Acceptance & Safety Verification ──');
+      console.log('\n── 2. Behavioral Acceptance & Safety Verification ──');
 
-    let canonicalSnap = null;
-    await test('7. Canonical tenant snapshot envelope structured correctly', 'behavioral', async () => {
-      const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, superAdminAuth.token, monitoredFetch);
-      if (!res.ok || !res.data || res.data.success !== true) throw new Error('Failed to fetch canonical tenant snapshot');
-      canonicalSnap = res.data;
-      if (!canonicalSnap.readiness_facts || !canonicalSnap.global_release_control || !canonicalSnap.pilot_authorization) {
-        throw new Error('Canonical snapshot envelope missing required subsections');
-      }
-    });
+      let canonicalSnap = null;
+      await test('7. Canonical tenant snapshot envelope structured correctly', 'behavioral', async () => {
+        const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, superAdminAuth.token, monitoredFetch);
+        canonicalSnap = assertSuperAdminEligibilityEnvelope(res);
+      });
 
-    await test('8. Dedicated H1D tenant snapshot envelope structured correctly', 'behavioral', async () => {
-      const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: DEDICATED_H1D_TENANT_ID }, superAdminAuth.token, monitoredFetch);
-      if (!res.ok || !res.data || res.data.success !== true) throw new Error('Failed to fetch dedicated H1D tenant snapshot');
-      if (!res.data.readiness_facts || !res.data.global_release_control || !res.data.pilot_authorization) {
-        throw new Error('Dedicated H1D snapshot envelope missing required subsections');
-      }
-    });
+      await test('8. Dedicated H1D tenant snapshot envelope structured correctly', 'behavioral', async () => {
+        const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: DEDICATED_H1D_TENANT_ID }, superAdminAuth.token, monitoredFetch);
+        assertSuperAdminEligibilityEnvelope(res);
+      });
 
-    await test('9. Nonexistent tenant produces GLOBAL_RELEASE_PHASE_BLOCKED with TENANT_NOT_FOUND blocker', 'behavioral', async () => {
-      const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: NONEXISTENT_TENANT_ID }, superAdminAuth.token, monitoredFetch);
-      if (!res.ok || !res.data || res.data.success !== true) throw new Error('Missing tenant call failed');
-      if (res.data.primary_reason_code !== 'GLOBAL_RELEASE_PHASE_BLOCKED') {
-        throw new Error('Expected primary_reason_code GLOBAL_RELEASE_PHASE_BLOCKED under pre_pilot, got ' + res.data.primary_reason_code);
-      }
-      if (!Array.isArray(res.data.blocking_reason_codes) || !res.data.blocking_reason_codes.includes('TENANT_NOT_FOUND')) {
-        throw new Error('blocking_reason_codes missing TENANT_NOT_FOUND');
-      }
-      if (res.data.readiness_facts.tenant_exists !== false) {
-        throw new Error('readiness_facts.tenant_exists should be false for nonexistent tenant');
-      }
-    });
+      await test('9. Nonexistent tenant produces GLOBAL_RELEASE_PHASE_BLOCKED with TENANT_NOT_FOUND blocker', 'behavioral', async () => {
+        const res = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: NONEXISTENT_TENANT_ID }, superAdminAuth.token, monitoredFetch);
+        const snap = assertSuperAdminEligibilityEnvelope(res);
+        if (snap.primary_reason_code !== 'GLOBAL_RELEASE_PHASE_BLOCKED') {
+          throw new Error('Expected primary_reason_code GLOBAL_RELEASE_PHASE_BLOCKED under pre_pilot, got ' + snap.primary_reason_code);
+        }
+        if (!Array.isArray(snap.blocking_reason_codes) || !snap.blocking_reason_codes.includes('TENANT_NOT_FOUND')) {
+          throw new Error('blocking_reason_codes missing TENANT_NOT_FOUND');
+        }
+        if (snap.readiness_facts.tenant_exists !== false) {
+          throw new Error('readiness_facts.tenant_exists should be false for nonexistent tenant');
+        }
+      });
 
-    await test('10. Global release phase is pre_pilot', 'behavioral', async () => {
-      if (!canonicalSnap || canonicalSnap.global_release_control.release_phase !== 'pre_pilot') {
-        throw new Error('Expected global release phase pre_pilot');
-      }
-    });
+      await test('10. Global release phase is pre_pilot', 'behavioral', async () => {
+        if (!canonicalSnap || canonicalSnap.global_release_control.release_phase !== 'pre_pilot') {
+          throw new Error('Expected global release phase pre_pilot');
+        }
+      });
 
-    await test('11. Payment collection enabled remains false', 'behavioral', async () => {
-      if (!canonicalSnap || canonicalSnap.global_release_control.is_payment_collection_enabled !== false) {
-        throw new Error('Payment collection is enabled!');
-      }
-    });
+      await test('11. Payment collection enabled remains false', 'behavioral', async () => {
+        if (!canonicalSnap || canonicalSnap.global_release_control.is_payment_collection_enabled !== false) {
+          throw new Error('Payment collection is enabled!');
+        }
+      });
 
-    await test('12. Checkout enabled remains false', 'behavioral', async () => {
-      if (!canonicalSnap || canonicalSnap.global_release_control.is_checkout_enabled !== false) {
-        throw new Error('Checkout is enabled!');
-      }
-    });
+      await test('12. Checkout enabled remains false', 'behavioral', async () => {
+        if (!canonicalSnap || canonicalSnap.global_release_control.is_checkout_enabled !== false) {
+          throw new Error('Checkout is enabled!');
+        }
+      });
 
-    await test('13. Iyzico enabled remains false', 'behavioral', async () => {
-      if (!canonicalSnap || canonicalSnap.global_release_control.is_iyzico_enabled !== false) {
-        throw new Error('Iyzico is enabled!');
-      }
-    });
+      await test('13. Iyzico enabled remains false', 'behavioral', async () => {
+        if (!canonicalSnap || canonicalSnap.global_release_control.is_iyzico_enabled !== false) {
+          throw new Error('Iyzico is enabled!');
+        }
+      });
 
-    await test('14. Production authorization remains false', 'behavioral', async () => {
-      if (!canonicalSnap || canonicalSnap.production_authorized !== false) {
-        throw new Error('Production is authorized!');
-      }
-    });
+      await test('14. Production authorization remains false', 'behavioral', async () => {
+        if (!canonicalSnap || canonicalSnap.production_authorized !== false) {
+          throw new Error('Production is authorized!');
+        }
+      });
 
-    await test('15. Transitional authorization implementation state is pending_h1e_b', 'behavioral', async () => {
-      if (!canonicalSnap || canonicalSnap.pilot_authorization.implementation_state !== 'pending_h1e_b') {
-        throw new Error('Transitional implementation state is not pending_h1e_b');
-      }
-    });
+      await test('15. Transitional authorization implementation state is pending_h1e_b', 'behavioral', async () => {
+        if (!canonicalSnap || canonicalSnap.pilot_authorization.implementation_state !== 'pending_h1e_b') {
+          throw new Error('Transitional implementation state is not pending_h1e_b');
+        }
+      });
 
-    await test('16. Transitional authorization actor and timestamp fields are null', 'behavioral', async () => {
-      const authObj = canonicalSnap.pilot_authorization;
-      if (authObj.authorization_id !== null || authObj.approved_by !== null || authObj.revoked_by !== null || authObj.approved_at !== null || authObj.revoked_at !== null) {
-        throw new Error('Transitional authorization actor/id/timestamp fields are not null');
-      }
-    });
+      await test('16. Transitional authorization actor and timestamp fields are null', 'behavioral', async () => {
+        const authObj = canonicalSnap.pilot_authorization;
+        if (authObj.authorization_id !== null || authObj.approved_by !== null || authObj.revoked_by !== null || authObj.approved_at !== null || authObj.revoked_at !== null) {
+          throw new Error('Transitional authorization actor/id/timestamp fields are not null');
+        }
+      });
 
-    await test('17. authorized remains false', 'behavioral', async () => {
-      if (!canonicalSnap || canonicalSnap.authorized !== false) throw new Error('authorized is true!');
-    });
+      await test('17. authorized remains false', 'behavioral', async () => {
+        if (!canonicalSnap || canonicalSnap.authorized !== false) throw new Error('authorized is true!');
+      });
 
-    await test('18. bookable remains false', 'behavioral', async () => {
-      if (!canonicalSnap || canonicalSnap.bookable !== false) throw new Error('bookable is true!');
-    });
+      await test('18. bookable remains false', 'behavioral', async () => {
+        if (!canonicalSnap || canonicalSnap.bookable !== false) throw new Error('bookable is true!');
+      });
 
-    await test('19. pilot_enforcement_active remains false', 'behavioral', async () => {
-      if (!canonicalSnap || canonicalSnap.pilot_enforcement_active !== false) throw new Error('pilot_enforcement_active is true!');
-    });
+      await test('19. pilot_enforcement_active remains false', 'behavioral', async () => {
+        if (!canonicalSnap || canonicalSnap.pilot_enforcement_active !== false) throw new Error('pilot_enforcement_active is true!');
+      });
 
-    await test('20. Primary reason code is GLOBAL_RELEASE_PHASE_BLOCKED under pre_pilot default', 'behavioral', async () => {
-      if (!canonicalSnap || canonicalSnap.primary_reason_code !== 'GLOBAL_RELEASE_PHASE_BLOCKED') {
-        throw new Error('Expected primary_reason_code GLOBAL_RELEASE_PHASE_BLOCKED, got ' + canonicalSnap.primary_reason_code);
-      }
-    });
+      await test('20. Primary reason code is GLOBAL_RELEASE_PHASE_BLOCKED under pre_pilot default', 'behavioral', async () => {
+        if (!canonicalSnap || canonicalSnap.primary_reason_code !== 'GLOBAL_RELEASE_PHASE_BLOCKED') {
+          throw new Error('Expected primary_reason_code GLOBAL_RELEASE_PHASE_BLOCKED, got ' + canonicalSnap.primary_reason_code);
+        }
+      });
 
-    await test('21. BOOKING_ALLOWED is not returned under pre_pilot default', 'behavioral', async () => {
-      if (!canonicalSnap || canonicalSnap.primary_reason_code === 'BOOKING_ALLOWED') {
-        throw new Error('BOOKING_ALLOWED was returned under pre_pilot!');
-      }
-    });
+      await test('21. BOOKING_ALLOWED is not returned under pre_pilot default', 'behavioral', async () => {
+        if (!canonicalSnap || canonicalSnap.primary_reason_code === 'BOOKING_ALLOWED') {
+          throw new Error('BOOKING_ALLOWED was returned under pre_pilot!');
+        }
+      });
 
-    await test('22. blocking_reason_codes is a structured array', 'behavioral', async () => {
-      if (!canonicalSnap || !Array.isArray(canonicalSnap.blocking_reason_codes)) {
-        throw new Error('blocking_reason_codes is not an array');
-      }
-    });
+      await test('22. blocking_reason_codes is a structured array', 'behavioral', async () => {
+        if (!canonicalSnap || !Array.isArray(canonicalSnap.blocking_reason_codes)) {
+          throw new Error('blocking_reason_codes is not an array');
+        }
+      });
 
-    await test('23. Zero forbidden network requests executed', 'behavioral', async () => {
-      if (observer.forbiddenRequestsDetected !== 0) {
-        throw new Error('Forbidden network requests detected: ' + observer.forbiddenRequestsDetected);
-      }
-    });
+      await test('23. Zero forbidden network requests executed', 'behavioral', async () => {
+        if (observer.forbiddenRequestsDetected !== 0) {
+          throw new Error('Forbidden network requests detected: ' + observer.forbiddenRequestsDetected);
+        }
+      });
 
-    await test('24. Zero network mutation attempts executed', 'behavioral', async () => {
-      if (observer.mutationAttemptsDetected !== 0) {
-        throw new Error('Network mutation attempts detected: ' + observer.mutationAttemptsDetected);
-      }
-    });
+      await test('24. Zero network mutation attempts executed', 'behavioral', async () => {
+        if (observer.mutationAttemptsDetected !== 0) {
+          throw new Error('Network mutation attempts detected: ' + observer.mutationAttemptsDetected);
+        }
+      });
 
-    await test('25. Secrets redacted from formatted output', 'behavioral', async () => {
-      const text = JSON.stringify(canonicalSnap);
-      if (text.includes('Bearer ') && !text.includes('Bearer [REDACTED]')) {
-        throw new Error('Unredacted bearer token found in output');
-      }
-    });
+      await test('25. Secrets redacted from formatted output', 'behavioral', async () => {
+        const text = JSON.stringify(canonicalSnap);
+        if (text.includes('Bearer ') && !text.includes('Bearer [REDACTED]')) {
+          throw new Error('Unredacted bearer token found in output');
+        }
+      });
+    }
 
   } catch (topErr) {
+    topLevelFailed = true;
     const msg = redactSecrets(topErr.message || String(topErr));
-    console.error('\n❌ Top-Level Execution Exception: ' + msg);
     if (!firstError) firstError = { name: 'Top-Level Execution', error: msg };
+    console.error('\n❌ Top-Level Execution Exception: ' + msg);
   }
 
   console.log('\n══════════════════════════════════════════════════════════');
@@ -342,8 +324,12 @@ async function runCredentialedAcceptance() {
   console.log('Mutation attempts detected: ' + observer.mutationAttemptsDetected);
   console.log('Forbidden requests detected: ' + observer.forbiddenRequestsDetected);
   console.log('Cleanup required: false');
+  if (firstError) {
+    console.log('First safe failure: ' + firstError.name + ' - ' + firstError.error);
+  }
 
-  const finalExitCode = (executed === defined && passed === defined && failed === 0 && observer.mutationAttemptsDetected === 0 && observer.forbiddenRequestsDetected === 0) ? 0 : 1;
+  const isSuccess = (!setupFailed && !topLevelFailed && !firstError && defined > 0 && executed === defined && passed === defined && failed === 0 && observer.mutationAttemptsDetected === 0 && observer.forbiddenRequestsDetected === 0);
+  const finalExitCode = isSuccess ? 0 : 1;
   console.log('Final exit code: ' + finalExitCode);
 
   process.exit(finalExitCode);
