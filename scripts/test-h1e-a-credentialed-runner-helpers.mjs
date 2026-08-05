@@ -76,7 +76,15 @@ export class NetworkObserver {
       return true;
     }
 
-    if (pathname === '/rest/v1/rpc/super_admin_get_tenant_pilot_eligibility_snapshot' && method.toUpperCase() === 'POST') {
+    const allowedRpcs = [
+      '/rest/v1/rpc/super_admin_get_tenant_pilot_eligibility_snapshot',
+      '/rest/v1/rpc/super_admin_get_tenant_pilot_authorization',
+      '/rest/v1/rpc/super_admin_approve_tenant_pilot',
+      '/rest/v1/rpc/super_admin_revoke_tenant_pilot',
+      '/rest/v1/rpc/super_admin_get_tenant_pilot_mutation_evidence'
+    ];
+
+    if (allowedRpcs.includes(pathname) && method.toUpperCase() === 'POST') {
       return true;
     }
 
@@ -219,8 +227,9 @@ export function assertAuthenticatedUnauthorized(res, roleLabel) {
   if (res.data.success !== false) {
     throw new Error('Expected success=false for ' + roleLabel + ', got ' + res.data.success);
   }
-  if (res.data.reason_code !== 'unauthorized') {
-    throw new Error('Expected reason_code=unauthorized for ' + roleLabel + ', got ' + res.data.reason_code);
+  const reason = (res.data.reason_code || '').toUpperCase();
+  if (reason !== 'UNAUTHORIZED') {
+    throw new Error('Expected reason_code=UNAUTHORIZED for ' + roleLabel + ', got ' + res.data.reason_code);
   }
   if (res.data.readiness_facts || res.data.global_release_control || res.data.pilot_authorization) {
     throw new Error(roleLabel + ' call leaked tenant snapshot data!');

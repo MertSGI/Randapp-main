@@ -58,6 +58,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 47. **`20260822_h1e_release_control_and_eligibility_read_contracts.sql`** — Stage H1E-A Global Release Control & Eligibility Read Contracts: Provisions platform_global_release_control singleton table and super_admin_get_tenant_pilot_eligibility_snapshot read contract.
 48. **`20260823_h1e_a_eligibility_runtime_contract_fix.sql`** — Stage H1E-A Eligibility Read Contract Runtime Forward Fix: Provides a forward-only CREATE OR REPLACE correction for super_admin_get_tenant_pilot_eligibility_snapshot, aligning live column names (services.active, staff.active) and eliminating unassigned RECORD dereferences.
 49. **`20260824_h1e_b_pilot_authorization_history.sql`** — Stage H1E-B Pilot Authorization History & Management Contracts: Provisions tenant_pilot_authorizations table with partial unique index, super_admin_get_tenant_pilot_authorization, super_admin_approve_tenant_pilot, super_admin_revoke_tenant_pilot RPCs, and updates eligibility snapshot for H1E-B.
+50. **`20260825_h1e_b_authorization_contract_hardening.sql`** — Stage H1E-B1 Authorization Contract Hardening: Revokes all direct table client access on tenant_pilot_authorizations, normalizes reason codes to uppercase, hashes raw idempotency keys in audit payloads, and provisions super_admin_get_tenant_pilot_mutation_evidence read RPC.
 
 ---
 
