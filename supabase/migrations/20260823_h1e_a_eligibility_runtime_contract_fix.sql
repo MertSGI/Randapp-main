@@ -1,14 +1,14 @@
 -- =========================================================================
 -- MIGRATION 48: H1E-A ELIGIBILITY READ CONTRACT RUNTIME FORWARD FIX
 -- =========================================================================
--- This migration provides a forward-only correction for the eligibility RPC
--- public.super_admin_get_tenant_pilot_eligibility_snapshot(UUID)
--- replacing defective column references (services.is_active -> services.active,
--- staff.is_active -> staff.active) and replacing unsafe RECORD field dereferences
--- with explicit scalar facts and FOUND checks.
---
--- Migration 47 remains applied and immutable.
--- No database state, release state, payment flag, or authorization record is altered.
+-- Forward-only correction for public.super_admin_get_tenant_pilot_eligibility_snapshot(UUID).
+-- Implements:
+--   1. Immediate fail-closed return on missing global release control singleton (RELEASE_CONTROL_UNAVAILABLE).
+--   2. Canonical phase-based derivation for production_authorized and pilot_enforcement_required.
+--   3. Explicit join-based relationship verification across branches, services, staff, service_branches, staff_branches, and staff_services.
+--   4. Integration of resolve_tenant_commercial_eligibility into SUBSCRIPTION_BLOCKED evaluation.
+--   5. Blocker-consistent eligible boolean semantics (false if any tenant eligibility blocker exists).
+--   6. Live column alignment (services.active, staff.active) and safe scalar state.
 
 CREATE OR REPLACE FUNCTION public.super_admin_get_tenant_pilot_eligibility_snapshot(
     p_tenant_id UUID
@@ -32,17 +32,22 @@ DECLARE
 
     -- Release control facts
     v_release_ctrl_exists       BOOLEAN := false;
-    v_release_phase             TEXT := 'pre_pilot';
+    v_release_phase             TEXT := null;
     v_prod_authorized           BOOLEAN := false;
-    v_pilot_enforce_req         BOOLEAN := true;
+    v_pilot_enforce_req         BOOLEAN := false;
     v_payment_enabled           BOOLEAN := false;
     v_checkout_enabled          BOOLEAN := false;
     v_iyzico_enabled            BOOLEAN := false;
 
-    -- Operational readiness facts
+    -- Operational & relationship facts
+    v_primary_branch_id         UUID := null;
     v_primary_branch_count      INTEGER := 0;
     v_active_service_count      INTEGER := 0;
     v_active_staff_count        INTEGER := 0;
+    v_primary_branch_has_staff   BOOLEAN := false;
+    v_primary_branch_has_services BOOLEAN := false;
+    v_staff_can_perform_service  BOOLEAN := false;
+    v_rel_status                TEXT := 'NOT_VERIFIED';
 
     -- Subscription & commercial facts
     v_sub_exists                BOOLEAN := false;
@@ -88,35 +93,50 @@ BEGIN
     -- 2. Fetch global release control (Singleton id = 1)
     SELECT
         release_phase,
-        is_production_authorized,
-        is_pilot_enforcement_required,
         is_payment_collection_enabled,
         is_checkout_enabled,
         is_iyzico_enabled
     INTO
         v_release_phase,
-        v_prod_authorized,
-        v_pilot_enforce_req,
         v_payment_enabled,
         v_checkout_enabled,
         v_iyzico_enabled
     FROM public.platform_global_release_control
     WHERE id = 1;
 
-    IF FOUND THEN
-        v_release_ctrl_exists := true;
-    ELSE
-        -- Fallback default pre_pilot safe values if missing
-        v_release_phase := 'pre_pilot';
-        v_prod_authorized := false;
-        v_pilot_enforce_req := true;
-        v_payment_enabled := false;
-        v_checkout_enabled := false;
-        v_iyzico_enabled := false;
+    IF NOT FOUND OR v_release_phase IS NULL THEN
+        -- Immediate fail-closed return if singleton missing
+        RETURN jsonb_build_object(
+            'success', false,
+            'reason_code', 'RELEASE_CONTROL_UNAVAILABLE',
+            'timestamp', now(),
+            'tenant_id', p_tenant_id,
+            'eligible', false,
+            'authorized', false,
+            'bookable', false,
+            'production_authorized', false,
+            'pilot_enforcement_active', false,
+            'primary_reason_code', 'RELEASE_CONTROL_UNAVAILABLE',
+            'blocking_reason_codes', jsonb_build_array('RELEASE_CONTROL_UNAVAILABLE')
+        );
     END IF;
 
-    -- Derive production_authorized strictly from release_phase to enforce canonicality
-    v_prod_authorized := (v_release_phase = 'full_production');
+    v_release_ctrl_exists := true;
+
+    -- Canonical Phase Derivations
+    -- pre_pilot: prod_auth=false, pilot_enforce_req=false
+    -- paymentless_pilot: prod_auth=false, pilot_enforce_req=true
+    -- full_production: prod_auth=true, pilot_enforce_req=false
+    IF v_release_phase = 'full_production' THEN
+        v_prod_authorized := true;
+        v_pilot_enforce_req := false;
+    ELSIF v_release_phase = 'paymentless_pilot' THEN
+        v_prod_authorized := false;
+        v_pilot_enforce_req := true;
+    ELSE
+        v_prod_authorized := false;
+        v_pilot_enforce_req := false;
+    END IF;
 
     -- 3. Fetch tenant scalar facts
     IF p_tenant_id IS NOT NULL THEN
@@ -127,7 +147,6 @@ BEGIN
 
         IF FOUND THEN
             v_tenant_exists := true;
-            -- Check if slug resolves back to this tenant
             IF v_tenant_slug IS NOT NULL THEN
                 PERFORM 1 FROM public.tenants WHERE slug = v_tenant_slug AND id = p_tenant_id;
                 v_slug_resolves := FOUND;
@@ -135,22 +154,55 @@ BEGIN
         END IF;
     END IF;
 
-    -- 4. Gather operational facts if tenant exists
+    -- 4. Gather operational facts & explicit relationship verifications if tenant exists
     IF v_tenant_exists THEN
-        -- Primary branch count
+        -- Primary branch query
+        SELECT id INTO v_primary_branch_id
+        FROM public.branches
+        WHERE tenant_id = p_tenant_id AND is_primary = true AND is_active = true
+        LIMIT 1;
+
         SELECT count(*)::INTEGER INTO v_primary_branch_count
         FROM public.branches
         WHERE tenant_id = p_tenant_id AND is_primary = true AND is_active = true;
 
-        -- Active service count (using exact live column `active`)
+        -- Active service count
         SELECT count(*)::INTEGER INTO v_active_service_count
         FROM public.services
         WHERE tenant_id = p_tenant_id AND active = true;
 
-        -- Active staff count (using exact live column `active`)
+        -- Active staff count
         SELECT count(*)::INTEGER INTO v_active_staff_count
         FROM public.staff
         WHERE tenant_id = p_tenant_id AND active = true;
+
+        -- Explicit relationship proof queries
+        IF v_primary_branch_id IS NOT NULL THEN
+            PERFORM 1
+            FROM public.staff_branches sb
+            JOIN public.staff s ON s.id = sb.staff_id
+            WHERE sb.branch_id = v_primary_branch_id AND sb.tenant_id = p_tenant_id AND s.active = true;
+            v_primary_branch_has_staff := FOUND;
+
+            PERFORM 1
+            FROM public.service_branches sb
+            JOIN public.services s ON s.id = sb.service_id
+            WHERE sb.branch_id = v_primary_branch_id AND sb.tenant_id = p_tenant_id AND s.active = true;
+            v_primary_branch_has_services := FOUND;
+        END IF;
+
+        PERFORM 1
+        FROM public.staff_services ss
+        JOIN public.staff st ON st.id = ss.staff_id
+        JOIN public.services se ON se.id = ss.service_id
+        WHERE st.tenant_id = p_tenant_id AND st.active = true AND se.tenant_id = p_tenant_id AND se.active = true;
+        v_staff_can_perform_service := FOUND;
+
+        IF v_primary_branch_count = 1 AND v_primary_branch_has_staff AND v_primary_branch_has_services AND v_staff_can_perform_service THEN
+            v_rel_status := 'VERIFIED';
+        ELSE
+            v_rel_status := 'RELATIONSHIP_VERIFICATION_FAILED';
+        END IF;
 
         -- Subscription & commercial facts
         SELECT status, billing_mode INTO v_sub_status, v_billing_mode
@@ -178,10 +230,10 @@ BEGIN
             v_core_entitlement_blocked := true;
         END IF;
 
-        -- Active core_booking restrictions check
+        -- Active core_booking restrictions check (handling null/false is_global)
         SELECT count(*)::INTEGER INTO v_active_restrictions_count
         FROM public.platform_system_restrictions
-        WHERE (tenant_id = p_tenant_id OR is_global = true)
+        WHERE (tenant_id = p_tenant_id OR COALESCE(is_global, false) = true)
           AND feature_key = 'core_booking'
           AND is_restricted = true
           AND starts_at <= now()
@@ -190,12 +242,7 @@ BEGIN
         v_core_booking_restricted := (v_active_restrictions_count > 0);
     END IF;
 
-    -- 5. Evaluate Blocking Reason Codes in Precedence Order
-    -- 1. RELEASE_CONTROL_UNAVAILABLE
-    IF NOT v_release_ctrl_exists THEN
-        v_blocking_reasons := array_append(v_blocking_reasons, 'RELEASE_CONTROL_UNAVAILABLE');
-    END IF;
-
+    -- 5. Evaluate Blocking Reason Codes in Deterministic Precedence Order
     -- 2. GLOBAL_RELEASE_PHASE_BLOCKED
     IF v_release_phase != 'paymentless_pilot' AND v_release_phase != 'full_production' THEN
         v_blocking_reasons := array_append(v_blocking_reasons, 'GLOBAL_RELEASE_PHASE_BLOCKED');
@@ -226,8 +273,8 @@ BEGIN
         v_blocking_reasons := array_append(v_blocking_reasons, 'PILOT_AUTHORIZATION_REQUIRED');
     END IF;
 
-    -- 9. SUBSCRIPTION_BLOCKED
-    IF v_tenant_exists AND (NOT v_sub_exists OR v_sub_status IS DISTINCT FROM 'active') THEN
+    -- 9. SUBSCRIPTION_BLOCKED (evaluated via raw sub + commercial resolver)
+    IF v_tenant_exists AND (NOT v_sub_exists OR v_sub_status IS DISTINCT FROM 'active' OR NOT v_comm_eligible) THEN
         v_blocking_reasons := array_append(v_blocking_reasons, 'SUBSCRIPTION_BLOCKED');
     END IF;
 
@@ -237,7 +284,7 @@ BEGIN
     END IF;
 
     -- 11. OPERATIONAL_READINESS_FAILED
-    IF v_tenant_exists AND (v_primary_branch_count != 1 OR v_active_service_count < 1 OR v_active_staff_count < 1) THEN
+    IF v_tenant_exists AND (v_primary_branch_count != 1 OR v_active_service_count < 1 OR v_active_staff_count < 1 OR v_rel_status != 'VERIFIED') THEN
         v_blocking_reasons := array_append(v_blocking_reasons, 'OPERATIONAL_READINESS_FAILED');
     END IF;
 
@@ -248,8 +295,16 @@ BEGIN
         v_primary_reason := 'BOOKING_ALLOWED';
     END IF;
 
-    -- Calculate Readiness & Authorization Booleans
-    v_eligible := v_tenant_exists AND (v_primary_branch_count = 1) AND (v_active_service_count >= 1) AND (v_active_staff_count >= 1) AND (v_tenant_status = 'active') AND v_sub_exists;
+    -- Calculate Blocker-Consistent Eligible Boolean
+    -- eligible MUST be false if ANY tenant-level eligibility blocker exists
+    v_eligible := v_tenant_exists
+      AND (v_tenant_status = 'active')
+      AND NOT v_core_booking_restricted
+      AND (v_public_site_status = 'published')
+      AND v_sub_exists AND (v_sub_status = 'active') AND v_comm_eligible
+      AND NOT v_core_entitlement_blocked
+      AND (v_primary_branch_count = 1) AND (v_active_service_count >= 1) AND (v_active_staff_count >= 1) AND (v_rel_status = 'VERIFIED');
+
     v_authorized := false; -- Pending H1E-B
     v_bookable := false;   -- Pending H1E-B & H1E-C
 
@@ -288,9 +343,10 @@ BEGIN
     );
 
     v_rel_verification := jsonb_build_object(
-        'status', 'VERIFIED_SCHEMA_BOUND',
-        'primary_branch_has_staff', (v_primary_branch_count = 1 AND v_active_staff_count >= 1),
-        'primary_branch_has_services', (v_primary_branch_count = 1 AND v_active_service_count >= 1)
+        'status', v_rel_status,
+        'primary_branch_has_staff', v_primary_branch_has_staff,
+        'primary_branch_has_services', v_primary_branch_has_services,
+        'staff_can_perform_service', v_staff_can_perform_service
     );
 
     v_entitlement_facts := jsonb_build_object(

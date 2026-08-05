@@ -168,9 +168,30 @@ export async function callRpcEndpoint(supabaseUrl, supabaseAnonKey, rpcName, par
     const status = res.status;
     const text = await res.text();
     const data = safeJsonParse(text);
-    return { status, data, ok: res.ok, rawText: text };
+
+    let errorObj = null;
+    if (!res.ok) {
+      errorObj = redactSecrets({
+        code: (data && data.code) || 'HTTP_' + status,
+        message: (data && data.message) || 'HTTP Request failed with status ' + status,
+        details: (data && data.details) || null,
+        hint: (data && data.hint) || null
+      });
+    }
+
+    return { status, data, ok: res.ok, error: errorObj };
   } catch (err) {
-    return { status: 500, data: null, ok: false, error: err.message };
+    return {
+      status: 500,
+      data: null,
+      ok: false,
+      error: redactSecrets({
+        code: 'NETWORK_EXCEPTION',
+        message: err.message || String(err),
+        details: null,
+        hint: null
+      })
+    };
   }
 }
 

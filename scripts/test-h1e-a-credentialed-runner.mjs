@@ -209,7 +209,8 @@ async function runCredentialedAcceptance() {
       });
 
       await test('10. Global release phase is pre_pilot', 'behavioral', async () => {
-        if (!canonicalSnap || canonicalSnap.global_release_control.release_phase !== 'pre_pilot') {
+        if (!canonicalSnap) throw new Error('DEPENDENCY_UNAVAILABLE: canonical eligibility snapshot');
+        if (canonicalSnap.global_release_control.release_phase !== 'pre_pilot') {
           throw new Error('Expected global release phase pre_pilot');
         }
       });

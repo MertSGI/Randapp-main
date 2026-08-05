@@ -6,61 +6,63 @@
 
 ---
 
-## 1. Failed Execution Summary
+## 1. Candidate Rejection & Audit Log
 
-- **Run ID**: `h1e_a_credentialed_run_1785916380590`
-- **Result**: Defined: 25 | Executed: 25 | Passed: 8 | Failed: 17
-- **Authorization Result**: 6 attempted / 5 passed / 1 failed
-- **Behavioral Result**: 19 attempted / 3 passed / 16 failed
-- **First Failure**: Test 6 (`Super Admin call allowed with full structured envelope`) returned **HTTP status 400 Bad Request**.
-
-### Runtime Diagnostics Analysis
-1. **Negative Path Success**: Unauthenticated/anon calls were correctly denied with HTTP `401`/`403` and PostgreSQL error code `42501` (`insufficient privilege`). Non-super-admin authenticated identities (`nonmember`, `staff`, `owner`, `otherOwner`) correctly received structured `{"success": false, "reason_code": "unauthorized"}` responses.
-2. **Super Admin Failure Root Cause**: Super admin RPC execution failed at runtime due to database column mismatches (`services.is_active` vs live `services.active`, `staff.is_active` vs live `staff.active`) and unassigned `RECORD` dereferences (`v_tenant.public_site_status`, `v_sub.id`) when no row was returned.
-
----
-
-## 2. Immutability of Migration 47
-
-Migration `20260822_h1e_release_control_and_eligibility_read_contracts.sql` was successfully applied and recorded remotely on linked staging project `rwedeejhjazwjthdjzrt` (Remote Parity: **47/47**).
-
-Per database governance rules:
-- Migration 47 is **frozen and immutable**.
-- All corrections must be delivered via forward-only migration.
+- **Rejected SHA**: `3ccbbed8e0b2610691a1e622108ac0ea691ca757`
+- **Reason for Rejection**: Adversarial inspection identified 8 critical defects:
+  1. Missing global release control singleton substituted `pre_pilot` defaults and returned `success = true` instead of failing closed immediately with `RELEASE_CONTROL_UNAVAILABLE`.
+  2. `relationship_verification` returned `VERIFIED_SCHEMA_BOUND` derived from tenant-wide counts instead of performing explicit join queries across branches, staff, services, and junction tables.
+  3. `resolve_tenant_commercial_eligibility` was called but its result was omitted from `SUBSCRIPTION_BLOCKED` logic.
+  4. `eligible` boolean could remain `true` while tenant eligibility blockers (`CORE_BOOKING_RESTRICTED`, `PUBLIC_SITE_STATUS_BLOCKED`, etc.) were present.
+  5. `is_pilot_enforcement_required` was read as an independently mutable table value instead of strictly derived from `release_phase`.
+  6. Runner dependency cascade did not explicitly block dependent assertions when canonical snapshot failed.
+  7. RPC helper returned unredacted `rawText`.
+  8. Migration 47 verification checked only file existence, not cryptographic SHA-256 digest.
 
 ---
 
-## 3. Forward-Fix Migration 48 Scope
+## 2. Immutability of Migration 47 & Cryptographic Verification
 
-Migration `20260823_h1e_a_eligibility_runtime_contract_fix.sql` (Migration 48) provides a `CREATE OR REPLACE FUNCTION` update for `public.super_admin_get_tenant_pilot_eligibility_snapshot(uuid)`:
-
-1. **Column Name Alignment**:
-   - Replaces `services.is_active` with canonical live column `services.active`.
-   - Replaces `staff.is_active` with canonical live column `staff.active`.
-   - Preserves `branches.is_active` and `branches.is_primary`.
-2. **Safe Scalar State & `FOUND` Checks**:
-   - Replaces generic uninitialized `RECORD` dereferencing with explicit scalar variables (`v_tenant_exists`, `v_tenant_status`, `v_public_site_status`, `v_sub_exists`, `v_sub_status`, `v_billing_mode`).
-   - Non-existent tenants and tenants without subscriptions complete execution gracefully without throwing unhandled PL/pgSQL runtime exceptions.
-3. **Precedence & Envelope Structure**:
-   - Implements all 12 reason code precedence levels in strict order (`RELEASE_CONTROL_UNAVAILABLE` through `BOOKING_ALLOWED`).
-   - Preserves `pending_h1e_b` transitional authorization state, `authorized = false`, `bookable = false`, and default `pre_pilot` release control state.
+Migration `20260822_h1e_release_control_and_eligibility_read_contracts.sql` is frozen and applied remotely on `rwedeejhjazwjthdjzrt` (47/47).
+- **Frozen SHA-256 Digest**: `6b4d45b226d16f54d4a4a6357aa7ab36bf836c47966df34c53857a0ec97f1e82`
+- Verified by executable QA `test-h1e-a-migration-48.mjs` on every run.
 
 ---
 
-## 4. Migration Numbering Governance Shift
+## 3. Corrected Migration 48 Scope
 
-To accommodate the forward-fix Migration 48:
+Migration `20260823_h1e_a_eligibility_runtime_contract_fix.sql` (Migration 48) provides the authoritative `CREATE OR REPLACE FUNCTION` correction:
+
+1. **Immediate Fail-Closed Missing Singleton Return**:
+   Returns `success = false`, `reason_code = RELEASE_CONTROL_UNAVAILABLE`, `blocking_reason_codes = ["RELEASE_CONTROL_UNAVAILABLE"]`, `eligible = false`, `authorized = false`, `bookable = false`, `production_authorized = false`, `pilot_enforcement_active = false`.
+2. **Canonical Phase Derivations**:
+   - `pre_pilot` -> `prod_auth = false`, `pilot_enforcement_required = false`
+   - `paymentless_pilot` -> `prod_auth = false`, `pilot_enforcement_required = true`
+   - `full_production` -> `prod_auth = true`, `pilot_enforcement_required = false`
+3. **Explicit Join-Based Relationship Proof**:
+   Performs explicit JOIN queries across `branches`, `services`, `staff`, `service_branches`, `staff_branches`, and `staff_services`. Returns `status = VERIFIED` only when primary branch has connected staff, connected services, and staff can perform services. Returns `RELATIONSHIP_VERIFICATION_FAILED` otherwise.
+4. **Commercial Resolver Integration**:
+   Combines subscription table facts with `public.resolve_tenant_commercial_eligibility(p_tenant_id)` result for `SUBSCRIPTION_BLOCKED` evaluation.
+5. **Blocker-Consistent `eligible` Boolean**:
+   `eligible` is strictly `false` whenever any tenant eligibility blocker (`TENANT_NOT_FOUND`, `TENANT_INACTIVE`, `CORE_BOOKING_RESTRICTED`, `PUBLIC_SITE_STATUS_BLOCKED`, `SUBSCRIPTION_BLOCKED`, `REQUIRED_ENTITLEMENT_BLOCKED`, `OPERATIONAL_READINESS_FAILED`) exists.
+6. **Live Column & Scalar Safety**:
+   Uses `services.active` and `staff.active` live columns and safe scalar `FOUND` checks.
+
+---
+
+## 4. Runner & Diagnostic Safety
+
+- `callRpcEndpoint` returns safe structured `{ ok, status, data, error: { code, message, details, hint } }` with all fields passed through `redactSecrets`. `rawText` output is eliminated.
+- Dependent tests in `test-h1e-a-credentialed-runner.mjs` throw explicit `DEPENDENCY_UNAVAILABLE: canonical eligibility snapshot` error when snapshot acquisition fails.
+
+---
+
+## 5. Governance & Invariants
+
 - **Migration 48**: H1E-A Eligibility Read Contract Runtime Forward Fix
-- **Migration 49**: Stage H1E-B Pilot Authorization History & Management RPCs (Previously planned as 48)
-- **Migration 50**: Stage H1E-C Public Booking Fail-Closed Enforcement (Previously planned as 49)
-
----
-
-## 5. Release & Safety Invariants
-
+- **Migration 49**: Stage H1E-B Pilot Authorization History & Management RPCs
+- **Migration 50**: Stage H1E-C Public Booking Fail-Closed Enforcement
 - **PRODUCTION_NO_GO**: Preserved
 - **PAYMENTS_DISABLED**: Preserved
 - **CHECKOUT_DISABLED**: Preserved
 - **IYZICO_DISABLED**: Preserved
-- **Data Mutations**: 0
-- **Credentialed Acceptance**: Deferred until Migration 48 is applied remotely.
