@@ -203,6 +203,45 @@ async function runUnitTests() {
     }
   });
 
+  await check('21. Null canonical snapshot produces DEPENDENCY_UNAVAILABLE and no false safety claims', async () => {
+    let canonicalSnap = null;
+    const requireCanonicalSnapshot = () => {
+      if (!canonicalSnap) throw new Error('DEPENDENCY_UNAVAILABLE: canonical eligibility snapshot');
+      return canonicalSnap;
+    };
+
+    try {
+      requireCanonicalSnapshot();
+      throw new Error('Should have thrown DEPENDENCY_UNAVAILABLE error!');
+    } catch (err) {
+      if (!err.message.includes('DEPENDENCY_UNAVAILABLE')) throw err;
+      if (err.message.includes('Payment collection is enabled') || err.message.includes('Production is authorized') || err.message.includes('BOOKING_ALLOWED')) {
+        throw new Error('Null snapshot produced false safety claim');
+      }
+    }
+  });
+
+  await check('22. Super-admin HTTP error formatting produces safe redacted diagnostic without rawText leakage', async () => {
+    const mockRpcRes = {
+      ok: false,
+      status: 400,
+      error: { code: '42601', message: 'syntax error with secret bearer sbp_12345', details: 'raw JWT eyJhbGci in details', hint: 'hint secret password' }
+    };
+    try {
+      assertSuperAdminEligibilityEnvelope(mockRpcRes);
+      throw new Error('Should have thrown Super Admin eligibility call failed error!');
+    } catch (err) {
+      const msg = err.message;
+      if (!msg.includes('HTTP 400') || !msg.includes('42601')) throw new Error('Diagnostic message missing status/code');
+      if (msg.includes('sbp_12345') || msg.includes('eyJhbGci') || msg.includes('password": "hint secret')) {
+        throw new Error('Unredacted secret found in diagnostic error: ' + msg);
+      }
+      if (!msg.includes('[REDACTED]') || !msg.includes('[JWT_REDACTED]')) {
+        throw new Error('Redaction tags missing from diagnostic error: ' + msg);
+      }
+    }
+  });
+
   console.log('\n══════════════════════════════════════════════════════════');
   console.log('Defined tests: ' + defined);
   console.log('Executed tests: ' + executed);

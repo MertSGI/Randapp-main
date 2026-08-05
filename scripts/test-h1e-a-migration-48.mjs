@@ -82,14 +82,27 @@ check('7. Migration 48 derives production_authorized & pilot_enforce_req strictl
 });
 
 // 8. Explicit Join-Based Relationship Verification
-check('8. Migration 48 performs explicit join queries across staff_branches, service_branches, and staff_services', () => {
+check('8. Migration 48 performs explicit join queries across staff_branches, service_branches, and staff_services on primary branch', () => {
   if (!codeLines.includes('staff_branches') || !codeLines.includes('service_branches') || !codeLines.includes('staff_services')) {
     throw new Error('Migration 48 missing explicit relationship proof joins!');
   }
+  if (!codeLines.includes('stb.branch_id = v_primary_branch_id') || !codeLines.includes('seb.branch_id = v_primary_branch_id')) {
+    throw new Error('Migration 48 staff_can_perform_service query does not join staff_branches and service_branches on v_primary_branch_id!');
+  }
 });
 
-// 9. Integration of Commercial Resolver Result
-check('9. Migration 48 incorporates resolve_tenant_commercial_eligibility result into SUBSCRIPTION_BLOCKED', () => {
+// 9. Global Restriction Scope Verification
+check('9. Migration 48 contains no is_global reference and uses tenant_id IS NULL for global scope', () => {
+  if (codeLines.includes('is_global')) {
+    throw new Error('Migration 48 contains non-existent is_global column reference!');
+  }
+  if (!codeLines.includes('tenant_id IS NULL')) {
+    throw new Error('Migration 48 missing tenant_id IS NULL global restriction predicate!');
+  }
+});
+
+// 10. Integration of Commercial Resolver Result
+check('10. Migration 48 incorporates resolve_tenant_commercial_eligibility result into SUBSCRIPTION_BLOCKED', () => {
   if (!codeLines.includes('resolve_tenant_commercial_eligibility') || !codeLines.includes('NOT v_comm_eligible')) {
     throw new Error('Migration 48 does not use commercial resolver result for SUBSCRIPTION_BLOCKED');
   }

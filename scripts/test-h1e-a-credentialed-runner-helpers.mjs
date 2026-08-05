@@ -228,7 +228,14 @@ export function assertAuthenticatedUnauthorized(res, roleLabel) {
 }
 
 export function assertSuperAdminEligibilityEnvelope(res) {
-  if (!res.ok) throw new Error('Super Admin eligibility call failed with HTTP status ' + res.status);
+  if (!res.ok) {
+    const errObj = res.error || {};
+    const safeMsg = redactSecrets(errObj.message || 'HTTP status ' + res.status);
+    const safeCode = redactSecrets(errObj.code || 'HTTP_' + res.status);
+    const safeDetails = redactSecrets(errObj.details || 'none');
+    const safeHint = redactSecrets(errObj.hint || 'none');
+    throw new Error(`Super Admin eligibility call failed (HTTP ${res.status}, Code: ${safeCode}, Msg: "${safeMsg}", Details: "${safeDetails}", Hint: "${safeHint}")`);
+  }
   if (!res.data || typeof res.data !== 'object') throw new Error('Super Admin call returned invalid JSON');
   const snap = res.data;
   if (snap.success !== true) throw new Error('Expected success=true for Super Admin');

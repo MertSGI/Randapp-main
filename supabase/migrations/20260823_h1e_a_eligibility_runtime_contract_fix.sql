@@ -189,14 +189,28 @@ BEGIN
             JOIN public.services s ON s.id = sb.service_id
             WHERE sb.branch_id = v_primary_branch_id AND sb.tenant_id = p_tenant_id AND s.active = true;
             v_primary_branch_has_services := FOUND;
-        END IF;
 
-        PERFORM 1
-        FROM public.staff_services ss
-        JOIN public.staff st ON st.id = ss.staff_id
-        JOIN public.services se ON se.id = ss.service_id
-        WHERE st.tenant_id = p_tenant_id AND st.active = true AND se.tenant_id = p_tenant_id AND se.active = true;
-        v_staff_can_perform_service := FOUND;
+            PERFORM 1
+            FROM public.staff_services ss
+            JOIN public.staff st
+              ON st.id = ss.staff_id
+             AND st.tenant_id = p_tenant_id
+             AND st.active = true
+            JOIN public.services se
+              ON se.id = ss.service_id
+             AND se.tenant_id = p_tenant_id
+             AND se.active = true
+            JOIN public.staff_branches stb
+              ON stb.staff_id = st.id
+             AND stb.branch_id = v_primary_branch_id
+             AND stb.tenant_id = p_tenant_id
+            JOIN public.service_branches seb
+              ON seb.service_id = se.id
+             AND seb.branch_id = v_primary_branch_id
+             AND seb.tenant_id = p_tenant_id
+            LIMIT 1;
+            v_staff_can_perform_service := FOUND;
+        END IF;
 
         IF v_primary_branch_count = 1 AND v_primary_branch_has_staff AND v_primary_branch_has_services AND v_staff_can_perform_service THEN
             v_rel_status := 'VERIFIED';
@@ -230,10 +244,10 @@ BEGIN
             v_core_entitlement_blocked := true;
         END IF;
 
-        -- Active core_booking restrictions check (handling null/false is_global)
+        -- Active core_booking restrictions check (global scope is tenant_id IS NULL)
         SELECT count(*)::INTEGER INTO v_active_restrictions_count
         FROM public.platform_system_restrictions
-        WHERE (tenant_id = p_tenant_id OR COALESCE(is_global, false) = true)
+        WHERE (tenant_id = p_tenant_id OR tenant_id IS NULL)
           AND feature_key = 'core_booking'
           AND is_restricted = true
           AND starts_at <= now()

@@ -208,76 +208,95 @@ async function runCredentialedAcceptance() {
         }
       });
 
+      function requireCanonicalSnapshot() {
+        if (!canonicalSnap) {
+          throw new Error('DEPENDENCY_UNAVAILABLE: canonical eligibility snapshot');
+        }
+        return canonicalSnap;
+      }
+
       await test('10. Global release phase is pre_pilot', 'behavioral', async () => {
-        if (!canonicalSnap) throw new Error('DEPENDENCY_UNAVAILABLE: canonical eligibility snapshot');
-        if (canonicalSnap.global_release_control.release_phase !== 'pre_pilot') {
+        const snap = requireCanonicalSnapshot();
+        if (snap.global_release_control.release_phase !== 'pre_pilot') {
           throw new Error('Expected global release phase pre_pilot');
         }
       });
 
       await test('11. Payment collection enabled remains false', 'behavioral', async () => {
-        if (!canonicalSnap || canonicalSnap.global_release_control.is_payment_collection_enabled !== false) {
+        const snap = requireCanonicalSnapshot();
+        if (snap.global_release_control.is_payment_collection_enabled !== false) {
           throw new Error('Payment collection is enabled!');
         }
       });
 
       await test('12. Checkout enabled remains false', 'behavioral', async () => {
-        if (!canonicalSnap || canonicalSnap.global_release_control.is_checkout_enabled !== false) {
+        const snap = requireCanonicalSnapshot();
+        if (snap.global_release_control.is_checkout_enabled !== false) {
           throw new Error('Checkout is enabled!');
         }
       });
 
       await test('13. Iyzico enabled remains false', 'behavioral', async () => {
-        if (!canonicalSnap || canonicalSnap.global_release_control.is_iyzico_enabled !== false) {
+        const snap = requireCanonicalSnapshot();
+        if (snap.global_release_control.is_iyzico_enabled !== false) {
           throw new Error('Iyzico is enabled!');
         }
       });
 
       await test('14. Production authorization remains false', 'behavioral', async () => {
-        if (!canonicalSnap || canonicalSnap.production_authorized !== false) {
+        const snap = requireCanonicalSnapshot();
+        if (snap.production_authorized !== false) {
           throw new Error('Production is authorized!');
         }
       });
 
       await test('15. Transitional authorization implementation state is pending_h1e_b', 'behavioral', async () => {
-        if (!canonicalSnap || canonicalSnap.pilot_authorization.implementation_state !== 'pending_h1e_b') {
+        const snap = requireCanonicalSnapshot();
+        if (snap.pilot_authorization.implementation_state !== 'pending_h1e_b') {
           throw new Error('Transitional implementation state is not pending_h1e_b');
         }
       });
 
       await test('16. Transitional authorization actor and timestamp fields are null', 'behavioral', async () => {
-        const authObj = canonicalSnap.pilot_authorization;
+        const snap = requireCanonicalSnapshot();
+        const authObj = snap.pilot_authorization;
         if (authObj.authorization_id !== null || authObj.approved_by !== null || authObj.revoked_by !== null || authObj.approved_at !== null || authObj.revoked_at !== null) {
           throw new Error('Transitional authorization actor/id/timestamp fields are not null');
         }
       });
 
       await test('17. authorized remains false', 'behavioral', async () => {
-        if (!canonicalSnap || canonicalSnap.authorized !== false) throw new Error('authorized is true!');
+        const snap = requireCanonicalSnapshot();
+        if (snap.authorized !== false) throw new Error('authorized is true!');
       });
 
       await test('18. bookable remains false', 'behavioral', async () => {
-        if (!canonicalSnap || canonicalSnap.bookable !== false) throw new Error('bookable is true!');
+        const snap = requireCanonicalSnapshot();
+        if (snap.bookable !== false) throw new Error('bookable is true!');
       });
 
       await test('19. pilot_enforcement_active remains false', 'behavioral', async () => {
-        if (!canonicalSnap || canonicalSnap.pilot_enforcement_active !== false) throw new Error('pilot_enforcement_active is true!');
+        const snap = requireCanonicalSnapshot();
+        if (snap.pilot_enforcement_active !== false) throw new Error('pilot_enforcement_active is true!');
       });
 
       await test('20. Primary reason code is GLOBAL_RELEASE_PHASE_BLOCKED under pre_pilot default', 'behavioral', async () => {
-        if (!canonicalSnap || canonicalSnap.primary_reason_code !== 'GLOBAL_RELEASE_PHASE_BLOCKED') {
-          throw new Error('Expected primary_reason_code GLOBAL_RELEASE_PHASE_BLOCKED, got ' + canonicalSnap.primary_reason_code);
+        const snap = requireCanonicalSnapshot();
+        if (snap.primary_reason_code !== 'GLOBAL_RELEASE_PHASE_BLOCKED') {
+          throw new Error('Expected primary_reason_code GLOBAL_RELEASE_PHASE_BLOCKED, got ' + snap.primary_reason_code);
         }
       });
 
       await test('21. BOOKING_ALLOWED is not returned under pre_pilot default', 'behavioral', async () => {
-        if (!canonicalSnap || canonicalSnap.primary_reason_code === 'BOOKING_ALLOWED') {
+        const snap = requireCanonicalSnapshot();
+        if (snap.primary_reason_code === 'BOOKING_ALLOWED') {
           throw new Error('BOOKING_ALLOWED was returned under pre_pilot!');
         }
       });
 
       await test('22. blocking_reason_codes is a structured array', 'behavioral', async () => {
-        if (!canonicalSnap || !Array.isArray(canonicalSnap.blocking_reason_codes)) {
+        const snap = requireCanonicalSnapshot();
+        if (!Array.isArray(snap.blocking_reason_codes)) {
           throw new Error('blocking_reason_codes is not an array');
         }
       });
