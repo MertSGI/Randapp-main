@@ -25,7 +25,7 @@ check('1. Migration 47 file exists with correct filename', () => {
 
 check('2. Migrations 1-46 remain unchanged', () => {
   const files = fs.readdirSync(path.join(process.cwd(), 'supabase/migrations')).filter(f => f.endsWith('.sql'));
-  if (files.length !== 47) throw new Error('Expected 47 migration files, found ' + files.length);
+  if (files.length < 47) throw new Error('Expected at least 47 migration files, found ' + files.length);
   staticPassed++;
 });
 

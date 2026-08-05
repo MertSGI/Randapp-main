@@ -55,6 +55,8 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 44. **`20260819_h1d_idempotency_helper_record_fix.sql`** — Stage H1D Migration 44 fixes the check_super_admin_idempotency runtime record-shape defect by selecting the complete idempotency ledger record and handling the no-row case explicitly.
 45. **`20260820_h1d_audit_events_schema_alignment_fix.sql`** — Stage H1D Migration 45 aligns platform restriction create/end audit writes with canonical audit_events columns: actor_id, actor_role, and action.
 46. **`20260821_h1d_future_restriction_end_fix.sql`** — Stage H1D Migration 46 allows future scheduled restrictions to be safely ended without violating the starts_at/expires_at date-range constraint.
+47. **`20260822_h1e_release_control_and_eligibility_read_contracts.sql`** — Stage H1E-A Global Release Control & Eligibility Read Contracts: Provisions platform_global_release_control singleton table and super_admin_get_tenant_pilot_eligibility_snapshot read contract.
+48. **`20260823_h1e_a_eligibility_runtime_contract_fix.sql`** — Stage H1E-A Eligibility Read Contract Runtime Forward Fix: Provides a forward-only CREATE OR REPLACE correction for super_admin_get_tenant_pilot_eligibility_snapshot, aligning live column names (services.active, staff.active) and eliminating unassigned RECORD dereferences.
 
 ---
 
