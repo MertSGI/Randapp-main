@@ -14,14 +14,130 @@ DO $fixture_block$
 DECLARE
     v_plan_id UUID;
     v_plan_version_id UUID;
+    v_count INTEGER;
+    v_existing_tenant_id UUID;
+    v_existing_slug VARCHAR;
+    v_existing_tenant_id_for_branch UUID;
+    v_existing_tenant_id_for_service UUID;
+    v_existing_tenant_id_for_staff UUID;
+    v_existing_tenant_id_for_sub UUID;
+    v_existing_tenant_id_for_event UUID;
+    v_existing_sub_id_for_event UUID;
+    v_rel_conflict_count INTEGER;
+    v_rel_staff_branch_conflict INTEGER;
+    v_rel_staff_service_conflict INTEGER;
+    v_release_phase TEXT;
+    v_is_pay_enabled BOOLEAN;
+    v_is_chk_enabled BOOLEAN;
+    v_is_iyz_enabled BOOLEAN;
+    v_pilot_auth_count INTEGER;
 BEGIN
-    -- 1. Resolve canonical Published Premium Version 1 plan_version_id
+    -- 0. PRE-FLIGHT GLOBAL SAFETY INVARIANT CHECK
+    SELECT release_phase, is_payment_collection_enabled, is_checkout_enabled, is_iyzico_enabled
+    INTO v_release_phase, v_is_pay_enabled, v_is_chk_enabled, v_is_iyz_enabled
+    FROM public.platform_global_release_control
+    LIMIT 1;
+
+    SELECT COUNT(*) INTO v_pilot_auth_count
+    FROM public.tenant_pilot_authorizations
+    WHERE tenant_id = 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd'
+      AND status = 'active';
+
+    IF v_release_phase != 'pre_pilot' OR v_is_pay_enabled OR v_is_chk_enabled OR v_is_iyz_enabled OR v_pilot_auth_count > 0 THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_SAFETY_INVARIANT_VIOLATION: Pre-check failed' USING ERRCODE = 'P0001';
+    END IF;
+
+    -- A. Dedicated Tenant Identity Guard
+    SELECT id, slug INTO v_existing_tenant_id, v_existing_slug
+    FROM public.tenants
+    WHERE id = 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd';
+
+    IF v_existing_tenant_id IS NOT NULL AND v_existing_slug != 'dedicated-h1d-tenant' THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_TENANT_SLUG_CONFLICT: Dedicated tenant ID exists with unexpected slug %', v_existing_slug USING ERRCODE = 'P0001';
+    END IF;
+
+    SELECT id INTO v_existing_tenant_id
+    FROM public.tenants
+    WHERE slug = 'dedicated-h1d-tenant'
+      AND id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd';
+
+    IF v_existing_tenant_id IS NOT NULL THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_TENANT_SLUG_CONFLICT: Dedicated slug already owned by tenant %', v_existing_tenant_id USING ERRCODE = 'P0001';
+    END IF;
+
+    -- B. Deterministic Branch ID Guard (bddddddd-0000-0000-0000-000000000001)
+    SELECT tenant_id INTO v_existing_tenant_id_for_branch
+    FROM public.branches
+    WHERE id = 'bddddddd-0000-0000-0000-000000000001';
+
+    IF v_existing_tenant_id_for_branch IS NOT NULL AND v_existing_tenant_id_for_branch != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_BRANCH_OWNERSHIP_CONFLICT: Branch ID owned by tenant %', v_existing_tenant_id_for_branch USING ERRCODE = 'P0001';
+    END IF;
+
+    SELECT COUNT(*) INTO v_count
+    FROM public.branches
+    WHERE tenant_id = 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd'
+      AND is_primary = true
+      AND is_active = true
+      AND id != 'bddddddd-0000-0000-0000-000000000001';
+
+    IF v_count > 0 THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_UNEXPECTED_PRIMARY_BRANCH: Dedicated tenant has another active primary branch' USING ERRCODE = 'P0001';
+    END IF;
+
+    -- C. Deterministic Service ID Guard (addddddd-0000-0000-0000-000000000001)
+    SELECT tenant_id INTO v_existing_tenant_id_for_service
+    FROM public.services
+    WHERE id = 'addddddd-0000-0000-0000-000000000001';
+
+    IF v_existing_tenant_id_for_service IS NOT NULL AND v_existing_tenant_id_for_service != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_SERVICE_OWNERSHIP_CONFLICT: Service ID owned by tenant %', v_existing_tenant_id_for_service USING ERRCODE = 'P0001';
+    END IF;
+
+    -- D. Deterministic Staff ID Guard (cddddddd-0000-0000-0000-000000000001)
+    SELECT tenant_id INTO v_existing_tenant_id_for_staff
+    FROM public.staff
+    WHERE id = 'cddddddd-0000-0000-0000-000000000001';
+
+    IF v_existing_tenant_id_for_staff IS NOT NULL AND v_existing_tenant_id_for_staff != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_STAFF_OWNERSHIP_CONFLICT: Staff ID owned by tenant %', v_existing_tenant_id_for_staff USING ERRCODE = 'P0001';
+    END IF;
+
+    -- E. Deterministic Subscription ID Guard (d9999999-9999-9999-9999-999999999999)
+    SELECT tenant_id INTO v_existing_tenant_id_for_sub
+    FROM public.subscriptions
+    WHERE id = 'd9999999-9999-9999-9999-999999999999';
+
+    IF v_existing_tenant_id_for_sub IS NOT NULL AND v_existing_tenant_id_for_sub != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_SUBSCRIPTION_OWNERSHIP_CONFLICT: Subscription ID owned by tenant %', v_existing_tenant_id_for_sub USING ERRCODE = 'P0001';
+    END IF;
+
+    SELECT COUNT(*) INTO v_count
+    FROM public.subscriptions
+    WHERE tenant_id = 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd'
+      AND id != 'd9999999-9999-9999-9999-999999999999';
+
+    IF v_count > 0 THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_UNEXPECTED_SUBSCRIPTION: Dedicated tenant has an unexpected subscription' USING ERRCODE = 'P0001';
+    END IF;
+
+    -- F. Premium Plan Version Cardinality Guard
     SELECT id INTO v_plan_id
     FROM public.plans
     WHERE code = 'premium';
 
     IF v_plan_id IS NULL THEN
-        RAISE EXCEPTION 'CANONICAL_PLAN_PREMIUM_NOT_FOUND: Plan code premium not found in public.plans' USING ERRCODE = 'P0001';
+        RAISE EXCEPTION 'H1E_C_FIXTURE_PREMIUM_V1_CARDINALITY_INVALID: Canonical plan premium not found' USING ERRCODE = 'P0001';
+    END IF;
+
+    SELECT COUNT(*) INTO v_count
+    FROM public.plan_versions pv
+    WHERE pv.plan_id = v_plan_id
+      AND pv.version_number = 1
+      AND pv.lifecycle_status = 'published';
+
+    IF v_count != 1 THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_PREMIUM_V1_CARDINALITY_INVALID: Found % published premium v1 versions (expected exactly 1)', v_count USING ERRCODE = 'P0001';
     END IF;
 
     SELECT pv.id INTO v_plan_version_id
@@ -30,11 +146,48 @@ BEGIN
       AND pv.version_number = 1
       AND pv.lifecycle_status = 'published';
 
-    IF v_plan_version_id IS NULL THEN
-        RAISE EXCEPTION 'PUBLISHED_PREMIUM_V1_PLAN_VERSION_NOT_FOUND: Published version 1 for plan code premium not found' USING ERRCODE = 'P0001';
+    -- G. Subscription Event Idempotency & Ownership Guard (h1e_c_dedicated_tenant_fixture_sub_event)
+    SELECT tenant_id, subscription_id
+    INTO v_existing_tenant_id_for_event, v_existing_sub_id_for_event
+    FROM public.subscription_events
+    WHERE idempotency_key = 'h1e_c_dedicated_tenant_fixture_sub_event';
+
+    IF v_existing_tenant_id_for_event IS NOT NULL AND
+       (v_existing_tenant_id_for_event != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR v_existing_sub_id_for_event != 'd9999999-9999-9999-9999-999999999999') THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_SUBSCRIPTION_EVENT_CONFLICT: Event key owned by tenant % sub %', v_existing_tenant_id_for_event, v_existing_sub_id_for_event USING ERRCODE = 'P0001';
     END IF;
 
-    -- 2. Tenant record & public_site_status
+    -- H. Relationship Ownership Guard
+    SELECT COUNT(*) INTO v_rel_conflict_count
+    FROM public.service_branches sb
+    JOIN public.branches b ON b.id = sb.branch_id
+    JOIN public.services s ON s.id = sb.service_id
+    WHERE (sb.service_id = 'addddddd-0000-0000-0000-000000000001' OR sb.branch_id = 'bddddddd-0000-0000-0000-000000000001')
+      AND (sb.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR b.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR s.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd');
+
+    SELECT COUNT(*) INTO v_rel_staff_branch_conflict
+    FROM public.staff_branches sb
+    JOIN public.branches b ON b.id = sb.branch_id
+    JOIN public.staff st ON st.id = sb.staff_id
+    WHERE (sb.staff_id = 'cddddddd-0000-0000-0000-000000000001' OR sb.branch_id = 'bddddddd-0000-0000-0000-000000000001')
+      AND (sb.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR b.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR st.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd');
+
+    SELECT COUNT(*) INTO v_rel_staff_service_conflict
+    FROM public.staff_services ss
+    JOIN public.services s ON s.id = ss.service_id
+    JOIN public.staff st ON st.id = ss.staff_id
+    WHERE (ss.staff_id = 'cddddddd-0000-0000-0000-000000000001' OR ss.service_id = 'addddddd-0000-0000-0000-000000000001')
+      AND (ss.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR s.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR st.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd');
+
+    IF v_rel_conflict_count > 0 OR v_rel_staff_branch_conflict > 0 OR v_rel_staff_service_conflict > 0 THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_RELATIONSHIP_OWNERSHIP_CONFLICT: Relationship entries conflict with another tenant' USING ERRCODE = 'P0001';
+    END IF;
+
+    -- =========================================================================
+    -- UPSERTS (SAFE SCOPED UPSERTS FOR DETERMINISTIC DEDICATED FIXTURE ROWS)
+    -- =========================================================================
+
+    -- Tenant record & public_site_status
     INSERT INTO public.tenants (id, slug, name, status, public_site_status)
     VALUES (
       'dddd1111-d1d1-d1d1-d1d1-dddddddddddd',
@@ -62,7 +215,7 @@ BEGIN
       short_description = EXCLUDED.short_description,
       is_public_profile_enabled = EXCLUDED.is_public_profile_enabled;
 
-    -- 3. Primary active branch (bddddddd-0000-0000-0000-000000000001)
+    -- Primary active branch (bddddddd-0000-0000-0000-000000000001)
     INSERT INTO public.branches (
       id, tenant_id, name, slug, is_active, is_primary, timezone
     ) VALUES (
@@ -78,7 +231,7 @@ BEGIN
       is_primary = EXCLUDED.is_primary,
       is_active = EXCLUDED.is_active;
 
-    -- 4. Active manual subscription linked to resolved published plan_version_id
+    -- Active manual subscription linked to resolved published plan_version_id
     INSERT INTO public.subscriptions (
       id,
       tenant_id,
@@ -108,7 +261,7 @@ BEGIN
       billing_mode = EXCLUDED.billing_mode,
       current_period_end = EXCLUDED.current_period_end;
 
-    -- 5. Idempotent Fixture Subscription Event
+    -- Idempotent Fixture Subscription Event
     INSERT INTO public.subscription_events (
       subscription_id,
       tenant_id,
@@ -131,7 +284,7 @@ BEGIN
     )
     ON CONFLICT (idempotency_key) DO NOTHING;
 
-    -- 6. Active service (addddddd-0000-0000-0000-000000000001)
+    -- Active service (addddddd-0000-0000-0000-000000000001)
     INSERT INTO public.services (id, tenant_id, name, duration, price, active, category)
     VALUES (
       'addddddd-0000-0000-0000-000000000001',
@@ -146,7 +299,7 @@ BEGIN
       name = EXCLUDED.name,
       active = EXCLUDED.active;
 
-    -- 7. Active staff (cddddddd-0000-0000-0000-000000000001)
+    -- Active staff (cddddddd-0000-0000-0000-000000000001)
     INSERT INTO public.staff (id, tenant_id, name, active, is_owner)
     VALUES (
       'cddddddd-0000-0000-0000-000000000001',
@@ -159,7 +312,7 @@ BEGIN
       name = EXCLUDED.name,
       active = EXCLUDED.active;
 
-    -- 8. Branch / Service / Staff relationships
+    -- Relationship mappings
     INSERT INTO public.service_branches (tenant_id, service_id, branch_id)
     VALUES (
       'dddd1111-d1d1-d1d1-d1d1-dddddddddddd',
@@ -183,6 +336,23 @@ BEGIN
       'addddddd-0000-0000-0000-000000000001'
     )
     ON CONFLICT DO NOTHING;
+
+    -- =========================================================================
+    -- POST-FLIGHT GLOBAL SAFETY INVARIANT RE-CHECK
+    -- =========================================================================
+    SELECT release_phase, is_payment_collection_enabled, is_checkout_enabled, is_iyzico_enabled
+    INTO v_release_phase, v_is_pay_enabled, v_is_chk_enabled, v_is_iyz_enabled
+    FROM public.platform_global_release_control
+    LIMIT 1;
+
+    SELECT COUNT(*) INTO v_pilot_auth_count
+    FROM public.tenant_pilot_authorizations
+    WHERE tenant_id = 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd'
+      AND status = 'active';
+
+    IF v_release_phase != 'pre_pilot' OR v_is_pay_enabled OR v_is_chk_enabled OR v_is_iyz_enabled OR v_pilot_auth_count > 0 THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_SAFETY_INVARIANT_VIOLATION: Post-check failed' USING ERRCODE = 'P0001';
+    END IF;
 
 END $fixture_block$;
 

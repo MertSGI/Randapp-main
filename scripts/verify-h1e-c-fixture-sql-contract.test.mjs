@@ -28,96 +28,208 @@ if (!fs.existsSync(sqlPath)) {
   process.exit(1);
 }
 
-const sqlContent = fs.readFileSync(sqlPath, 'utf8');
+const rawSqlContent = fs.readFileSync(sqlPath, 'utf8');
 
-// Strip single-line comments for strict SQL statement assertion
-const activeSqlContent = sqlContent
-  .split('\n')
-  .filter(line => !line.trim().startsWith('--'))
-  .join('\n');
+// Helper to strip single-line comments for active SQL analysis
+export function getActiveSql(sql) {
+  return sql
+    .split('\n')
+    .filter(line => !line.trim().startsWith('--'))
+    .join('\n');
+}
 
-// Helper to validate Postgres UUID syntax
 const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
-// 1. Extract UUID literals from SQL
-const uuidMatches = activeSqlContent.match(/'([0-9a-zA-Z\-]{36})'/g) || [];
-const extractedUuids = uuidMatches.map(m => m.replace(/'/g, ''));
+// Deterministic SQL contract validator engine
+export function verifySqlContentGuards(sqlContent) {
+  const activeSql = getActiveSql(sqlContent);
 
-check('1. Every hard-coded fixture UUID literal in SQL parses as PostgreSQL-compatible hex UUID', () => {
+  // 1. Transaction boundary check
+  if (!activeSql.trim().startsWith('BEGIN;') || !activeSql.trim().endsWith('COMMIT;')) {
+    throw new Error('Fixture SQL must be wrapped in a single BEGIN; ... COMMIT; transaction block');
+  }
+
+  // 2. Extract UUID literals
+  const uuidMatches = activeSql.match(/'([0-9a-zA-Z\-]{36})'/g) || [];
+  const extractedUuids = uuidMatches.map(m => m.replace(/'/g, ''));
   if (extractedUuids.length === 0) throw new Error('No UUID literals found in fixture SQL');
   for (const uuid of extractedUuids) {
     if (!UUID_REGEX.test(uuid)) {
       throw new Error(`Invalid UUID literal containing non-hex characters: "${uuid}"`);
     }
   }
-});
 
-check('2. Fixture SQL does not reference public.staff.role column', () => {
-  const staffInsertMatch = activeSqlContent.match(/INSERT\s+INTO\s+public\.staff\s*\(([^)]+)\)/i);
+  // 3. Check public.staff inserts
+  const staffInsertMatch = activeSql.match(/INSERT\s+INTO\s+public\.staff\s*\(([^)]+)\)/i);
   if (staffInsertMatch) {
     const cols = staffInsertMatch[1].split(',').map(c => c.trim().toLowerCase());
     if (cols.includes('role')) {
       throw new Error('Fixture SQL inserts into non-existent column public.staff.role');
     }
   }
-});
 
-check('3. Fixture SQL uses canonical plan code premium', () => {
-  if (!activeSqlContent.includes("'premium'")) {
-    throw new Error("Fixture SQL does not use canonical plan code 'premium'");
-  }
-  if (activeSqlContent.includes("'premium_monthly'")) {
-    throw new Error("Fixture SQL uses invalid noncanonical plan code 'premium_monthly'");
-  }
-});
+  // 4. Canonical plan code & billing_mode
+  if (!activeSql.includes("'premium'")) throw new Error("Fixture SQL missing canonical plan code 'premium'");
+  if (activeSql.includes("'premium_monthly'")) throw new Error("Fixture SQL contains non-canonical code 'premium_monthly'");
+  if (!activeSql.includes("'manual'")) throw new Error("Fixture SQL missing billing_mode 'manual'");
 
-check('4. Fixture SQL dynamically resolves published plan_version_id for premium v1', () => {
-  const resolvesPlanVersion = activeSqlContent.includes('public.plan_versions') &&
-    activeSqlContent.includes("code = 'premium'") &&
-    activeSqlContent.includes('version_number = 1') &&
-    activeSqlContent.includes("lifecycle_status = 'published'");
-  if (!resolvesPlanVersion) {
-    throw new Error('Fixture SQL does not dynamically resolve published premium v1 plan_version_id');
-  }
-});
+  // 5. Hardened Ownership Exception Codes Assertion
+  const requiredExceptionCodes = [
+    'H1E_C_FIXTURE_SAFETY_INVARIANT_VIOLATION',
+    'H1E_C_FIXTURE_TENANT_SLUG_CONFLICT',
+    'H1E_C_FIXTURE_BRANCH_OWNERSHIP_CONFLICT',
+    'H1E_C_FIXTURE_UNEXPECTED_PRIMARY_BRANCH',
+    'H1E_C_FIXTURE_SERVICE_OWNERSHIP_CONFLICT',
+    'H1E_C_FIXTURE_STAFF_OWNERSHIP_CONFLICT',
+    'H1E_C_FIXTURE_SUBSCRIPTION_OWNERSHIP_CONFLICT',
+    'H1E_C_FIXTURE_UNEXPECTED_SUBSCRIPTION',
+    'H1E_C_FIXTURE_PREMIUM_V1_CARDINALITY_INVALID',
+    'H1E_C_FIXTURE_SUBSCRIPTION_EVENT_CONFLICT',
+    'H1E_C_FIXTURE_RELATIONSHIP_OWNERSHIP_CONFLICT'
+  ];
 
-check('5. Fixture SQL sets subscription billing_mode = manual', () => {
-  if (!activeSqlContent.includes("'manual'")) {
-    throw new Error("Fixture SQL does not set billing_mode to 'manual'");
+  for (const code of requiredExceptionCodes) {
+    if (!activeSql.includes(code)) {
+      throw new Error(`Fixture SQL missing required exception guard: ${code}`);
+    }
   }
-});
 
-check('6. Fixture SQL does not modify global release control', () => {
-  if (activeSqlContent.includes('platform_global_release_control')) {
-    throw new Error('Fixture SQL must not reference or modify platform_global_release_control');
+  // 6. Pre/Post Safety Invariant Checks
+  if (!activeSql.includes("release_phase != 'pre_pilot'")) {
+    throw new Error('Fixture SQL missing release_phase pre_pilot safety invariant assertion');
   }
-});
 
-check('7. Fixture SQL does not modify pilot authorizations', () => {
-  if (activeSqlContent.includes('tenant_pilot_authorizations')) {
-    throw new Error('Fixture SQL must not reference or modify tenant_pilot_authorizations');
-  }
-});
-
-check('8. Fixture SQL does not touch the canonical tenant aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', () => {
-  if (activeSqlContent.includes('aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa')) {
+  // 7. Canonical tenant isolation assertion
+  if (activeSql.includes('aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa')) {
     throw new Error('Fixture SQL contains canonical tenant ID aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa!');
   }
-});
 
-check('9. Fixture SQL includes an idempotent subscription event with stable key', () => {
-  const hasSubEvent = activeSqlContent.includes('public.subscription_events') &&
-    activeSqlContent.includes("'h1e_c_dedicated_tenant_fixture_sub_event'") &&
-    activeSqlContent.includes('ON CONFLICT (idempotency_key) DO NOTHING');
-  if (!hasSubEvent) {
-    throw new Error('Fixture SQL missing idempotent subscription event insertion');
-  }
-});
-
-check('10. Fixture SQL targets strictly dedicated tenant dddd1111-d1d1-d1d1-d1d1-dddddddddddd', () => {
-  if (!activeSqlContent.includes('dddd1111-d1d1-d1d1-d1d1-dddddddddddd')) {
+  // 8. Target dedicated tenant assertion
+  if (!activeSql.includes('dddd1111-d1d1-d1d1-d1d1-dddddddddddd')) {
     throw new Error('Fixture SQL does not target dedicated tenant dddd1111-d1d1-d1d1-d1d1-dddddddddddd');
   }
+
+  return true;
+}
+
+// -----------------------------------------------------------------------------
+// POSITIVE CONTRACT TESTS
+// -----------------------------------------------------------------------------
+
+check('1. Actual h1e_c_dedicated_tenant_fixture.sql passes complete contract validation', () => {
+  verifySqlContentGuards(rawSqlContent);
+});
+
+check('2. Every hard-coded fixture UUID literal in active SQL parses as PostgreSQL-compatible hex UUID', () => {
+  const activeSql = getActiveSql(rawSqlContent);
+  const uuidMatches = activeSql.match(/'([0-9a-zA-Z\-]{36})'/g) || [];
+  for (const uuid of uuidMatches.map(m => m.replace(/'/g, ''))) {
+    if (!UUID_REGEX.test(uuid)) throw new Error(`Non-hex UUID: ${uuid}`);
+  }
+});
+
+check('3. Fixture SQL includes all 11 explicit machine-testable exception codes', () => {
+  const activeSql = getActiveSql(rawSqlContent);
+  const codes = [
+    'H1E_C_FIXTURE_SAFETY_INVARIANT_VIOLATION',
+    'H1E_C_FIXTURE_TENANT_SLUG_CONFLICT',
+    'H1E_C_FIXTURE_BRANCH_OWNERSHIP_CONFLICT',
+    'H1E_C_FIXTURE_UNEXPECTED_PRIMARY_BRANCH',
+    'H1E_C_FIXTURE_SERVICE_OWNERSHIP_CONFLICT',
+    'H1E_C_FIXTURE_STAFF_OWNERSHIP_CONFLICT',
+    'H1E_C_FIXTURE_SUBSCRIPTION_OWNERSHIP_CONFLICT',
+    'H1E_C_FIXTURE_UNEXPECTED_SUBSCRIPTION',
+    'H1E_C_FIXTURE_PREMIUM_V1_CARDINALITY_INVALID',
+    'H1E_C_FIXTURE_SUBSCRIPTION_EVENT_CONFLICT',
+    'H1E_C_FIXTURE_RELATIONSHIP_OWNERSHIP_CONFLICT'
+  ];
+  for (const code of codes) {
+    if (!activeSql.includes(code)) throw new Error(`Missing code: ${code}`);
+  }
+});
+
+check('4. Fixture SQL includes pre and post global safety invariant checks', () => {
+  const activeSql = getActiveSql(rawSqlContent);
+  const occurrences = (activeSql.match(/H1E_C_FIXTURE_SAFETY_INVARIANT_VIOLATION/g) || []).length;
+  if (occurrences < 2) {
+    throw new Error(`Expected both pre and post safety invariant checks (found ${occurrences})`);
+  }
+});
+
+check('5. Fixture SQL executes within a single BEGIN; ... COMMIT; transaction boundary', () => {
+  const activeSql = getActiveSql(rawSqlContent);
+  if (!activeSql.trim().startsWith('BEGIN;') || !activeSql.trim().endsWith('COMMIT;')) {
+    throw new Error('Transaction boundary missing or malformed');
+  }
+});
+
+// -----------------------------------------------------------------------------
+// NEGATIVE FIXTURE TESTS (PROVING VALIDATOR FAILS IF GUARDS ARE REMOVED)
+// -----------------------------------------------------------------------------
+
+check('6. Negative test: Removing H1E_C_FIXTURE_TENANT_SLUG_CONFLICT causes validator failure', () => {
+  const modified = rawSqlContent.replaceAll('H1E_C_FIXTURE_TENANT_SLUG_CONFLICT', 'REMOVED_GUARD');
+  let threw = false;
+  try {
+    verifySqlContentGuards(modified);
+  } catch (err) {
+    threw = true;
+    if (!err.message.includes('H1E_C_FIXTURE_TENANT_SLUG_CONFLICT')) {
+      throw new Error(`Unexpected error message: ${err.message}`);
+    }
+  }
+  if (!threw) throw new Error('Validator failed to catch missing tenant slug conflict guard');
+});
+
+check('7. Negative test: Removing H1E_C_FIXTURE_BRANCH_OWNERSHIP_CONFLICT causes validator failure', () => {
+  const modified = rawSqlContent.replaceAll('H1E_C_FIXTURE_BRANCH_OWNERSHIP_CONFLICT', 'REMOVED_GUARD');
+  let threw = false;
+  try {
+    verifySqlContentGuards(modified);
+  } catch (err) {
+    threw = true;
+    if (!err.message.includes('H1E_C_FIXTURE_BRANCH_OWNERSHIP_CONFLICT')) {
+      throw new Error(`Unexpected error message: ${err.message}`);
+    }
+  }
+  if (!threw) throw new Error('Validator failed to catch missing branch ownership guard');
+});
+
+check('8. Negative test: Removing H1E_C_FIXTURE_PREMIUM_V1_CARDINALITY_INVALID causes validator failure', () => {
+  const modified = rawSqlContent.replaceAll('H1E_C_FIXTURE_PREMIUM_V1_CARDINALITY_INVALID', 'REMOVED_GUARD');
+  let threw = false;
+  try {
+    verifySqlContentGuards(modified);
+  } catch (err) {
+    threw = true;
+    if (!err.message.includes('H1E_C_FIXTURE_PREMIUM_V1_CARDINALITY_INVALID')) {
+      throw new Error(`Unexpected error message: ${err.message}`);
+    }
+  }
+  if (!threw) throw new Error('Validator failed to catch missing premium v1 cardinality guard');
+});
+
+check('9. Negative test: Removing BEGIN; transaction boundary causes validator failure', () => {
+  const modified = rawSqlContent.replace('BEGIN;', '-- REMOVED');
+  let threw = false;
+  try {
+    verifySqlContentGuards(modified);
+  } catch (err) {
+    threw = true;
+  }
+  if (!threw) throw new Error('Validator failed to catch missing BEGIN; boundary');
+});
+
+check('10. Negative test: Adding canonical tenant UUID causes validator failure', () => {
+  const modified = rawSqlContent + "\n-- 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa'";
+  const activeModified = getActiveSql(modified) + "\nSELECT 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa';";
+  let threw = false;
+  try {
+    verifySqlContentGuards(activeModified);
+  } catch (err) {
+    threw = true;
+  }
+  if (!threw) throw new Error('Validator failed to catch canonical tenant UUID reference');
 });
 
 console.log(`\nDefined tests: ${defined}`);
