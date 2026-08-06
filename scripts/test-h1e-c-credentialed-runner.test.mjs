@@ -162,11 +162,11 @@ async function runExecutableUnitTests() {
     if (res.exitCode !== 1 || res.reason !== 'H1E_C_CONTROLLED_CONFIRMATION_INVALID') throw new Error('Confirmation check failed');
   });
 
-  // 8. Controlled mode without transition contract fails closed
-  await check('8. Controlled mode without transition contract fails closed', async () => {
+  // 8. Controlled mode without checkpointHandler fails closed
+  await check('8. Controlled mode without checkpointHandler fails closed', async () => {
     const env = { ...validEnv, LARI_H1E_C_CONTROLLED_CONFIRMATION: 'I_UNDERSTAND_THIS_MUTATES_STAGING_RELEASE_CONTROL', LARI_H1E_C_EXPECTED_INITIAL_PHASE: 'pre_pilot' };
     const res = await runH1ECredentialedAcceptance({ mode: 'controlled_paymentless_pilot', env, logger: mockLogger });
-    if (res.exitCode !== 1 || res.reason !== 'H1E_C_CONTROLLED_RELEASE_TRANSITION_CONTRACT_REQUIRED') throw new Error('Transition contract check failed');
+    if (res.exitCode !== 1 || res.reason !== 'H1E_C_CONTROLLED_CHECKPOINT_HANDLER_REQUIRED') throw new Error('Checkpoint handler requirement check failed');
   });
 
   // 9. All five successful auth responses are required
@@ -419,6 +419,19 @@ async function runExecutableUnitTests() {
     const res = await runH1ECredentialedAcceptance({ mode: 'pre_pilot_readonly', env: validEnv, fetchImpl: createMockFetch(), logger: mockLogger });
     if (res.accounting.defined !== 20 || res.accounting.executed !== 20 || res.accounting.passed !== 20) {
       throw new Error(`Predefined test count mismatch: defined ${res.accounting.defined}, executed ${res.accounting.executed}, passed ${res.accounting.passed}`);
+    }
+  });
+
+  // 41. Controlled mode requires checkpointHandler
+  await check('41. Controlled mode requires checkpointHandler', async () => {
+    const controlledEnv = {
+      ...validEnv,
+      LARI_H1E_C_CONTROLLED_CONFIRMATION: 'I_UNDERSTAND_THIS_MUTATES_STAGING_RELEASE_CONTROL',
+      LARI_H1E_C_EXPECTED_INITIAL_PHASE: 'pre_pilot'
+    };
+    const res = await runH1ECredentialedAcceptance({ mode: 'controlled_paymentless_pilot', env: controlledEnv, fetchImpl: createMockFetch(), logger: mockLogger, checkpointHandler: null });
+    if (res.exitCode !== 1 || res.reason !== 'H1E_C_CONTROLLED_CHECKPOINT_HANDLER_REQUIRED') {
+      throw new Error('Controlled mode without checkpointHandler did not fail closed');
     }
   });
 

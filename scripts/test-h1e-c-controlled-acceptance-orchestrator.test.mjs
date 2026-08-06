@@ -8,11 +8,11 @@ let executed = 0;
 let passed = 0;
 let failed = 0;
 
-function check(title, fn) {
+async function check(title, fn) {
   defined++;
   executed++;
   try {
-    fn();
+    await fn();
     passed++;
     console.log(`  ✅ PASS: ${title}`);
   } catch (err) {
@@ -22,6 +22,17 @@ function check(title, fn) {
 }
 
 async function runTests() {
+  // Harness self-test for async rejection detection
+  await check('Self-Test: Async rejection detection', async () => {
+    let innerCaught = false;
+    try {
+      await (async () => { throw new Error('Expected test error'); })();
+    } catch (e) {
+      innerCaught = true;
+    }
+    if (!innerCaught) throw new Error('Async rejection was not caught');
+  });
+
   // 1. Missing confirmation fails closed
   await check('1. Missing confirmation fails closed', async () => {
     const res = await runAcceptanceOrchestration({ confirmation: null, logger: { log: () => {} } });
@@ -42,15 +53,37 @@ async function runTests() {
     }
   });
 
-  // 3. Valid preflight passes
-  await check('3. Valid preflight passes', async () => {
+  // 3. Missing UI base URL fails closed
+  await check('3. Missing UI base URL fails closed', async () => {
     const res = await runAcceptanceOrchestration({
       confirmation: 'I_UNDERSTAND_THIS_ORCHESTRATES_STAGING_MUTATION_AND_BROWSER_ACCEPTANCE',
       env: { VITE_SUPABASE_URL: 'http://test.co', VITE_SUPABASE_ANON_KEY: 'anon' },
       logger: { log: () => {} }
     });
-    if (res.exitCode !== 0 || !res.runId.startsWith('h1e_c_orchestration_run_')) {
-      throw new Error('Valid orchestrator preflight failed');
+    if (res.exitCode !== 1 || res.reason !== 'H1E_C_UI_BASE_URL_REQUIRED') {
+      throw new Error('Unexpected result for missing UI base URL');
+    }
+  });
+
+  // 4. Valid preflight and mocked orchestration passes
+  await check('4. Valid preflight and mocked orchestration passes', async () => {
+    const mockRunner = async ({ checkpointHandler }) => {
+      await checkpointHandler({ runId: 'run_1', checkpoint: 'authorized_paymentless_pilot', dedicatedSlug: 's1' });
+      await checkpointHandler({ runId: 'run_1', checkpoint: 'revoked_paymentless_pilot', dedicatedSlug: 's1' });
+      await checkpointHandler({ runId: 'run_1', checkpoint: 'restored_pre_pilot', dedicatedSlug: 's1' });
+      return { ok: true, exitCode: 0 };
+    };
+    const mockBrowser = async () => ({ ok: true, exitCode: 0 });
+
+    const res = await runAcceptanceOrchestration({
+      confirmation: 'I_UNDERSTAND_THIS_ORCHESTRATES_STAGING_MUTATION_AND_BROWSER_ACCEPTANCE',
+      env: { VITE_SUPABASE_URL: 'http://test.co', VITE_SUPABASE_ANON_KEY: 'anon', LARI_H1E_C_UI_BASE_URL: 'http://localhost:3000' },
+      logger: { log: () => {} },
+      runnerImpl: mockRunner,
+      browserImpl: mockBrowser
+    });
+    if (res.exitCode !== 0 || res.checkpointsExecuted.length !== 3) {
+      throw new Error('Valid orchestration failed');
     }
   });
 

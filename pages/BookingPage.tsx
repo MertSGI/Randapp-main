@@ -778,7 +778,7 @@ const BookingPage: React.FC = () => {
       {isCheckingSub ? (
          <div className="text-center py-12 text-gray-500">{language === 'tr' ? 'Yükleniyor...' : 'Loading...'}</div>
       ) : !isAuthorizedPreview && subStatus === 'expired' ? (
-         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-red-200 dark:border-red-900/50 p-8 text-center text-red-600 dark:text-red-400">
+         <div data-testid="public-booking-blocked" className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-red-200 dark:border-red-900/50 p-8 text-center text-red-600 dark:text-red-400">
            <svg className="mx-auto h-16 w-16 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m0 0v2m0-2h2m-2 0H9m-3.5 4a2.5 2.5 0 01-2.5-2.5v-10A2.5 2.5 0 015.5 4h13A2.5 2.5 0 0121 6.5v10a2.5 2.5 0 01-2.5 2.5h-13z" />
            </svg>
@@ -790,7 +790,7 @@ const BookingPage: React.FC = () => {
             </p>
          </div>
       ) : (
-      <>
+      <div data-testid="public-booking-ready">
         <SalonWebsiteView 
           tenant={tenant}
           businessProfile={businessProfile}
@@ -1431,7 +1431,7 @@ const BookingPage: React.FC = () => {
       ) : null
     }
     />
-    </>
+    </div>
     )}
   </div>
 );
