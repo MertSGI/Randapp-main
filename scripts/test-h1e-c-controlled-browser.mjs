@@ -60,7 +60,7 @@ export async function runControlledBrowserAcceptance({
   print('Dedicated Slug: ' + dedicatedSlug);
   print('Target URL: ' + targetUrl);
 
-  let defined = 10; // 5 per viewport
+  let defined = 14; // 7 per viewport (desktop & mobile)
   let executed = 0;
   let passed = 0;
   let failed = 0;
@@ -74,35 +74,6 @@ export async function runControlledBrowserAcceptance({
     { name: 'mobile', width: 375, height: 667 }
   ];
 
-  // In unit test mode without chromiumImpl, perform deterministic mocked evaluation
-  if (!chromiumImpl && typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
-    for (const vp of viewports) {
-      executed += 5;
-      passed += 5;
-      print(`  ✅ PASS: [${vp.name}] UI boundary state matches checkpoint '${checkpoint}'`);
-      print(`  ✅ PASS: [${vp.name}] Form actionability assertion verified`);
-      print(`  ✅ PASS: [${vp.name}] Zero console errors detected`);
-      print(`  ✅ PASS: [${vp.name}] Zero failed application requests`);
-      print(`  ✅ PASS: [${vp.name}] Zero forbidden mutation or payment requests`);
-    }
-    const isOk = executed === defined && passed === defined && failed === 0;
-    const exitCode = isOk ? 0 : 1;
-    print(`Final exit code: ${exitCode}`);
-    return {
-      ok: isOk,
-      exitCode,
-      runId,
-      checkpoint,
-      dedicatedSlug,
-      targetUrl,
-      accounting: {
-        defined, executed, passed, failed,
-        appointmentSubmissionsAttempted, paymentRequestsAttempted, checkoutRequestsAttempted
-      }
-    };
-  }
-
-  // Real Playwright execution
   let playwright;
   try {
     playwright = chromiumImpl || (await import('playwright')).chromium;
@@ -120,7 +91,6 @@ export async function runControlledBrowserAcceptance({
 
       let consoleErrors = 0;
       let networkFailures = 0;
-      let sensitiveTextExposed = false;
 
       page.on('console', msg => {
         if (msg.type() === 'error') consoleErrors++;
@@ -147,21 +117,16 @@ export async function runControlledBrowserAcceptance({
 
       await page.goto(targetUrl, { waitUntil: 'networkidle' });
 
-      // State Assertions using stable selectors
+      // 1. State Assertion using stable testids
       executed++;
       const isReadyVisible = await page.isVisible('[data-testid="public-booking-ready"]').catch(() => false);
       const isBlockedVisible = await page.isVisible('[data-testid="public-booking-blocked"]').catch(() => false);
-      const bodyText = await page.innerText('body').catch(() => '');
-
-      if (bodyText.includes('PILOT_AUTHORIZATION') || bodyText.includes('GLOBAL_RELEASE')) {
-        sensitiveTextExposed = true;
-      }
 
       let stateOk = false;
       if (checkpoint === 'authorized_paymentless_pilot') {
-        stateOk = isReadyVisible && !isBlockedVisible && !sensitiveTextExposed;
-      } else if (checkpoint === 'revoked_paymentless_pilot' || checkpoint === 'restored_pre_pilot') {
-        stateOk = isBlockedVisible && !isReadyVisible && !sensitiveTextExposed;
+        stateOk = isReadyVisible && !isBlockedVisible;
+      } else {
+        stateOk = isBlockedVisible && !isReadyVisible;
       }
 
       if (stateOk) {
@@ -169,20 +134,43 @@ export async function runControlledBrowserAcceptance({
         print(`  ✅ PASS: [${vp.name}] UI boundary state matches checkpoint '${checkpoint}'`);
       } else {
         failed++;
-        print(`  ❌ FAIL: [${vp.name}] UI boundary state mismatch for checkpoint '${checkpoint}' (ready=${isReadyVisible}, blocked=${isBlockedVisible})`);
+        print(`  ❌ FAIL: [${vp.name}] UI boundary state mismatch (ready=${isReadyVisible}, blocked=${isBlockedVisible})`);
       }
 
-      // Form actionability
+      // 2. Form Actionability Assertion
       executed++;
+      let actionabilityOk = false;
       if (checkpoint === 'authorized_paymentless_pilot') {
-        passed++;
-        print(`  ✅ PASS: [${vp.name}] Booking form ready and non-submitting`);
+        // Must contain visible booking boundary
+        const hasForm = await page.isVisible('form, button, select, [data-testid="public-booking-ready"]').catch(() => false);
+        actionabilityOk = hasForm;
       } else {
-        passed++;
-        print(`  ✅ PASS: [${vp.name}] Booking form safely absent or non-actionable`);
+        // Must be absent or disabled
+        const isFormPresent = await page.isVisible('form').catch(() => false);
+        actionabilityOk = !isFormPresent || isBlockedVisible;
       }
 
-      // Console errors
+      if (actionabilityOk) {
+        passed++;
+        print(`  ✅ PASS: [${vp.name}] Form actionability assertion verified`);
+      } else {
+        failed++;
+        print(`  ❌ FAIL: [${vp.name}] Form actionability assertion failed`);
+      }
+
+      // 3. Sensitive Internal Reason Code Exposure Assertion
+      executed++;
+      const bodyText = await page.innerText('body').catch(() => '');
+      const sensitiveExposed = bodyText.includes('PILOT_AUTHORIZATION') || bodyText.includes('GLOBAL_RELEASE_PHASE');
+      if (!sensitiveExposed) {
+        passed++;
+        print(`  ✅ PASS: [${vp.name}] Zero sensitive internal reason codes exposed`);
+      } else {
+        failed++;
+        print(`  ❌ FAIL: [${vp.name}] Sensitive internal reason codes exposed in UI`);
+      }
+
+      // 4. Console Errors
       executed++;
       if (consoleErrors === 0) {
         passed++;
@@ -192,7 +180,7 @@ export async function runControlledBrowserAcceptance({
         print(`  ❌ FAIL: [${vp.name}] ${consoleErrors} console errors detected`);
       }
 
-      // Network failures
+      // 5. Network Failures
       executed++;
       if (networkFailures === 0) {
         passed++;
@@ -202,14 +190,24 @@ export async function runControlledBrowserAcceptance({
         print(`  ❌ FAIL: [${vp.name}] ${networkFailures} failed network requests`);
       }
 
-      // Forbidden requests
+      // 6. Forbidden Appointment Submissions
       executed++;
-      if (appointmentSubmissionsAttempted === 0 && paymentRequestsAttempted === 0 && checkoutRequestsAttempted === 0) {
+      if (appointmentSubmissionsAttempted === 0) {
         passed++;
-        print(`  ✅ PASS: [${vp.name}] Zero forbidden mutation or payment requests`);
+        print(`  ✅ PASS: [${vp.name}] Zero appointment submission requests`);
       } else {
         failed++;
-        print(`  ❌ FAIL: [${vp.name}] Forbidden mutation attempt detected`);
+        print(`  ❌ FAIL: [${vp.name}] Forbidden appointment submission request detected`);
+      }
+
+      // 7. Forbidden Payment/Checkout Requests
+      executed++;
+      if (paymentRequestsAttempted === 0 && checkoutRequestsAttempted === 0) {
+        passed++;
+        print(`  ✅ PASS: [${vp.name}] Zero payment/checkout requests`);
+      } else {
+        failed++;
+        print(`  ❌ FAIL: [${vp.name}] Forbidden payment/checkout request detected`);
       }
 
       await context.close();
@@ -218,7 +216,7 @@ export async function runControlledBrowserAcceptance({
     await browser.close();
   }
 
-  const isOk = executed === defined && passed === defined && failed === 0;
+  const isOk = executed === defined && passed === defined && failed === 0 && appointmentSubmissionsAttempted === 0 && paymentRequestsAttempted === 0 && checkoutRequestsAttempted === 0;
   const exitCode = isOk ? 0 : 1;
 
   print(`Final exit code: ${exitCode}`);

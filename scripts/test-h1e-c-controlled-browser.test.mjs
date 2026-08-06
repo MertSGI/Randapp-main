@@ -21,8 +21,43 @@ async function check(title, fn) {
   }
 }
 
+function createMockChromium(options = {}) {
+  const isReadyVisible = options.isReadyVisible !== false;
+  const isBlockedVisible = options.isBlockedVisible === true;
+  const bodyText = options.bodyText || 'Standard page text';
+  const consoleErrors = options.consoleErrors || 0;
+  const networkFailures = options.networkFailures || 0;
+
+  return {
+    launch: async () => ({
+      newContext: async () => ({
+        newPage: async () => ({
+          on: (event, cb) => {
+            if (event === 'console' && consoleErrors > 0) {
+              for (let i = 0; i < consoleErrors; i++) cb({ type: () => 'error' });
+            }
+            if (event === 'requestfailed' && networkFailures > 0) {
+              for (let i = 0; i < networkFailures; i++) cb();
+            }
+          },
+          goto: async () => {},
+          isVisible: async (selector) => {
+            if (selector.includes('ready')) return isReadyVisible;
+            if (selector.includes('blocked')) return isBlockedVisible;
+            if (selector.includes('form')) return true;
+            return false;
+          },
+          innerText: async () => bodyText
+        }),
+        close: async () => {}
+      }),
+      close: async () => {}
+    })
+  };
+}
+
 async function runTests() {
-  // Harness self-test for async rejection detection
+  // Self-test for async rejection detection
   await check('Self-Test: Async rejection detection', async () => {
     let innerCaught = false;
     try {
@@ -95,15 +130,16 @@ async function runTests() {
     }
   });
 
-  // 6. Authorized paymentless pilot checkpoint passes
+  // 6. Authorized paymentless pilot checkpoint passes with injected mock chromium
   await check('6. Authorized paymentless pilot checkpoint passes', async () => {
-    process.env.NODE_ENV = 'test';
+    const mockChromium = createMockChromium({ isReadyVisible: true, isBlockedVisible: false });
     const res = await runControlledBrowserAcceptance({
       confirmation: 'I_UNDERSTAND_THE_RELEASE_PHASE_IS_CONTROLLED_EXTERNALLY',
       runId: 'run_123',
       baseUrl: 'http://localhost:3000',
       dedicatedSlug: 'test-slug',
       checkpoint: 'authorized_paymentless_pilot',
+      chromiumImpl: mockChromium,
       logger: { log: () => {} }
     });
     if (res.exitCode !== 0 || res.targetUrl !== 'http://localhost:3000/#/test-slug') {
@@ -111,32 +147,49 @@ async function runTests() {
     }
   });
 
-  // 7. Revoked paymentless pilot checkpoint passes
+  // 7. Revoked paymentless pilot checkpoint passes with injected mock chromium
   await check('7. Revoked paymentless pilot checkpoint passes', async () => {
-    process.env.NODE_ENV = 'test';
+    const mockChromium = createMockChromium({ isReadyVisible: false, isBlockedVisible: true });
     const res = await runControlledBrowserAcceptance({
       confirmation: 'I_UNDERSTAND_THE_RELEASE_PHASE_IS_CONTROLLED_EXTERNALLY',
       runId: 'run_123',
       baseUrl: 'http://localhost:3000',
       dedicatedSlug: 'test-slug',
       checkpoint: 'revoked_paymentless_pilot',
+      chromiumImpl: mockChromium,
       logger: { log: () => {} }
     });
     if (res.exitCode !== 0) throw new Error('Revoked checkpoint failed');
   });
 
-  // 8. Restored pre_pilot checkpoint passes
+  // 8. Restored pre_pilot checkpoint passes with injected mock chromium
   await check('8. Restored pre_pilot checkpoint passes', async () => {
-    process.env.NODE_ENV = 'test';
+    const mockChromium = createMockChromium({ isReadyVisible: false, isBlockedVisible: true });
     const res = await runControlledBrowserAcceptance({
       confirmation: 'I_UNDERSTAND_THE_RELEASE_PHASE_IS_CONTROLLED_EXTERNALLY',
       runId: 'run_123',
       baseUrl: 'http://localhost:3000',
       dedicatedSlug: 'test-slug',
       checkpoint: 'restored_pre_pilot',
+      chromiumImpl: mockChromium,
       logger: { log: () => {} }
     });
     if (res.exitCode !== 0) throw new Error('Restored checkpoint failed');
+  });
+
+  // 9. Sensitive internal reason exposure fails checkpoint
+  await check('9. Sensitive internal reason exposure fails checkpoint', async () => {
+    const mockChromium = createMockChromium({ isReadyVisible: true, isBlockedVisible: false, bodyText: 'Internal code: PILOT_AUTHORIZATION_REVOKED' });
+    const res = await runControlledBrowserAcceptance({
+      confirmation: 'I_UNDERSTAND_THE_RELEASE_PHASE_IS_CONTROLLED_EXTERNALLY',
+      runId: 'run_123',
+      baseUrl: 'http://localhost:3000',
+      dedicatedSlug: 'test-slug',
+      checkpoint: 'authorized_paymentless_pilot',
+      chromiumImpl: mockChromium,
+      logger: { log: () => {} }
+    });
+    if (res.exitCode !== 1) throw new Error('Sensitive text exposure did not fail');
   });
 
   console.log('\n══════════════════════════════════════════════════════════');
