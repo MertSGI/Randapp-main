@@ -30,11 +30,17 @@ if (!fs.existsSync(sqlPath)) {
 
 const sqlContent = fs.readFileSync(sqlPath, 'utf8');
 
+// Strip single-line comments for strict SQL statement assertion
+const activeSqlContent = sqlContent
+  .split('\n')
+  .filter(line => !line.trim().startsWith('--'))
+  .join('\n');
+
 // Helper to validate Postgres UUID syntax
 const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 // 1. Extract UUID literals from SQL
-const uuidMatches = sqlContent.match(/'([0-9a-zA-Z\-]{36})'/g) || [];
+const uuidMatches = activeSqlContent.match(/'([0-9a-zA-Z\-]{36})'/g) || [];
 const extractedUuids = uuidMatches.map(m => m.replace(/'/g, ''));
 
 check('1. Every hard-coded fixture UUID literal in SQL parses as PostgreSQL-compatible hex UUID', () => {
@@ -47,8 +53,7 @@ check('1. Every hard-coded fixture UUID literal in SQL parses as PostgreSQL-comp
 });
 
 check('2. Fixture SQL does not reference public.staff.role column', () => {
-  // Check for staff table insert column lists
-  const staffInsertMatch = sqlContent.match(/INSERT\s+INTO\s+public\.staff\s*\(([^)]+)\)/i);
+  const staffInsertMatch = activeSqlContent.match(/INSERT\s+INTO\s+public\.staff\s*\(([^)]+)\)/i);
   if (staffInsertMatch) {
     const cols = staffInsertMatch[1].split(',').map(c => c.trim().toLowerCase());
     if (cols.includes('role')) {
@@ -58,59 +63,59 @@ check('2. Fixture SQL does not reference public.staff.role column', () => {
 });
 
 check('3. Fixture SQL uses canonical plan code premium', () => {
-  if (!sqlContent.includes("'premium'")) {
+  if (!activeSqlContent.includes("'premium'")) {
     throw new Error("Fixture SQL does not use canonical plan code 'premium'");
   }
-  if (sqlContent.includes("'premium_monthly'")) {
+  if (activeSqlContent.includes("'premium_monthly'")) {
     throw new Error("Fixture SQL uses invalid noncanonical plan code 'premium_monthly'");
   }
 });
 
 check('4. Fixture SQL dynamically resolves published plan_version_id for premium v1', () => {
-  const resolvesPlanVersion = sqlContent.includes('public.plan_versions') &&
-    sqlContent.includes("code = 'premium'") &&
-    sqlContent.includes('version_number = 1') &&
-    sqlContent.includes("lifecycle_status = 'published'");
+  const resolvesPlanVersion = activeSqlContent.includes('public.plan_versions') &&
+    activeSqlContent.includes("code = 'premium'") &&
+    activeSqlContent.includes('version_number = 1') &&
+    activeSqlContent.includes("lifecycle_status = 'published'");
   if (!resolvesPlanVersion) {
     throw new Error('Fixture SQL does not dynamically resolve published premium v1 plan_version_id');
   }
 });
 
 check('5. Fixture SQL sets subscription billing_mode = manual', () => {
-  if (!sqlContent.includes("'manual'")) {
+  if (!activeSqlContent.includes("'manual'")) {
     throw new Error("Fixture SQL does not set billing_mode to 'manual'");
   }
 });
 
 check('6. Fixture SQL does not modify global release control', () => {
-  if (sqlContent.includes('platform_global_release_control')) {
+  if (activeSqlContent.includes('platform_global_release_control')) {
     throw new Error('Fixture SQL must not reference or modify platform_global_release_control');
   }
 });
 
 check('7. Fixture SQL does not modify pilot authorizations', () => {
-  if (sqlContent.includes('tenant_pilot_authorizations')) {
+  if (activeSqlContent.includes('tenant_pilot_authorizations')) {
     throw new Error('Fixture SQL must not reference or modify tenant_pilot_authorizations');
   }
 });
 
 check('8. Fixture SQL does not touch the canonical tenant aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa', () => {
-  if (sqlContent.includes('aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa')) {
+  if (activeSqlContent.includes('aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa')) {
     throw new Error('Fixture SQL contains canonical tenant ID aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa!');
   }
 });
 
 check('9. Fixture SQL includes an idempotent subscription event with stable key', () => {
-  const hasSubEvent = sqlContent.includes('public.subscription_events') &&
-    sqlContent.includes("'h1e_c_dedicated_tenant_fixture_sub_event'") &&
-    sqlContent.includes('ON CONFLICT (idempotency_key) DO NOTHING');
+  const hasSubEvent = activeSqlContent.includes('public.subscription_events') &&
+    activeSqlContent.includes("'h1e_c_dedicated_tenant_fixture_sub_event'") &&
+    activeSqlContent.includes('ON CONFLICT (idempotency_key) DO NOTHING');
   if (!hasSubEvent) {
     throw new Error('Fixture SQL missing idempotent subscription event insertion');
   }
 });
 
 check('10. Fixture SQL targets strictly dedicated tenant dddd1111-d1d1-d1d1-d1d1-dddddddddddd', () => {
-  if (!sqlContent.includes('dddd1111-d1d1-d1d1-d1d1-dddddddddddd')) {
+  if (!activeSqlContent.includes('dddd1111-d1d1-d1d1-d1d1-dddddddddddd')) {
     throw new Error('Fixture SQL does not target dedicated tenant dddd1111-d1d1-d1d1-d1d1-dddddddddddd');
   }
 });
