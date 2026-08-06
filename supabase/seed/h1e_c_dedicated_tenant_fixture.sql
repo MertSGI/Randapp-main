@@ -12,7 +12,6 @@ BEGIN;
 
 DO $fixture_block$
 DECLARE
-    v_plan_id UUID;
     v_plan_version_id UUID;
     v_count INTEGER;
     v_existing_tenant_id UUID;
@@ -23,6 +22,9 @@ DECLARE
     v_existing_tenant_id_for_sub UUID;
     v_existing_tenant_id_for_event UUID;
     v_existing_sub_id_for_event UUID;
+    v_existing_event_type_for_event TEXT;
+    v_existing_reason_for_event TEXT;
+    v_existing_source_for_event TEXT;
     v_rel_conflict_count INTEGER;
     v_rel_staff_branch_conflict INTEGER;
     v_rel_staff_service_conflict INTEGER;
@@ -32,27 +34,39 @@ DECLARE
     v_is_iyz_enabled BOOLEAN;
     v_pilot_auth_count INTEGER;
 BEGIN
-    -- 0. PRE-FLIGHT GLOBAL SAFETY INVARIANT CHECK
+    -- 0. PRE-FLIGHT RELEASE CONTROL SINGLETON & NULL-SAFE SAFETY INVARIANT CHECK
+    SELECT COUNT(*) INTO v_count
+    FROM public.platform_global_release_control
+    WHERE id = 1;
+
+    IF v_count != 1 THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_RELEASE_CONTROL_CARDINALITY_INVALID: Singleton row id = 1 missing or invalid' USING ERRCODE = 'P0001';
+    END IF;
+
     SELECT release_phase, is_payment_collection_enabled, is_checkout_enabled, is_iyzico_enabled
     INTO v_release_phase, v_is_pay_enabled, v_is_chk_enabled, v_is_iyz_enabled
     FROM public.platform_global_release_control
-    LIMIT 1;
+    WHERE id = 1;
 
     SELECT COUNT(*) INTO v_pilot_auth_count
     FROM public.tenant_pilot_authorizations
     WHERE tenant_id = 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd'
-      AND status = 'active';
+      AND revoked_at IS NULL;
 
-    IF v_release_phase != 'pre_pilot' OR v_is_pay_enabled OR v_is_chk_enabled OR v_is_iyz_enabled OR v_pilot_auth_count > 0 THEN
+    IF v_release_phase IS DISTINCT FROM 'pre_pilot'
+       OR v_is_pay_enabled IS DISTINCT FROM false
+       OR v_is_chk_enabled IS DISTINCT FROM false
+       OR v_is_iyz_enabled IS DISTINCT FROM false
+       OR v_pilot_auth_count IS DISTINCT FROM 0 THEN
         RAISE EXCEPTION 'H1E_C_FIXTURE_SAFETY_INVARIANT_VIOLATION: Pre-check failed' USING ERRCODE = 'P0001';
     END IF;
 
-    -- A. Dedicated Tenant Identity Guard
+    -- A. Dedicated Tenant Identity Guard (Null-Safe)
     SELECT id, slug INTO v_existing_tenant_id, v_existing_slug
     FROM public.tenants
     WHERE id = 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd';
 
-    IF v_existing_tenant_id IS NOT NULL AND v_existing_slug != 'dedicated-h1d-tenant' THEN
+    IF v_existing_tenant_id IS NOT NULL AND v_existing_slug IS DISTINCT FROM 'dedicated-h1d-tenant' THEN
         RAISE EXCEPTION 'H1E_C_FIXTURE_TENANT_SLUG_CONFLICT: Dedicated tenant ID exists with unexpected slug %', v_existing_slug USING ERRCODE = 'P0001';
     END IF;
 
@@ -121,18 +135,11 @@ BEGIN
         RAISE EXCEPTION 'H1E_C_FIXTURE_UNEXPECTED_SUBSCRIPTION: Dedicated tenant has an unexpected subscription' USING ERRCODE = 'P0001';
     END IF;
 
-    -- F. Premium Plan Version Cardinality Guard
-    SELECT id INTO v_plan_id
-    FROM public.plans
-    WHERE code = 'premium';
-
-    IF v_plan_id IS NULL THEN
-        RAISE EXCEPTION 'H1E_C_FIXTURE_PREMIUM_V1_CARDINALITY_INVALID: Canonical plan premium not found' USING ERRCODE = 'P0001';
-    END IF;
-
+    -- F. Premium Plan Version Cardinality Guard (Canonical Join)
     SELECT COUNT(*) INTO v_count
     FROM public.plan_versions pv
-    WHERE pv.plan_id = v_plan_id
+    JOIN public.plans p ON p.id = pv.plan_id
+    WHERE p.code = 'premium'
       AND pv.version_number = 1
       AND pv.lifecycle_status = 'published';
 
@@ -142,19 +149,25 @@ BEGIN
 
     SELECT pv.id INTO v_plan_version_id
     FROM public.plan_versions pv
-    WHERE pv.plan_id = v_plan_id
+    JOIN public.plans p ON p.id = pv.plan_id
+    WHERE p.code = 'premium'
       AND pv.version_number = 1
       AND pv.lifecycle_status = 'published';
 
-    -- G. Subscription Event Idempotency & Ownership Guard (h1e_c_dedicated_tenant_fixture_sub_event)
-    SELECT tenant_id, subscription_id
-    INTO v_existing_tenant_id_for_event, v_existing_sub_id_for_event
+    -- G. Subscription Event Semantic Conflict Guard (h1e_c_dedicated_tenant_fixture_sub_event)
+    SELECT tenant_id, subscription_id, event_type, internal_reason, metadata->>'source'
+    INTO v_existing_tenant_id_for_event, v_existing_sub_id_for_event, v_existing_event_type_for_event, v_existing_reason_for_event, v_existing_source_for_event
     FROM public.subscription_events
     WHERE idempotency_key = 'h1e_c_dedicated_tenant_fixture_sub_event';
 
-    IF v_existing_tenant_id_for_event IS NOT NULL AND
-       (v_existing_tenant_id_for_event != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR v_existing_sub_id_for_event != 'd9999999-9999-9999-9999-999999999999') THEN
-        RAISE EXCEPTION 'H1E_C_FIXTURE_SUBSCRIPTION_EVENT_CONFLICT: Event key owned by tenant % sub %', v_existing_tenant_id_for_event, v_existing_sub_id_for_event USING ERRCODE = 'P0001';
+    IF v_existing_tenant_id_for_event IS NOT NULL AND (
+       v_existing_tenant_id_for_event != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR
+       v_existing_sub_id_for_event != 'd9999999-9999-9999-9999-999999999999' OR
+       v_existing_event_type_for_event != 'subscription_created' OR
+       v_existing_reason_for_event != 'Stage H1E-C dedicated tenant manual subscription fixture creation' OR
+       v_existing_source_for_event IS DISTINCT FROM 'h1e_c_dedicated_tenant_fixture.sql'
+    ) THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_SUBSCRIPTION_EVENT_CONFLICT: Event key owned by conflicting payload' USING ERRCODE = 'P0001';
     END IF;
 
     -- H. Relationship Ownership Guard
@@ -338,19 +351,23 @@ BEGIN
     ON CONFLICT DO NOTHING;
 
     -- =========================================================================
-    -- POST-FLIGHT GLOBAL SAFETY INVARIANT RE-CHECK
+    -- POST-FLIGHT RELEASE CONTROL SINGLETON & NULL-SAFE SAFETY INVARIANT RE-CHECK
     -- =========================================================================
     SELECT release_phase, is_payment_collection_enabled, is_checkout_enabled, is_iyzico_enabled
     INTO v_release_phase, v_is_pay_enabled, v_is_chk_enabled, v_is_iyz_enabled
     FROM public.platform_global_release_control
-    LIMIT 1;
+    WHERE id = 1;
 
     SELECT COUNT(*) INTO v_pilot_auth_count
     FROM public.tenant_pilot_authorizations
     WHERE tenant_id = 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd'
-      AND status = 'active';
+      AND revoked_at IS NULL;
 
-    IF v_release_phase != 'pre_pilot' OR v_is_pay_enabled OR v_is_chk_enabled OR v_is_iyz_enabled OR v_pilot_auth_count > 0 THEN
+    IF v_release_phase IS DISTINCT FROM 'pre_pilot'
+       OR v_is_pay_enabled IS DISTINCT FROM false
+       OR v_is_chk_enabled IS DISTINCT FROM false
+       OR v_is_iyz_enabled IS DISTINCT FROM false
+       OR v_pilot_auth_count IS DISTINCT FROM 0 THEN
         RAISE EXCEPTION 'H1E_C_FIXTURE_SAFETY_INVARIANT_VIOLATION: Post-check failed' USING ERRCODE = 'P0001';
     END IF;
 
