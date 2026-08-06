@@ -24,9 +24,14 @@ async function check(title, fn) {
 function createMockChromium(options = {}) {
   const isReadyVisible = options.isReadyVisible !== false;
   const isBlockedVisible = options.isBlockedVisible === true;
+  const isFormVisible = options.isFormVisible !== false;
+  const hasActionableControl = options.hasActionableControl !== false;
   const bodyText = options.bodyText || 'Standard page text';
   const consoleErrors = options.consoleErrors || 0;
   const networkFailures = options.networkFailures || 0;
+  const mockSubmissions = options.mockSubmissions || 0;
+  const mockPayments = options.mockPayments || 0;
+  const mockCheckouts = options.mockCheckouts || 0;
 
   return {
     launch: async () => ({
@@ -39,13 +44,28 @@ function createMockChromium(options = {}) {
             if (event === 'requestfailed' && networkFailures > 0) {
               for (let i = 0; i < networkFailures; i++) cb();
             }
+            if (event === 'request') {
+              if (mockSubmissions > 0) {
+                for (let i = 0; i < mockSubmissions; i++) cb({ url: () => '/create_public_booking', method: () => 'POST' });
+              }
+              if (mockPayments > 0) {
+                for (let i = 0; i < mockPayments; i++) cb({ url: () => '/payment', method: () => 'POST' });
+              }
+              if (mockCheckouts > 0) {
+                for (let i = 0; i < mockCheckouts; i++) cb({ url: () => '/checkout', method: () => 'POST' });
+              }
+            }
           },
           goto: async () => {},
           isVisible: async (selector) => {
             if (selector.includes('ready')) return isReadyVisible;
             if (selector.includes('blocked')) return isBlockedVisible;
-            if (selector.includes('form')) return true;
+            if (selector.includes('form')) return isFormVisible;
             return false;
+          },
+          evaluate: async (fn) => {
+            if (!isFormVisible) return false;
+            return hasActionableControl;
           },
           innerText: async () => bodyText
         }),
@@ -130,9 +150,9 @@ async function runTests() {
     }
   });
 
-  // 6. Authorized paymentless pilot checkpoint passes with injected mock chromium
-  await check('6. Authorized paymentless pilot checkpoint passes', async () => {
-    const mockChromium = createMockChromium({ isReadyVisible: true, isBlockedVisible: false });
+  // 6. Authorized paymentless pilot checkpoint passes with ready marker, form and enabled control
+  await check('6. Authorized paymentless pilot checkpoint passes with ready marker, form and enabled control', async () => {
+    const mockChromium = createMockChromium({ isReadyVisible: true, isBlockedVisible: false, isFormVisible: true, hasActionableControl: true });
     const res = await runControlledBrowserAcceptance({
       confirmation: 'I_UNDERSTAND_THE_RELEASE_PHASE_IS_CONTROLLED_EXTERNALLY',
       runId: 'run_123',
@@ -147,9 +167,39 @@ async function runTests() {
     }
   });
 
-  // 7. Revoked paymentless pilot checkpoint passes with injected mock chromium
-  await check('7. Revoked paymentless pilot checkpoint passes', async () => {
-    const mockChromium = createMockChromium({ isReadyVisible: false, isBlockedVisible: true });
+  // 7. Authorized checkpoint fails when ready marker exists but form is absent
+  await check('7. Authorized checkpoint fails when ready marker exists but form is absent', async () => {
+    const mockChromium = createMockChromium({ isReadyVisible: true, isBlockedVisible: false, isFormVisible: false, hasActionableControl: false });
+    const res = await runControlledBrowserAcceptance({
+      confirmation: 'I_UNDERSTAND_THE_RELEASE_PHASE_IS_CONTROLLED_EXTERNALLY',
+      runId: 'run_123',
+      baseUrl: 'http://localhost:3000',
+      dedicatedSlug: 'test-slug',
+      checkpoint: 'authorized_paymentless_pilot',
+      chromiumImpl: mockChromium,
+      logger: { log: () => {} }
+    });
+    if (res.exitCode !== 1) throw new Error('Authorized checkpoint without form did not fail');
+  });
+
+  // 8. Authorized checkpoint fails when form has no enabled interaction boundary
+  await check('8. Authorized checkpoint fails when form has no enabled interaction boundary', async () => {
+    const mockChromium = createMockChromium({ isReadyVisible: true, isBlockedVisible: false, isFormVisible: true, hasActionableControl: false });
+    const res = await runControlledBrowserAcceptance({
+      confirmation: 'I_UNDERSTAND_THE_RELEASE_PHASE_IS_CONTROLLED_EXTERNALLY',
+      runId: 'run_123',
+      baseUrl: 'http://localhost:3000',
+      dedicatedSlug: 'test-slug',
+      checkpoint: 'authorized_paymentless_pilot',
+      chromiumImpl: mockChromium,
+      logger: { log: () => {} }
+    });
+    if (res.exitCode !== 1) throw new Error('Authorized checkpoint with non-actionable form did not fail');
+  });
+
+  // 9. Revoked checkpoint fails when blocked marker and actionable form coexist
+  await check('9. Revoked checkpoint fails when blocked marker and actionable form coexist', async () => {
+    const mockChromium = createMockChromium({ isReadyVisible: false, isBlockedVisible: true, isFormVisible: true, hasActionableControl: true });
     const res = await runControlledBrowserAcceptance({
       confirmation: 'I_UNDERSTAND_THE_RELEASE_PHASE_IS_CONTROLLED_EXTERNALLY',
       runId: 'run_123',
@@ -159,12 +209,12 @@ async function runTests() {
       chromiumImpl: mockChromium,
       logger: { log: () => {} }
     });
-    if (res.exitCode !== 0) throw new Error('Revoked checkpoint failed');
+    if (res.exitCode !== 1) throw new Error('Revoked checkpoint with actionable form did not fail');
   });
 
-  // 8. Restored pre_pilot checkpoint passes with injected mock chromium
-  await check('8. Restored pre_pilot checkpoint passes', async () => {
-    const mockChromium = createMockChromium({ isReadyVisible: false, isBlockedVisible: true });
+  // 10. Restored checkpoint fails when blocked marker and actionable form coexist
+  await check('10. Restored checkpoint fails when blocked marker and actionable form coexist', async () => {
+    const mockChromium = createMockChromium({ isReadyVisible: false, isBlockedVisible: true, isFormVisible: true, hasActionableControl: true });
     const res = await runControlledBrowserAcceptance({
       confirmation: 'I_UNDERSTAND_THE_RELEASE_PHASE_IS_CONTROLLED_EXTERNALLY',
       runId: 'run_123',
@@ -174,12 +224,62 @@ async function runTests() {
       chromiumImpl: mockChromium,
       logger: { log: () => {} }
     });
-    if (res.exitCode !== 0) throw new Error('Restored checkpoint failed');
+    if (res.exitCode !== 1) throw new Error('Restored checkpoint with actionable form did not fail');
   });
 
-  // 9. Sensitive internal reason exposure fails checkpoint
-  await check('9. Sensitive internal reason exposure fails checkpoint', async () => {
-    const mockChromium = createMockChromium({ isReadyVisible: true, isBlockedVisible: false, bodyText: 'Internal code: PILOT_AUTHORIZATION_REVOKED' });
+  // 11. Blocked checkpoint passes when form is absent
+  await check('11. Blocked checkpoint passes when form is absent', async () => {
+    const mockChromium = createMockChromium({ isReadyVisible: false, isBlockedVisible: true, isFormVisible: false, hasActionableControl: false });
+    const res = await runControlledBrowserAcceptance({
+      confirmation: 'I_UNDERSTAND_THE_RELEASE_PHASE_IS_CONTROLLED_EXTERNALLY',
+      runId: 'run_123',
+      baseUrl: 'http://localhost:3000',
+      dedicatedSlug: 'test-slug',
+      checkpoint: 'revoked_paymentless_pilot',
+      chromiumImpl: mockChromium,
+      logger: { log: () => {} }
+    });
+    if (res.exitCode !== 0) throw new Error('Blocked checkpoint without form failed');
+  });
+
+  // 12. Blocked checkpoint passes when all form controls are disabled
+  await check('12. Blocked checkpoint passes when all form controls are disabled', async () => {
+    const mockChromium = createMockChromium({ isReadyVisible: false, isBlockedVisible: true, isFormVisible: true, hasActionableControl: false });
+    const res = await runControlledBrowserAcceptance({
+      confirmation: 'I_UNDERSTAND_THE_RELEASE_PHASE_IS_CONTROLLED_EXTERNALLY',
+      runId: 'run_123',
+      baseUrl: 'http://localhost:3000',
+      dedicatedSlug: 'test-slug',
+      checkpoint: 'revoked_paymentless_pilot',
+      chromiumImpl: mockChromium,
+      logger: { log: () => {} }
+    });
+    if (res.exitCode !== 0) throw new Error('Blocked checkpoint with disabled form failed');
+  });
+
+  // 13. Desktop and mobile accounting are independent and reported
+  await check('13. Desktop and mobile accounting are independent and reported', async () => {
+    const mockChromium = createMockChromium({ isReadyVisible: true, isBlockedVisible: false, isFormVisible: true, hasActionableControl: true });
+    const res = await runControlledBrowserAcceptance({
+      confirmation: 'I_UNDERSTAND_THE_RELEASE_PHASE_IS_CONTROLLED_EXTERNALLY',
+      runId: 'run_123',
+      baseUrl: 'http://localhost:3000',
+      dedicatedSlug: 'test-slug',
+      checkpoint: 'authorized_paymentless_pilot',
+      chromiumImpl: mockChromium,
+      logger: { log: () => {} }
+    });
+    if (!res.viewportResults || !res.viewportResults.desktop || !res.viewportResults.mobile) {
+      throw new Error('Independent viewport results missing');
+    }
+    if (res.viewportResults.desktop.defined !== 7 || res.viewportResults.mobile.defined !== 7) {
+      throw new Error('Viewport accounting count mismatch');
+    }
+  });
+
+  // 14. Sensitive internal reason exposure fails checkpoint
+  await check('14. Sensitive internal reason exposure fails checkpoint', async () => {
+    const mockChromium = createMockChromium({ isReadyVisible: true, isBlockedVisible: false, isFormVisible: true, hasActionableControl: true, bodyText: 'Internal code: PILOT_AUTHORIZATION_REVOKED' });
     const res = await runControlledBrowserAcceptance({
       confirmation: 'I_UNDERSTAND_THE_RELEASE_PHASE_IS_CONTROLLED_EXTERNALLY',
       runId: 'run_123',

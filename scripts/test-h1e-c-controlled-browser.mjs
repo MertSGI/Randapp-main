@@ -60,19 +60,12 @@ export async function runControlledBrowserAcceptance({
   print('Dedicated Slug: ' + dedicatedSlug);
   print('Target URL: ' + targetUrl);
 
-  let defined = 14; // 7 per viewport (desktop & mobile)
-  let executed = 0;
-  let passed = 0;
-  let failed = 0;
-
-  let appointmentSubmissionsAttempted = 0;
-  let paymentRequestsAttempted = 0;
-  let checkoutRequestsAttempted = 0;
-
   const viewports = [
     { name: 'desktop', width: 1280, height: 800 },
     { name: 'mobile', width: 375, height: 667 }
   ];
+
+  const viewportResults = {};
 
   let playwright;
   try {
@@ -86,11 +79,19 @@ export async function runControlledBrowserAcceptance({
 
   try {
     for (const vp of viewports) {
-      const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
-      const page = await context.newPage();
+      let defined = 7;
+      let executed = 0;
+      let passed = 0;
+      let failed = 0;
 
       let consoleErrors = 0;
-      let networkFailures = 0;
+      let failedRequests = 0;
+      let appointmentSubmissionsAttempted = 0;
+      let paymentRequestsAttempted = 0;
+      let checkoutRequestsAttempted = 0;
+
+      const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
+      const page = await context.newPage();
 
       page.on('console', msg => {
         if (msg.type() === 'error') consoleErrors++;
@@ -112,50 +113,65 @@ export async function runControlledBrowserAcceptance({
       });
 
       page.on('requestfailed', () => {
-        networkFailures++;
+        failedRequests++;
       });
 
       await page.goto(targetUrl, { waitUntil: 'networkidle' });
 
-      // 1. State Assertion using stable testids
+      // 1. Exact Selector State Assertion
       executed++;
       const isReadyVisible = await page.isVisible('[data-testid="public-booking-ready"]').catch(() => false);
       const isBlockedVisible = await page.isVisible('[data-testid="public-booking-blocked"]').catch(() => false);
+      const isFormVisible = await page.isVisible('[data-testid="public-booking-form"]').catch(() => false);
 
       let stateOk = false;
       if (checkpoint === 'authorized_paymentless_pilot') {
-        stateOk = isReadyVisible && !isBlockedVisible;
+        stateOk = isReadyVisible && !isBlockedVisible && isFormVisible;
       } else {
         stateOk = isBlockedVisible && !isReadyVisible;
       }
 
       if (stateOk) {
         passed++;
-        print(`  ✅ PASS: [${vp.name}] UI boundary state matches checkpoint '${checkpoint}'`);
+        print(`  ✅ PASS: [${vp.name}] Exact selector state matches checkpoint '${checkpoint}'`);
       } else {
         failed++;
-        print(`  ❌ FAIL: [${vp.name}] UI boundary state mismatch (ready=${isReadyVisible}, blocked=${isBlockedVisible})`);
+        print(`  ❌ FAIL: [${vp.name}] State mismatch (ready=${isReadyVisible}, blocked=${isBlockedVisible}, form=${isFormVisible})`);
       }
 
-      // 2. Form Actionability Assertion
+      // 2. Strict Form Actionability Contract
       executed++;
       let actionabilityOk = false;
       if (checkpoint === 'authorized_paymentless_pilot') {
-        // Must contain visible booking boundary
-        const hasForm = await page.isVisible('form, button, select, [data-testid="public-booking-ready"]').catch(() => false);
-        actionabilityOk = hasForm;
+        // Require visible enabled booking interaction control inside form
+        const hasInteractiveControl = await page.evaluate(() => {
+          const formEl = document.querySelector('[data-testid="public-booking-form"]');
+          if (!formEl) return false;
+          const controls = Array.from(formEl.querySelectorAll('button, select, input, [role="button"], a[href]'));
+          return controls.some(c => !c.disabled && c.getAttribute('aria-disabled') !== 'true');
+        }).catch(() => false);
+        actionabilityOk = isFormVisible && hasInteractiveControl;
       } else {
-        // Must be absent or disabled
-        const isFormPresent = await page.isVisible('form').catch(() => false);
-        actionabilityOk = !isFormPresent || isBlockedVisible;
+        // Require form absent or ALL controls inside form disabled/non-actionable
+        if (!isFormVisible) {
+          actionabilityOk = true;
+        } else {
+          const hasAnyActionableControl = await page.evaluate(() => {
+            const formEl = document.querySelector('[data-testid="public-booking-form"]');
+            if (!formEl) return false;
+            const controls = Array.from(formEl.querySelectorAll('button, select, input, [role="button"], a[href]'));
+            return controls.some(c => !c.disabled && c.getAttribute('aria-disabled') !== 'true');
+          }).catch(() => false);
+          actionabilityOk = !hasAnyActionableControl;
+        }
       }
 
       if (actionabilityOk) {
         passed++;
-        print(`  ✅ PASS: [${vp.name}] Form actionability assertion verified`);
+        print(`  ✅ PASS: [${vp.name}] Form actionability contract verified`);
       } else {
         failed++;
-        print(`  ❌ FAIL: [${vp.name}] Form actionability assertion failed`);
+        print(`  ❌ FAIL: [${vp.name}] Form actionability contract failed`);
       }
 
       // 3. Sensitive Internal Reason Code Exposure Assertion
@@ -180,14 +196,14 @@ export async function runControlledBrowserAcceptance({
         print(`  ❌ FAIL: [${vp.name}] ${consoleErrors} console errors detected`);
       }
 
-      // 5. Network Failures
+      // 5. Failed Requests
       executed++;
-      if (networkFailures === 0) {
+      if (failedRequests === 0) {
         passed++;
         print(`  ✅ PASS: [${vp.name}] Zero failed application requests`);
       } else {
         failed++;
-        print(`  ❌ FAIL: [${vp.name}] ${networkFailures} failed network requests`);
+        print(`  ❌ FAIL: [${vp.name}] ${failedRequests} failed network requests`);
       }
 
       // 6. Forbidden Appointment Submissions
@@ -211,12 +227,39 @@ export async function runControlledBrowserAcceptance({
       }
 
       await context.close();
+
+      viewportResults[vp.name] = {
+        defined, executed, passed, failed,
+        consoleErrors, failedRequests,
+        appointmentSubmissionsAttempted, paymentRequestsAttempted, checkoutRequestsAttempted
+      };
     }
   } finally {
     await browser.close();
   }
 
-  const isOk = executed === defined && passed === defined && failed === 0 && appointmentSubmissionsAttempted === 0 && paymentRequestsAttempted === 0 && checkoutRequestsAttempted === 0;
+  const desktop = viewportResults.desktop || {};
+  const mobile = viewportResults.mobile || {};
+
+  const totalDefined = (desktop.defined || 0) + (mobile.defined || 0);
+  const totalExecuted = (desktop.executed || 0) + (mobile.executed || 0);
+  const totalPassed = (desktop.passed || 0) + (mobile.passed || 0);
+  const totalFailed = (desktop.failed || 0) + (mobile.failed || 0);
+
+  const totalAppointment = (desktop.appointmentSubmissionsAttempted || 0) + (mobile.appointmentSubmissionsAttempted || 0);
+  const totalPayment = (desktop.paymentRequestsAttempted || 0) + (mobile.paymentRequestsAttempted || 0);
+  const totalCheckout = (desktop.checkoutRequestsAttempted || 0) + (mobile.checkoutRequestsAttempted || 0);
+
+  const isOk = totalDefined > 0 &&
+    totalExecuted === totalDefined &&
+    totalPassed === totalDefined &&
+    totalFailed === 0 &&
+    desktop.passed === desktop.defined &&
+    mobile.passed === mobile.defined &&
+    totalAppointment === 0 &&
+    totalPayment === 0 &&
+    totalCheckout === 0;
+
   const exitCode = isOk ? 0 : 1;
 
   print(`Final exit code: ${exitCode}`);
@@ -228,9 +271,12 @@ export async function runControlledBrowserAcceptance({
     dedicatedSlug,
     targetUrl,
     accounting: {
-      defined, executed, passed, failed,
-      appointmentSubmissionsAttempted, paymentRequestsAttempted, checkoutRequestsAttempted
-    }
+      defined: totalDefined, executed: totalExecuted, passed: totalPassed, failed: totalFailed,
+      appointmentSubmissionsAttempted: totalAppointment,
+      paymentRequestsAttempted: totalPayment,
+      checkoutRequestsAttempted: totalCheckout
+    },
+    viewportResults
   };
 }
 

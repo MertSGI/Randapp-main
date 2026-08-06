@@ -101,7 +101,7 @@ export async function runH1ECredentialedAcceptance({
   print('Run ID: ' + runId);
   print('Mode: ' + mode);
 
-  // Controlled Test Plan Construction
+  // Controlled Test Plan Construction (47 items)
   let testPlan = [];
   if (mode === 'controlled_paymentless_pilot') {
     const controlledPlanItems = [
@@ -143,6 +143,8 @@ export async function runH1ECredentialedAcceptance({
       'paymentless_audit_delta_plus_1',
       'restoration_audit_delta_plus_1',
       'transition_idempotency_delta_plus_2',
+      'pilot_authorization_history_delta_plus_1',
+      'pilot_idempotency_delta_plus_2',
       'pilot_approval_audit_delta_plus_1',
       'pilot_revocation_audit_delta_plus_1',
       'final_active_authorization_count_0',
@@ -242,10 +244,10 @@ export async function runH1ECredentialedAcceptance({
   let pilotApprovedActive = false;
   let tokens = {};
   let dedicatedSlug = null;
+  let canonicalSecondSlug = null;
 
   try {
     if (mode === 'pre_pilot_readonly') {
-      // Pre-pilot read-only mode unchanged
       for (const [role, c] of Object.entries(creds)) {
         authAttempted++;
         executed++;
@@ -379,7 +381,11 @@ export async function runH1ECredentialedAcceptance({
       // 4. Dedicated Tenant Snapshot Preconditions
       authorizationAttempted++;
       const initSnapRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: DEDICATED_H1D_TENANT_ID }, tokens.superAdmin, monitoredFetch);
-      authorizationPassed++;
+      if (initSnapRes && initSnapRes.status === 200 && initSnapRes.data && initSnapRes.data.success) {
+        authorizationPassed++;
+      } else {
+        authorizationFailed++;
+      }
 
       executePlanTest('dedicated_tenant_exists', () => {
         if (!initSnapRes || initSnapRes.status !== 200 || !initSnapRes.data || !initSnapRes.data.success) {
@@ -404,8 +410,23 @@ export async function runH1ECredentialedAcceptance({
         }
       });
 
+      // Resolve Canonical Second Tenant via Snapshot RPC
+      authorizationAttempted++;
+      const secondTenantSnapRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: CANONICAL_TENANT_ID }, tokens.superAdmin, monitoredFetch);
+      if (secondTenantSnapRes && secondTenantSnapRes.status === 200 && secondTenantSnapRes.data && secondTenantSnapRes.data.success) {
+        authorizationPassed++;
+      } else {
+        authorizationFailed++;
+      }
+
       executePlanTest('second_non_authorized_tenant_identified', () => {
-        if (!CANONICAL_TENANT_ID) throw new Error('Canonical tenant missing');
+        if (!secondTenantSnapRes || secondTenantSnapRes.status !== 200 || !secondTenantSnapRes.data || !secondTenantSnapRes.data.success) {
+          throw new Error('Canonical second tenant snapshot fetch failed');
+        }
+        canonicalSecondSlug = secondTenantSnapRes.data.tenant_slug;
+        if (!canonicalSecondSlug || canonicalSecondSlug.trim() === '') throw new Error('Canonical second tenant slug missing');
+        if (CANONICAL_TENANT_ID === DEDICATED_H1D_TENANT_ID) throw new Error('Canonical tenant ID equals dedicated tenant ID');
+        if (secondTenantSnapRes.data.authorized === true) throw new Error('Canonical second tenant already authorized');
       });
 
       // 5. Transition pre_pilot -> paymentless_pilot
@@ -457,13 +478,18 @@ export async function runH1ECredentialedAcceptance({
         }
       });
 
-      // Second tenant check
+      // Second tenant check using resolved canonicalSecondSlug
       behavioralAttempted++;
-      const pubResSecond = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'can_accept_public_booking', { p_slug: 'melis-guzellik' }, null, monitoredFetch);
+      const pubResSecond = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'can_accept_public_booking', { p_slug: canonicalSecondSlug }, null, monitoredFetch);
       executePlanTest('second_tenant_remains_blocked', () => {
         if (!pubResSecond || pubResSecond.status !== 200 || !pubResSecond.data || pubResSecond.data.bookable !== false) {
           behavioralFailed++;
           throw new Error('Second tenant unexpectedly bookable');
+        }
+        const blockers = pubResSecond.data.blocking_reason_codes || [];
+        if (!blockers.includes('PILOT_AUTHORIZATION_REQUIRED') && !blockers.includes('PILOT_AUTHORIZATION_REVOKED')) {
+          behavioralFailed++;
+          throw new Error(`Second tenant blocker mismatch: ${blockers.join(', ')}`);
         }
         behavioralPassed++;
       });
@@ -489,12 +515,16 @@ export async function runH1ECredentialedAcceptance({
 
       authorizationAttempted++;
       const postApproveSnap = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: DEDICATED_H1D_TENANT_ID }, tokens.superAdmin, monitoredFetch);
+      if (postApproveSnap && postApproveSnap.status === 200 && postApproveSnap.data && postApproveSnap.data.authorized === true) {
+        authorizationPassed++;
+      } else {
+        authorizationFailed++;
+      }
+
       executePlanTest('authorized_snapshot', () => {
         if (!postApproveSnap || postApproveSnap.status !== 200 || !postApproveSnap.data || postApproveSnap.data.authorized !== true) {
-          authorizationFailed++;
           throw new Error('Authorized snapshot false');
         }
-        authorizationPassed++;
       });
 
       behavioralAttempted++;
@@ -657,6 +687,20 @@ export async function runH1ECredentialedAcceptance({
         }
       });
 
+      executePlanTest('pilot_authorization_history_delta_plus_1', () => {
+        const delta = finalPilotEvidence.total_authorization_count - initialPilotEvidence.total_authorization_count;
+        if (delta !== 1) throw new Error(`Expected pilot authorization history delta +1, got ${delta}`);
+      });
+
+      executePlanTest('pilot_idempotency_delta_plus_2', () => {
+        const initialCount = initialPilotEvidence.idempotency_record_count || 0;
+        const finalCount = finalPilotEvidence.idempotency_record_count;
+        const delta = finalCount - initialCount;
+        if (initialCount !== 0 || finalCount !== 2 || delta !== 2) {
+          throw new Error(`Expected pilot idempotency initial 0, final 2, delta +2; got initial ${initialCount}, final ${finalCount}, delta ${delta}`);
+        }
+      });
+
       executePlanTest('pilot_approval_audit_delta_plus_1', () => {
         const delta = finalPilotEvidence.approved_audit_count - initialPilotEvidence.approved_audit_count;
         if (delta !== 1) throw new Error(`Expected approval audit delta +1, got ${delta}`);
@@ -726,15 +770,21 @@ export async function runH1ECredentialedAcceptance({
       }
 
       // Real Read RPCs to verify compensation final state
-      if (tokens.superAdmin) {
-        const compEvRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_release_transition_evidence', {}, tokens.superAdmin, monitoredFetch);
+      if (tokens.superAdmin && dedicatedSlug) {
+        const compEvRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_release_transition_evidence', { p_run_prefix: runId }, tokens.superAdmin, monitoredFetch);
+        const compPilotEvRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_mutation_evidence', { p_tenant_id: DEDICATED_H1D_TENANT_ID, p_run_prefix: runId }, tokens.superAdmin, monitoredFetch);
         const compSnapRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: DEDICATED_H1D_TENANT_ID }, tokens.superAdmin, monitoredFetch);
-        const compPubRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'can_accept_public_booking', { p_slug: dedicatedSlug || 'dedicated-slug' }, null, monitoredFetch);
+        const compPubRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'can_accept_public_booking', { p_slug: dedicatedSlug }, null, monitoredFetch);
 
-        const isCompPhaseSafe = compEvRes && compEvRes.data && compEvRes.data.release_phase === 'pre_pilot';
-        const isCompAuthSafe = compSnapRes && compSnapRes.data && compSnapRes.data.authorized === false;
-        const isCompPaymentSafe = validatePaymentFlagsFalse(compEvRes ? compEvRes.data : null);
-        const isCompPublicBlocked = compPubRes && compPubRes.data && compPubRes.data.bookable === false;
+        const isCompEvOk = compEvRes && compEvRes.status === 200 && compEvRes.data && compEvRes.data.success;
+        const isCompPilotEvOk = compPilotEvRes && compPilotEvRes.status === 200 && compPilotEvRes.data && compPilotEvRes.data.success;
+        const isCompSnapOk = compSnapRes && compSnapRes.status === 200 && compSnapRes.data && compSnapRes.data.success;
+        const isCompPubOk = compPubRes && compPubRes.status === 200 && compPubRes.data;
+
+        const isCompPhaseSafe = isCompEvOk && compEvRes.data.release_phase === 'pre_pilot';
+        const isCompAuthSafe = isCompSnapOk && compSnapRes.data.authorized === false && isCompPilotEvOk && compPilotEvRes.data.active_authorization_count === 0;
+        const isCompPaymentSafe = isCompEvOk && validatePaymentFlagsFalse(compEvRes.data);
+        const isCompPublicBlocked = isCompPubOk && compPubRes.data.bookable === false;
 
         if (isCompPhaseSafe && isCompAuthSafe && isCompPaymentSafe && isCompPublicBlocked) {
           compensationSucceeded++;
@@ -747,6 +797,7 @@ export async function runH1ECredentialedAcceptance({
         }
       } else {
         cleanupRequired = true;
+        print('  ⚠️ OPERATOR WARNING: Missing tokens or dedicated slug for compensation verification. Cleanup required = true');
       }
     }
   }
@@ -754,7 +805,42 @@ export async function runH1ECredentialedAcceptance({
   forbiddenMutationAttempts = observer.getForbiddenMutationAttemptsDetected();
   forbiddenRequestsDetected = observer.getForbiddenRequestsDetected();
 
-  const isAccountingValid = (executed === defined && passed === defined && failed === 0 && authFailed === 0 && authorizationFailed === 0 && transitionFailed === 0 && pilotMutationFailed === 0 && behavioralFailed === 0 && browserCheckpointsFailed === 0 && forbiddenMutationAttempts === 0 && forbiddenRequestsDetected === 0 && finalReleasePhase === 'pre_pilot' && finalActiveAuthCount === 0);
+  const isAccountingValid = mode === 'controlled_paymentless_pilot' ? (
+    defined > 0 &&
+    executed === defined &&
+    passed === defined &&
+    failed === 0 &&
+    blocked === 0 &&
+    authAttempted === 5 &&
+    authPassed === 5 &&
+    authFailed === 0 &&
+    authorizationAttempted === authorizationPassed &&
+    authorizationFailed === 0 &&
+    transitionFailed === 0 &&
+    pilotMutationFailed === 0 &&
+    behavioralFailed === 0 &&
+    browserCheckpointsAttempted === 3 &&
+    browserCheckpointsPassed === 3 &&
+    browserCheckpointsFailed === 0 &&
+    approvedMutations === 4 &&
+    forbiddenMutationAttempts === 0 &&
+    forbiddenRequestsDetected === 0 &&
+    cleanupRequired === false &&
+    finalReleasePhase === 'pre_pilot' &&
+    finalActiveAuthCount === 0
+  ) : (
+    defined > 0 &&
+    executed === defined &&
+    passed === defined &&
+    failed === 0 &&
+    authFailed === 0 &&
+    authorizationFailed === 0 &&
+    behavioralFailed === 0 &&
+    forbiddenMutationAttempts === 0 &&
+    forbiddenRequestsDetected === 0 &&
+    finalReleasePhase === 'pre_pilot' &&
+    finalActiveAuthCount === 0
+  );
 
   const exitCode = isAccountingValid ? 0 : 1;
 

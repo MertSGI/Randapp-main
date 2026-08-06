@@ -804,7 +804,7 @@ const BookingPage: React.FC = () => {
           isAiEnabled={isAiEnabled}
           bookingComponent={
             step > 0 ? (
-              <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-blue-900/5 border border-gray-100 dark:border-slate-700/50 p-6 md:p-8 lg:p-10 mx-auto w-full mb-12">
+              <div data-testid="public-booking-form" className="bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-blue-900/5 border border-gray-100 dark:border-slate-700/50 p-6 md:p-8 lg:p-10 mx-auto w-full mb-12">
                 {renderStepper()}
                 {/* Steps 1-4 with left/right column structure */}
                 {step < 5 && (
