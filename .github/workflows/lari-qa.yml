@@ -122,3 +122,21 @@ jobs:
 
       - name: QA Booking Consistency
         run: npm run qa:booking-consistency
+
+      - name: Stage H1E-C Fixture SQL Static Contract QA
+        run: npm run qa:h1e-c-fixture-sql-contract
+
+      - name: Stage H1E-C Dedicated Tenant Readiness Diagnostic QA
+        run: npm run qa:h1e-c-dedicated-tenant-readiness
+
+      - name: Stage H1E-C Dedicated Tenant Fixture Verifier QA
+        run: npm run qa:h1e-c-dedicated-tenant-fixture
+
+      - name: Stage H1E-C Credentialed Runner Unit QA
+        run: npm run qa:h1e-c-credentialed-runner
+
+      - name: Stage H1E-C Controlled Orchestrator Unit QA
+        run: npm run qa:h1e-c-orchestrator
+
+      - name: Stage H1E-C Controlled Browser Harness Unit QA
+        run: npm run qa:h1e-c-browser

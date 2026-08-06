@@ -30,7 +30,7 @@ export async function prepareDedicatedTenantStagingFixture({
   logger = console
 } = {}) {
   const print = (msg = '') => logger.log(msg);
-  print('=== STAGE H1E-C DEDICATED TENANT STAGING FIXTURE PREPARATION ===');
+  print('=== STAGE H1E-C DEDICATED TENANT STAGING FIXTURE VERIFIER (OPTION B) ===');
 
   const check = validateFixturePreparationPreconditions({ targetTenantId, confirmation });
   if (!check.ok) {
@@ -62,45 +62,33 @@ export async function prepareDedicatedTenantStagingFixture({
     return { ok: false, exitCode: 1, reason: 'AUTHENTICATION_FAILED' };
   }
 
-  // 1. Capture BEFORE readiness state
-  const beforeSnapRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: targetTenantId }, authRes.token, fetchImpl);
-  const beforeSnap = beforeSnapRes ? beforeSnapRes.data : null;
-  const beforeSlug = beforeSnap ? beforeSnap.tenant_slug : 'dedicated-h1d-tenant';
-  const beforePubRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'can_accept_public_booking', { p_slug: beforeSlug }, null, fetchImpl);
-  const beforePub = beforePubRes ? beforePubRes.data : null;
-  const beforeAudit = buildDedicatedTenantBlockerRegister(beforeSnap, beforePub);
+  // 1. Fetch current dedicated tenant snapshot
+  const snapRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: targetTenantId }, authRes.token, fetchImpl);
+  const snapData = snapRes ? snapRes.data : null;
+  const slug = snapData ? snapData.tenant_slug : 'dedicated-h1d-tenant';
 
-  print('\n--- BEFORE FIXTURE PREPARATION READINESS FACTS ---');
-  print(`  Tenant Exists: ${beforeSnap ? beforeSnap.tenant_id : 'false'}`);
-  print(`  Public Site Status: ${beforeSnap ? (beforeSnap.public_site_status || 'missing') : 'missing'}`);
-  print(`  Primary Reasons: ${beforeSnap ? beforeSnap.primary_reason_code : 'UNKNOWN'}`);
-  print(`  Blocking Reasons: [${beforeAudit.blockingReasonCodes.join(', ')}]`);
-  print(`  Unexpected Blockers Count: ${beforeAudit.unexpectedBlockers.length}`);
+  const pubRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'can_accept_public_booking', { p_slug: slug }, null, fetchImpl);
+  const pubData = pubRes ? pubRes.data : null;
 
-  // 2. Perform Idempotent Staging Fixture Preparation via super_admin RPC or direct SQL
-  // Note: Staging operator executes supabase/seed/h1e_c_dedicated_tenant_fixture.sql
-  print('\nApplying idempotent staging fixture seed for dedicated tenant: ' + targetTenantId);
+  const audit = buildDedicatedTenantBlockerRegister(snapData, pubData);
 
-  // Verification post-condition gate
-  const afterSnapRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: targetTenantId }, authRes.token, fetchImpl);
-  const afterSnap = afterSnapRes ? afterSnapRes.data : null;
-  const afterSlug = afterSnap ? afterSnap.tenant_slug : 'dedicated-h1d-tenant';
-  const afterPubRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'can_accept_public_booking', { p_slug: afterSlug }, null, fetchImpl);
-  const afterPub = afterPubRes ? afterPubRes.data : null;
-  const afterAudit = buildDedicatedTenantBlockerRegister(afterSnap, afterPub);
+  print('\n--- STAGING FIXTURE EXECUTION INSTRUCTIONS ---');
+  print('⚠️ FIXTURE_SQL_REQUIRES_EXPLICIT_OPERATOR_EXECUTION');
+  print('   SQL Seed file path: supabase/seed/h1e_c_dedicated_tenant_fixture.sql');
+  print('   Please execute this SQL seed file in the Supabase SQL Editor for target tenant: ' + targetTenantId);
 
-  print('\n--- AFTER FIXTURE PREPARATION READINESS FACTS ---');
-  print(`  Tenant Exists: ${afterSnap ? afterSnap.tenant_id : 'false'}`);
-  print(`  Public Site Status: ${afterSnap ? (afterSnap.public_site_status || 'missing') : 'missing'}`);
-  print(`  Primary Reasons: ${afterSnap ? afterSnap.primary_reason_code : 'UNKNOWN'}`);
-  print(`  Blocking Reasons: [${afterAudit.blockingReasonCodes.join(', ')}]`);
-  print(`  Unexpected Blockers Count: ${afterAudit.unexpectedBlockers.length}`);
+  print('\n--- CURRENT STAGING READINESS FACTS ---');
+  print(`  Tenant Exists: ${snapData ? snapData.tenant_id : 'false'}`);
+  print(`  Public Site Status: ${snapData ? (snapData.public_site_status || 'missing') : 'missing'}`);
+  print(`  Primary Reason: ${snapData ? snapData.primary_reason_code : 'UNKNOWN'}`);
+  print(`  Blocking Reasons: [${audit.blockingReasonCodes.join(', ')}]`);
+  print(`  Unexpected Blockers Count: ${audit.unexpectedBlockers.length}`);
 
-  // Prove Safety Invariants
-  const relControl = afterSnap ? afterSnap.global_release_control : null;
+  // Safety Invariant Verification
+  const relControl = snapData ? snapData.global_release_control : null;
   const isPaymentDisabled = relControl && relControl.is_payment_collection_enabled === false && relControl.is_checkout_enabled === false && relControl.is_iyzico_enabled === false;
   const isReleasePrePilot = relControl && relControl.release_phase === 'pre_pilot';
-  const isPilotAuthCountZero = afterSnap && afterSnap.pilot_authorization && afterSnap.pilot_authorization.is_authorized === false;
+  const isPilotAuthCountZero = snapData && snapData.pilot_authorization && snapData.pilot_authorization.is_authorized === false;
 
   print('\n--- SAFETY INVARIANT VERIFICATION ---');
   print(`  [SAFETY] Release Phase Is pre_pilot: ${isReleasePrePilot}`);
@@ -109,31 +97,31 @@ export async function prepareDedicatedTenantStagingFixture({
   print(`  [SAFETY] Canonical Tenant Untouched: true`);
 
   if (!isReleasePrePilot || !isPaymentDisabled || !isPilotAuthCountZero) {
-    print('\n❌ SAFETY VIOLATION DETECTED: Staging fixture preparation altered system safety flags!');
+    print('\n❌ SAFETY VIOLATION DETECTED: Staging state violates safety invariants!');
     return { ok: false, exitCode: 1, reason: 'SAFETY_INVARIANT_VIOLATION' };
   }
 
-  if (afterAudit.isPreflightReady) {
-    print('\n✅ STAGING FIXTURE PREPARATION SUCCESSFUL');
-    print('   Dedicated tenant is now fully ready. Only GLOBAL_RELEASE_PHASE_BLOCKED remains.');
+  if (audit.isPreflightReady) {
+    print('\n✅ FIXTURE VERIFIED READY: Fixture SQL has been executed and verified.');
+    print('   Dedicated tenant is fully ready. Only GLOBAL_RELEASE_PHASE_BLOCKED remains.');
     return {
       ok: true,
       exitCode: 0,
       targetTenantId,
-      beforeBlockers: beforeAudit.blockingReasonCodes,
-      afterBlockers: afterAudit.blockingReasonCodes,
-      unexpectedBlockersRemaining: afterAudit.unexpectedBlockers.length
+      reason: 'FIXTURE_VERIFIED_READY',
+      blockers: audit.blockingReasonCodes,
+      unexpectedBlockersRemaining: 0
     };
   } else {
-    print('\n⚠️ STAGING FIXTURE INCOMPLETE: Unexpected blockers still remain:');
-    print(`   Remaining Blockers: ${afterAudit.unexpectedBlockers.join(', ')}`);
+    print('\n⚠️ FIXTURE_SQL_REQUIRES_EXPLICIT_OPERATOR_EXECUTION');
+    print(`   Unexpected Staging Blockers Remaining: ${audit.unexpectedBlockers.join(', ')}`);
+    print('   Please execute supabase/seed/h1e_c_dedicated_tenant_fixture.sql in Supabase SQL Editor and rerun this script.');
     return {
       ok: false,
       exitCode: 1,
-      reason: 'STAGING_FIXTURE_INCOMPLETE',
-      beforeBlockers: beforeAudit.blockingReasonCodes,
-      afterBlockers: afterAudit.blockingReasonCodes,
-      unexpectedBlockersRemaining: afterAudit.unexpectedBlockers.length
+      reason: 'FIXTURE_SQL_REQUIRES_EXPLICIT_OPERATOR_EXECUTION',
+      blockers: audit.blockingReasonCodes,
+      unexpectedBlockersRemaining: audit.unexpectedBlockers.length
     };
   }
 }
