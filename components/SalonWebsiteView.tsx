@@ -143,7 +143,7 @@ const SalonWebsiteView: React.FC<SalonWebsiteViewProps> = ({
 
          {/* Header CTAs */}
          <div className="flex items-center gap-3">
-            <button onClick={onStartBooking} className="px-5 py-2.5 bg-accent text-white rounded-xl font-bold border border-transparent hover:bg-blue-600 hover:shadow-md transition-all truncate">
+            <button data-testid="public-booking-start" onClick={onStartBooking} className="px-5 py-2.5 bg-accent text-white rounded-xl font-bold border border-transparent hover:bg-blue-600 hover:shadow-md transition-all truncate">
                {language === 'tr' ? 'Randevu Al' : 'Book Now'}
             </button>
          </div>

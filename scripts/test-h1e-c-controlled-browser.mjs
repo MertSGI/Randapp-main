@@ -79,7 +79,7 @@ export async function runControlledBrowserAcceptance({
 
   try {
     for (const vp of viewports) {
-      let defined = 7;
+      let defined = 8;
       let executed = 0;
       let passed = 0;
       let failed = 0;
@@ -118,60 +118,63 @@ export async function runControlledBrowserAcceptance({
 
       await page.goto(targetUrl, { waitUntil: 'networkidle' });
 
-      // 1. Exact Selector State Assertion
+      // 1. Initial State Assertion
       executed++;
       const isReadyVisible = await page.isVisible('[data-testid="public-booking-ready"]').catch(() => false);
       const isBlockedVisible = await page.isVisible('[data-testid="public-booking-blocked"]').catch(() => false);
-      const isFormVisible = await page.isVisible('[data-testid="public-booking-form"]').catch(() => false);
+      const isStartVisible = await page.isVisible('[data-testid="public-booking-start"]').catch(() => false);
+      const isFormVisibleInitial = await page.isVisible('[data-testid="public-booking-form"]').catch(() => false);
 
       let stateOk = false;
       if (checkpoint === 'authorized_paymentless_pilot') {
-        stateOk = isReadyVisible && !isBlockedVisible && isFormVisible;
+        stateOk = isReadyVisible && !isBlockedVisible && isStartVisible && !isFormVisibleInitial;
       } else {
-        stateOk = isBlockedVisible && !isReadyVisible;
+        stateOk = isBlockedVisible && !isReadyVisible && !isStartVisible && !isFormVisibleInitial;
       }
 
       if (stateOk) {
         passed++;
-        print(`  ✅ PASS: [${vp.name}] Exact selector state matches checkpoint '${checkpoint}'`);
+        print(`  ✅ PASS: [${vp.name}] Initial selector state matches checkpoint '${checkpoint}'`);
       } else {
         failed++;
-        print(`  ❌ FAIL: [${vp.name}] State mismatch (ready=${isReadyVisible}, blocked=${isBlockedVisible}, form=${isFormVisible})`);
+        print(`  ❌ FAIL: [${vp.name}] Initial state mismatch (ready=${isReadyVisible}, blocked=${isBlockedVisible}, start=${isStartVisible}, form=${isFormVisibleInitial})`);
       }
 
-      // 2. Strict Form Actionability Contract
+      // 2. Start-Booking Boundary & Form Actionability Contract
       executed++;
-      let actionabilityOk = false;
+      let boundaryOk = false;
+
       if (checkpoint === 'authorized_paymentless_pilot') {
-        // Require visible enabled booking interaction control inside form
-        const hasInteractiveControl = await page.evaluate(() => {
-          const formEl = document.querySelector('[data-testid="public-booking-form"]');
-          if (!formEl) return false;
-          const controls = Array.from(formEl.querySelectorAll('button, select, input, [role="button"], a[href]'));
-          return controls.some(c => !c.disabled && c.getAttribute('aria-disabled') !== 'true');
-        }).catch(() => false);
-        actionabilityOk = isFormVisible && hasInteractiveControl;
-      } else {
-        // Require form absent or ALL controls inside form disabled/non-actionable
-        if (!isFormVisible) {
-          actionabilityOk = true;
-        } else {
-          const hasAnyActionableControl = await page.evaluate(() => {
-            const formEl = document.querySelector('[data-testid="public-booking-form"]');
-            if (!formEl) return false;
-            const controls = Array.from(formEl.querySelectorAll('button, select, input, [role="button"], a[href]'));
-            return controls.some(c => !c.disabled && c.getAttribute('aria-disabled') !== 'true');
-          }).catch(() => false);
-          actionabilityOk = !hasAnyActionableControl;
+        // Must click public-booking-start and reveal public-booking-form with enabled interaction control
+        if (isStartVisible) {
+          const isStartEnabled = await page.isEnabled('[data-testid="public-booking-start"]').catch(() => false);
+          if (isStartEnabled) {
+            await page.click('[data-testid="public-booking-start"]').catch(() => {});
+            await page.waitForSelector('[data-testid="public-booking-form"]', { state: 'visible', timeout: 5000 }).catch(() => {});
+            const isFormVisiblePostClick = await page.isVisible('[data-testid="public-booking-form"]').catch(() => false);
+
+            if (isFormVisiblePostClick) {
+              const hasInteractiveControl = await page.evaluate(() => {
+                const formEl = document.querySelector('[data-testid="public-booking-form"]');
+                if (!formEl) return false;
+                const controls = Array.from(formEl.querySelectorAll('button, select, input, [role="button"], a[href]'));
+                return controls.some(c => !c.disabled && c.getAttribute('aria-disabled') !== 'true');
+              }).catch(() => false);
+              boundaryOk = hasInteractiveControl;
+            }
+          }
         }
+      } else {
+        // Blocked checkpoints require start absent AND form absent
+        boundaryOk = !isStartVisible && !isFormVisibleInitial;
       }
 
-      if (actionabilityOk) {
+      if (boundaryOk) {
         passed++;
-        print(`  ✅ PASS: [${vp.name}] Form actionability contract verified`);
+        print(`  ✅ PASS: [${vp.name}] Booking boundary actionability contract verified`);
       } else {
         failed++;
-        print(`  ❌ FAIL: [${vp.name}] Form actionability contract failed`);
+        print(`  ❌ FAIL: [${vp.name}] Booking boundary actionability contract failed`);
       }
 
       // 3. Sensitive Internal Reason Code Exposure Assertion
@@ -216,14 +219,24 @@ export async function runControlledBrowserAcceptance({
         print(`  ❌ FAIL: [${vp.name}] Forbidden appointment submission request detected`);
       }
 
-      // 7. Forbidden Payment/Checkout Requests
+      // 7. Forbidden Payment Requests
       executed++;
-      if (paymentRequestsAttempted === 0 && checkoutRequestsAttempted === 0) {
+      if (paymentRequestsAttempted === 0) {
         passed++;
-        print(`  ✅ PASS: [${vp.name}] Zero payment/checkout requests`);
+        print(`  ✅ PASS: [${vp.name}] Zero payment requests`);
       } else {
         failed++;
-        print(`  ❌ FAIL: [${vp.name}] Forbidden payment/checkout request detected`);
+        print(`  ❌ FAIL: [${vp.name}] Forbidden payment request detected`);
+      }
+
+      // 8. Forbidden Checkout Requests
+      executed++;
+      if (checkoutRequestsAttempted === 0) {
+        passed++;
+        print(`  ✅ PASS: [${vp.name}] Zero checkout requests`);
+      } else {
+        failed++;
+        print(`  ❌ FAIL: [${vp.name}] Forbidden checkout request detected`);
       }
 
       await context.close();

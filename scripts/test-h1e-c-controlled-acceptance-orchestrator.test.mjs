@@ -38,8 +38,8 @@ function createValidBrowserResult(runId, checkpoint, dedicatedSlug = 's1') {
   return {
     ok: true, exitCode: 0, runId, checkpoint, dedicatedSlug,
     viewportResults: {
-      desktop: { defined: 7, executed: 7, passed: 7, failed: 0, appointmentSubmissionsAttempted: 0, paymentRequestsAttempted: 0, checkoutRequestsAttempted: 0, consoleErrors: 0, failedRequests: 0 },
-      mobile: { defined: 7, executed: 7, passed: 7, failed: 0, appointmentSubmissionsAttempted: 0, paymentRequestsAttempted: 0, checkoutRequestsAttempted: 0, consoleErrors: 0, failedRequests: 0 }
+      desktop: { defined: 8, executed: 8, passed: 8, failed: 0, appointmentSubmissionsAttempted: 0, paymentRequestsAttempted: 0, checkoutRequestsAttempted: 0, consoleErrors: 0, failedRequests: 0 },
+      mobile: { defined: 8, executed: 8, passed: 8, failed: 0, appointmentSubmissionsAttempted: 0, paymentRequestsAttempted: 0, checkoutRequestsAttempted: 0, consoleErrors: 0, failedRequests: 0 }
     }
   };
 }
