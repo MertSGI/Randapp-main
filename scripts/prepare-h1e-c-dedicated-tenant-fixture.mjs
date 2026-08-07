@@ -1,6 +1,6 @@
 // scripts/prepare-h1e-c-dedicated-tenant-fixture.mjs
 import path from 'path';
-import { loadEnvFile, callRpcEndpoint, authenticateUser, DEDICATED_H1D_TENANT_ID, CANONICAL_TENANT_ID } from './test-h1e-a-credentialed-runner-helpers.mjs';
+import { loadEnvFile, callRpcEndpoint, authenticateUser, DEDICATED_H1D_TENANT_ID, DEDICATED_H1D_TENANT_SLUG, CANONICAL_TENANT_ID } from './test-h1e-a-credentialed-runner-helpers.mjs';
 import { buildDedicatedTenantBlockerRegister } from './diagnose-h1e-c-dedicated-tenant-readiness.mjs';
 
 export function validateFixturePreparationPreconditions({
@@ -48,7 +48,7 @@ export async function prepareDedicatedTenantStagingFixture({
     return { ok: false, exitCode: 1, reason: 'CONFIGURATION_REQUIRED' };
   }
 
-  const superEmail = env.LARI_STAGE_H1D_SUPER_ADMIN_EMAIL;
+  const superEmail = env.LARI_STAGE_H1D_SUPER_ADMIN_EMAIL || 'superadmin@randevulari.com';
   const superPass = env.LARI_STAGE_H1D_SUPER_ADMIN_PASSWORD;
 
   if (!superEmail || !superPass) {
@@ -65,7 +65,7 @@ export async function prepareDedicatedTenantStagingFixture({
   // 1. Fetch current dedicated tenant snapshot
   const snapRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: targetTenantId }, authRes.token, fetchImpl);
   const snapData = snapRes ? snapRes.data : null;
-  const slug = snapData ? snapData.tenant_slug : 'dedicated-h1d-tenant';
+  const slug = snapData && snapData.tenant_slug ? snapData.tenant_slug : DEDICATED_H1D_TENANT_SLUG;
 
   const pubRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'can_accept_public_booking', { p_slug: slug }, null, fetchImpl);
   const pubData = pubRes ? pubRes.data : null;

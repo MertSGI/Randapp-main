@@ -66,13 +66,13 @@ BEGIN
     FROM public.tenants
     WHERE id = 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd';
 
-    IF v_existing_tenant_id IS NOT NULL AND v_existing_slug IS DISTINCT FROM 'dedicated-h1d-tenant' THEN
+    IF v_existing_tenant_id IS NOT NULL AND v_existing_slug IS DISTINCT FROM 'h1d-contract-test' THEN
         RAISE EXCEPTION 'H1E_C_FIXTURE_TENANT_SLUG_CONFLICT: Dedicated tenant ID exists with unexpected slug %', v_existing_slug USING ERRCODE = 'P0001';
     END IF;
 
     SELECT id INTO v_existing_tenant_id
     FROM public.tenants
-    WHERE slug = 'dedicated-h1d-tenant'
+    WHERE slug = 'h1d-contract-test'
       AND id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd';
 
     IF v_existing_tenant_id IS NOT NULL THEN
@@ -204,7 +204,7 @@ BEGIN
     INSERT INTO public.tenants (id, slug, name, status, public_site_status)
     VALUES (
       'dddd1111-d1d1-d1d1-d1d1-dddddddddddd',
-      'dedicated-h1d-tenant',
+      'h1d-contract-test',
       'Dedicated H1D Acceptance Tenant',
       'active',
       'published'

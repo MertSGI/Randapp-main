@@ -138,6 +138,11 @@ export function verifySqlContentGuards(sqlContent) {
     throw new Error('Fixture SQL does not target dedicated tenant dddd1111-d1d1-d1d1-d1d1-dddddddddddd');
   }
 
+  // 13. Reconciled slug assertion
+  if (!activeSql.includes("'h1d-contract-test'")) {
+    throw new Error("Fixture SQL must target reconciled dedicated slug 'h1d-contract-test'");
+  }
+
   return true;
 }
 
@@ -200,10 +205,28 @@ check('7. Fixture SQL executes within a single BEGIN; ... COMMIT; transaction bo
 });
 
 // -----------------------------------------------------------------------------
+// REGRESSION & RECONCILIATION TESTS
+// -----------------------------------------------------------------------------
+
+check('8. Regression test: Fixture SQL accepts existing dedicated tenant ID dddd1111-d1d1-d1d1-d1d1-dddddddddddd with canonical slug h1d-contract-test without renaming live data', () => {
+  const activeSql = getActiveSql(rawSqlContent);
+  if (!activeSql.includes("'h1d-contract-test'")) {
+    throw new Error('Fixture SQL must use canonical dedicated slug h1d-contract-test');
+  }
+  const tenantUpdateMatch = activeSql.match(/INSERT\s+INTO\s+public\.tenants[\s\S]+?ON\s+CONFLICT\s*\(id\)\s*DO\s*UPDATE\s+SET\s+([^;]+);/i);
+  if (tenantUpdateMatch) {
+    const updateClause = tenantUpdateMatch[1].toLowerCase();
+    if (updateClause.includes('slug =')) {
+      throw new Error('Fixture SQL must not overwrite or rename existing tenant slug!');
+    }
+  }
+});
+
+// -----------------------------------------------------------------------------
 // NEGATIVE FIXTURE TESTS (PROVING VALIDATOR FAILS IF GUARDS ARE REMOVED)
 // -----------------------------------------------------------------------------
 
-check('8. Negative test: Replacing revoked_at IS NULL with status = active causes validator failure', () => {
+check('9. Negative test: Replacing revoked_at IS NULL with status = active causes validator failure', () => {
   const modified = rawSqlContent.replaceAll('revoked_at IS NULL', "status = 'active'");
   let threw = false;
   try {
@@ -217,7 +240,7 @@ check('8. Negative test: Replacing revoked_at IS NULL with status = active cause
   if (!threw) throw new Error('Validator failed to catch status = active schema defect');
 });
 
-check('9. Negative test: Removing release-control id = 1 cardinality guard causes validator failure', () => {
+check('10. Negative test: Removing release-control id = 1 cardinality guard causes validator failure', () => {
   const modified = rawSqlContent.replaceAll('H1E_C_FIXTURE_RELEASE_CONTROL_CARDINALITY_INVALID', 'REMOVED_GUARD');
   let threw = false;
   try {
@@ -231,7 +254,7 @@ check('9. Negative test: Removing release-control id = 1 cardinality guard cause
   if (!threw) throw new Error('Validator failed to catch missing release-control cardinality guard');
 });
 
-check('10. Negative test: Replacing IS DISTINCT FROM with != causes validator failure', () => {
+check('11. Negative test: Replacing IS DISTINCT FROM with != causes validator failure', () => {
   const modified = rawSqlContent.replaceAll('IS DISTINCT FROM', '!=');
   let threw = false;
   try {
@@ -245,7 +268,7 @@ check('10. Negative test: Replacing IS DISTINCT FROM with != causes validator fa
   if (!threw) throw new Error('Validator failed to catch non-null-safe != check');
 });
 
-check('11. Negative test: Removing subscription-event semantic payload fields causes validator failure', () => {
+check('12. Negative test: Removing subscription-event semantic payload fields causes validator failure', () => {
   const modified = rawSqlContent.replaceAll("metadata->>'source'", 'REMOVED_FIELD');
   let threw = false;
   try {
@@ -256,7 +279,7 @@ check('11. Negative test: Removing subscription-event semantic payload fields ca
   if (!threw) throw new Error('Validator failed to catch missing subscription-event semantic guard');
 });
 
-check('12. Negative test: Removing postflight active-authorization check causes validator failure', () => {
+check('13. Negative test: Removing postflight active-authorization check causes validator failure', () => {
   const activeSql = getActiveSql(rawSqlContent);
   const firstPos = activeSql.indexOf('revoked_at IS NULL');
   const secondPos = activeSql.indexOf('revoked_at IS NULL', firstPos + 1);

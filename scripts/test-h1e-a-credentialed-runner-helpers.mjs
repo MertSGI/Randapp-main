@@ -3,6 +3,7 @@ import path from 'path';
 
 export const CANONICAL_TENANT_ID = 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa';
 export const DEDICATED_H1D_TENANT_ID = 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd';
+export const DEDICATED_H1D_TENANT_SLUG = 'h1d-contract-test';
 export const NONEXISTENT_TENANT_ID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 
 export function loadEnvFile(filePath) {

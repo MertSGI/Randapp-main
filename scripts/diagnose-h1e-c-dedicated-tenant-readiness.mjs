@@ -1,6 +1,6 @@
 // scripts/diagnose-h1e-c-dedicated-tenant-readiness.mjs
 import path from 'path';
-import { loadEnvFile, callRpcEndpoint, authenticateUser, DEDICATED_H1D_TENANT_ID, CANONICAL_TENANT_ID } from './test-h1e-a-credentialed-runner-helpers.mjs';
+import { loadEnvFile, callRpcEndpoint, authenticateUser, DEDICATED_H1D_TENANT_ID, DEDICATED_H1D_TENANT_SLUG, CANONICAL_TENANT_ID } from './test-h1e-a-credentialed-runner-helpers.mjs';
 
 export function buildDedicatedTenantBlockerRegister(snapshotData, publicBookingData) {
   const register = [];
@@ -33,7 +33,7 @@ export function buildDedicatedTenantBlockerRegister(snapshotData, publicBookingD
     field: '2. Tenant slug',
     databaseFact: `slug=${tenantSlug}`,
     evaluatingRpc: 'super_admin_get_tenant_pilot_eligibility_snapshot / can_accept_public_booking',
-    expectedValue: 'dedicated-h1d-tenant',
+    expectedValue: DEDICATED_H1D_TENANT_SLUG,
     actualValue: tenantSlug,
     isBlocker: !tenantSlug || tenantSlug === 'missing',
     classification: 'STAGING_FIXTURE_DEFECT'
@@ -260,7 +260,7 @@ export async function runDedicatedTenantReadinessDiagnostic({
     return { ok: false, reason: 'CONFIGURATION_REQUIRED' };
   }
 
-  const superEmail = env.LARI_STAGE_H1D_SUPER_ADMIN_EMAIL;
+  const superEmail = env.LARI_STAGE_H1D_SUPER_ADMIN_EMAIL || 'superadmin@randevulari.com';
   const superPass = env.LARI_STAGE_H1D_SUPER_ADMIN_PASSWORD;
 
   if (!superEmail || !superPass) {
@@ -277,7 +277,7 @@ export async function runDedicatedTenantReadinessDiagnostic({
   const snapRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: DEDICATED_H1D_TENANT_ID }, authRes.token, fetchImpl);
   const snapData = snapRes ? snapRes.data : null;
 
-  const slug = snapData ? snapData.tenant_slug : 'dedicated-h1d-tenant';
+  const slug = snapData && snapData.tenant_slug ? snapData.tenant_slug : DEDICATED_H1D_TENANT_SLUG;
   const pubRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'can_accept_public_booking', { p_slug: slug }, null, fetchImpl);
   const pubData = pubRes ? pubRes.data : null;
 
