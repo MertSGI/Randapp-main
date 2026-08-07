@@ -170,30 +170,41 @@ BEGIN
         RAISE EXCEPTION 'H1E_C_FIXTURE_SUBSCRIPTION_EVENT_CONFLICT: Event key owned by conflicting payload' USING ERRCODE = 'P0001';
     END IF;
 
-    -- H. Relationship Ownership Guard
+    -- H. Relationship Ownership Guards (per-table, null-safe)
+    -- H1. service_branches: HAS tenant_id column
     SELECT COUNT(*) INTO v_rel_conflict_count
     FROM public.service_branches sb
     JOIN public.branches b ON b.id = sb.branch_id
     JOIN public.services s ON s.id = sb.service_id
     WHERE (sb.service_id = 'addddddd-0000-0000-0000-000000000001' OR sb.branch_id = 'bddddddd-0000-0000-0000-000000000001')
-      AND (sb.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR b.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR s.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd');
+      AND (sb.tenant_id IS DISTINCT FROM 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR b.tenant_id IS DISTINCT FROM 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR s.tenant_id IS DISTINCT FROM 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd');
 
+    IF v_rel_conflict_count > 0 THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_SERVICE_BRANCH_RELATIONSHIP_CONFLICT: service_branches entries conflict with another tenant' USING ERRCODE = 'P0001';
+    END IF;
+
+    -- H2. staff_branches: HAS tenant_id column
     SELECT COUNT(*) INTO v_rel_staff_branch_conflict
-    FROM public.staff_branches sb
-    JOIN public.branches b ON b.id = sb.branch_id
-    JOIN public.staff st ON st.id = sb.staff_id
-    WHERE (sb.staff_id = 'cddddddd-0000-0000-0000-000000000001' OR sb.branch_id = 'bddddddd-0000-0000-0000-000000000001')
-      AND (sb.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR b.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR st.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd');
+    FROM public.staff_branches stb
+    JOIN public.branches b ON b.id = stb.branch_id
+    JOIN public.staff st ON st.id = stb.staff_id
+    WHERE (stb.staff_id = 'cddddddd-0000-0000-0000-000000000001' OR stb.branch_id = 'bddddddd-0000-0000-0000-000000000001')
+      AND (stb.tenant_id IS DISTINCT FROM 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR b.tenant_id IS DISTINCT FROM 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR st.tenant_id IS DISTINCT FROM 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd');
 
+    IF v_rel_staff_branch_conflict > 0 THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_STAFF_BRANCH_RELATIONSHIP_CONFLICT: staff_branches entries conflict with another tenant' USING ERRCODE = 'P0001';
+    END IF;
+
+    -- H3. staff_services: NO tenant_id column — derive ownership from joined parents only
     SELECT COUNT(*) INTO v_rel_staff_service_conflict
     FROM public.staff_services ss
     JOIN public.services s ON s.id = ss.service_id
     JOIN public.staff st ON st.id = ss.staff_id
     WHERE (ss.staff_id = 'cddddddd-0000-0000-0000-000000000001' OR ss.service_id = 'addddddd-0000-0000-0000-000000000001')
-      AND (ss.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR s.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR st.tenant_id != 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd');
+      AND (s.tenant_id IS DISTINCT FROM 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR st.tenant_id IS DISTINCT FROM 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd');
 
-    IF v_rel_conflict_count > 0 OR v_rel_staff_branch_conflict > 0 OR v_rel_staff_service_conflict > 0 THEN
-        RAISE EXCEPTION 'H1E_C_FIXTURE_RELATIONSHIP_OWNERSHIP_CONFLICT: Relationship entries conflict with another tenant' USING ERRCODE = 'P0001';
+    IF v_rel_staff_service_conflict > 0 THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_STAFF_SERVICE_RELATIONSHIP_CONFLICT: staff_services entries conflict with another tenant' USING ERRCODE = 'P0001';
     END IF;
 
     -- =========================================================================
@@ -342,9 +353,9 @@ BEGIN
     )
     ON CONFLICT DO NOTHING;
 
-    INSERT INTO public.staff_services (tenant_id, staff_id, service_id)
+    -- staff_services: NO tenant_id column — only (staff_id, service_id)
+    INSERT INTO public.staff_services (staff_id, service_id)
     VALUES (
-      'dddd1111-d1d1-d1d1-d1d1-dddddddddddd',
       'cddddddd-0000-0000-0000-000000000001',
       'addddddd-0000-0000-0000-000000000001'
     )

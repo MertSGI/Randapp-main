@@ -40,7 +40,87 @@ export function getActiveSql(sql) {
 
 const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
-// Deterministic SQL contract validator engine
+// =========================================================================
+// CANONICAL SCHEMA MAP — derived from active migrations
+// =========================================================================
+export const CANONICAL_SCHEMA_MAP = {
+  'tenants': ['id', 'slug', 'name', 'status', 'public_site_status', 'tenant_id', 'created_at', 'updated_at', 'email', 'phone'],
+  'branches': ['id', 'tenant_id', 'name', 'slug', 'is_active', 'is_primary', 'timezone', 'created_at', 'updated_at'],
+  'services': ['id', 'tenant_id', 'name', 'duration', 'price', 'active', 'category', 'created_at', 'updated_at', 'description'],
+  'staff': ['id', 'tenant_id', 'name', 'active', 'is_owner', 'created_at', 'updated_at', 'email', 'phone'],
+  'staff_services': ['staff_id', 'service_id'],
+  'service_branches': ['tenant_id', 'service_id', 'branch_id', 'created_at'],
+  'staff_branches': ['tenant_id', 'staff_id', 'branch_id', 'created_at'],
+  'subscriptions': ['id', 'tenant_id', 'plan_id', 'plan_version_id', 'status', 'billing_mode', 'current_period_start', 'current_period_end', 'cancel_at_period_end', 'cancelled_at', 'past_due_at', 'provider', 'provider_subscription_reference_code', 'provider_customer_reference_code', 'trial_starts_at', 'trial_ends_at', 'grace_until', 'commercial_version', 'created_at', 'updated_at'],
+  'subscription_events': ['id', 'subscription_id', 'tenant_id', 'event_type', 'previous_state', 'new_state', 'internal_reason', 'idempotency_key', 'metadata', 'created_at'],
+  'plans': ['id', 'code', 'name', 'description', 'is_active', 'created_at'],
+  'plan_versions': ['id', 'plan_id', 'version_number', 'lifecycle_status', 'created_at'],
+  'platform_global_release_control': ['id', 'release_phase', 'is_payment_collection_enabled', 'is_checkout_enabled', 'is_iyzico_enabled', 'updated_at'],
+  'tenant_pilot_authorizations': ['id', 'tenant_id', 'authorized_at', 'authorized_by', 'revoked_at', 'revoked_by', 'revocation_reason', 'created_at'],
+  'tenant_business_profiles': ['tenant_id', 'short_description', 'is_public_profile_enabled', 'created_at', 'updated_at']
+};
+
+// =========================================================================
+// FIXTURE COLUMN-LINT VALIDATOR
+// =========================================================================
+// Extracts alias.column references and INSERT column lists from fixture SQL,
+// then validates every referenced column against the canonical schema map.
+export function verifyFixtureColumnReferences(sqlContent) {
+  const activeSql = getActiveSql(sqlContent);
+  const errors = [];
+
+  // 1. Validate INSERT INTO columns
+  const insertMatches = [...activeSql.matchAll(/INSERT\s+INTO\s+public\.(\w+)\s*\(([^)]+)\)/gi)];
+  for (const m of insertMatches) {
+    const table = m[1].toLowerCase();
+    const cols = m[2].split(',').map(c => c.trim().toLowerCase());
+    const schema = CANONICAL_SCHEMA_MAP[table];
+    if (!schema) {
+      errors.push({ table, column: '*', issue: `Table public.${table} not in canonical schema map` });
+      continue;
+    }
+    for (const col of cols) {
+      if (!schema.includes(col)) {
+        errors.push({ table, column: col, issue: `Column '${col}' does not exist on public.${table}` });
+      }
+    }
+  }
+
+  // 2. Validate alias.column references in WHERE/AND/ON/SET clauses
+  // Build alias-to-table mappings from FROM/JOIN clauses
+  const aliasMap = {};
+  const fromJoinMatches = [...activeSql.matchAll(/(?:FROM|JOIN)\s+public\.(\w+)\s+(\w+)/gi)];
+  for (const m of fromJoinMatches) {
+    aliasMap[m[2].toLowerCase()] = m[1].toLowerCase();
+  }
+
+  // Find all alias.column references (format: alias.column_name)
+  const aliasColMatches = [...activeSql.matchAll(/\b(\w+)\.(\w+)\b/g)];
+  for (const m of aliasColMatches) {
+    const alias = m[1].toLowerCase();
+    const col = m[2].toLowerCase();
+    // Skip non-alias prefixes (public, excluded, etc.)
+    if (['public', 'excluded', 'pg_catalog', 'information_schema'].includes(alias)) continue;
+    // Skip function calls and keywords
+    if (['id', 'now', 'gen_random_uuid', 'jsonb_build_object', 'count'].includes(col)) continue;
+    
+    const table = aliasMap[alias];
+    if (!table) continue; // Not a known alias
+    
+    const schema = CANONICAL_SCHEMA_MAP[table];
+    if (!schema) continue; // Table not in map
+    
+    if (!schema.includes(col)) {
+      errors.push({ table, alias, column: col, issue: `Alias '${alias}' references non-existent column '${col}' on public.${table}` });
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+// =========================================================================
+// DETERMINISTIC SQL CONTRACT VALIDATOR ENGINE
+// =========================================================================
 export function verifySqlContentGuards(sqlContent) {
   const activeSql = getActiveSql(sqlContent);
 
@@ -84,7 +164,7 @@ export function verifySqlContentGuards(sqlContent) {
     }
   }
 
-  // 7. Check public.staff inserts
+  // 7. Check public.staff inserts — no 'role' column
   const staffInsertMatch = activeSql.match(/INSERT\s+INTO\s+public\.staff\s*\(([^)]+)\)/i);
   if (staffInsertMatch) {
     const cols = staffInsertMatch[1].split(',').map(c => c.trim().toLowerCase());
@@ -111,7 +191,9 @@ export function verifySqlContentGuards(sqlContent) {
     'H1E_C_FIXTURE_UNEXPECTED_SUBSCRIPTION',
     'H1E_C_FIXTURE_PREMIUM_V1_CARDINALITY_INVALID',
     'H1E_C_FIXTURE_SUBSCRIPTION_EVENT_CONFLICT',
-    'H1E_C_FIXTURE_RELATIONSHIP_OWNERSHIP_CONFLICT'
+    'H1E_C_FIXTURE_SERVICE_BRANCH_RELATIONSHIP_CONFLICT',
+    'H1E_C_FIXTURE_STAFF_BRANCH_RELATIONSHIP_CONFLICT',
+    'H1E_C_FIXTURE_STAFF_SERVICE_RELATIONSHIP_CONFLICT'
   ];
 
   for (const code of requiredExceptionCodes) {
@@ -141,6 +223,27 @@ export function verifySqlContentGuards(sqlContent) {
   // 13. Reconciled slug assertion
   if (!activeSql.includes("'h1d-contract-test'")) {
     throw new Error("Fixture SQL must target reconciled dedicated slug 'h1d-contract-test'");
+  }
+
+  // 14. staff_services must NOT reference tenant_id (schema defect guard)
+  const staffServicesInsertMatch = activeSql.match(/INSERT\s+INTO\s+public\.staff_services\s*\(([^)]+)\)/i);
+  if (staffServicesInsertMatch) {
+    const cols = staffServicesInsertMatch[1].split(',').map(c => c.trim().toLowerCase());
+    if (cols.includes('tenant_id')) {
+      throw new Error('Schema defect: public.staff_services does not have a tenant_id column');
+    }
+  }
+
+  // 15. No ss.tenant_id alias reference anywhere
+  if (/\bss\.tenant_id\b/i.test(activeSql)) {
+    throw new Error('Schema defect: alias ss.tenant_id references non-existent column on staff_services');
+  }
+
+  // 16. Full column-lint validation
+  const colLint = verifyFixtureColumnReferences(sqlContent);
+  if (!colLint.valid) {
+    const errDetails = colLint.errors.map(e => `${e.table}.${e.column}: ${e.issue}`).join('; ');
+    throw new Error(`Column-lint failures: ${errDetails}`);
   }
 
   return true;
@@ -204,11 +307,7 @@ check('7. Fixture SQL executes within a single BEGIN; ... COMMIT; transaction bo
   }
 });
 
-// -----------------------------------------------------------------------------
-// REGRESSION & RECONCILIATION TESTS
-// -----------------------------------------------------------------------------
-
-check('8. Regression test: Fixture SQL accepts existing dedicated tenant ID dddd1111-d1d1-d1d1-d1d1-dddddddddddd with canonical slug h1d-contract-test without renaming live data', () => {
+check('8. Fixture SQL uses reconciled dedicated slug h1d-contract-test and does not overwrite existing slug', () => {
   const activeSql = getActiveSql(rawSqlContent);
   if (!activeSql.includes("'h1d-contract-test'")) {
     throw new Error('Fixture SQL must use canonical dedicated slug h1d-contract-test');
@@ -223,73 +322,129 @@ check('8. Regression test: Fixture SQL accepts existing dedicated tenant ID dddd
 });
 
 // -----------------------------------------------------------------------------
-// NEGATIVE FIXTURE TESTS (PROVING VALIDATOR FAILS IF GUARDS ARE REMOVED)
+// SCHEMA COLUMN-LINT TESTS
 // -----------------------------------------------------------------------------
 
-check('9. Negative test: Replacing revoked_at IS NULL with status = active causes validator failure', () => {
+check('9. staff_services schema: only (staff_id, service_id) — no tenant_id', () => {
+  const schemaMap = CANONICAL_SCHEMA_MAP;
+  if (!schemaMap['staff_services']) throw new Error('staff_services missing from schema map');
+  if (schemaMap['staff_services'].includes('tenant_id')) {
+    throw new Error('staff_services must NOT have tenant_id in canonical schema');
+  }
+  if (!schemaMap['staff_services'].includes('staff_id') || !schemaMap['staff_services'].includes('service_id')) {
+    throw new Error('staff_services missing required columns');
+  }
+});
+
+check('10. Fixture SQL INSERT into staff_services does not include tenant_id', () => {
+  const activeSql = getActiveSql(rawSqlContent);
+  const m = activeSql.match(/INSERT\s+INTO\s+public\.staff_services\s*\(([^)]+)\)/i);
+  if (!m) throw new Error('No INSERT INTO public.staff_services found');
+  const cols = m[1].split(',').map(c => c.trim().toLowerCase());
+  if (cols.includes('tenant_id')) {
+    throw new Error('staff_services INSERT must not include tenant_id column');
+  }
+});
+
+check('11. No ss.tenant_id alias reference in active fixture SQL', () => {
+  const activeSql = getActiveSql(rawSqlContent);
+  if (/\bss\.tenant_id\b/i.test(activeSql)) {
+    throw new Error('Found ss.tenant_id reference — staff_services has no tenant_id column');
+  }
+});
+
+check('12. Full column-lint passes for all fixture table references', () => {
+  const result = verifyFixtureColumnReferences(rawSqlContent);
+  if (!result.valid) {
+    const errStr = result.errors.map(e => `${e.table}.${e.column}`).join(', ');
+    throw new Error(`Column-lint found invalid references: ${errStr}`);
+  }
+});
+
+check('13. Per-relationship exception codes are present: SERVICE_BRANCH, STAFF_BRANCH, STAFF_SERVICE', () => {
+  const activeSql = getActiveSql(rawSqlContent);
+  if (!activeSql.includes('H1E_C_FIXTURE_SERVICE_BRANCH_RELATIONSHIP_CONFLICT')) {
+    throw new Error('Missing H1E_C_FIXTURE_SERVICE_BRANCH_RELATIONSHIP_CONFLICT');
+  }
+  if (!activeSql.includes('H1E_C_FIXTURE_STAFF_BRANCH_RELATIONSHIP_CONFLICT')) {
+    throw new Error('Missing H1E_C_FIXTURE_STAFF_BRANCH_RELATIONSHIP_CONFLICT');
+  }
+  if (!activeSql.includes('H1E_C_FIXTURE_STAFF_SERVICE_RELATIONSHIP_CONFLICT')) {
+    throw new Error('Missing H1E_C_FIXTURE_STAFF_SERVICE_RELATIONSHIP_CONFLICT');
+  }
+});
+
+// -----------------------------------------------------------------------------
+// NEGATIVE FIXTURE TESTS
+// -----------------------------------------------------------------------------
+
+check('14. Negative: Adding ss.tenant_id to staff_services ownership guard causes validator failure', () => {
+  const modified = rawSqlContent.replace(
+    /AND \(s\.tenant_id IS DISTINCT FROM.*?OR st\.tenant_id IS DISTINCT FROM.*?\)/s,
+    "AND (ss.tenant_id IS DISTINCT FROM 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR s.tenant_id IS DISTINCT FROM 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR st.tenant_id IS DISTINCT FROM 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd')"
+  );
+  let threw = false;
+  try { verifySqlContentGuards(modified); } catch (err) {
+    threw = true;
+    if (!err.message.includes('ss.tenant_id')) throw new Error(`Unexpected error: ${err.message}`);
+  }
+  if (!threw) throw new Error('Validator failed to catch ss.tenant_id schema defect');
+});
+
+check('15. Negative: Adding tenant_id to staff_services INSERT causes validator failure', () => {
+  const modified = rawSqlContent.replace(
+    'INSERT INTO public.staff_services (staff_id, service_id)',
+    'INSERT INTO public.staff_services (tenant_id, staff_id, service_id)'
+  );
+  let threw = false;
+  try { verifySqlContentGuards(modified); } catch (err) { threw = true; }
+  if (!threw) throw new Error('Validator failed to catch tenant_id in staff_services INSERT');
+});
+
+check('16. Negative: Replacing revoked_at IS NULL with status = active causes validator failure', () => {
   const modified = rawSqlContent.replaceAll('revoked_at IS NULL', "status = 'active'");
   let threw = false;
-  try {
-    verifySqlContentGuards(modified);
-  } catch (err) {
+  try { verifySqlContentGuards(modified); } catch (err) {
     threw = true;
-    if (!err.message.includes('status column')) {
-      throw new Error(`Unexpected error message: ${err.message}`);
-    }
+    if (!err.message.includes('status column')) throw new Error(`Unexpected error: ${err.message}`);
   }
   if (!threw) throw new Error('Validator failed to catch status = active schema defect');
 });
 
-check('10. Negative test: Removing release-control id = 1 cardinality guard causes validator failure', () => {
+check('17. Negative: Removing release-control cardinality guard causes validator failure', () => {
   const modified = rawSqlContent.replaceAll('H1E_C_FIXTURE_RELEASE_CONTROL_CARDINALITY_INVALID', 'REMOVED_GUARD');
   let threw = false;
-  try {
-    verifySqlContentGuards(modified);
-  } catch (err) {
+  try { verifySqlContentGuards(modified); } catch (err) {
     threw = true;
-    if (!err.message.includes('H1E_C_FIXTURE_RELEASE_CONTROL_CARDINALITY_INVALID')) {
-      throw new Error(`Unexpected error message: ${err.message}`);
-    }
+    if (!err.message.includes('H1E_C_FIXTURE_RELEASE_CONTROL_CARDINALITY_INVALID')) throw new Error(`Unexpected error: ${err.message}`);
   }
   if (!threw) throw new Error('Validator failed to catch missing release-control cardinality guard');
 });
 
-check('11. Negative test: Replacing IS DISTINCT FROM with != causes validator failure', () => {
+check('18. Negative: Replacing IS DISTINCT FROM with != causes validator failure', () => {
   const modified = rawSqlContent.replaceAll('IS DISTINCT FROM', '!=');
   let threw = false;
-  try {
-    verifySqlContentGuards(modified);
-  } catch (err) {
+  try { verifySqlContentGuards(modified); } catch (err) {
     threw = true;
-    if (!err.message.includes('IS DISTINCT FROM')) {
-      throw new Error(`Unexpected error message: ${err.message}`);
-    }
+    if (!err.message.includes('IS DISTINCT FROM')) throw new Error(`Unexpected error: ${err.message}`);
   }
   if (!threw) throw new Error('Validator failed to catch non-null-safe != check');
 });
 
-check('12. Negative test: Removing subscription-event semantic payload fields causes validator failure', () => {
+check('19. Negative: Removing subscription-event semantic fields causes validator failure', () => {
   const modified = rawSqlContent.replaceAll("metadata->>'source'", 'REMOVED_FIELD');
   let threw = false;
-  try {
-    verifySqlContentGuards(modified);
-  } catch (err) {
-    threw = true;
-  }
+  try { verifySqlContentGuards(modified); } catch (err) { threw = true; }
   if (!threw) throw new Error('Validator failed to catch missing subscription-event semantic guard');
 });
 
-check('13. Negative test: Removing postflight active-authorization check causes validator failure', () => {
+check('20. Negative: Removing postflight active-authorization check causes validator failure', () => {
   const activeSql = getActiveSql(rawSqlContent);
   const firstPos = activeSql.indexOf('revoked_at IS NULL');
   const secondPos = activeSql.indexOf('revoked_at IS NULL', firstPos + 1);
   const modified = activeSql.slice(0, secondPos) + activeSql.slice(secondPos).replace('revoked_at IS NULL', '1 = 1');
   let threw = false;
-  try {
-    verifySqlContentGuards(modified);
-  } catch (err) {
-    threw = true;
-  }
+  try { verifySqlContentGuards(modified); } catch (err) { threw = true; }
   if (!threw) throw new Error('Validator failed to catch missing postflight active-authorization check');
 });
 
