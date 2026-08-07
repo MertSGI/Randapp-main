@@ -33,6 +33,10 @@ DECLARE
     v_is_chk_enabled BOOLEAN;
     v_is_iyz_enabled BOOLEAN;
     v_pilot_auth_count INTEGER;
+    v_branch_quota JSONB;
+    v_service_quota JSONB;
+    v_staff_quota JSONB;
+    v_has_core_booking BOOLEAN;
 BEGIN
     -- 0. PRE-FLIGHT RELEASE CONTROL SINGLETON & NULL-SAFE SAFETY INVARIANT CHECK
     SELECT COUNT(*) INTO v_count
@@ -211,7 +215,7 @@ BEGIN
     -- UPSERTS (SAFE SCOPED UPSERTS FOR DETERMINISTIC DEDICATED FIXTURE ROWS)
     -- =========================================================================
 
-    -- Tenant record & public_site_status
+    -- 1. Tenant record & public_site_status
     INSERT INTO public.tenants (id, slug, name, status, public_site_status)
     VALUES (
       'dddd1111-d1d1-d1d1-d1d1-dddddddddddd',
@@ -239,23 +243,8 @@ BEGIN
       short_description = EXCLUDED.short_description,
       is_public_profile_enabled = EXCLUDED.is_public_profile_enabled;
 
-    -- Primary active branch (bddddddd-0000-0000-0000-000000000001)
-    INSERT INTO public.branches (
-      id, tenant_id, name, slug, is_active, is_primary, timezone
-    ) VALUES (
-      'bddddddd-0000-0000-0000-000000000001',
-      'dddd1111-d1d1-d1d1-d1d1-dddddddddddd',
-      'Dedicated Main Branch',
-      'merkez',
-      true,
-      true,
-      'Europe/Istanbul'
-    ) ON CONFLICT (id) DO UPDATE SET
-      name = EXCLUDED.name,
-      is_primary = EXCLUDED.is_primary,
-      is_active = EXCLUDED.is_active;
-
-    -- Active manual subscription linked to resolved published plan_version_id
+    -- 2. Active manual subscription linked to resolved published plan_version_id
+    -- CRITICAL ORDERING: Subscription MUST exist before branch/service/staff quota triggers execute!
     INSERT INTO public.subscriptions (
       id,
       tenant_id,
@@ -285,7 +274,7 @@ BEGIN
       billing_mode = EXCLUDED.billing_mode,
       current_period_end = EXCLUDED.current_period_end;
 
-    -- Idempotent Fixture Subscription Event
+    -- 3. Idempotent Fixture Subscription Event
     INSERT INTO public.subscription_events (
       subscription_id,
       tenant_id,
@@ -308,7 +297,40 @@ BEGIN
     )
     ON CONFLICT (idempotency_key) DO NOTHING;
 
-    -- Active service (addddddd-0000-0000-0000-000000000001)
+    -- 4. PRE-MUTATION COMMERCIAL READINESS GUARD
+    -- Verify resolved active subscription empowers required fixture quotas before inserting operational rows
+    v_branch_quota := public.resolve_commercial_quota('dddd1111-d1d1-d1d1-d1d1-dddddddddddd', 'max_branches');
+    v_service_quota := public.resolve_commercial_quota('dddd1111-d1d1-d1d1-d1d1-dddddddddddd', 'max_services');
+    v_staff_quota := public.resolve_commercial_quota('dddd1111-d1d1-d1d1-d1d1-dddddddddddd', 'max_staff');
+
+    SELECT COALESCE(boolean_value, false) INTO v_has_core_booking
+    FROM public.resolve_effective_tenant_entitlements('dddd1111-d1d1-d1d1-d1d1-dddddddddddd')
+    WHERE feature_key = 'core_booking';
+
+    IF v_has_core_booking IS NOT TRUE OR
+       ((v_branch_quota->>'is_unlimited')::boolean IS NOT TRUE AND ((v_branch_quota->>'limit_value')::bigint < 1 OR (v_branch_quota->>'limit_value') IS NULL)) OR
+       ((v_service_quota->>'is_unlimited')::boolean IS NOT TRUE AND ((v_service_quota->>'limit_value')::bigint < 1 OR (v_service_quota->>'limit_value') IS NULL)) OR
+       ((v_staff_quota->>'is_unlimited')::boolean IS NOT TRUE AND ((v_staff_quota->>'limit_value')::bigint < 1 OR (v_staff_quota->>'limit_value') IS NULL)) THEN
+        RAISE EXCEPTION 'H1E_C_FIXTURE_COMMERCIAL_READINESS_INVALID: Dedicated tenant active subscription does not supply required commercial quotas for fixture operational rows' USING ERRCODE = 'P0001';
+    END IF;
+
+    -- 5. Primary active branch (bddddddd-0000-0000-0000-000000000001)
+    INSERT INTO public.branches (
+      id, tenant_id, name, slug, is_active, is_primary, timezone
+    ) VALUES (
+      'bddddddd-0000-0000-0000-000000000001',
+      'dddd1111-d1d1-d1d1-d1d1-dddddddddddd',
+      'Dedicated Main Branch',
+      'merkez',
+      true,
+      true,
+      'Europe/Istanbul'
+    ) ON CONFLICT (id) DO UPDATE SET
+      name = EXCLUDED.name,
+      is_primary = EXCLUDED.is_primary,
+      is_active = EXCLUDED.is_active;
+
+    -- 6. Active service (addddddd-0000-0000-0000-000000000001)
     INSERT INTO public.services (id, tenant_id, name, duration, price, active, category)
     VALUES (
       'addddddd-0000-0000-0000-000000000001',
@@ -323,7 +345,7 @@ BEGIN
       name = EXCLUDED.name,
       active = EXCLUDED.active;
 
-    -- Active staff (cddddddd-0000-0000-0000-000000000001)
+    -- 7. Active staff (cddddddd-0000-0000-0000-000000000001)
     INSERT INTO public.staff (id, tenant_id, name, active, is_owner)
     VALUES (
       'cddddddd-0000-0000-0000-000000000001',
@@ -336,7 +358,7 @@ BEGIN
       name = EXCLUDED.name,
       active = EXCLUDED.active;
 
-    -- Relationship mappings
+    -- 8. Relationship mappings
     INSERT INTO public.service_branches (tenant_id, service_id, branch_id)
     VALUES (
       'dddd1111-d1d1-d1d1-d1d1-dddddddddddd',

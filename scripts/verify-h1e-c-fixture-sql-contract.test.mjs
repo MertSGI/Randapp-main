@@ -63,8 +63,6 @@ export const CANONICAL_SCHEMA_MAP = {
 // =========================================================================
 // FIXTURE COLUMN-LINT VALIDATOR
 // =========================================================================
-// Extracts alias.column references and INSERT column lists from fixture SQL,
-// then validates every referenced column against the canonical schema map.
 export function verifyFixtureColumnReferences(sqlContent) {
   const activeSql = getActiveSql(sqlContent);
   const errors = [];
@@ -86,30 +84,26 @@ export function verifyFixtureColumnReferences(sqlContent) {
     }
   }
 
-  // 2. Validate alias.column references in WHERE/AND/ON/SET clauses
-  // Build alias-to-table mappings from FROM/JOIN clauses
+  // 2. Validate alias.column references
   const aliasMap = {};
   const fromJoinMatches = [...activeSql.matchAll(/(?:FROM|JOIN)\s+public\.(\w+)\s+(\w+)/gi)];
   for (const m of fromJoinMatches) {
     aliasMap[m[2].toLowerCase()] = m[1].toLowerCase();
   }
 
-  // Find all alias.column references (format: alias.column_name)
   const aliasColMatches = [...activeSql.matchAll(/\b(\w+)\.(\w+)\b/g)];
   for (const m of aliasColMatches) {
     const alias = m[1].toLowerCase();
     const col = m[2].toLowerCase();
-    // Skip non-alias prefixes (public, excluded, etc.)
     if (['public', 'excluded', 'pg_catalog', 'information_schema'].includes(alias)) continue;
-    // Skip function calls and keywords
     if (['id', 'now', 'gen_random_uuid', 'jsonb_build_object', 'count'].includes(col)) continue;
-    
+
     const table = aliasMap[alias];
-    if (!table) continue; // Not a known alias
-    
+    if (!table) continue;
+
     const schema = CANONICAL_SCHEMA_MAP[table];
-    if (!schema) continue; // Table not in map
-    
+    if (!schema) continue;
+
     if (!schema.includes(col)) {
       errors.push({ table, alias, column: col, issue: `Alias '${alias}' references non-existent column '${col}' on public.${table}` });
     }
@@ -193,7 +187,8 @@ export function verifySqlContentGuards(sqlContent) {
     'H1E_C_FIXTURE_SUBSCRIPTION_EVENT_CONFLICT',
     'H1E_C_FIXTURE_SERVICE_BRANCH_RELATIONSHIP_CONFLICT',
     'H1E_C_FIXTURE_STAFF_BRANCH_RELATIONSHIP_CONFLICT',
-    'H1E_C_FIXTURE_STAFF_SERVICE_RELATIONSHIP_CONFLICT'
+    'H1E_C_FIXTURE_STAFF_SERVICE_RELATIONSHIP_CONFLICT',
+    'H1E_C_FIXTURE_COMMERCIAL_READINESS_INVALID'
   ];
 
   for (const code of requiredExceptionCodes) {
@@ -239,7 +234,26 @@ export function verifySqlContentGuards(sqlContent) {
     throw new Error('Schema defect: alias ss.tenant_id references non-existent column on staff_services');
   }
 
-  // 16. Full column-lint validation
+  // 16. Commercial dependency ordering check
+  const subPos = activeSql.indexOf('INSERT INTO public.subscriptions');
+  const branchPos = activeSql.indexOf('INSERT INTO public.branches');
+  const servicePos = activeSql.indexOf('INSERT INTO public.services');
+  const staffPos = activeSql.indexOf('INSERT INTO public.staff');
+  const commReadinessPos = activeSql.indexOf('H1E_C_FIXTURE_COMMERCIAL_READINESS_INVALID');
+
+  if (subPos === -1 || branchPos === -1 || servicePos === -1 || staffPos === -1) {
+    throw new Error('Fixture SQL missing required table INSERT statements');
+  }
+
+  if (subPos > branchPos || subPos > servicePos || subPos > staffPos) {
+    throw new Error('Commercial contract ordering violation: INSERT INTO public.subscriptions must occur before branch, service, and staff INSERTs');
+  }
+
+  if (commReadinessPos === -1 || commReadinessPos > branchPos) {
+    throw new Error('Commercial readiness guard violation: H1E_C_FIXTURE_COMMERCIAL_READINESS_INVALID guard must execute before operational branch/service/staff INSERTs');
+  }
+
+  // 17. Full column-lint validation
   const colLint = verifyFixtureColumnReferences(sqlContent);
   if (!colLint.valid) {
     const errDetails = colLint.errors.map(e => `${e.table}.${e.column}: ${e.issue}`).join('; ');
@@ -374,11 +388,27 @@ check('13. Per-relationship exception codes are present: SERVICE_BRANCH, STAFF_B
   }
 });
 
+check('14. Commercial dependency ordering: Active subscription and commercial readiness guard appear before operational rows (branches, services, staff)', () => {
+  const activeSql = getActiveSql(rawSqlContent);
+  const subPos = activeSql.indexOf('INSERT INTO public.subscriptions');
+  const branchPos = activeSql.indexOf('INSERT INTO public.branches');
+  const servicePos = activeSql.indexOf('INSERT INTO public.services');
+  const staffPos = activeSql.indexOf('INSERT INTO public.staff');
+  const commReadinessPos = activeSql.indexOf('H1E_C_FIXTURE_COMMERCIAL_READINESS_INVALID');
+
+  if (subPos > branchPos || subPos > servicePos || subPos > staffPos) {
+    throw new Error('Active subscription INSERT must precede operational row INSERTs');
+  }
+  if (commReadinessPos > branchPos) {
+    throw new Error('Commercial readiness guard must precede branch INSERT');
+  }
+});
+
 // -----------------------------------------------------------------------------
 // NEGATIVE FIXTURE TESTS
 // -----------------------------------------------------------------------------
 
-check('14. Negative: Adding ss.tenant_id to staff_services ownership guard causes validator failure', () => {
+check('15. Negative: Adding ss.tenant_id to staff_services ownership guard causes validator failure', () => {
   const modified = rawSqlContent.replace(
     /AND \(s\.tenant_id IS DISTINCT FROM.*?OR st\.tenant_id IS DISTINCT FROM.*?\)/s,
     "AND (ss.tenant_id IS DISTINCT FROM 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR s.tenant_id IS DISTINCT FROM 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd' OR st.tenant_id IS DISTINCT FROM 'dddd1111-d1d1-d1d1-d1d1-dddddddddddd')"
@@ -391,7 +421,7 @@ check('14. Negative: Adding ss.tenant_id to staff_services ownership guard cause
   if (!threw) throw new Error('Validator failed to catch ss.tenant_id schema defect');
 });
 
-check('15. Negative: Adding tenant_id to staff_services INSERT causes validator failure', () => {
+check('16. Negative: Adding tenant_id to staff_services INSERT causes validator failure', () => {
   const modified = rawSqlContent.replace(
     'INSERT INTO public.staff_services (staff_id, service_id)',
     'INSERT INTO public.staff_services (tenant_id, staff_id, service_id)'
@@ -401,7 +431,7 @@ check('15. Negative: Adding tenant_id to staff_services INSERT causes validator 
   if (!threw) throw new Error('Validator failed to catch tenant_id in staff_services INSERT');
 });
 
-check('16. Negative: Replacing revoked_at IS NULL with status = active causes validator failure', () => {
+check('17. Negative: Replacing revoked_at IS NULL with status = active causes validator failure', () => {
   const modified = rawSqlContent.replaceAll('revoked_at IS NULL', "status = 'active'");
   let threw = false;
   try { verifySqlContentGuards(modified); } catch (err) {
@@ -411,7 +441,7 @@ check('16. Negative: Replacing revoked_at IS NULL with status = active causes va
   if (!threw) throw new Error('Validator failed to catch status = active schema defect');
 });
 
-check('17. Negative: Removing release-control cardinality guard causes validator failure', () => {
+check('18. Negative: Removing release-control cardinality guard causes validator failure', () => {
   const modified = rawSqlContent.replaceAll('H1E_C_FIXTURE_RELEASE_CONTROL_CARDINALITY_INVALID', 'REMOVED_GUARD');
   let threw = false;
   try { verifySqlContentGuards(modified); } catch (err) {
@@ -421,7 +451,7 @@ check('17. Negative: Removing release-control cardinality guard causes validator
   if (!threw) throw new Error('Validator failed to catch missing release-control cardinality guard');
 });
 
-check('18. Negative: Replacing IS DISTINCT FROM with != causes validator failure', () => {
+check('19. Negative: Replacing IS DISTINCT FROM with != causes validator failure', () => {
   const modified = rawSqlContent.replaceAll('IS DISTINCT FROM', '!=');
   let threw = false;
   try { verifySqlContentGuards(modified); } catch (err) {
@@ -431,14 +461,14 @@ check('18. Negative: Replacing IS DISTINCT FROM with != causes validator failure
   if (!threw) throw new Error('Validator failed to catch non-null-safe != check');
 });
 
-check('19. Negative: Removing subscription-event semantic fields causes validator failure', () => {
+check('20. Negative: Removing subscription-event semantic fields causes validator failure', () => {
   const modified = rawSqlContent.replaceAll("metadata->>'source'", 'REMOVED_FIELD');
   let threw = false;
   try { verifySqlContentGuards(modified); } catch (err) { threw = true; }
   if (!threw) throw new Error('Validator failed to catch missing subscription-event semantic guard');
 });
 
-check('20. Negative: Removing postflight active-authorization check causes validator failure', () => {
+check('21. Negative: Removing postflight active-authorization check causes validator failure', () => {
   const activeSql = getActiveSql(rawSqlContent);
   const firstPos = activeSql.indexOf('revoked_at IS NULL');
   const secondPos = activeSql.indexOf('revoked_at IS NULL', firstPos + 1);
@@ -446,6 +476,29 @@ check('20. Negative: Removing postflight active-authorization check causes valid
   let threw = false;
   try { verifySqlContentGuards(modified); } catch (err) { threw = true; }
   if (!threw) throw new Error('Validator failed to catch missing postflight active-authorization check');
+});
+
+check('22. Negative: Placing branch INSERT before subscription INSERT causes validator failure', () => {
+  const activeSql = getActiveSql(rawSqlContent);
+  const subChunk = activeSql.substring(activeSql.indexOf('INSERT INTO public.subscriptions'), activeSql.indexOf('INSERT INTO public.subscription_events'));
+  const branchChunk = activeSql.substring(activeSql.indexOf('INSERT INTO public.branches'), activeSql.indexOf('INSERT INTO public.services'));
+  const modified = activeSql.replace(subChunk, '').replace(branchChunk, branchChunk + '\n' + subChunk);
+  let threw = false;
+  try { verifySqlContentGuards(modified); } catch (err) {
+    threw = true;
+    if (!err.message.includes('Commercial contract ordering violation')) throw new Error(`Unexpected error: ${err.message}`);
+  }
+  if (!threw) throw new Error('Validator failed to catch branch INSERT before subscription INSERT');
+});
+
+check('23. Negative: Removing commercial readiness guard causes validator failure', () => {
+  const modified = rawSqlContent.replaceAll('H1E_C_FIXTURE_COMMERCIAL_READINESS_INVALID', 'REMOVED_COMMERCIAL_GUARD');
+  let threw = false;
+  try { verifySqlContentGuards(modified); } catch (err) {
+    threw = true;
+    if (!err.message.includes('H1E_C_FIXTURE_COMMERCIAL_READINESS_INVALID')) throw new Error(`Unexpected error: ${err.message}`);
+  }
+  if (!threw) throw new Error('Validator failed to catch missing commercial readiness guard');
 });
 
 console.log(`\nDefined tests: ${defined}`);
