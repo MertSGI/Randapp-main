@@ -1,6 +1,6 @@
 // scripts/test-p1a-paymentless-real-pilot-runners.test.mjs
-import { runRealPilotActivation, REAL_PILOT_TENANT_ID, REAL_PILOT_SLUG, EXPECTED_PROJECT_REF } from './run-paymentless-real-pilot-activation.mjs';
-import { runRealPilotRollback } from './run-paymentless-real-pilot-rollback.mjs';
+import { runRealPilotActivation, REAL_PILOT_TENANT_ID, REAL_PILOT_SLUG, EXPECTED_PROJECT_REF, ALLOWED_ACTIVATION_MUTATION_RPCS } from './run-paymentless-real-pilot-activation.mjs';
+import { runRealPilotRollback, ALLOWED_ROLLBACK_MUTATION_RPCS } from './run-paymentless-real-pilot-rollback.mjs';
 
 function createMockEnv(overrides = {}) {
   return {
@@ -97,27 +97,53 @@ async function runAllTests() {
   const results = [];
   const silentLogger = { log: () => {}, error: () => {}, warn: () => {} };
 
-  console.log('=== RUNNING P1A ACTIVATION & ROLLBACK SAFETY TESTS ===\n');
+  console.log('=== RUNNING P1A COMPLETE ACTIVATION & ROLLBACK SAFETY MATRIX ===\n');
 
-  // Test 1: Activation fails on project mismatch
+  // =========================================================================
+  // ACTIVATION SAFETY MATRIX (A01 - A26)
+  // =========================================================================
+
+  // A01: Wrong Supabase project
   {
     const env = createMockEnv({ VITE_SUPABASE_URL: 'https://wrongproject.supabase.co' });
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    const pass = res.ok === false && res.reason === 'PROJECT_MISMATCH' && mutationCalls.length === 0;
-    results.push({ name: 'Activation refuses wrong project ref', pass });
+    results.push({ code: 'A01', name: 'Refuses wrong Supabase project ref', pass: res.ok === false && res.reason === 'PROJECT_MISMATCH' && mutationCalls.length === 0 });
   }
 
-  // Test 2: Activation fails on tenant mismatch
+  // A02: Wrong tenant ID
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch();
-    const res = await runRealPilotActivation({ tenantId: 'invalid-id', env, fetchImpl: mockFetch, logger: silentLogger });
-    const pass = res.ok === false && res.reason === 'TENANT_MISMATCH' && mutationCalls.length === 0;
-    results.push({ name: 'Activation refuses tenant mismatch', pass });
+    const res = await runRealPilotActivation({ tenantId: 'wrong-tenant-id', env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'A02', name: 'Refuses wrong tenant ID', pass: res.ok === false && res.reason === 'TENANT_ID_MISMATCH' && mutationCalls.length === 0 });
   }
 
-  // Test 3: Activation fails when release phase is not pre_pilot
+  // A03: Wrong tenant slug
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch();
+    const res = await runRealPilotActivation({ tenantSlug: 'wrong-slug', env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'A03', name: 'Refuses wrong tenant slug', pass: res.ok === false && res.reason === 'TENANT_SLUG_MISMATCH' && mutationCalls.length === 0 });
+  }
+
+  // A04 & A05: Unauthenticated or non-super-admin actor
+  {
+    const env = createMockEnv({ LARI_STAGE_H1D_SUPER_ADMIN_PASSWORD: '' });
+    const { mockFetch, mutationCalls } = createMockFetch();
+    const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'A04_A05', name: 'Refuses unauthenticated or missing super-admin actor', pass: res.ok === false && res.reason === 'SUPER_ADMIN_PASSWORD_MISSING' && mutationCalls.length === 0 });
+  }
+
+  // A06: Dirty working tree
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch();
+    const res = await runRealPilotActivation({ enforceCleanTree: true, isWorkingTreeClean: false, env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'A06', name: 'Refuses dirty working tree', pass: res.ok === false && res.reason === 'DIRTY_WORKING_TREE' && mutationCalls.length === 0 });
+  }
+
+  // A07: Unexpected release phase
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch({
@@ -130,11 +156,10 @@ async function runAllTests() {
       })
     });
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    const pass = res.ok === false && res.reason === 'UNEXPECTED_RELEASE_PHASE' && mutationCalls.length === 0;
-    results.push({ name: 'Activation refuses unexpected release_phase', pass });
+    results.push({ code: 'A07', name: 'Refuses unexpected release phase (must be pre_pilot)', pass: res.ok === false && res.reason === 'UNEXPECTED_RELEASE_PHASE' && mutationCalls.length === 0 });
   }
 
-  // Test 4: Activation fails when payment flag is true
+  // A08, A09, A10: Payment collection / checkout / iyzico enabled
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch({
@@ -147,11 +172,10 @@ async function runAllTests() {
       })
     });
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    const pass = res.ok === false && res.reason === 'PAYMENT_FLAG_ENABLED' && mutationCalls.length === 0;
-    results.push({ name: 'Activation refuses enabled payment collection flag', pass });
+    results.push({ code: 'A08_A09_A10', name: 'Refuses when payment collection / checkout flag enabled', pass: res.ok === false && res.reason === 'PAYMENT_FLAG_ENABLED' && mutationCalls.length === 0 });
   }
 
-  // Test 5: Activation fails when Melis is already authorized
+  // A11: Melis already authorized
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch({
@@ -164,20 +188,82 @@ async function runAllTests() {
       })
     });
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    const pass = res.ok === false && res.reason === 'ALREADY_AUTHORIZED' && mutationCalls.length === 0;
-    results.push({ name: 'Activation refuses already-authorized Melis tenant', pass });
+    results.push({ code: 'A11', name: 'Refuses when Melis already authorized', pass: res.ok === false && res.reason === 'ALREADY_AUTHORIZED' && mutationCalls.length === 0 });
   }
 
-  // Test 6: Dry-run activation passes without performing mutations
+  // A12: Melis operational readiness not READY
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch({
+      super_admin_get_tenant_pilot_eligibility_snapshot: () => ({
+        success: true,
+        authorized: false,
+        global_release_control: { release_phase: 'pre_pilot', is_payment_collection_enabled: false },
+        readiness_facts: { tenant_status: 'inactive', public_site_status: 'draft' },
+        pilot_authorization: { is_authorized: false }
+      })
+    });
+    const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'A12', name: 'Refuses when Melis operational readiness is not READY', pass: res.ok === false && res.reason === 'TENANT_NOT_READY' && mutationCalls.length === 0 });
+  }
+
+  // A13: Blocker list is not exactly GLOBAL_RELEASE_PHASE_BLOCKED
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch({
+      can_accept_public_booking: () => ({
+        found: true,
+        allowed: false,
+        bookable: false,
+        blocking_reason_codes: ['GLOBAL_RELEASE_PHASE_BLOCKED', 'SUBSCRIPTION_BLOCKED']
+      })
+    });
+    const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'A13', name: 'Refuses when blocker list has extra reason codes', pass: res.ok === false && res.reason === 'UNEXPECTED_BLOCKERS' && mutationCalls.length === 0 });
+  }
+
+  // A14: Fixture tenant actively authorized
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch({
+      super_admin_get_tenant_pilot_eligibility_snapshot: (body) => ({
+        success: true,
+        tenant_id: body.p_tenant_id,
+        authorized: body.p_tenant_id.includes('dddd1111'),
+        global_release_control: { release_phase: 'pre_pilot', is_payment_collection_enabled: false },
+        readiness_facts: { tenant_status: 'active', public_site_status: 'published', relationship_verification: { status: 'VERIFIED' } },
+        pilot_authorization: { is_authorized: body.p_tenant_id.includes('dddd1111') }
+      })
+    });
+    const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'A14_A15', name: 'Refuses when fixture or unrelated tenant actively authorized', pass: res.ok === false && res.reason === 'FIXTURE_TENANT_AUTHORIZED' && mutationCalls.length === 0 });
+  }
+
+  // A16: Missing activation reason
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch();
+    const res = await runRealPilotActivation({ reason: '', env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'A16', name: 'Refuses missing activation reason', pass: res.ok === false && res.reason === 'MISSING_ACTIVATION_REASON' && mutationCalls.length === 0 });
+  }
+
+  // A20: External frontend mandatory gate unsatisfied
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch();
+    const res = await runRealPilotActivation({ requireExternalFrontend: true, externalFrontendUrl: 'http://localhost:4173', env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'A20', name: 'Refuses when external frontend mandatory gate fails', pass: res.ok === false && res.reason === 'REAL_PILOT_EXTERNAL_FRONTEND_NOT_DEPLOYED' && mutationCalls.length === 0 });
+  }
+
+  // A21: Dry-run = 0 mutation RPCs
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: true });
-    const pass = res.ok === true && res.reason === 'DRY_RUN_PASSED' && mutationCalls.length === 0;
-    results.push({ name: 'Dry-run activation passes with 0 mutations', pass });
+    results.push({ code: 'A21', name: 'Dry-run execution executes exactly 0 mutation RPCs', pass: res.ok === true && res.reason === 'DRY_RUN_PASSED' && res.mutationRpcCount === 0 && mutationCalls.length === 0 });
   }
 
-  // Test 7: Live activation performs exactly two approved mutation RPC calls in sequence
+  // A22, A23, A24, A25, A26: Execution path performs exactly 2 approved mutation RPCs and post-checks
   {
     const env = createMockEnv();
     let melisState = { allowed: false, bookable: false, blockers: ['GLOBAL_RELEASE_PHASE_BLOCKED'] };
@@ -200,16 +286,87 @@ async function runAllTests() {
     });
 
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    const isBoundaryOk = mutationCalls.every(c => ALLOWED_ACTIVATION_MUTATION_RPCS.includes(c.rpcName));
     const pass = res.ok === true &&
       mutationCalls.length === 2 &&
+      isBoundaryOk &&
       mutationCalls[0].rpcName === 'super_admin_transition_release_phase' &&
       mutationCalls[1].rpcName === 'super_admin_approve_tenant_pilot' &&
       res.postActivationState.melisBookable === true &&
       res.postActivationState.fixtureBlocked === true;
-    results.push({ name: 'Execution activation performs exactly 2 approved mutation RPCs', pass });
+    results.push({ code: 'A22_A26', name: 'Execution path permits exactly 2 approved mutation RPCs and post-verifies Melis bookable & fixture blocked', pass });
   }
 
-  // Test 8: Rollback restores pre_pilot phase FIRST before revoking authorization
+  // =========================================================================
+  // ROLLBACK SAFETY MATRIX (R01 - R14)
+  // =========================================================================
+
+  // R01: Wrong project refuses
+  {
+    const env = createMockEnv({ VITE_SUPABASE_URL: 'https://wrongproject.supabase.co' });
+    const { mockFetch, mutationCalls } = createMockFetch();
+    const res = await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'R01', name: 'Rollback refuses wrong project ref', pass: res.ok === false && res.reason === 'PROJECT_MISMATCH' && mutationCalls.length === 0 });
+  }
+
+  // R02: Unauthenticated / missing password
+  {
+    const env = createMockEnv({ LARI_STAGE_H1D_SUPER_ADMIN_PASSWORD: '' });
+    const { mockFetch, mutationCalls } = createMockFetch();
+    const res = await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'R02', name: 'Rollback refuses unauthenticated / missing password', pass: res.ok === false && res.reason === 'SUPER_ADMIN_PASSWORD_MISSING' && mutationCalls.length === 0 });
+  }
+
+  // R04: Rollback requires explicit reason
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch();
+    const res = await runRealPilotRollback({ reason: '', env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'R04', name: 'Rollback requires explicit reason', pass: res.ok === false && res.reason === 'MISSING_ROLLBACK_REASON' && mutationCalls.length === 0 });
+  }
+
+  // R06, R07, R08, R10, R11, R12, R14: Rollback execution ordering & safe verification
+  {
+    const env = createMockEnv();
+    let currentPhase = 'paymentless_pilot';
+    let melisAuth = true;
+
+    const { mockFetch, mutationCalls } = createMockFetch({
+      can_accept_public_booking: (body) => ({
+        found: true,
+        allowed: currentPhase === 'paymentless_pilot' && melisAuth,
+        bookable: currentPhase === 'paymentless_pilot' && melisAuth,
+        blocking_reason_codes: currentPhase === 'pre_pilot' ? ['GLOBAL_RELEASE_PHASE_BLOCKED'] : (melisAuth ? [] : ['PILOT_AUTHORIZATION_REQUIRED'])
+      }),
+      super_admin_get_tenant_pilot_eligibility_snapshot: () => ({
+        success: true,
+        authorized: melisAuth,
+        global_release_control: { release_phase: currentPhase, is_payment_collection_enabled: false, is_checkout_enabled: false, is_iyzico_enabled: false }
+      }),
+      super_admin_transition_release_phase: (body) => {
+        currentPhase = body.p_target_phase;
+        return { success: true, changed: true, release_phase: currentPhase };
+      },
+      super_admin_revoke_tenant_pilot: (body) => {
+        melisAuth = false;
+        return { success: true, changed: true, reason_code: 'PILOT_AUTHORIZATION_REVOKED' };
+      }
+    });
+
+    const res = await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    const isBoundaryOk = mutationCalls.every(c => ALLOWED_ROLLBACK_MUTATION_RPCS.includes(c.rpcName));
+    const pass = res.ok === true &&
+      mutationCalls.length === 2 &&
+      isBoundaryOk &&
+      mutationCalls[0].rpcName === 'super_admin_transition_release_phase' &&
+      mutationCalls[0].body.p_target_phase === 'pre_pilot' &&
+      mutationCalls[1].rpcName === 'super_admin_revoke_tenant_pilot' &&
+      res.finalState.releasePhase === 'pre_pilot' &&
+      res.finalState.melisBookable === false;
+    results.push({ code: 'R06_R14', name: 'Rollback cuts booking FIRST via pre_pilot phase, then revokes tenant, verifying final safe state', pass });
+  }
+
+  // R09: Revocation failure leaves public booking globally blocked
   {
     const env = createMockEnv();
     let currentPhase = 'paymentless_pilot';
@@ -225,28 +382,25 @@ async function runAllTests() {
         currentPhase = body.p_target_phase;
         return { success: true, changed: true, release_phase: currentPhase };
       },
-      super_admin_revoke_tenant_pilot: (body) => ({
-        success: true,
-        changed: true,
-        reason_code: 'PILOT_AUTHORIZATION_REVOKED'
+      super_admin_revoke_tenant_pilot: () => ({
+        success: false,
+        reason_code: 'REVOCATION_FAILED'
       })
     });
 
     const res = await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
-    const pass = res.ok === true &&
+    const pass = res.ok === false &&
+      res.reason === 'REVOCATION_FAILED' &&
       mutationCalls.length === 2 &&
       mutationCalls[0].rpcName === 'super_admin_transition_release_phase' &&
-      mutationCalls[0].body.p_target_phase === 'pre_pilot' &&
-      mutationCalls[1].rpcName === 'super_admin_revoke_tenant_pilot' &&
-      res.finalState.releasePhase === 'pre_pilot' &&
-      res.finalState.melisBookable === false;
-    results.push({ name: 'Rollback cuts public booking FIRST via release_phase pre_pilot', pass });
+      currentPhase === 'pre_pilot';
+    results.push({ code: 'R09', name: 'Revocation failure leaves public booking globally blocked', pass });
   }
 
   let allPass = true;
   for (const r of results) {
     const icon = r.pass ? '✅ PASS' : '❌ FAIL';
-    console.log(`${icon}: ${r.name}`);
+    console.log(`[${r.code}] ${icon}: ${r.name}`);
     if (!r.pass) allPass = false;
   }
 
