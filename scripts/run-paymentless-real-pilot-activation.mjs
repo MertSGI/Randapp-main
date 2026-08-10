@@ -7,7 +7,6 @@ import { loadEnvFile, callRpcEndpoint, authenticateUser, CANONICAL_TENANT_ID, DE
 export const REAL_PILOT_TENANT_ID = CANONICAL_TENANT_ID;
 export const REAL_PILOT_SLUG = 'melis-guzellik';
 export const REAL_PILOT_BUSINESS_NAME = 'Melis Güzellik & Nail Art';
-export const REAL_PILOT_EXPECTED_SHA = '69837e78fb6d261259263d2d23c6424fd0565d7c';
 export const EXPECTED_PROJECT_REF = 'rwedeejhjazwjthdjzrt';
 export const EXPECTED_EXTERNAL_FRONTEND_URL = 'https://lari-staging.vercel.app/';
 export const REQUIRED_ACTIVATION_CONFIRMATION = 'I_UNDERSTAND_THIS_ACTIVATES_THE_REAL_MELIS_PAYMENTLESS_PILOT';
@@ -42,8 +41,42 @@ export function checkWorkingTreeClean(cwd = process.cwd()) {
   }
 }
 
+export function parseActivationCliMode(argv = process.argv, env = process.env) {
+  const isExecute = argv.includes('--execute');
+  if (!isExecute) {
+    return { isExecute: false, dryRun: true, ok: true, exitCode: 0, reason: 'DRY_RUN' };
+  }
+
+  const confirmation = env.LARI_P1C_ACTIVATION_CONFIRMATION;
+  if (!confirmation) {
+    return { isExecute: true, dryRun: false, ok: false, exitCode: 1, reason: 'MISSING_OPERATOR_CONFIRMATION' };
+  }
+  if (confirmation !== REQUIRED_ACTIVATION_CONFIRMATION) {
+    return { isExecute: true, dryRun: false, ok: false, exitCode: 1, reason: 'INVALID_OPERATOR_CONFIRMATION' };
+  }
+
+  const expectedSha = env.LARI_P1C_EXPECTED_SHA;
+  if (!expectedSha || typeof expectedSha !== 'string' || expectedSha.trim() === '') {
+    return { isExecute: true, dryRun: false, ok: false, exitCode: 1, reason: 'EXPECTED_SHA_REQUIRED' };
+  }
+
+  const cleanSha = expectedSha.trim();
+  if (!/^[0-9a-f]{40}$/.test(cleanSha)) {
+    return { isExecute: true, dryRun: false, ok: false, exitCode: 1, reason: 'MALFORMED_EXPECTED_SHA' };
+  }
+
+  return {
+    isExecute: true,
+    dryRun: false,
+    ok: true,
+    exitCode: 0,
+    confirmation: cleanSha ? confirmation : null,
+    expectedSha: cleanSha
+  };
+}
+
 export async function runRealPilotActivation({
-  expectedSha = REAL_PILOT_EXPECTED_SHA,
+  expectedSha = null,
   expectedProjectRef = EXPECTED_PROJECT_REF,
   tenantId = REAL_PILOT_TENANT_ID,
   tenantSlug = REAL_PILOT_SLUG,
@@ -64,6 +97,7 @@ export async function runRealPilotActivation({
   getOriginShaImpl = getGitOriginSha,
   checkCleanTreeImpl = checkWorkingTreeClean,
   operatorConfirmation = null,
+  markerFsImpl = fs,
   dryRun = true
 } = {}) {
   const print = (msg = '') => logger.log(msg);
@@ -78,11 +112,37 @@ export async function runRealPilotActivation({
   const superAdminEmail = env.LARI_STAGE_H1D_SUPER_ADMIN_EMAIL || 'superadmin@randevulari.com';
   const superAdminPass = env.LARI_STAGE_H1D_SUPER_ADMIN_PASSWORD;
 
-  // Real execution mode safety confirmation check
+  // Real execution mode safety checks
   if (!dryRun) {
-    if (operatorConfirmation !== REQUIRED_ACTIVATION_CONFIRMATION && env.LARI_P1C_ACTIVATION_CONFIRMATION !== REQUIRED_ACTIVATION_CONFIRMATION) {
+    const activeConfirmation = operatorConfirmation || env.LARI_P1C_ACTIVATION_CONFIRMATION;
+    if (!activeConfirmation) {
       print('⚠️ MISSING_OPERATOR_CONFIRMATION: Real activation requires explicit operator confirmation contract.');
       return { ok: false, exitCode: 1, reason: 'MISSING_OPERATOR_CONFIRMATION' };
+    }
+    if (activeConfirmation !== REQUIRED_ACTIVATION_CONFIRMATION) {
+      print('⚠️ INVALID_OPERATOR_CONFIRMATION: Provided operator confirmation string is invalid.');
+      return { ok: false, exitCode: 1, reason: 'INVALID_OPERATOR_CONFIRMATION' };
+    }
+
+    const targetSha = expectedSha || env.LARI_P1C_EXPECTED_SHA;
+    if (!targetSha || typeof targetSha !== 'string' || targetSha.trim() === '') {
+      print('⚠️ EXPECTED_SHA_REQUIRED: Real execution requires explicit runtime LARI_P1C_EXPECTED_SHA variable.');
+      return { ok: false, exitCode: 1, reason: 'EXPECTED_SHA_REQUIRED' };
+    }
+
+    const cleanSha = targetSha.trim();
+    if (!/^[0-9a-f]{40}$/.test(cleanSha)) {
+      print(`⚠️ MALFORMED_EXPECTED_SHA: Expected 40-character lowercase hex SHA, got '${cleanSha}'`);
+      return { ok: false, exitCode: 1, reason: 'MALFORMED_EXPECTED_SHA' };
+    }
+
+    if (enforceGitSha) {
+      const headSha = getHeadShaImpl();
+      const originSha = getOriginShaImpl();
+      if (!headSha || !originSha || headSha !== cleanSha || originSha !== cleanSha) {
+        print(`⚠️ SHA_MISMATCH: Expected SHA '${cleanSha}', got HEAD='${headSha}', origin='${originSha}'`);
+        return { ok: false, exitCode: 1, reason: 'SHA_MISMATCH', headSha, originSha, expectedSha: cleanSha };
+      }
     }
   }
 
@@ -91,17 +151,6 @@ export async function runRealPilotActivation({
   if (enforceCleanTree && !isClean) {
     print('⚠️ A06_DIRTY_WORKING_TREE: Working tree must be clean before activation.');
     return { ok: false, exitCode: 1, reason: 'DIRTY_WORKING_TREE' };
-  }
-
-  // Exact Git SHA enforcement
-  if (enforceGitSha) {
-    const headSha = getHeadShaImpl();
-    const originSha = getOriginShaImpl();
-    const targetExpected = (expectedSha && expectedSha !== REAL_PILOT_EXPECTED_SHA) ? expectedSha : headSha;
-    if (!headSha || !originSha || headSha !== targetExpected || originSha !== targetExpected) {
-      print(`⚠️ SHA_MISMATCH: Expected SHA '${targetExpected}', got HEAD='${headSha}', origin='${originSha}'`);
-      return { ok: false, exitCode: 1, reason: 'SHA_MISMATCH', headSha, originSha, expectedSha: targetExpected };
-    }
   }
 
   // Supabase Project Ref check
@@ -238,7 +287,17 @@ export async function runRealPilotActivation({
     return { ok: true, exitCode: 0, reason: 'DRY_RUN_PASSED', dryRun: true, mutationRpcCount: 0 };
   }
 
-  // Idempotency keys check for execution path
+  // Real execution marker check & exclusive creation
+  const validatedSha = (expectedSha || env.LARI_P1C_EXPECTED_SHA || getHeadShaImpl() || '').trim();
+  const tempDir = env.TEMP || 'C:\\Windows\\Temp';
+  const markerPath = path.join(tempDir, `lari-p1c-${validatedSha}.controlled-run-started`);
+
+  print(`\n📌 Auditing exact-once activation marker: ${markerPath}`);
+  if (markerFsImpl.existsSync(markerPath)) {
+    print(`⚠️ P1C_ACTIVATION_MARKER_ALREADY_EXISTS: Operator marker already exists for SHA '${validatedSha}'. Controlled activation run has already executed once.`);
+    return { ok: false, exitCode: 1, reason: 'P1C_ACTIVATION_MARKER_ALREADY_EXISTS' };
+  }
+
   const currentTs = now();
   const transKey = transitionIdempotencyKey || `p1c_real_pilot_activation_phase_${currentTs}_${randomSuffix()}`;
   const appKey = approveIdempotencyKey || `p1c_real_pilot_activation_tenant_${currentTs}_${randomSuffix()}`;
@@ -253,29 +312,30 @@ export async function runRealPilotActivation({
     return { ok: false, exitCode: 1, reason: 'MISSING_APPROVE_KEY' };
   }
 
-  // Create P1C Operator Marker Record immediately before first mutation
-  const markerPath = path.join(process.env.TEMP || 'C:\\Windows\\Temp', `lari-p1c-${expectedSha}.controlled-run-started`);
   const markerRecord = {
-    sha: expectedSha,
+    stage: 'P1C_REAL_PILOT_ACTIVATION',
+    validatedSha,
     timestamp: new Date(currentTs).toISOString(),
     projectRef: expectedProjectRef,
     tenantId,
+    tenantSlug,
     externalFrontendUrl,
-    reason,
-    transitionKey: transKey,
-    approveKey: appKey,
-    expectedMutationCount: 2
+    preReleasePhase: snapData.global_release_control.release_phase,
+    preMelisAuthorizationCount: snapData.authorized ? 1 : 0,
+    expectedMutationCount: 2,
+    activationReason: reason
   };
 
   try {
-    fs.writeFileSync(markerPath, JSON.stringify(markerRecord, null, 2));
-    print(`\n📝 Operator marker created: ${markerPath}`);
+    markerFsImpl.writeFileSync(markerPath, JSON.stringify(markerRecord, null, 2), { flag: 'wx' });
+    print(`  ✅ Operator marker created atomically before Mutation 1.`);
   } catch (mErr) {
-    print(`⚠️ MARKER_CREATION_FAILED: ${mErr.message}`);
+    print(`⚠️ P1C_ACTIVATION_MARKER_CREATION_FAILED: Failed to write exclusive marker: ${mErr.message}`);
+    return { ok: false, exitCode: 1, reason: 'P1C_ACTIVATION_MARKER_CREATION_FAILED' };
   }
 
   // Step 1 Mutation - Release Phase Transition
-  print(`\n🚀 STEP 1: Transitioning release phase to 'paymentless_pilot' (Key: ${transKey})...`);
+  print(`\n🚀 STEP 1: Transitioning release phase to 'paymentless_pilot'...`);
   const transRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_transition_release_phase', {
     p_expected_phase: 'pre_pilot',
     p_target_phase: 'paymentless_pilot',
@@ -315,7 +375,7 @@ export async function runRealPilotActivation({
   print('  ✅ Step 2 Revalidation: Payment flags confirmed false and Melis confirmed blocked by PILOT_AUTHORIZATION_REQUIRED.');
 
   // Step 2 Mutation - Approve Tenant Pilot Authorization
-  print(`\n🚀 STEP 3: Approving pilot authorization for Melis Güzellik (Key: ${appKey})...`);
+  print(`\n🚀 STEP 3: Approving pilot authorization for Melis Güzellik...`);
   const approveRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_approve_tenant_pilot', {
     p_tenant_id: tenantId,
     p_reason: reason,
@@ -328,22 +388,22 @@ export async function runRealPilotActivation({
   }
   print('  ✅ Step 3 Success: Pilot authorization approved for Melis Güzellik.');
 
-  // Post-Activation Acceptance Verification
+  // Section 7: Final Post-Activation Payment & Booking Proof
   print('\n🎯 Post-Activation Acceptance Verification...');
+  const postMelisSnap = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: tenantId }, token, fetchImpl);
   const postMelis = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'can_accept_public_booking', { p_slug: tenantSlug }, null, fetchImpl);
-  const isMelisBookable = postMelis.data && postMelis.data.found === true && postMelis.data.allowed === true && postMelis.data.bookable === true;
-
   const postFixture = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'can_accept_public_booking', { p_slug: DEDICATED_H1D_TENANT_SLUG }, null, fetchImpl);
+
+  const finalControl = (postMelisSnap.data && postMelisSnap.data.global_release_control) || {};
+  const isFinalPhaseCorrect = finalControl.release_phase === 'paymentless_pilot';
+  const isFinalPayDisabled = finalControl.is_payment_collection_enabled === false && finalControl.is_checkout_enabled === false && finalControl.is_iyzico_enabled === false;
+  const isMelisAuthorized = postMelisSnap.data && postMelisSnap.data.authorized === true;
+  const isMelisBookable = postMelis.data && postMelis.data.found === true && postMelis.data.allowed === true && postMelis.data.bookable === true;
   const isFixtureBlocked = postFixture.data && postFixture.data.allowed === false && postFixture.data.blocking_reason_codes.includes('PILOT_AUTHORIZATION_REQUIRED');
 
-  if (!isMelisBookable) {
-    print(`⚠️ A25_MELIS_NOT_BOOKABLE: Melis Güzellik is not bookable post-activation: ${JSON.stringify(postMelis.data)}`);
-    return { ok: false, exitCode: 1, reason: 'POST_VERIFICATION_MELIS_FAILED' };
-  }
-
-  if (!isFixtureBlocked) {
-    print(`⚠️ A26_FIXTURE_NOT_BLOCKED: Fixture tenant is not safely blocked post-activation: ${JSON.stringify(postFixture.data)}`);
-    return { ok: false, exitCode: 1, reason: 'POST_VERIFICATION_FIXTURE_FAILED' };
+  if (!isFinalPhaseCorrect || !isFinalPayDisabled || !isMelisAuthorized || !isMelisBookable || !isFixtureBlocked) {
+    print('⚠️ POST_ACTIVATION_PROOF_FAILED: Post-activation verification failed.');
+    return { ok: false, exitCode: 1, reason: 'POST_VERIFICATION_FAILED' };
   }
 
   print('\n🎉 P1C PAYMENTLESS REAL PILOT ACTIVATION COMPLETE (Exactly 2 approved mutation RPCs executed):');
@@ -369,17 +429,19 @@ if (process.argv[1] && process.argv[1].endsWith('run-paymentless-real-pilot-acti
   loadEnvFile(path.join(process.cwd(), '.env'));
   loadEnvFile(path.join(process.cwd(), '.env.local'));
 
-  const isExecuteFlag = process.argv.includes('--execute');
-  const confirmationEnv = process.env.LARI_P1C_ACTIVATION_CONFIRMATION;
-
-  const shouldExecute = isExecuteFlag && confirmationEnv === REQUIRED_ACTIVATION_CONFIRMATION;
+  const modeParsed = parseActivationCliMode(process.argv, process.env);
+  if (!modeParsed.ok) {
+    console.error(`⚠️ ACTIVATION_CLI_ERROR: ${modeParsed.reason}`);
+    process.exit(modeParsed.exitCode);
+  }
 
   runRealPilotActivation({
-    dryRun: !shouldExecute,
+    dryRun: modeParsed.dryRun,
+    expectedSha: modeParsed.expectedSha,
+    operatorConfirmation: modeParsed.confirmation,
     enforceCleanTree: true,
     requireExternalFrontend: true,
-    enforceGitSha: true,
-    operatorConfirmation: confirmationEnv
+    enforceGitSha: true
   }).then(res => {
     process.exitCode = res.exitCode;
   });

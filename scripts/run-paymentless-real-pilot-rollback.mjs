@@ -13,6 +13,23 @@ export const ALLOWED_ROLLBACK_MUTATION_RPCS = [
   'super_admin_revoke_tenant_pilot'
 ];
 
+export function parseRollbackCliMode(argv = process.argv, env = process.env) {
+  const isExecute = argv.includes('--execute');
+  if (!isExecute) {
+    return { isExecute: false, dryRun: true, ok: true, exitCode: 0, reason: 'DRY_RUN' };
+  }
+
+  const confirmation = env.LARI_P1C_ROLLBACK_CONFIRMATION;
+  if (!confirmation) {
+    return { isExecute: true, dryRun: false, ok: false, exitCode: 1, reason: 'MISSING_OPERATOR_CONFIRMATION' };
+  }
+  if (confirmation !== REQUIRED_ROLLBACK_CONFIRMATION) {
+    return { isExecute: true, dryRun: false, ok: false, exitCode: 1, reason: 'INVALID_OPERATOR_CONFIRMATION' };
+  }
+
+  return { isExecute: true, dryRun: false, ok: true, exitCode: 0, confirmation };
+}
+
 export async function runRealPilotRollback({
   expectedProjectRef = EXPECTED_PROJECT_REF,
   tenantId = REAL_PILOT_TENANT_ID,
@@ -42,9 +59,14 @@ export async function runRealPilotRollback({
 
   // Real execution mode safety confirmation check
   if (!dryRun) {
-    if (operatorConfirmation !== REQUIRED_ROLLBACK_CONFIRMATION && env.LARI_P1C_ROLLBACK_CONFIRMATION !== REQUIRED_ROLLBACK_CONFIRMATION) {
+    const activeConfirmation = operatorConfirmation || env.LARI_P1C_ROLLBACK_CONFIRMATION;
+    if (!activeConfirmation) {
       print('⚠️ MISSING_OPERATOR_CONFIRMATION: Real rollback requires explicit operator confirmation contract.');
       return { ok: false, exitCode: 1, reason: 'MISSING_OPERATOR_CONFIRMATION' };
+    }
+    if (activeConfirmation !== REQUIRED_ROLLBACK_CONFIRMATION) {
+      print('⚠️ INVALID_OPERATOR_CONFIRMATION: Provided rollback confirmation string is invalid.');
+      return { ok: false, exitCode: 1, reason: 'INVALID_OPERATOR_CONFIRMATION' };
     }
   }
 
@@ -75,15 +97,33 @@ export async function runRealPilotRollback({
   }
   const token = authRes.token;
 
-  // R02: Verify authenticated actor is a super_admin (RPC returns UNAUTHORIZED for non-super-admin)
+  // R02: Verify authenticated actor is a super_admin
   const roleCheck = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: tenantId }, token, fetchImpl);
   if (roleCheck.data && roleCheck.data.reason_code === 'UNAUTHORIZED') {
     print('⚠️ R02_UNAUTHORIZED_ACTOR: Authenticated actor is valid but not a super_admin.');
     return { ok: false, exitCode: 1, reason: 'UNAUTHORIZED_ACTOR' };
   }
 
+  const currentSnap = roleCheck.data || {};
+  const currentControl = currentSnap.global_release_control || {};
+  const isCurrentlyPrePilot = currentControl.release_phase === 'pre_pilot';
+  const isMelisCurrentlyAuthorized = currentSnap.authorized === true || (currentSnap.pilot_authorization && currentSnap.pilot_authorization.is_authorized === true);
+
+  // Dry-run mode read-only preflight
   if (dryRun) {
-    print('\n🛑 DRY-RUN ROLLBACK COMPLETE: Preconditions verified. No mutations executed.');
+    print('\n🔍 Auditing live rollback necessity facts...');
+    print(`  - Current Release Phase: ${currentControl.release_phase}`);
+    print(`  - Melis Active Authorization: ${isMelisCurrentlyAuthorized}`);
+    print(`  - Payment Collection Enabled: ${currentControl.is_payment_collection_enabled}`);
+    print(`  - Checkout Enabled: ${currentControl.is_checkout_enabled}`);
+    print(`  - Iyzico Enabled: ${currentControl.is_iyzico_enabled}`);
+
+    if (isCurrentlyPrePilot && !isMelisCurrentlyAuthorized) {
+      print('\nℹ️ ROLLBACK_NOT_CURRENTLY_REQUIRED: Live system is already in pre_pilot phase and Melis is unauthorized. 0 mutations executed.');
+      return { ok: true, exitCode: 0, reason: 'ROLLBACK_NOT_CURRENTLY_REQUIRED', dryRun: true, mutationRpcCount: 0 };
+    }
+
+    print('\n🛑 DRY-RUN ROLLBACK COMPLETE: Rollback target verified. No mutations executed.');
     return { ok: true, exitCode: 0, reason: 'DRY_RUN_PASSED', dryRun: true, mutationRpcCount: 0 };
   }
 
@@ -103,7 +143,7 @@ export async function runRealPilotRollback({
   }
 
   // R06: STEP 1 - CUT PUBLIC BOOKING GLOBALLY FIRST BY RESTORING pre_pilot PHASE
-  print(`\n🛡️ STEP 1 (R06): Restoring release phase to 'pre_pilot' (Key: ${transKey})...`);
+  print(`\n🛡️ STEP 1 (R06): Restoring release phase to 'pre_pilot'...`);
   const transRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_transition_release_phase', {
     p_expected_phase: 'paymentless_pilot',
     p_target_phase: 'pre_pilot',
@@ -130,7 +170,7 @@ export async function runRealPilotRollback({
   }
 
   // R08: STEP 3 - REVOKE MELIS PILOT AUTHORIZATION AFTER BOOKING IS GLOBALLY CUT
-  print(`\n🛡️ STEP 3 (R08): Revoking pilot authorization for Melis Güzellik (Key: ${revKey})...`);
+  print(`\n🛡️ STEP 3 (R08): Revoking pilot authorization for Melis Güzellik...`);
   const revokeRes = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_revoke_tenant_pilot', {
     p_tenant_id: tenantId,
     p_reason: reason,
@@ -189,14 +229,15 @@ if (process.argv[1] && process.argv[1].endsWith('run-paymentless-real-pilot-roll
   loadEnvFile(path.join(process.cwd(), '.env'));
   loadEnvFile(path.join(process.cwd(), '.env.local'));
 
-  const isExecuteFlag = process.argv.includes('--execute');
-  const confirmationEnv = process.env.LARI_P1C_ROLLBACK_CONFIRMATION;
-
-  const shouldExecute = isExecuteFlag && confirmationEnv === REQUIRED_ROLLBACK_CONFIRMATION;
+  const modeParsed = parseRollbackCliMode(process.argv, process.env);
+  if (!modeParsed.ok) {
+    console.error(`⚠️ ROLLBACK_CLI_ERROR: ${modeParsed.reason}`);
+    process.exit(modeParsed.exitCode);
+  }
 
   runRealPilotRollback({
-    dryRun: !shouldExecute,
-    operatorConfirmation: confirmationEnv
+    dryRun: modeParsed.dryRun,
+    operatorConfirmation: modeParsed.confirmation
   }).then(res => {
     process.exitCode = res.exitCode;
   });
