@@ -65,6 +65,13 @@ export async function runRealPilotRollback({
   }
   const token = authRes.token;
 
+  // R02: Verify authenticated actor is a super_admin (RPC returns UNAUTHORIZED for non-super-admin)
+  const roleCheck = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: tenantId }, token, fetchImpl);
+  if (roleCheck.data && roleCheck.data.reason_code === 'UNAUTHORIZED') {
+    print('⚠️ R02_UNAUTHORIZED_ACTOR: Authenticated actor is valid but not a super_admin.');
+    return { ok: false, exitCode: 1, reason: 'UNAUTHORIZED_ACTOR' };
+  }
+
   if (dryRun) {
     print('\n🛑 DRY-RUN ROLLBACK COMPLETE: No mutations executed.');
     return { ok: true, exitCode: 0, reason: 'DRY_RUN_PASSED', dryRun: true, mutationRpcCount: 0 };

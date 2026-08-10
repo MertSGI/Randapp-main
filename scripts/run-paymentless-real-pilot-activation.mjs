@@ -96,6 +96,13 @@ export async function runRealPilotActivation({
   }
   const token = authRes.token;
 
+  // A05: Verify authenticated actor is a super_admin (RPC returns UNAUTHORIZED for non-super-admin)
+  const roleCheck = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: tenantId }, token, fetchImpl);
+  if (roleCheck.data && roleCheck.data.reason_code === 'UNAUTHORIZED') {
+    print('⚠️ A05_UNAUTHORIZED_ACTOR: Authenticated actor is valid but not a super_admin.');
+    return { ok: false, exitCode: 1, reason: 'UNAUTHORIZED_ACTOR' };
+  }
+
   // 2. Precondition Verification - Read Only
   print('\n🔍 Auditing pre-activation readiness facts...');
   
@@ -156,6 +163,14 @@ export async function runRealPilotActivation({
   if (fixtureSnap.data && fixtureSnap.data.authorized === true) {
     print('⚠️ A14_FIXTURE_TENANT_AUTHORIZED: Dedicated acceptance fixture tenant is unexpectedly authorized.');
     return { ok: false, exitCode: 1, reason: 'FIXTURE_TENANT_AUTHORIZED' };
+  }
+
+  // A15: Unrelated tenant (eeee1111-...) authorized check
+  const unrelatedTenantId = 'eeee1111-e1e1-e1e1-e1e1-eeeeeeeeeeee';
+  const unrelatedSnap = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: unrelatedTenantId }, token, fetchImpl);
+  if (unrelatedSnap.data && unrelatedSnap.data.authorized === true) {
+    print('⚠️ A15_UNRELATED_TENANT_AUTHORIZED: Unrelated tenant is unexpectedly authorized.');
+    return { ok: false, exitCode: 1, reason: 'UNRELATED_TENANT_AUTHORIZED' };
   }
 
   // A21: Dry Run check

@@ -20,11 +20,12 @@ function createMockFetch(rpcResponses = {}) {
     const body = options.body ? JSON.parse(options.body) : {};
 
     if (pathname.includes('/auth/v1/token')) {
+      const email = body.email || 'superadmin@randevulari.com';
       return {
         ok: true,
         status: 200,
-        text: async () => JSON.stringify({ access_token: 'mock_access_token', token_type: 'bearer', user: { id: 'superadmin-id', email: 'superadmin@randevulari.com' } }),
-        json: async () => ({ access_token: 'mock_access_token', token_type: 'bearer', user: { id: 'superadmin-id', email: 'superadmin@randevulari.com' } })
+        text: async () => JSON.stringify({ access_token: 'mock_access_token', token_type: 'bearer', user: { id: 'user-id', email } }),
+        json: async () => ({ access_token: 'mock_access_token', token_type: 'bearer', user: { id: 'user-id', email } })
       };
     }
 
@@ -97,7 +98,7 @@ async function runAllTests() {
   const results = [];
   const silentLogger = { log: () => {}, error: () => {}, warn: () => {} };
 
-  console.log('=== RUNNING P1A COMPLETE ACTIVATION & ROLLBACK SAFETY MATRIX ===\n');
+  console.log('=== RUNNING P1A & P1B COMPLETE ACTIVATION & ROLLBACK SAFETY MATRIX ===\n');
 
   // =========================================================================
   // ACTIVATION SAFETY MATRIX (A01 - A26)
@@ -127,12 +128,27 @@ async function runAllTests() {
     results.push({ code: 'A03', name: 'Refuses wrong tenant slug', pass: res.ok === false && res.reason === 'TENANT_SLUG_MISMATCH' && mutationCalls.length === 0 });
   }
 
-  // A04 & A05: Unauthenticated or non-super-admin actor
+  // A04: Unauthenticated / missing password
   {
     const env = createMockEnv({ LARI_STAGE_H1D_SUPER_ADMIN_PASSWORD: '' });
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A04_A05', name: 'Refuses unauthenticated or missing super-admin actor', pass: res.ok === false && res.reason === 'SUPER_ADMIN_PASSWORD_MISSING' && mutationCalls.length === 0 });
+    results.push({ code: 'A04', name: 'Refuses unauthenticated actor (missing password)', pass: res.ok === false && res.reason === 'SUPER_ADMIN_PASSWORD_MISSING' && mutationCalls.length === 0 });
+  }
+
+  // A05: Valid authenticated NON-super-admin actor (e.g. customer/staff)
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch({
+      super_admin_get_tenant_pilot_eligibility_snapshot: () => ({
+        success: false,
+        reason_code: 'UNAUTHORIZED',
+        changed: false,
+        replayed: false
+      })
+    });
+    const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'A05', name: 'Refuses validly authenticated NON-super-admin actor (RPC UNAUTHORIZED)', pass: res.ok === false && res.reason === 'UNAUTHORIZED_ACTOR' && mutationCalls.length === 0 });
   }
 
   // A06: Dirty working tree
@@ -222,7 +238,7 @@ async function runAllTests() {
     results.push({ code: 'A13', name: 'Refuses when blocker list has extra reason codes', pass: res.ok === false && res.reason === 'UNEXPECTED_BLOCKERS' && mutationCalls.length === 0 });
   }
 
-  // A14: Fixture tenant actively authorized
+  // A14: Fixture tenant (dddd1111-...) actively authorized
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch({
@@ -236,7 +252,24 @@ async function runAllTests() {
       })
     });
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A14_A15', name: 'Refuses when fixture or unrelated tenant actively authorized', pass: res.ok === false && res.reason === 'FIXTURE_TENANT_AUTHORIZED' && mutationCalls.length === 0 });
+    results.push({ code: 'A14', name: 'Refuses when fixture tenant (dddd1111-...) is actively authorized', pass: res.ok === false && res.reason === 'FIXTURE_TENANT_AUTHORIZED' && mutationCalls.length === 0 });
+  }
+
+  // A15: Unrelated tenant (eeee1111-...) actively authorized
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch({
+      super_admin_get_tenant_pilot_eligibility_snapshot: (body) => ({
+        success: true,
+        tenant_id: body.p_tenant_id,
+        authorized: body.p_tenant_id.includes('eeee1111'),
+        global_release_control: { release_phase: 'pre_pilot', is_payment_collection_enabled: false },
+        readiness_facts: { tenant_status: 'active', public_site_status: 'published', relationship_verification: { status: 'VERIFIED' } },
+        pilot_authorization: { is_authorized: body.p_tenant_id.includes('eeee1111') }
+      })
+    });
+    const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'A15', name: 'Refuses when unrelated tenant (eeee1111-...) is actively authorized', pass: res.ok === false && res.reason === 'UNRELATED_TENANT_AUTHORIZED' && mutationCalls.length === 0 });
   }
 
   // A16: Missing activation reason
@@ -245,6 +278,14 @@ async function runAllTests() {
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotActivation({ reason: '', env, fetchImpl: mockFetch, logger: silentLogger });
     results.push({ code: 'A16', name: 'Refuses missing activation reason', pass: res.ok === false && res.reason === 'MISSING_ACTIVATION_REASON' && mutationCalls.length === 0 });
+  }
+
+  // A18: Missing authorization idempotency key in execution path
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch();
+    const res = await runRealPilotActivation({ approveIdempotencyKey: ' ', env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    results.push({ code: 'A18', name: 'Independently proves authorization idempotency key is required', pass: res.ok === false && res.reason === 'MISSING_APPROVE_KEY' });
   }
 
   // A20: External frontend mandatory gate unsatisfied
@@ -263,7 +304,7 @@ async function runAllTests() {
     results.push({ code: 'A21', name: 'Dry-run execution executes exactly 0 mutation RPCs', pass: res.ok === true && res.reason === 'DRY_RUN_PASSED' && res.mutationRpcCount === 0 && mutationCalls.length === 0 });
   }
 
-  // A22, A23, A24, A25, A26: Execution path performs exactly 2 approved mutation RPCs and post-checks
+  // A22-A26: Execution path performs exactly 2 approved mutation RPCs and post-checks
   {
     const env = createMockEnv();
     let melisState = { allowed: false, bookable: false, blockers: ['GLOBAL_RELEASE_PHASE_BLOCKED'] };
@@ -309,12 +350,19 @@ async function runAllTests() {
     results.push({ code: 'R01', name: 'Rollback refuses wrong project ref', pass: res.ok === false && res.reason === 'PROJECT_MISMATCH' && mutationCalls.length === 0 });
   }
 
-  // R02: Unauthenticated / missing password
+  // R02: Valid authenticated NON-super-admin actor rejected
   {
-    const env = createMockEnv({ LARI_STAGE_H1D_SUPER_ADMIN_PASSWORD: '' });
-    const { mockFetch, mutationCalls } = createMockFetch();
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch({
+      super_admin_get_tenant_pilot_eligibility_snapshot: () => ({
+        success: false,
+        reason_code: 'UNAUTHORIZED',
+        changed: false,
+        replayed: false
+      })
+    });
     const res = await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'R02', name: 'Rollback refuses unauthenticated / missing password', pass: res.ok === false && res.reason === 'SUPER_ADMIN_PASSWORD_MISSING' && mutationCalls.length === 0 });
+    results.push({ code: 'R02', name: 'Rollback rejects validly authenticated NON-super-admin actor (RPC UNAUTHORIZED)', pass: res.ok === false && res.reason === 'UNAUTHORIZED_ACTOR' && mutationCalls.length === 0 });
   }
 
   // R04: Rollback requires explicit reason
@@ -325,7 +373,7 @@ async function runAllTests() {
     results.push({ code: 'R04', name: 'Rollback requires explicit reason', pass: res.ok === false && res.reason === 'MISSING_ROLLBACK_REASON' && mutationCalls.length === 0 });
   }
 
-  // R06, R07, R08, R10, R11, R12, R14: Rollback execution ordering & safe verification
+  // R06-R14: Rollback execution ordering & safe verification
   {
     const env = createMockEnv();
     let currentPhase = 'paymentless_pilot';
@@ -404,7 +452,7 @@ async function runAllTests() {
     if (!r.pass) allPass = false;
   }
 
-  console.log(`\nTotal P1A Runner Tests: ${results.length}`);
+  console.log(`\nTotal P1A & P1B Runner Tests: ${results.length}`);
   console.log(`Passed: ${results.filter(r => r.pass).length}`);
   console.log(`Failed: ${results.filter(r => !r.pass).length}`);
 
