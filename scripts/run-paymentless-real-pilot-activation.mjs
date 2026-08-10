@@ -399,7 +399,9 @@ export async function runRealPilotActivation({
   const isFinalPayDisabled = finalControl.is_payment_collection_enabled === false && finalControl.is_checkout_enabled === false && finalControl.is_iyzico_enabled === false;
   const isMelisAuthorized = postMelisSnap.data && postMelisSnap.data.authorized === true;
   const isMelisBookable = postMelis.data && postMelis.data.found === true && postMelis.data.allowed === true && postMelis.data.bookable === true;
-  const isFixtureBlocked = postFixture.data && postFixture.data.allowed === false && postFixture.data.blocking_reason_codes.includes('PILOT_AUTHORIZATION_REQUIRED');
+  const fixtureHasHistory = postFixture.data && (postFixture.data.blocking_reason_codes.includes('PILOT_AUTHORIZATION_REVOKED') || (postFixture.data.blocking_reason_codes.includes('PILOT_AUTHORIZATION_REQUIRED') && !postFixture.data.blocking_reason_codes.includes('PILOT_AUTHORIZATION_REVOKED')));
+  const expectedFixtureBlocker = postFixture.data && postFixture.data.blocking_reason_codes.includes('PILOT_AUTHORIZATION_REVOKED') ? 'PILOT_AUTHORIZATION_REVOKED' : 'PILOT_AUTHORIZATION_REQUIRED';
+  const isFixtureBlocked = postFixture.data && postFixture.data.allowed === false && postFixture.data.blocking_reason_codes.includes(expectedFixtureBlocker);
 
   if (!isFinalPhaseCorrect || !isFinalPayDisabled || !isMelisAuthorized || !isMelisBookable || !isFixtureBlocked) {
     print('⚠️ POST_ACTIVATION_PROOF_FAILED: Post-activation verification failed.');

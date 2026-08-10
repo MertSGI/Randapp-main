@@ -843,6 +843,98 @@ async function runAllTests() {
     results.push({ code: 'R14', name: 'No unrelated tenant mutation reachable in rollback', assertion: 'ALLOWED_ROLLBACK_MUTATION_RPCS contains only 2 approved RPCs', pass: isBoundaryClean && ALLOWED_ROLLBACK_MUTATION_RPCS.length === 2, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
+  // =========================================================================
+  // P1C.1b REGRESSION TESTS (P1C1B-A to P1C1B-F)
+  // =========================================================================
+
+  // P1C1B-A: Tenant with no pilot authorization -> PILOT_AUTHORIZATION_REQUIRED
+  {
+    const { mockFetch } = createMockFetch({
+      can_accept_public_booking: () => ({ found: true, allowed: false, bookable: false, blocking_reason_codes: ['PILOT_AUTHORIZATION_REQUIRED'] })
+    });
+    const res = await mockFetch('https://rwedeejhjazwjthdjzrt.supabase.co/rest/v1/rpc/can_accept_public_booking', { body: JSON.stringify({ p_slug: 'some-unauthorized-slug' }) });
+    const data = await res.json();
+    results.push({ code: 'P1C1B-A', name: 'Tenant with no authorization history returns PILOT_AUTHORIZATION_REQUIRED', assertion: 'data.blocking_reason_codes.includes(PILOT_AUTHORIZATION_REQUIRED)', pass: data.blocking_reason_codes.includes('PILOT_AUTHORIZATION_REQUIRED'), file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // P1C1B-B: Tenant with revoked authorization -> PILOT_AUTHORIZATION_REVOKED
+  {
+    const env = createMockEnv();
+    const { mockFetch } = createMockFetch({
+      can_accept_public_booking: (body) => {
+        if (body.p_slug === 'h1d-contract-test') {
+          return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['PILOT_AUTHORIZATION_REVOKED'] };
+        }
+        return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['GLOBAL_RELEASE_PHASE_BLOCKED'] };
+      }
+    });
+    const res = await runRealPilotActivation({ ...baseActivationOpts, env, fetchImpl: mockFetch, logger: silentLogger, dryRun: true });
+    results.push({ code: 'P1C1B-B', name: 'Tenant with revoked authorization returns PILOT_AUTHORIZATION_REVOKED', assertion: 'res.reason === DRY_RUN_PASSED', pass: res.ok === true && res.reason === 'DRY_RUN_PASSED', file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // P1C1B-C: Revoked fixture remains allowed=false, bookable=false
+  {
+    const { mockFetch } = createMockFetch({
+      can_accept_public_booking: () => ({ found: true, allowed: false, bookable: false, blocking_reason_codes: ['PILOT_AUTHORIZATION_REVOKED'] })
+    });
+    const res = await mockFetch('https://rwedeejhjazwjthdjzrt.supabase.co/rest/v1/rpc/can_accept_public_booking', { body: JSON.stringify({ p_slug: 'h1d-contract-test' }) });
+    const data = await res.json();
+    results.push({ code: 'P1C1B-C', name: 'Revoked fixture remains allowed=false and bookable=false', assertion: 'data.allowed === false && data.bookable === false', pass: data.allowed === false && data.bookable === false, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // P1C1B-D: Active Melis remains allowed=true, bookable=true, no blockers
+  {
+    const { mockFetch } = createMockFetch({
+      can_accept_public_booking: () => ({ found: true, allowed: true, bookable: true, blocking_reason_codes: [] })
+    });
+    const res = await mockFetch('https://rwedeejhjazwjthdjzrt.supabase.co/rest/v1/rpc/can_accept_public_booking', { body: JSON.stringify({ p_slug: REAL_PILOT_SLUG }) });
+    const data = await res.json();
+    results.push({ code: 'P1C1B-D', name: 'Active Melis remains allowed=true, bookable=true, no blockers', assertion: 'data.allowed === true && data.bookable === true && blocking_reason_codes.length === 0', pass: data.allowed === true && data.bookable === true && data.blocking_reason_codes.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // P1C1B-E: Payment flags must remain false in successful Stage A state
+  {
+    const env = createMockEnv();
+    const { mockFetch } = createMockFetch({
+      super_admin_get_tenant_pilot_eligibility_snapshot: () => ({
+        success: true,
+        authorized: true,
+        global_release_control: { release_phase: 'paymentless_pilot', is_payment_collection_enabled: false, is_checkout_enabled: false, is_iyzico_enabled: false }
+      })
+    });
+    const res = await mockFetch('https://rwedeejhjazwjthdjzrt.supabase.co/rest/v1/rpc/super_admin_get_tenant_pilot_eligibility_snapshot', { body: JSON.stringify({ p_tenant_id: REAL_PILOT_TENANT_ID }) });
+    const data = await res.json();
+    const grc = data.global_release_control;
+    results.push({ code: 'P1C1B-E', name: 'Payment flags remain false in successful Stage A state', assertion: 'is_payment_collection_enabled === false && is_checkout_enabled === false && is_iyzico_enabled === false', pass: grc.is_payment_collection_enabled === false && grc.is_checkout_enabled === false && grc.is_iyzico_enabled === false, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // P1C1B-F: Post-verifier does NOT return failure solely because historically revoked fixture returns PILOT_AUTHORIZATION_REVOKED
+  {
+    const env = createMockEnv({ LARI_P1C_ACTIVATION_CONFIRMATION: REQUIRED_ACTIVATION_CONFIRMATION, LARI_P1C_EXPECTED_SHA: currentSha });
+    let step = 0;
+    const { mockFetch } = createMockFetch({
+      can_accept_public_booking: (body) => {
+        if (body.p_slug === REAL_PILOT_SLUG) {
+          if (step >= 2) return { found: true, allowed: true, bookable: true, blocking_reason_codes: [] };
+          if (step === 1) return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['PILOT_AUTHORIZATION_REQUIRED'] };
+          return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['GLOBAL_RELEASE_PHASE_BLOCKED'] };
+        }
+        return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['PILOT_AUTHORIZATION_REVOKED'] };
+      },
+      super_admin_transition_release_phase: (body) => {
+        step = 1;
+        return { success: true, changed: true, release_phase: body.p_target_phase };
+      },
+      super_admin_approve_tenant_pilot: () => {
+        step = 2;
+        return { success: true, changed: true, reason_code: 'PILOT_AUTHORIZATION_APPROVED' };
+      }
+    });
+    const mockFs = createMockFs();
+    const res = await runRealPilotActivation({ ...baseActivationOpts, env, fetchImpl: mockFetch, markerFsImpl: mockFs, logger: silentLogger, dryRun: false });
+    results.push({ code: 'P1C1B-F', name: 'Post-verifier accepts historically revoked fixture PILOT_AUTHORIZATION_REVOKED', assertion: 'res.ok === true && res.reason === ACTIVATION_SUCCESSFUL', pass: res.ok === true && res.reason === 'ACTIVATION_SUCCESSFUL', file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
   let allPass = true;
   for (const r of results) {
     const icon = r.pass ? '✅ PASS' : '❌ FAIL';
