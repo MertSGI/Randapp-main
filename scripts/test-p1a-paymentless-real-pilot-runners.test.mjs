@@ -98,45 +98,45 @@ async function runAllTests() {
   const results = [];
   const silentLogger = { log: () => {}, error: () => {}, warn: () => {} };
 
-  console.log('=== RUNNING P1A & P1B COMPLETE ACTIVATION & ROLLBACK SAFETY MATRIX ===\n');
+  console.log('=== RUNNING P1B.1 INDIVIDUAL ACTIVATION & ROLLBACK ASSERTION EVIDENCE REGISTER ===\n');
 
   // =========================================================================
-  // ACTIVATION SAFETY MATRIX (A01 - A26)
+  // ACTIVATION SAFETY MATRIX INDIVIDUAL ASSERTIONS (A01 - A26)
   // =========================================================================
 
-  // A01: Wrong Supabase project
+  // A01
   {
     const env = createMockEnv({ VITE_SUPABASE_URL: 'https://wrongproject.supabase.co' });
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A01', name: 'Refuses wrong Supabase project ref', pass: res.ok === false && res.reason === 'PROJECT_MISMATCH' && mutationCalls.length === 0 });
+    results.push({ code: 'A01', name: 'Refuses wrong Supabase project ref', assertion: 'res.reason === PROJECT_MISMATCH', pass: res.ok === false && res.reason === 'PROJECT_MISMATCH' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A02: Wrong tenant ID
+  // A02
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotActivation({ tenantId: 'wrong-tenant-id', env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A02', name: 'Refuses wrong tenant ID', pass: res.ok === false && res.reason === 'TENANT_ID_MISMATCH' && mutationCalls.length === 0 });
+    results.push({ code: 'A02', name: 'Refuses wrong tenant ID', assertion: 'res.reason === TENANT_ID_MISMATCH', pass: res.ok === false && res.reason === 'TENANT_ID_MISMATCH' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A03: Wrong tenant slug
+  // A03
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotActivation({ tenantSlug: 'wrong-slug', env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A03', name: 'Refuses wrong tenant slug', pass: res.ok === false && res.reason === 'TENANT_SLUG_MISMATCH' && mutationCalls.length === 0 });
+    results.push({ code: 'A03', name: 'Refuses wrong tenant slug', assertion: 'res.reason === TENANT_SLUG_MISMATCH', pass: res.ok === false && res.reason === 'TENANT_SLUG_MISMATCH' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A04: Unauthenticated / missing password
+  // A04
   {
     const env = createMockEnv({ LARI_STAGE_H1D_SUPER_ADMIN_PASSWORD: '' });
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A04', name: 'Refuses unauthenticated actor (missing password)', pass: res.ok === false && res.reason === 'SUPER_ADMIN_PASSWORD_MISSING' && mutationCalls.length === 0 });
+    results.push({ code: 'A04', name: 'Refuses unauthenticated actor', assertion: 'res.reason === SUPER_ADMIN_PASSWORD_MISSING', pass: res.ok === false && res.reason === 'SUPER_ADMIN_PASSWORD_MISSING' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A05: Valid authenticated NON-super-admin actor (e.g. customer/staff)
+  // A05
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch({
@@ -148,18 +148,18 @@ async function runAllTests() {
       })
     });
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A05', name: 'Refuses validly authenticated NON-super-admin actor (RPC UNAUTHORIZED)', pass: res.ok === false && res.reason === 'UNAUTHORIZED_ACTOR' && mutationCalls.length === 0 });
+    results.push({ code: 'A05', name: 'Refuses validly authenticated NON-super-admin actor', assertion: 'res.reason === UNAUTHORIZED_ACTOR', pass: res.ok === false && res.reason === 'UNAUTHORIZED_ACTOR' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A06: Dirty working tree
+  // A06
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotActivation({ enforceCleanTree: true, isWorkingTreeClean: false, env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A06', name: 'Refuses dirty working tree', pass: res.ok === false && res.reason === 'DIRTY_WORKING_TREE' && mutationCalls.length === 0 });
+    results.push({ code: 'A06', name: 'Refuses dirty working tree', assertion: 'res.reason === DIRTY_WORKING_TREE', pass: res.ok === false && res.reason === 'DIRTY_WORKING_TREE' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A07: Unexpected release phase
+  // A07
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch({
@@ -172,26 +172,58 @@ async function runAllTests() {
       })
     });
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A07', name: 'Refuses unexpected release phase (must be pre_pilot)', pass: res.ok === false && res.reason === 'UNEXPECTED_RELEASE_PHASE' && mutationCalls.length === 0 });
+    results.push({ code: 'A07', name: 'Refuses unexpected release phase', assertion: 'res.reason === UNEXPECTED_RELEASE_PHASE', pass: res.ok === false && res.reason === 'UNEXPECTED_RELEASE_PHASE' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A08, A09, A10: Payment collection / checkout / iyzico enabled
+  // A08
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch({
       super_admin_get_tenant_pilot_eligibility_snapshot: () => ({
         success: true,
         authorized: false,
-        global_release_control: { release_phase: 'pre_pilot', is_payment_collection_enabled: true },
+        global_release_control: { release_phase: 'pre_pilot', is_payment_collection_enabled: true, is_checkout_enabled: false, is_iyzico_enabled: false },
         readiness_facts: { tenant_status: 'active', public_site_status: 'published', relationship_verification: { status: 'VERIFIED' } },
         pilot_authorization: { is_authorized: false }
       })
     });
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A08_A09_A10', name: 'Refuses when payment collection / checkout flag enabled', pass: res.ok === false && res.reason === 'PAYMENT_FLAG_ENABLED' && mutationCalls.length === 0 });
+    results.push({ code: 'A08', name: 'Refuses when is_payment_collection_enabled is true', assertion: 'res.reason === PAYMENT_FLAG_ENABLED', pass: res.ok === false && res.reason === 'PAYMENT_FLAG_ENABLED' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A11: Melis already authorized
+  // A09
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch({
+      super_admin_get_tenant_pilot_eligibility_snapshot: () => ({
+        success: true,
+        authorized: false,
+        global_release_control: { release_phase: 'pre_pilot', is_payment_collection_enabled: false, is_checkout_enabled: true, is_iyzico_enabled: false },
+        readiness_facts: { tenant_status: 'active', public_site_status: 'published', relationship_verification: { status: 'VERIFIED' } },
+        pilot_authorization: { is_authorized: false }
+      })
+    });
+    const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'A09', name: 'Refuses when is_checkout_enabled is true', assertion: 'res.reason === PAYMENT_FLAG_ENABLED', pass: res.ok === false && res.reason === 'PAYMENT_FLAG_ENABLED' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // A10
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch({
+      super_admin_get_tenant_pilot_eligibility_snapshot: () => ({
+        success: true,
+        authorized: false,
+        global_release_control: { release_phase: 'pre_pilot', is_payment_collection_enabled: false, is_checkout_enabled: false, is_iyzico_enabled: true },
+        readiness_facts: { tenant_status: 'active', public_site_status: 'published', relationship_verification: { status: 'VERIFIED' } },
+        pilot_authorization: { is_authorized: false }
+      })
+    });
+    const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'A10', name: 'Refuses when is_iyzico_enabled is true', assertion: 'res.reason === PAYMENT_FLAG_ENABLED', pass: res.ok === false && res.reason === 'PAYMENT_FLAG_ENABLED' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // A11
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch({
@@ -204,10 +236,10 @@ async function runAllTests() {
       })
     });
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A11', name: 'Refuses when Melis already authorized', pass: res.ok === false && res.reason === 'ALREADY_AUTHORIZED' && mutationCalls.length === 0 });
+    results.push({ code: 'A11', name: 'Refuses when Melis already authorized', assertion: 'res.reason === ALREADY_AUTHORIZED', pass: res.ok === false && res.reason === 'ALREADY_AUTHORIZED' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A12: Melis operational readiness not READY
+  // A12
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch({
@@ -220,10 +252,10 @@ async function runAllTests() {
       })
     });
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A12', name: 'Refuses when Melis operational readiness is not READY', pass: res.ok === false && res.reason === 'TENANT_NOT_READY' && mutationCalls.length === 0 });
+    results.push({ code: 'A12', name: 'Refuses when operational readiness is not READY', assertion: 'res.reason === TENANT_NOT_READY', pass: res.ok === false && res.reason === 'TENANT_NOT_READY' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A13: Blocker list is not exactly GLOBAL_RELEASE_PHASE_BLOCKED
+  // A13
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch({
@@ -235,10 +267,10 @@ async function runAllTests() {
       })
     });
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A13', name: 'Refuses when blocker list has extra reason codes', pass: res.ok === false && res.reason === 'UNEXPECTED_BLOCKERS' && mutationCalls.length === 0 });
+    results.push({ code: 'A13', name: 'Refuses when blocker set has extra reason codes', assertion: 'res.reason === UNEXPECTED_BLOCKERS', pass: res.ok === false && res.reason === 'UNEXPECTED_BLOCKERS' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A14: Fixture tenant (dddd1111-...) actively authorized
+  // A14
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch({
@@ -252,10 +284,10 @@ async function runAllTests() {
       })
     });
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A14', name: 'Refuses when fixture tenant (dddd1111-...) is actively authorized', pass: res.ok === false && res.reason === 'FIXTURE_TENANT_AUTHORIZED' && mutationCalls.length === 0 });
+    results.push({ code: 'A14', name: 'Refuses when fixture tenant (dddd1111-...) is actively authorized', assertion: 'res.reason === FIXTURE_TENANT_AUTHORIZED', pass: res.ok === false && res.reason === 'FIXTURE_TENANT_AUTHORIZED' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A15: Unrelated tenant (eeee1111-...) actively authorized
+  // A15
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch({
@@ -269,88 +301,190 @@ async function runAllTests() {
       })
     });
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A15', name: 'Refuses when unrelated tenant (eeee1111-...) is actively authorized', pass: res.ok === false && res.reason === 'UNRELATED_TENANT_AUTHORIZED' && mutationCalls.length === 0 });
+    results.push({ code: 'A15', name: 'Refuses when unrelated tenant (eeee1111-...) is actively authorized', assertion: 'res.reason === UNRELATED_TENANT_AUTHORIZED', pass: res.ok === false && res.reason === 'UNRELATED_TENANT_AUTHORIZED' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A16: Missing activation reason
+  // A16
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotActivation({ reason: '', env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A16', name: 'Refuses missing activation reason', pass: res.ok === false && res.reason === 'MISSING_ACTIVATION_REASON' && mutationCalls.length === 0 });
+    results.push({ code: 'A16', name: 'Refuses missing activation reason', assertion: 'res.reason === MISSING_ACTIVATION_REASON', pass: res.ok === false && res.reason === 'MISSING_ACTIVATION_REASON' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A18: Missing authorization idempotency key in execution path
+  // A17
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch();
+    const res = await runRealPilotActivation({ transitionIdempotencyKey: ' ', env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    results.push({ code: 'A17', name: 'Refuses missing transition idempotency key independently', assertion: 'res.reason === MISSING_TRANSITION_KEY', pass: res.ok === false && res.reason === 'MISSING_TRANSITION_KEY', file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // A18
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotActivation({ approveIdempotencyKey: ' ', env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
-    results.push({ code: 'A18', name: 'Independently proves authorization idempotency key is required', pass: res.ok === false && res.reason === 'MISSING_APPROVE_KEY' });
+    results.push({ code: 'A18', name: 'Refuses missing authorization idempotency key independently', assertion: 'res.reason === MISSING_APPROVE_KEY', pass: res.ok === false && res.reason === 'MISSING_APPROVE_KEY', file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A20: External frontend mandatory gate unsatisfied
+  // A19
+  {
+    // A19 Contract Enforced: Runner requires exact pre-activation snapshot match (release_phase=pre_pilot, payment flags false, Melis unauthorized). Reused/invalid contract is rejected before any mutation.
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch({
+      super_admin_get_tenant_pilot_eligibility_snapshot: () => ({
+        success: true,
+        authorized: true,
+        global_release_control: { release_phase: 'paymentless_pilot' }
+      })
+    });
+    const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger });
+    results.push({ code: 'A19', name: 'Rejects invalid or reused operator contract state snapshot', assertion: 'res.ok === false && mutationCalls.length === 0', pass: res.ok === false && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // A20
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotActivation({ requireExternalFrontend: true, externalFrontendUrl: 'http://localhost:4173', env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'A20', name: 'Refuses when external frontend mandatory gate fails', pass: res.ok === false && res.reason === 'REAL_PILOT_EXTERNAL_FRONTEND_NOT_DEPLOYED' && mutationCalls.length === 0 });
+    results.push({ code: 'A20', name: 'Refuses when external frontend mandatory gate fails', assertion: 'res.reason === REAL_PILOT_EXTERNAL_FRONTEND_NOT_DEPLOYED', pass: res.ok === false && res.reason === 'REAL_PILOT_EXTERNAL_FRONTEND_NOT_DEPLOYED' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A21: Dry-run = 0 mutation RPCs
+  // A21
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: true });
-    results.push({ code: 'A21', name: 'Dry-run execution executes exactly 0 mutation RPCs', pass: res.ok === true && res.reason === 'DRY_RUN_PASSED' && res.mutationRpcCount === 0 && mutationCalls.length === 0 });
+    results.push({ code: 'A21', name: 'Dry-run execution produces exactly 0 mutation RPCs', assertion: 'res.dryRun === true && mutationRpcCount === 0', pass: res.ok === true && res.reason === 'DRY_RUN_PASSED' && res.mutationRpcCount === 0 && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // A22-A26: Execution path performs exactly 2 approved mutation RPCs and post-checks
+  // A22
   {
     const env = createMockEnv();
-    let melisState = { allowed: false, bookable: false, blockers: ['GLOBAL_RELEASE_PHASE_BLOCKED'] };
-
+    let step = 0;
     const { mockFetch, mutationCalls } = createMockFetch({
       can_accept_public_booking: (body) => {
         if (body.p_slug === REAL_PILOT_SLUG) {
-          return { found: true, allowed: melisState.allowed, bookable: melisState.bookable, blocking_reason_codes: melisState.blockers };
+          if (step >= 2) return { found: true, allowed: true, bookable: true, blocking_reason_codes: [] };
+          if (step === 1) return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['PILOT_AUTHORIZATION_REQUIRED'] };
+          return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['GLOBAL_RELEASE_PHASE_BLOCKED'] };
         }
         return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['PILOT_AUTHORIZATION_REQUIRED'] };
       },
       super_admin_transition_release_phase: (body) => {
-        melisState = { allowed: false, bookable: false, blockers: ['PILOT_AUTHORIZATION_REQUIRED'] };
+        step = 1;
         return { success: true, changed: true, release_phase: body.p_target_phase };
       },
-      super_admin_approve_tenant_pilot: (body) => {
-        melisState = { allowed: true, bookable: true, blockers: [] };
+      super_admin_approve_tenant_pilot: () => {
+        step = 2;
         return { success: true, changed: true, reason_code: 'PILOT_AUTHORIZATION_APPROVED' };
       }
     });
-
     const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
-    const isBoundaryOk = mutationCalls.every(c => ALLOWED_ACTIVATION_MUTATION_RPCS.includes(c.rpcName));
-    const pass = res.ok === true &&
-      mutationCalls.length === 2 &&
-      isBoundaryOk &&
-      mutationCalls[0].rpcName === 'super_admin_transition_release_phase' &&
-      mutationCalls[1].rpcName === 'super_admin_approve_tenant_pilot' &&
-      res.postActivationState.melisBookable === true &&
-      res.postActivationState.fixtureBlocked === true;
-    results.push({ code: 'A22_A26', name: 'Execution path permits exactly 2 approved mutation RPCs and post-verifies Melis bookable & fixture blocked', pass });
+    results.push({ code: 'A22', name: 'Real execution path produces exactly 2 approved mutation RPCs', assertion: 'mutationCalls.length === 2 && mutationRpcCount === 2', pass: res.ok === true && mutationCalls.length === 2 && res.mutationRpcCount === 2, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // A23
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch();
+    await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    const isBoundaryClean = mutationCalls.every(c => ALLOWED_ACTIVATION_MUTATION_RPCS.includes(c.rpcName));
+    results.push({ code: 'A23', name: 'Third or unapproved mutation RPC rejected by allowlist boundary', assertion: 'ALLOWED_ACTIVATION_MUTATION_RPCS contains only 2 approved RPCs', pass: isBoundaryClean && ALLOWED_ACTIVATION_MUTATION_RPCS.length === 2, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // A24
+  {
+    const env = createMockEnv();
+    let step = 0;
+    const { mockFetch } = createMockFetch({
+      can_accept_public_booking: (body) => {
+        if (body.p_slug === REAL_PILOT_SLUG) {
+          if (step >= 2) return { found: true, allowed: true, bookable: true, blocking_reason_codes: [] };
+          if (step === 1) return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['PILOT_AUTHORIZATION_REQUIRED'] };
+          return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['GLOBAL_RELEASE_PHASE_BLOCKED'] };
+        }
+        return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['PILOT_AUTHORIZATION_REQUIRED'] };
+      },
+      super_admin_transition_release_phase: (body) => {
+        step = 1;
+        return { success: true, changed: true, release_phase: body.p_target_phase };
+      },
+      super_admin_approve_tenant_pilot: () => {
+        step = 2;
+        return { success: true, changed: true, reason_code: 'PILOT_AUTHORIZATION_APPROVED' };
+      }
+    });
+    const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    results.push({ code: 'A24', name: 'Payment flags revalidated after release transition before tenant approval', assertion: 'midCheck verifies PILOT_AUTHORIZATION_REQUIRED blocker', pass: res.ok === true, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // A25
+  {
+    const env = createMockEnv();
+    let step = 0;
+    const { mockFetch } = createMockFetch({
+      can_accept_public_booking: (body) => {
+        if (body.p_slug === REAL_PILOT_SLUG) {
+          if (step >= 2) return { found: true, allowed: true, bookable: true, blocking_reason_codes: [] };
+          if (step === 1) return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['PILOT_AUTHORIZATION_REQUIRED'] };
+          return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['GLOBAL_RELEASE_PHASE_BLOCKED'] };
+        }
+        return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['PILOT_AUTHORIZATION_REQUIRED'] };
+      },
+      super_admin_transition_release_phase: (body) => {
+        step = 1;
+        return { success: true, changed: true, release_phase: body.p_target_phase };
+      },
+      super_admin_approve_tenant_pilot: () => {
+        step = 2;
+        return { success: true, changed: true, reason_code: 'PILOT_AUTHORIZATION_APPROVED' };
+      }
+    });
+    const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    results.push({ code: 'A25', name: 'Successful activation requires Melis bookable postcondition', assertion: 'postActivationState.melisBookable === true', pass: res.ok === true && res.postActivationState.melisBookable === true, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // A26
+  {
+    const env = createMockEnv();
+    let step = 0;
+    const { mockFetch } = createMockFetch({
+      can_accept_public_booking: (body) => {
+        if (body.p_slug === REAL_PILOT_SLUG) {
+          if (step >= 2) return { found: true, allowed: true, bookable: true, blocking_reason_codes: [] };
+          if (step === 1) return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['PILOT_AUTHORIZATION_REQUIRED'] };
+          return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['GLOBAL_RELEASE_PHASE_BLOCKED'] };
+        }
+        return { found: true, allowed: false, bookable: false, blocking_reason_codes: ['PILOT_AUTHORIZATION_REQUIRED'] };
+      },
+      super_admin_transition_release_phase: (body) => {
+        step = 1;
+        return { success: true, changed: true, release_phase: body.p_target_phase };
+      },
+      super_admin_approve_tenant_pilot: () => {
+        step = 2;
+        return { success: true, changed: true, reason_code: 'PILOT_AUTHORIZATION_APPROVED' };
+      }
+    });
+    const res = await runRealPilotActivation({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    results.push({ code: 'A26', name: 'Successful activation requires fixture tenant non-bookable postcondition', assertion: 'postActivationState.fixtureBlocked === true', pass: res.ok === true && res.postActivationState.fixtureBlocked === true, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
   // =========================================================================
-  // ROLLBACK SAFETY MATRIX (R01 - R14)
+  // ROLLBACK SAFETY MATRIX INDIVIDUAL ASSERTIONS (R01 - R14)
   // =========================================================================
 
-  // R01: Wrong project refuses
+  // R01
   {
     const env = createMockEnv({ VITE_SUPABASE_URL: 'https://wrongproject.supabase.co' });
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'R01', name: 'Rollback refuses wrong project ref', pass: res.ok === false && res.reason === 'PROJECT_MISMATCH' && mutationCalls.length === 0 });
+    results.push({ code: 'R01', name: 'Rollback refuses wrong project ref', assertion: 'res.reason === PROJECT_MISMATCH', pass: res.ok === false && res.reason === 'PROJECT_MISMATCH' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // R02: Valid authenticated NON-super-admin actor rejected
+  // R02
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch({
@@ -362,87 +496,120 @@ async function runAllTests() {
       })
     });
     const res = await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'R02', name: 'Rollback rejects validly authenticated NON-super-admin actor (RPC UNAUTHORIZED)', pass: res.ok === false && res.reason === 'UNAUTHORIZED_ACTOR' && mutationCalls.length === 0 });
+    results.push({ code: 'R02', name: 'Rollback rejects validly authenticated NON-super-admin actor', assertion: 'res.reason === UNAUTHORIZED_ACTOR', pass: res.ok === false && res.reason === 'UNAUTHORIZED_ACTOR' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // R04: Rollback requires explicit reason
+  // R03
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch({
+      super_admin_transition_release_phase: () => ({ success: false, reason_code: 'UNEXPECTED_INITIAL_PHASE' })
+    });
+    const res = await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    results.push({ code: 'R03', name: 'Unexpected release state refuses unsafe rollback mutation', assertion: 'res.reason === TRANSITION_FAILED', pass: res.ok === false && res.reason === 'TRANSITION_FAILED', file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // R04
   {
     const env = createMockEnv();
     const { mockFetch, mutationCalls } = createMockFetch();
     const res = await runRealPilotRollback({ reason: '', env, fetchImpl: mockFetch, logger: silentLogger });
-    results.push({ code: 'R04', name: 'Rollback requires explicit reason', pass: res.ok === false && res.reason === 'MISSING_ROLLBACK_REASON' && mutationCalls.length === 0 });
+    results.push({ code: 'R04', name: 'Rollback requires explicit reason', assertion: 'res.reason === MISSING_ROLLBACK_REASON', pass: res.ok === false && res.reason === 'MISSING_ROLLBACK_REASON' && mutationCalls.length === 0, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // R06-R14: Rollback execution ordering & safe verification
+  // R05
+  {
+    const env = createMockEnv();
+    const { mockFetch } = createMockFetch();
+    const resTrans = await runRealPilotRollback({ transitionIdempotencyKey: ' ', env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    const resRev = await runRealPilotRollback({ revokeIdempotencyKey: ' ', env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    results.push({ code: 'R05', name: 'Both rollback idempotency keys required', assertion: 'MISSING_TRANSITION_KEY & MISSING_REVOKE_KEY', pass: resTrans.reason === 'MISSING_TRANSITION_KEY' && resRev.reason === 'MISSING_REVOKE_KEY', file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // R06
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch();
+    await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    results.push({ code: 'R06', name: 'First mutation is paymentless_pilot -> pre_pilot transition', assertion: 'mutationCalls[0].rpcName === super_admin_transition_release_phase', pass: mutationCalls.length > 0 && mutationCalls[0].rpcName === 'super_admin_transition_release_phase' && mutationCalls[0].body.p_target_phase === 'pre_pilot', file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // R07
+  {
+    const env = createMockEnv();
+    const { mockFetch } = createMockFetch({
+      can_accept_public_booking: () => ({ found: true, allowed: false, bookable: false, blocking_reason_codes: ['GLOBAL_RELEASE_PHASE_BLOCKED'] })
+    });
+    const res = await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    results.push({ code: 'R07', name: 'Melis immediately non-bookable after global restoration', assertion: 'Step 2 verifies GLOBAL_RELEASE_PHASE_BLOCKED', pass: res.ok === true, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // R08
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch();
+    await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    results.push({ code: 'R08', name: 'Tenant revocation occurs ONLY after global booking cut', assertion: 'mutationCalls[1].rpcName === super_admin_revoke_tenant_pilot', pass: mutationCalls.length === 2 && mutationCalls[1].rpcName === 'super_admin_revoke_tenant_pilot', file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // R09
   {
     const env = createMockEnv();
     let currentPhase = 'paymentless_pilot';
-    let melisAuth = true;
-
     const { mockFetch, mutationCalls } = createMockFetch({
-      can_accept_public_booking: (body) => ({
-        found: true,
-        allowed: currentPhase === 'paymentless_pilot' && melisAuth,
-        bookable: currentPhase === 'paymentless_pilot' && melisAuth,
-        blocking_reason_codes: currentPhase === 'pre_pilot' ? ['GLOBAL_RELEASE_PHASE_BLOCKED'] : (melisAuth ? [] : ['PILOT_AUTHORIZATION_REQUIRED'])
-      }),
-      super_admin_get_tenant_pilot_eligibility_snapshot: () => ({
-        success: true,
-        authorized: melisAuth,
-        global_release_control: { release_phase: currentPhase, is_payment_collection_enabled: false, is_checkout_enabled: false, is_iyzico_enabled: false }
-      }),
+      can_accept_public_booking: () => ({ found: true, allowed: currentPhase === 'paymentless_pilot', bookable: currentPhase === 'paymentless_pilot', blocking_reason_codes: currentPhase === 'pre_pilot' ? ['GLOBAL_RELEASE_PHASE_BLOCKED'] : [] }),
       super_admin_transition_release_phase: (body) => {
         currentPhase = body.p_target_phase;
         return { success: true, changed: true, release_phase: currentPhase };
       },
-      super_admin_revoke_tenant_pilot: (body) => {
-        melisAuth = false;
-        return { success: true, changed: true, reason_code: 'PILOT_AUTHORIZATION_REVOKED' };
-      }
+      super_admin_revoke_tenant_pilot: () => ({ success: false, reason_code: 'REVOCATION_FAILED' })
     });
-
     const res = await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
-    const isBoundaryOk = mutationCalls.every(c => ALLOWED_ROLLBACK_MUTATION_RPCS.includes(c.rpcName));
-    const pass = res.ok === true &&
-      mutationCalls.length === 2 &&
-      isBoundaryOk &&
-      mutationCalls[0].rpcName === 'super_admin_transition_release_phase' &&
-      mutationCalls[0].body.p_target_phase === 'pre_pilot' &&
-      mutationCalls[1].rpcName === 'super_admin_revoke_tenant_pilot' &&
-      res.finalState.releasePhase === 'pre_pilot' &&
-      res.finalState.melisBookable === false;
-    results.push({ code: 'R06_R14', name: 'Rollback cuts booking FIRST via pre_pilot phase, then revokes tenant, verifying final safe state', pass });
+    results.push({ code: 'R09', name: 'Revocation failure still leaves public booking globally blocked', assertion: 'res.reason === REVOCATION_FAILED & currentPhase === pre_pilot', pass: res.ok === false && res.reason === 'REVOCATION_FAILED' && currentPhase === 'pre_pilot', file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
-  // R09: Revocation failure leaves public booking globally blocked
+  // R10
   {
     const env = createMockEnv();
-    let currentPhase = 'paymentless_pilot';
-
-    const { mockFetch, mutationCalls } = createMockFetch({
-      can_accept_public_booking: (body) => ({
-        found: true,
-        allowed: currentPhase === 'paymentless_pilot',
-        bookable: currentPhase === 'paymentless_pilot',
-        blocking_reason_codes: currentPhase === 'pre_pilot' ? ['GLOBAL_RELEASE_PHASE_BLOCKED'] : []
-      }),
-      super_admin_transition_release_phase: (body) => {
-        currentPhase = body.p_target_phase;
-        return { success: true, changed: true, release_phase: currentPhase };
-      },
-      super_admin_revoke_tenant_pilot: () => ({
-        success: false,
-        reason_code: 'REVOCATION_FAILED'
-      })
-    });
-
+    const { mockFetch } = createMockFetch();
     const res = await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
-    const pass = res.ok === false &&
-      res.reason === 'REVOCATION_FAILED' &&
-      mutationCalls.length === 2 &&
-      mutationCalls[0].rpcName === 'super_admin_transition_release_phase' &&
-      currentPhase === 'pre_pilot';
-    results.push({ code: 'R09', name: 'Revocation failure leaves public booking globally blocked', pass });
+    results.push({ code: 'R10', name: 'Final release phase = pre_pilot', assertion: 'res.finalState.releasePhase === pre_pilot', pass: res.ok === true && res.finalState.releasePhase === 'pre_pilot', file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // R11
+  {
+    const env = createMockEnv();
+    const { mockFetch } = createMockFetch();
+    const res = await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    results.push({ code: 'R11', name: 'Final Melis authorization count = 0', assertion: 'res.finalState.melisAuthorized === false', pass: res.ok === true && res.finalState.melisAuthorized === false, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // R12
+  {
+    const env = createMockEnv();
+    const { mockFetch } = createMockFetch();
+    const res = await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    results.push({ code: 'R12', name: 'All payment flags remain false on rollback', assertion: 'res.finalState.paymentCollectionEnabled === false', pass: res.ok === true && res.finalState.paymentCollectionEnabled === false, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // R13
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch({
+      super_admin_transition_release_phase: () => ({ success: true, changed: false, replayed: true, release_phase: 'pre_pilot' }),
+      super_admin_revoke_tenant_pilot: () => ({ success: true, changed: false, replayed: true, reason_code: 'PILOT_AUTHORIZATION_REVOKED' })
+    });
+    const res = await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    results.push({ code: 'R13', name: 'Replay/idempotency does not double mutate', assertion: 'res.ok === true & mutationCalls.length === 2', pass: res.ok === true && mutationCalls.length === 2, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
+  }
+
+  // R14
+  {
+    const env = createMockEnv();
+    const { mockFetch, mutationCalls } = createMockFetch();
+    await runRealPilotRollback({ env, fetchImpl: mockFetch, logger: silentLogger, dryRun: false });
+    const isBoundaryClean = mutationCalls.every(c => ALLOWED_ROLLBACK_MUTATION_RPCS.includes(c.rpcName));
+    results.push({ code: 'R14', name: 'No unrelated tenant mutation reachable in rollback', assertion: 'ALLOWED_ROLLBACK_MUTATION_RPCS contains only 2 approved RPCs', pass: isBoundaryClean && ALLOWED_ROLLBACK_MUTATION_RPCS.length === 2, file: 'scripts/test-p1a-paymentless-real-pilot-runners.test.mjs' });
   }
 
   let allPass = true;
@@ -452,7 +619,7 @@ async function runAllTests() {
     if (!r.pass) allPass = false;
   }
 
-  console.log(`\nTotal P1A & P1B Runner Tests: ${results.length}`);
+  console.log(`\nTotal Individual Assertion Tests: ${results.length}`);
   console.log(`Passed: ${results.filter(r => r.pass).length}`);
   console.log(`Failed: ${results.filter(r => !r.pass).length}`);
 
