@@ -6,6 +6,7 @@ export const REAL_PILOT_TENANT_ID = CANONICAL_TENANT_ID;
 export const REAL_PILOT_SLUG = 'melis-guzellik';
 export const REAL_PILOT_BUSINESS_NAME = 'Melis Güzellik & Nail Art';
 export const EXPECTED_PROJECT_REF = 'rwedeejhjazwjthdjzrt';
+export const REQUIRED_ROLLBACK_CONFIRMATION = 'I_UNDERSTAND_THIS_ROLLS_BACK_THE_REAL_MELIS_PAYMENTLESS_PILOT';
 
 export const ALLOWED_ROLLBACK_MUTATION_RPCS = [
   'super_admin_transition_release_phase',
@@ -16,7 +17,7 @@ export async function runRealPilotRollback({
   expectedProjectRef = EXPECTED_PROJECT_REF,
   tenantId = REAL_PILOT_TENANT_ID,
   tenantSlug = REAL_PILOT_SLUG,
-  reason = 'Operator executed emergency P1A real paymentless pilot rollback',
+  reason = 'Operator executed emergency P1C real paymentless pilot rollback',
   transitionIdempotencyKey = null,
   revokeIdempotencyKey = null,
   env = process.env,
@@ -24,19 +25,28 @@ export async function runRealPilotRollback({
   logger = console,
   now = () => Date.now(),
   randomSuffix = () => Math.random().toString(36).substring(2, 10),
-  dryRun = false
+  operatorConfirmation = null,
+  dryRun = true
 } = {}) {
   const print = (msg = '') => logger.log(msg);
 
-  print('=== P1A PAYMENTLESS REAL PILOT EMERGENCY ROLLBACK RUNNER ===');
+  print('=== P1C PAYMENTLESS REAL PILOT EMERGENCY ROLLBACK RUNNER ===');
   print(`Target Tenant: ${REAL_PILOT_BUSINESS_NAME} (${tenantId})`);
   print(`Target Slug: ${tenantSlug}`);
-  print(`Dry Run Mode: ${dryRun}`);
+  print(`Mode: ${dryRun ? 'DRY-RUN (READ-ONLY)' : 'REAL EXECUTION (MUTATING)'}`);
 
   const supabaseUrl = env.VITE_SUPABASE_URL;
   const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY;
   const superAdminEmail = env.LARI_STAGE_H1D_SUPER_ADMIN_EMAIL || 'superadmin@randevulari.com';
   const superAdminPass = env.LARI_STAGE_H1D_SUPER_ADMIN_PASSWORD;
+
+  // Real execution mode safety confirmation check
+  if (!dryRun) {
+    if (operatorConfirmation !== REQUIRED_ROLLBACK_CONFIRMATION && env.LARI_P1C_ROLLBACK_CONFIRMATION !== REQUIRED_ROLLBACK_CONFIRMATION) {
+      print('⚠️ MISSING_OPERATOR_CONFIRMATION: Real rollback requires explicit operator confirmation contract.');
+      return { ok: false, exitCode: 1, reason: 'MISSING_OPERATOR_CONFIRMATION' };
+    }
+  }
 
   // R01: Wrong project ref
   if (!supabaseUrl || !supabaseUrl.includes(expectedProjectRef)) {
@@ -73,14 +83,14 @@ export async function runRealPilotRollback({
   }
 
   if (dryRun) {
-    print('\n🛑 DRY-RUN ROLLBACK COMPLETE: No mutations executed.');
+    print('\n🛑 DRY-RUN ROLLBACK COMPLETE: Preconditions verified. No mutations executed.');
     return { ok: true, exitCode: 0, reason: 'DRY_RUN_PASSED', dryRun: true, mutationRpcCount: 0 };
   }
 
   // R05: Idempotency keys check
   const currentTs = now();
-  const transKey = transitionIdempotencyKey || `p1a_real_pilot_rollback_phase_${currentTs}_${randomSuffix()}`;
-  const revKey = revokeIdempotencyKey || `p1a_real_pilot_rollback_tenant_${currentTs}_${randomSuffix()}`;
+  const transKey = transitionIdempotencyKey || `p1c_real_pilot_rollback_phase_${currentTs}_${randomSuffix()}`;
+  const revKey = revokeIdempotencyKey || `p1c_real_pilot_rollback_tenant_${currentTs}_${randomSuffix()}`;
 
   if (!transKey || transKey.trim() === '') {
     print('⚠️ R05_MISSING_TRANSITION_KEY: Idempotency key required for rollback transition.');
@@ -154,7 +164,7 @@ export async function runRealPilotRollback({
     return { ok: false, exitCode: 1, reason: 'FINAL_SAFE_CHECK_FAILED' };
   }
 
-  print('\n🚨 P1A EMERGENCY ROLLBACK COMPLETE AND VERIFIED:');
+  print('\n🚨 P1C EMERGENCY ROLLBACK COMPLETE AND VERIFIED:');
   print('  - Release Phase: pre_pilot');
   print('  - Melis Pilot Authorization: Revoked (authorized = false)');
   print('  - Public Booking: GLOBALLY BLOCKED (bookable = false)');
@@ -178,7 +188,16 @@ export async function runRealPilotRollback({
 if (process.argv[1] && process.argv[1].endsWith('run-paymentless-real-pilot-rollback.mjs')) {
   loadEnvFile(path.join(process.cwd(), '.env'));
   loadEnvFile(path.join(process.cwd(), '.env.local'));
-  runRealPilotRollback({ dryRun: true }).then(res => {
+
+  const isExecuteFlag = process.argv.includes('--execute');
+  const confirmationEnv = process.env.LARI_P1C_ROLLBACK_CONFIRMATION;
+
+  const shouldExecute = isExecuteFlag && confirmationEnv === REQUIRED_ROLLBACK_CONFIRMATION;
+
+  runRealPilotRollback({
+    dryRun: !shouldExecute,
+    operatorConfirmation: confirmationEnv
+  }).then(res => {
     process.exitCode = res.exitCode;
   });
 }
