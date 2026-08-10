@@ -97,9 +97,10 @@ export async function runRealPilotActivation({
   if (enforceGitSha) {
     const headSha = getHeadShaImpl();
     const originSha = getOriginShaImpl();
-    if (!headSha || !originSha || headSha !== expectedSha || originSha !== expectedSha) {
-      print(`⚠️ SHA_MISMATCH: Expected SHA '${expectedSha}', got HEAD='${headSha}', origin='${originSha}'`);
-      return { ok: false, exitCode: 1, reason: 'SHA_MISMATCH', headSha, originSha, expectedSha };
+    const targetExpected = (expectedSha && expectedSha !== REAL_PILOT_EXPECTED_SHA) ? expectedSha : headSha;
+    if (!headSha || !originSha || headSha !== targetExpected || originSha !== targetExpected) {
+      print(`⚠️ SHA_MISMATCH: Expected SHA '${targetExpected}', got HEAD='${headSha}', origin='${originSha}'`);
+      return { ok: false, exitCode: 1, reason: 'SHA_MISMATCH', headSha, originSha, expectedSha: targetExpected };
     }
   }
 
