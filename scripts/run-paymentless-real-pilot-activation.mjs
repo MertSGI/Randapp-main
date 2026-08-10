@@ -392,16 +392,24 @@ export async function runRealPilotActivation({
   print('\n🎯 Post-Activation Acceptance Verification...');
   const postMelisSnap = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: tenantId }, token, fetchImpl);
   const postMelis = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'can_accept_public_booking', { p_slug: tenantSlug }, null, fetchImpl);
+  const postFixtureSnap = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'super_admin_get_tenant_pilot_eligibility_snapshot', { p_tenant_id: DEDICATED_H1D_TENANT_ID }, token, fetchImpl);
   const postFixture = await callRpcEndpoint(supabaseUrl, supabaseAnonKey, 'can_accept_public_booking', { p_slug: DEDICATED_H1D_TENANT_SLUG }, null, fetchImpl);
 
   const finalControl = (postMelisSnap.data && postMelisSnap.data.global_release_control) || {};
   const isFinalPhaseCorrect = finalControl.release_phase === 'paymentless_pilot';
   const isFinalPayDisabled = finalControl.is_payment_collection_enabled === false && finalControl.is_checkout_enabled === false && finalControl.is_iyzico_enabled === false;
   const isMelisAuthorized = postMelisSnap.data && postMelisSnap.data.authorized === true;
-  const isMelisBookable = postMelis.data && postMelis.data.found === true && postMelis.data.allowed === true && postMelis.data.bookable === true;
-  const fixtureHasHistory = postFixture.data && (postFixture.data.blocking_reason_codes.includes('PILOT_AUTHORIZATION_REVOKED') || (postFixture.data.blocking_reason_codes.includes('PILOT_AUTHORIZATION_REQUIRED') && !postFixture.data.blocking_reason_codes.includes('PILOT_AUTHORIZATION_REVOKED')));
-  const expectedFixtureBlocker = postFixture.data && postFixture.data.blocking_reason_codes.includes('PILOT_AUTHORIZATION_REVOKED') ? 'PILOT_AUTHORIZATION_REVOKED' : 'PILOT_AUTHORIZATION_REQUIRED';
-  const isFixtureBlocked = postFixture.data && postFixture.data.allowed === false && postFixture.data.blocking_reason_codes.includes(expectedFixtureBlocker);
+  const isMelisBookable = postMelis.data && postMelis.data.found === true && postMelis.data.allowed === true && postMelis.data.bookable === true && Array.isArray(postMelis.data.blocking_reason_codes) && postMelis.data.blocking_reason_codes.length === 0;
+
+  const fixtureHasHistory = postFixtureSnap.data && postFixtureSnap.data.pilot_authorization && postFixtureSnap.data.pilot_authorization.has_authorization_history === true;
+  const expectedFixtureBlocker = fixtureHasHistory ? 'PILOT_AUTHORIZATION_REVOKED' : 'PILOT_AUTHORIZATION_REQUIRED';
+
+  const isFixtureBlocked = postFixture.data &&
+    postFixture.data.found === true &&
+    postFixture.data.allowed === false &&
+    postFixture.data.bookable === false &&
+    Array.isArray(postFixture.data.blocking_reason_codes) &&
+    postFixture.data.blocking_reason_codes.includes(expectedFixtureBlocker);
 
   if (!isFinalPhaseCorrect || !isFinalPayDisabled || !isMelisAuthorized || !isMelisBookable || !isFixtureBlocked) {
     print('⚠️ POST_ACTIVATION_PROOF_FAILED: Post-activation verification failed.');
@@ -410,7 +418,7 @@ export async function runRealPilotActivation({
 
   print('\n🎉 P1C PAYMENTLESS REAL PILOT ACTIVATION COMPLETE (Exactly 2 approved mutation RPCs executed):');
   print('  - Melis Güzellik: PUBLIC BOOKING OPEN (bookable = true)');
-  print('  - Dedicated Fixture Tenant: BLOCKED (PILOT_AUTHORIZATION_REQUIRED)');
+  print(`  - Dedicated Fixture Tenant: BLOCKED (${expectedFixtureBlocker})`);
   print('  - All Payment Flags: false');
 
   return {
