@@ -54,6 +54,41 @@ export const branchService = {
     return this.getStoredBranches(tenantId).filter(b => b.isActive);
   },
 
+  async listPublicBranches(slug: string, tenantId?: string): Promise<BusinessBranch[]> {
+    try {
+      const { fetchSupabase, getDataSourceMode } = await import('./repositories/supabaseClient');
+      if (getDataSourceMode() === 'supabase') {
+        const res = await fetchSupabase('/rest/v1/rpc/get_public_branches', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ p_slug: slug })
+        });
+        if (res.ok) {
+          const raw = await res.json();
+          const data = Array.isArray(raw) ? raw[0] : raw;
+          if (data?.success && Array.isArray(data.branches) && data.branches.length > 0) {
+            return data.branches.map((b: any) => ({
+              id: b.id,
+              tenantId: tenantId || '',
+              name: b.name,
+              slug: b.slug,
+              isPrimary: !!b.is_primary,
+              isActive: true,
+              createdAt: '',
+              updatedAt: ''
+            }));
+          }
+        }
+      }
+    } catch (err) {
+      console.error('listPublicBranches RPC failed:', err);
+    }
+    if (tenantId) {
+      return this.listBranches(tenantId);
+    }
+    return [];
+  },
+
   async getPrimaryBranch(tenantId: string): Promise<BusinessBranch> {
     return this.ensurePrimaryBranchForTenant(tenantId);
   },

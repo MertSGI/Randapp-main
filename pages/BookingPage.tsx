@@ -159,8 +159,11 @@ const BookingPage: React.FC = () => {
       businessProfileService.getPublicBusinessProfile(tenant.id).then(setBusinessProfile);
       
       const requestedBranchSlug = new URLSearchParams(window.location.hash.split('?')[1]).get('branch');
-      branchService.listBranches(tenant.id).then(branches => {
+      branchService.listPublicBranches(tenant.slug, tenant.id).then(branches => {
          setBranches(branches);
+         if (branches.length === 1 && !selectedBranch) {
+            setSelectedBranch(branches[0]);
+         }
          if (requestedBranchSlug) {
             const b = branches.find(br => br.slug === requestedBranchSlug || br.id === requestedBranchSlug);
             if (b) {
@@ -363,6 +366,11 @@ const BookingPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedService || !selectedTime || !selectedStaff || !tenant) return;
+    const isSupabaseMode = getDataSourceMode() === 'supabase';
+    if (isSupabaseMode && (!selectedBranch || !selectedBranch.id)) {
+       alert(language === 'tr' ? 'İşletme şube bilgisi alınamadı. Lütfen sayfayı yenileyip tekrar deneyin.' : 'Salon branch information could not be resolved. Please refresh and try again.');
+       return;
+    }
     if (!consentForms.requiredBookingConsent) {
        alert('Lütfen randevu işlemini tamamlamak için öncelikle kullanım iznini onaylayınız.');
        return;
@@ -398,8 +406,6 @@ const BookingPage: React.FC = () => {
     }
 
     // Determine data source mode early — needed to gate consent writes
-      const isSupabaseMode = getDataSourceMode() === 'supabase';
-
     try {
       // Core Operation: Consent service captures
       // In Supabase mode these are intentionally skipped: the create_public_booking RPC
