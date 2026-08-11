@@ -63,6 +63,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 52. **`20260827_h1e_c_public_booking_release_gate_runtime_fix.sql`** — Stage H1E-C1 Public Booking Release Gate Runtime Forward Fix: Provisions single slug-aware 2-argument internal evaluator, drops obsolete 1-argument evaluator, corrects snapshot pilot authorization columns to approved_*, aligns restrictions query with platform_system_restrictions schema, and enforces pre_pilot unknown slug precedence without early return.
 53. **`20260828_h1e_c_controlled_release_phase_transition.sql`** — Stage H1E-C3 Controlled Release Phase Transition Contract: Provisions platform_release_phase_transition_history and super_admin_release_transition_idempotency tables, super_admin_transition_release_phase mutation RPC with advisory/row locks and payment safety interlocks, and super_admin_get_release_transition_evidence read RPC.
 54. **`20260829_h1e_c_controlled_transition_runtime_fix.sql`** — Stage H1E-C4 Controlled Release Transition Runtime Forward Fix: Aligns transition audit_events INSERT with canonical schema (tenant_id, actor_id, actor_role, action, resource_type, resource_id, payload), enforces actor_user_id match on idempotency replay, and updates evidence read RPC to query canonical action column.
+55. **`20260830_p1c_public_branch_read_contract.sql`** — Server-authoritative public branch read RPC get_public_branches for active tenant storefront branch discovery.
 
 ---
 
