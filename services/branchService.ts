@@ -79,9 +79,15 @@ export const branchService = {
             }));
           }
         }
+        // In public Supabase mode, fail closed on RPC error/empty response; DO NOT fallback to direct table read
+        return [];
       }
     } catch (err) {
       console.error('listPublicBranches RPC failed:', err);
+      const { getDataSourceMode } = await import('./repositories/supabaseClient');
+      if (getDataSourceMode() === 'supabase') {
+        return [];
+      }
     }
     if (tenantId) {
       return this.listBranches(tenantId);

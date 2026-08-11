@@ -91,7 +91,8 @@ const CANONICAL_MIGRATIONS = [
   '20260827_h1e_c_public_booking_release_gate_runtime_fix.sql',
   '20260828_h1e_c_controlled_release_phase_transition.sql',
   '20260829_h1e_c_controlled_transition_runtime_fix.sql',
-  '20260830_p1c_public_branch_read_contract.sql'
+  '20260830_p1c_public_branch_read_contract.sql',
+  '20260831_p1c_public_branch_read_contract_runtime_fix.sql'
 ];
 
 // Check actual migration files on disk
