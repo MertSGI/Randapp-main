@@ -696,8 +696,12 @@ const BookingPage: React.FC = () => {
         ? `Merhaba ${newAppointment.user_name}, ${serviceName} randevunuz ${selectedStaff.name} ile onaylandı!\n\nTarih: ${newAppointment.date}\nSaat: ${newAppointment.time}\nUzman Tel: ${selectedStaff.phone || 'Girilmedi'}\n\nTakviminize eklemek için tıklayın: ${link}`
         : `Hello ${newAppointment.user_name}, your ${serviceName} appointment with ${selectedStaff.name} is confirmed!\n\nDate: ${newAppointment.date}\nTime: ${newAppointment.time}\nStaff Phone: ${selectedStaff.phone || 'Not provided'}\n\nAdd to your calendar: ${link}`;
 
-      await NotificationService.sendAutomatedWhatsApp(newAppointment, waText).catch(e => console.error("WhatsApp send fail", e));
-      setWhatsappSent(true);
+      let isWaDelivered = false;
+      if (!isSupabaseMode) {
+        await NotificationService.sendAutomatedWhatsApp(newAppointment, waText).catch(e => console.error("WhatsApp send fail", e));
+        isWaDelivered = true;
+      }
+      setWhatsappSent(isWaDelivered);
 
       // Persist booking confirmation to sessionStorage for durable display
       const confirmationPayload = {
@@ -712,7 +716,7 @@ const BookingPage: React.FC = () => {
         customerPhone: formData.phone,
         tenantName: branding?.businessName || tenant.name || '',
         calendarLink: CalendarService.generateGoogleCalendarLink(newAppointment, selectedService, selectedStaff, language),
-        whatsappSent: true,
+        whatsappSent: isWaDelivered,
       };
       try {
         sessionStorage.setItem(`randapp_booking_confirmation_${tenant.id}`, JSON.stringify(confirmationPayload));
