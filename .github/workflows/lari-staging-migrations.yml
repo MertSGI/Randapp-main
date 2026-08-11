@@ -1,0 +1,79 @@
+name: LARI Staging Migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: "Exact target Git commit SHA to execute against"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  apply-staging-migrations:
+    name: Apply Staging Schema Migrations
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_PROJECT_ID: "rwedeejhjazwjthdjzrt"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.expected_sha }}
+
+      - name: Verify Exact SHA match
+        run: |
+          HEAD_SHA=$(git rev-parse HEAD)
+          EXPECTED_SHA="${{ github.event.inputs.expected_sha }}"
+          echo "Current HEAD SHA: ${HEAD_SHA}"
+          echo "Expected SHA:     ${EXPECTED_SHA}"
+          if [ "${HEAD_SHA}" != "${EXPECTED_SHA}" ]; then
+            echo "ERROR: HEAD SHA mismatch with expected_sha input!"
+            exit 1
+          fi
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Verify Required Secrets Present
+        run: |
+          if [ -z "${{ secrets.SUPABASE_ACCESS_TOKEN }}" ] || [ -z "${{ secrets.STAGING_DB_PASSWORD }}" ]; then
+            echo "P1C2_GITHUB_MIGRATION_SECRETS_REQUIRED: SUPABASE_ACCESS_TOKEN and/or STAGING_DB_PASSWORD missing"
+            exit 1
+          fi
+
+      - name: Link Staging Supabase Project
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+        run: |
+          supabase link --project-ref "$SUPABASE_PROJECT_ID"
+
+      - name: Remote Migration List Precheck
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase migration list --linked
+
+      - name: Migration Dry Run
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase db push --linked --dry-run
+
+      - name: Execute Migration Push
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase db push --linked
+
+      - name: Remote Migration List Post-Proof
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase migration list --linked
