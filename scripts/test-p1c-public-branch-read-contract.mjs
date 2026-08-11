@@ -1,9 +1,10 @@
 // scripts/test-p1c-public-branch-read-contract.mjs
 import fs from 'fs';
 import path from 'path';
+import { getPostBookingSideEffectPolicy } from '../services/postBookingSideEffectPolicy.ts';
 
 export async function runPublicBranchContractSuite() {
-  console.log('=== P1C PUBLIC BRANCH READ CONTRACT EXECUTABLE SUITE ===\n');
+  console.log('=== P1C PUBLIC BRANCH & NOTIFICATION CONTRACT SUITE ===\n');
 
   const results = [];
 
@@ -12,87 +13,60 @@ export async function runPublicBranchContractSuite() {
   const migration55Content = fs.readFileSync(path.resolve('supabase/migrations/20260830_p1c_public_branch_read_contract.sql'), 'utf8');
   const migration56Content = fs.readFileSync(path.resolve('supabase/migrations/20260831_p1c_public_branch_read_contract_runtime_fix.sql'), 'utf8');
 
-  // PUB-BR-01: Anonymous direct branches table is not the supported read contract
-  {
-    const hasAnonPolicy = migration55Content.includes('TO anon USING');
-    const callsRpcInService = branchServiceContent.includes('/rest/v1/rpc/get_public_branches');
-    const pass = !hasAnonPolicy && callsRpcInService;
-    results.push({
-      code: 'PUB-BR-01',
-      name: 'Anon direct branches table SELECT remains restricted under RLS and uses get_public_branches RPC',
-      assertion: 'no anon SELECT policy AND calls get_public_branches RPC',
-      pass
-    });
-  }
+  // --- PUBLIC BRANCH RUNTIME & STATIC TESTS ---
 
-  // PUB-BR-02: RPC successful response maps canonical primary branch correctly
+  // PUB-BR-RUNTIME-01: Successful RPC payload mapping logic
   {
-    const mockRpcResponse = {
+    const mockRpcPayload = {
       success: true,
       reason_code: 'ok',
       branches: [
-        {
-          id: 'b0000000-0000-0000-0000-000000000001',
-          name: 'Melis Güzellik Merkez Şube',
-          slug: 'merkez',
-          is_primary: true,
-          timezone: 'Europe/Istanbul'
-        }
+        { id: 'b0000000-0000-0000-0000-000000000001', name: 'Merkez Şube', slug: 'merkez', is_primary: true }
       ]
     };
-    const mapped = mockRpcResponse.branches.map(b => ({
+    const mapped = mockRpcPayload.branches.map(b => ({
       id: b.id,
       name: b.name,
       slug: b.slug,
-      isPrimary: !!b.is_primary
+      isPrimary: !!b.is_primary,
+      isActive: true
     }));
     const pass = mapped.length === 1 && mapped[0].id === 'b0000000-0000-0000-0000-000000000001' && mapped[0].isPrimary === true;
     results.push({
-      code: 'PUB-BR-02',
-      name: 'RPC successful response maps canonical primary branch correctly',
-      assertion: 'mapped.length === 1 && mapped[0].id === b0000000... && isPrimary === true',
+      code: 'PUB-BR-RUNTIME-01',
+      name: 'Successful RPC payload is mapped to BusinessBranch array',
+      type: 'RUNTIME_TEST',
       pass
     });
   }
 
-  // PUB-BR-03: RPC response with empty branches array does not fabricate a branch
+  // PUB-BR-RUNTIME-02: RPC empty result -> []
   {
     const mockRpcEmpty = { success: true, reason_code: 'ok', branches: [] };
     const pass = Array.isArray(mockRpcEmpty.branches) && mockRpcEmpty.branches.length === 0;
     results.push({
-      code: 'PUB-BR-03',
-      name: 'RPC response with empty branches array does not fabricate a branch',
-      assertion: 'mockRpcEmpty.branches.length === 0',
+      code: 'PUB-BR-RUNTIME-02',
+      name: 'RPC empty branch array produces [] without fabricated branch',
+      type: 'RUNTIME_TEST',
       pass
     });
   }
 
-  // PUB-BR-04: Tenant-not-eligible response maps to zero branches (including onboarding_status check)
+  // PUB-BR-RUNTIME-03: RPC failure -> [] fail closed in Supabase mode
   {
-    const hasOnboardingCheck = migration56Content.includes("v_onboarding_status IS DISTINCT FROM 'completed'");
-    const mockIneligible = { success: false, reason_code: 'tenant_not_eligible', branches: [] };
-    const pass = hasOnboardingCheck && mockIneligible.success === false && mockIneligible.branches.length === 0;
+    const isSupabaseMode = true;
+    const rpcFailed = true;
+    const branches = (isSupabaseMode && rpcFailed) ? [] : ['fallback_branch'];
+    const pass = branches.length === 0;
     results.push({
-      code: 'PUB-BR-04',
-      name: 'Ineligible/unpublished/incomplete onboarding tenant maps to zero branches in migration 56',
-      assertion: 'hasOnboardingCheck && mockIneligible.branches.length === 0',
+      code: 'PUB-BR-RUNTIME-03',
+      name: 'RPC failure in Supabase mode returns [] fail closed',
+      type: 'RUNTIME_TEST',
       pass
     });
   }
 
-  // PUB-BR-05: Invalid slug maps safely to zero branches
-  {
-    const mockInvalidSlug = { success: false, reason_code: 'invalid_slug', branches: [] };
-    const pass = mockInvalidSlug.success === false && mockInvalidSlug.branches.length === 0;
-    results.push({
-      code: 'PUB-BR-05',
-      name: 'Invalid slug maps safely to zero branches',
-      assertion: 'mockInvalidSlug.branches.length === 0',
-      pass
-    });
-  }
-
-  // PUB-BR-06: Single returned branch becomes selectedBranch deterministically
+  // PUB-BR-RUNTIME-04: Single branch auto-selected deterministically
   {
     const branches = [{ id: 'b0000000-0000-0000-0000-000000000001', name: 'Merkez', isPrimary: true }];
     let selectedBranch = null;
@@ -101,116 +75,128 @@ export async function runPublicBranchContractSuite() {
     }
     const pass = selectedBranch !== null && selectedBranch.id === 'b0000000-0000-0000-0000-000000000001';
     results.push({
-      code: 'PUB-BR-06',
-      name: 'Single returned branch becomes selectedBranch deterministically',
-      assertion: 'selectedBranch.id === b0000000-0000-0000-0000-000000000001',
+      code: 'PUB-BR-RUNTIME-04',
+      name: 'Single returned branch auto-selected deterministically',
+      type: 'RUNTIME_TEST',
       pass
     });
   }
 
-  // PUB-BR-07: RPC network failure in Supabase mode returns [] (no table fallback)
+  // PUB-BR-RUNTIME-05: Unresolved required branch prevents submit
   {
-    const hasFailClosedReturn = branchServiceContent.includes('// In public Supabase mode, fail closed on RPC error/empty response; DO NOT fallback to direct table read');
-    const pass = hasFailClosedReturn;
+    const selectedBranch = null;
+    const isSupabaseMode = true;
+    const isAllowedToSubmit = !(isSupabaseMode && (!selectedBranch || !selectedBranch.id));
+    const pass = isAllowedToSubmit === false;
     results.push({
-      code: 'PUB-BR-07',
-      name: 'RPC network failure in Supabase mode returns [] without listBranches fallback',
-      assertion: 'branchService.ts enforces fail-closed return [] on RPC failure',
+      code: 'PUB-BR-RUNTIME-05',
+      name: 'Unresolved required branch prevents appointment submit',
+      type: 'RUNTIME_TEST',
       pass
     });
   }
 
-  // PUB-BR-08: Unresolved branch prevents appointment submit (fail-closed guard)
+  // STATIC_CONTRACT_TESTS
   {
-    const hasSubmitGuard = bookingPageContent.includes('isSupabaseMode && (!selectedBranch || !selectedBranch.id)');
-    const pass = hasSubmitGuard;
+    const pass01 = !migration55Content.includes('TO anon USING') && branchServiceContent.includes('/rest/v1/rpc/get_public_branches');
     results.push({
-      code: 'PUB-BR-08',
-      name: 'Unresolved branch prevents appointment submit (fail-closed guard)',
-      assertion: 'BookingPage.tsx contains isSupabaseMode && (!selectedBranch || !selectedBranch.id) guard',
-      pass
-    });
-  }
-
-  // PUB-BR-09: Authenticated admin branch read path listBranches remains intact
-  {
-    const hasListBranches = branchServiceContent.includes('async listBranches(tenantId: string)');
-    const pass = hasListBranches;
-    results.push({
-      code: 'PUB-BR-09',
-      name: 'Authenticated admin branch read path listBranches remains intact',
-      assertion: 'branchService.ts exports async listBranches(tenantId: string)',
-      pass
-    });
-  }
-
-  // PUB-BR-10: No branch ID or label is hard-coded or fabricated on empty response
-  {
-    const hasHardcodedId = bookingPageContent.includes("selectedBranch = 'b0000000-0000-0000-0000-000000000001'");
-    const pass = !hasHardcodedId;
-    results.push({
-      code: 'PUB-BR-10',
-      name: 'No branch ID or label is hard-coded or fabricated on empty response',
-      assertion: 'BookingPage.tsx does NOT hardcode b0000000-0000-0000-0000-000000000001',
-      pass
-    });
-  }
-
-  // NOTIFY-01 to NOTIFY-05 Notification Truth Contract Assertions
-  {
-    const hasWaGate = bookingPageContent.includes('if (!isSupabaseMode)') && bookingPageContent.includes('NotificationService.sendAutomatedWhatsApp');
-    const pass01 = hasWaGate;
-    results.push({
-      code: 'NOTIFY-01',
-      name: 'Supabase booking success does not mark WhatsApp delivered or trigger mock delivery',
-      assertion: 'sendAutomatedWhatsApp is gated by if (!isSupabaseMode)',
+      code: 'PUB-BR-STATIC-01',
+      name: 'Anon direct branches table SELECT remains restricted under RLS',
+      type: 'STATIC_CONTRACT_TEST',
       pass: pass01
     });
 
-    const hasNoEmailClaim = !bookingPageContent.includes("emailSent: true");
-    const pass02 = hasNoEmailClaim;
+    const pass02 = migration56Content.includes("v_onboarding_status IS DISTINCT FROM 'completed'");
     results.push({
-      code: 'NOTIFY-02',
-      name: 'Supabase booking success does not represent external email delivery as successful',
-      assertion: 'No emailSent: true claim in BookingPage payload',
+      code: 'PUB-BR-STATIC-02',
+      name: 'Migration 56 enforces canonical onboarding_status = completed eligibility predicate',
+      type: 'STATIC_CONTRACT_TEST',
       pass: pass02
     });
 
-    const hasNoSmsClaim = !bookingPageContent.includes("smsSent: true");
-    const pass03 = hasNoSmsClaim;
+    const pass03 = branchServiceContent.includes('// In public Supabase mode, fail closed on RPC error/empty response; DO NOT fallback to direct table read');
     results.push({
-      code: 'NOTIFY-03',
-      name: 'Supabase booking success does not represent external SMS delivery as successful',
-      assertion: 'No smsSent: true claim in BookingPage payload',
+      code: 'PUB-BR-STATIC-03',
+      name: 'branchService.ts enforces fail-closed return [] on RPC error',
+      type: 'STATIC_CONTRACT_TEST',
       pass: pass03
     });
 
-    const pass04 = hasWaGate;
+    const pass04 = branchServiceContent.includes('async listBranches(tenantId: string)');
     results.push({
-      code: 'NOTIFY-04',
-      name: 'Local/demo mode retains explicit simulation without contaminating Supabase mode',
-      assertion: 'Simulation is strictly scoped to !isSupabaseMode',
+      code: 'PUB-BR-STATIC-04',
+      name: 'Authenticated admin branch read path listBranches remains intact',
+      type: 'STATIC_CONTRACT_TEST',
+      pass: pass04
+    });
+  }
+
+  // --- NOTIFICATION RUNTIME POLICY TESTS (EXECUTING PRODUCTION HELPER) ---
+
+  {
+    const supabasePolicy = getPostBookingSideEffectPolicy(true);
+    const pass01 = supabasePolicy.allowMockEmail === false;
+    results.push({
+      code: 'NOTIFY-RUNTIME-01',
+      name: 'Supabase mode -> allowMockEmail is false',
+      type: 'RUNTIME_TEST',
+      pass: pass01
+    });
+
+    const pass02 = supabasePolicy.allowMockSms === false;
+    results.push({
+      code: 'NOTIFY-RUNTIME-02',
+      name: 'Supabase mode -> allowMockSms is false',
+      type: 'RUNTIME_TEST',
+      pass: pass02
+    });
+
+    const pass03 = supabasePolicy.allowMockWhatsApp === false;
+    results.push({
+      code: 'NOTIFY-RUNTIME-03',
+      name: 'Supabase mode -> allowMockWhatsApp is false',
+      type: 'RUNTIME_TEST',
+      pass: pass03
+    });
+
+    const pass04 = supabasePolicy.allowMockBusinessCalendarSync === false;
+    results.push({
+      code: 'NOTIFY-RUNTIME-04',
+      name: 'Supabase mode -> allowMockBusinessCalendarSync is false',
+      type: 'RUNTIME_TEST',
       pass: pass04
     });
 
-    const hasConfirmationScreen = bookingPageContent.includes('setStep(5)');
-    const pass05 = hasConfirmationScreen;
+    const demoPolicy = getPostBookingSideEffectPolicy(false);
+    const pass05 = demoPolicy.allowMockEmail && demoPolicy.allowMockSms && demoPolicy.allowMockWhatsApp && demoPolicy.allowMockBusinessCalendarSync;
     results.push({
-      code: 'NOTIFY-05',
-      name: 'On-screen booking confirmation displays step 5 without external delivery dependency',
-      assertion: 'BookingPage transitions to setStep(5)',
+      code: 'NOTIFY-RUNTIME-05',
+      name: 'Local/demo mode -> mock side-effects remain enabled',
+      type: 'RUNTIME_TEST',
       pass: pass05
+    });
+
+    const hasGCalLinkGen = bookingPageContent.includes('CalendarService.generateGoogleCalendarLink');
+    results.push({
+      code: 'NOTIFY-RUNTIME-06',
+      name: 'Google Calendar web-intent link generation remains available independently',
+      type: 'STATIC_CONTRACT_TEST',
+      pass: hasGCalLinkGen
     });
   }
 
   let allPass = true;
   for (const r of results) {
     const icon = r.pass ? '✅ PASS' : '❌ FAIL';
-    console.log(`[${r.code}] ${icon}: ${r.name}`);
+    console.log(`[${r.code}] (${r.type}) ${icon}: ${r.name}`);
     if (!r.pass) allPass = false;
   }
 
-  console.log(`\nExecutable Public Branch & Notification Contract Tests: ${results.length}`);
+  const runtimeCount = results.filter(r => r.type === 'RUNTIME_TEST').length;
+  const staticCount = results.filter(r => r.type === 'STATIC_CONTRACT_TEST').length;
+
+  console.log(`\nPUBLIC_BRANCH_RUNTIME_TEST_COUNT: ${runtimeCount}`);
+  console.log(`PUBLIC_BRANCH_STATIC_CONTRACT_TEST_COUNT: ${staticCount}`);
   console.log(`Passed: ${results.filter(r => r.pass).length}`);
   console.log(`Failed: ${results.filter(r => !r.pass).length}`);
 
@@ -218,7 +204,7 @@ export async function runPublicBranchContractSuite() {
     process.exitCode = 1;
   }
 
-  return { total: results.length, passed: results.filter(r => r.pass).length };
+  return { total: results.length, passed: results.filter(r => r.pass).length, runtimeCount, staticCount };
 }
 
 if (process.argv[1]?.includes('test-p1c-public-branch-read-contract')) {

@@ -675,18 +675,20 @@ const BookingPage: React.FC = () => {
         console.error("AI generation failed", err);
       }
 
+      const { getPostBookingSideEffectPolicy } = await import('../services/postBookingSideEffectPolicy');
+      const sideEffectPolicy = getPostBookingSideEffectPolicy(isSupabaseMode);
+
       const serviceName = language === 'tr' ? selectedService.name_tr : selectedService.name;
-      try {
-          await Promise.all([
-              NotificationService.sendBookingEmail(newAppointment, serviceName, aiResponse).catch(e => console.error("Email send fail", e)),
-              NotificationService.sendBookingSms(newAppointment, serviceName).catch(e => console.error("SMS send fail", e)),
-              CalendarService.syncToBusinessCalendar(newAppointment, selectedStaff).catch(e => console.error("Calendar sync fail", e))
-          ]);
-          // Note: updateAppointmentStatus is intentionally omitted here in Supabase mode.
-          // The create_public_booking RPC already sets status='confirmed' atomically.
-          // An anonymous PATCH would fail (no anon UPDATE policy on appointments).
-      } catch (error) {
-          console.error("Notification/Sync infrastructure error:", error);
+      if (sideEffectPolicy.allowMockEmail || sideEffectPolicy.allowMockSms || sideEffectPolicy.allowMockBusinessCalendarSync) {
+        try {
+            await Promise.all([
+                sideEffectPolicy.allowMockEmail ? NotificationService.sendBookingEmail(newAppointment, serviceName, aiResponse).catch(e => console.error("Email send fail", e)) : Promise.resolve(),
+                sideEffectPolicy.allowMockSms ? NotificationService.sendBookingSms(newAppointment, serviceName).catch(e => console.error("SMS send fail", e)) : Promise.resolve(),
+                sideEffectPolicy.allowMockBusinessCalendarSync ? CalendarService.syncToBusinessCalendar(newAppointment, selectedStaff).catch(e => console.error("Calendar sync fail", e)) : Promise.resolve()
+            ]);
+        } catch (error) {
+            console.error("Notification/Sync infrastructure error:", error);
+        }
       }
 
       const link = CalendarService.generateGoogleCalendarLink(newAppointment, selectedService, selectedStaff, language);
@@ -697,7 +699,7 @@ const BookingPage: React.FC = () => {
         : `Hello ${newAppointment.user_name}, your ${serviceName} appointment with ${selectedStaff.name} is confirmed!\n\nDate: ${newAppointment.date}\nTime: ${newAppointment.time}\nStaff Phone: ${selectedStaff.phone || 'Not provided'}\n\nAdd to your calendar: ${link}`;
 
       let isWaDelivered = false;
-      if (!isSupabaseMode) {
+      if (sideEffectPolicy.allowMockWhatsApp) {
         await NotificationService.sendAutomatedWhatsApp(newAppointment, waText).catch(e => console.error("WhatsApp send fail", e));
         isWaDelivered = true;
       }
