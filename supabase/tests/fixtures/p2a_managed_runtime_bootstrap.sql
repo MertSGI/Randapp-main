@@ -77,12 +77,24 @@ $$;
 -- Managed Supabase auth.uid() compatibility helper
 CREATE OR REPLACE FUNCTION auth.uid()
 RETURNS uuid
-LANGUAGE sql STABLE
+LANGUAGE plpgsql STABLE
 AS $$
-  SELECT COALESCE(
+DECLARE
+  v_id uuid;
+BEGIN
+  v_id := COALESCE(
     NULLIF(auth.jwt()->>'sub', '')::uuid,
     NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid
   );
+
+  IF v_id IS NOT NULL THEN
+    INSERT INTO auth.users (id, email, role, created_at, updated_at)
+    VALUES (v_id, concat('user_', v_id::text, '@p2a-test.invalid'), 'authenticated', now(), now())
+    ON CONFLICT (id) DO NOTHING;
+  END IF;
+
+  RETURN v_id;
+END;
 $$;
 
 -- Managed Supabase auth.role() compatibility helper
