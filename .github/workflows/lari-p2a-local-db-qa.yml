@@ -83,6 +83,10 @@ jobs:
           ORDINAL=1
           rm -f /tmp/p2a-applied-migrations.txt /tmp/p2a-failure-summary.txt /tmp/p2a-migration-*.log
           for migration in "${MIGRATIONS[@]}"; do
+            if [ "${migration}" = "20260813_h1c_commercial_eligibility_and_quota_enforcement.sql" ]; then
+              echo "=== HISTORICAL REPLAY COMPATIBILITY BRIDGE ==="
+              psql "$DB_URL" -v ON_ERROR_STOP=1 -f "supabase/tests/fixtures/p2a_historical_replay_bridge_before_migration_38.sql"
+            fi
             echo "=== APPLYING [${ORDINAL}/${#MIGRATIONS[@]}] ${migration} ==="
             if ! psql "$DB_URL" \
               -v ON_ERROR_STOP=1 \
