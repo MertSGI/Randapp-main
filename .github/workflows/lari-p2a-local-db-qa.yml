@@ -157,9 +157,14 @@ jobs:
 
       - name: Run Sequential DB Integration & RLS Privacy Matrix Suite
         run: |
+          set -o pipefail
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== RUNNING SEQUENTIAL PROVISIONING INTEGRATION & RLS PRIVACY MATRIX SUITE ==="
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_tenant_provisioning_integration_tests.sql
+          if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_tenant_provisioning_integration_tests.sql 2>&1 | tee /tmp/p2a-integration-suite.log; then
+            echo "=== INTEGRATION TEST SUITE FAILURE ===" >> "$GITHUB_STEP_SUMMARY"
+            tail -n 80 /tmp/p2a-integration-suite.log >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
       - name: Run Multi-Session Real DB Concurrency Harness
         run: |
