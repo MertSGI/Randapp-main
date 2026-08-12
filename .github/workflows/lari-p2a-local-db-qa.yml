@@ -22,10 +22,15 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup Supabase CLI
+      - name: Preflight Docker & Environment Check
+        run: |
+          docker --version
+          docker info
+
+      - name: Setup Supabase CLI (Pinned Version)
         uses: supabase/setup-cli@v1
         with:
-          version: 'latest'
+          version: '1.145.0'
 
       - name: Start Disposable Local Supabase Stack
         run: |
@@ -35,16 +40,25 @@ jobs:
         run: |
           supabase db reset --local --no-seed
 
-      - name: Run Executable P2A DB Tests via psql Harness
+      - name: Install DB Test Dependencies
         run: |
-          # Obtain local Postgres connection URL from supabase status
+          npm install pg @types/pg ts-node typescript --no-save
+
+      - name: Run Static SQL Security & Contract Suite
+        run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          
           echo "=== RUNNING STATIC INTEGRITY SUITE ==="
           psql "$DB_URL" -f supabase/tests/p2a_tenant_provisioning_static_test.sql
-          
-          echo "=== RUNNING FULL PROVISIONING & PRIVACY INTEGRATION SUITE ==="
+
+      - name: Run Sequential DB Integration Suite
+        run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== RUNNING SEQUENTIAL PROVISIONING INTEGRATION MATRIX SUITE ==="
           psql "$DB_URL" -f supabase/tests/p2a_tenant_provisioning_integration_tests.sql
+
+      - name: Run Multi-Session Real DB Concurrency Harness
+        run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx ts-node supabase/tests/p2a_concurrency_harness.ts
 
       - name: Stop Local Supabase Stack
         if: always()
