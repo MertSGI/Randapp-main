@@ -1,26 +1,18 @@
 # P2A Commercial Core Foundation Ledger
 
 **Base Pilot SHA**: `134c8716c2511c909cd400aee0496ebd70f63bf6`  
-**Starting SHA**: `0d411c3d2210d40fdab30a20e700b9adfdb4336b`  
-**Current Stage**: `P2A.0-R3a — Disposable Supabase Start Failure Root-Cause & CI Boot Repair`  
+**Starting SHA**: `9f901acac27fe639db34159bcaf8a6b756505fb2`  
+**Current Stage**: `P2A.0-R3b — Database-Only Disposable CI Conversion & Runtime QA`  
 
 ---
 
-## Disposable CI Startup Root-Cause Inspection (P2A.0-R3a)
+## Disposable CI Conversion Summary (P2A.0-R3b)
 
-### 1. Failed Run Analysis
-- **Failed Run ID**: `31595632099`
-- **Failed Step**: `Start Disposable Local Supabase Stack`
-- **Command**: `supabase start`
-- **Exit Code**: `1`
-- **Sanitized Root Cause Classification**: `WORKFLOW_CONFIGURATION_FAILURE` & `CLI_VERSION_INCOMPATIBLE`.
-- **Details**: Pinned CLI version `1.145.0` with minimal `config.toml` failed during local container orchestration initialization due to versioned configuration schema requirements for auth email confirmation settings.
-
-### 2. Applied Repairs:
-1. Updated `supabase/config.toml` with complete `[auth.email]` settings (`enable_signup = true`, `double_confirm_changes = false`, `enable_confirmations = false`).
-2. Updated `.github/workflows/lari-p2a-local-db-qa.yml` to use `supabase/setup-cli@v1` version `'latest'`.
-3. Added `supabase start --debug` execution for verbosity.
-4. Added an explicit `Diagnostic Collector on Startup Failure` step (`docker ps -a` and container log dump) triggered on step failure.
+### 1. Database-Only Stack Conversion
+- **Command Converted**: Replaced `supabase start --debug` (which attempts to launch Studio, Storage, Analytics, and Realtime UI containers) with `supabase db start`.
+- **Pinned Supabase CLI Version**: Pinned `1.145.0` in `.github/workflows/lari-p2a-local-db-qa.yml`.
+- **Isolated Local Port**: Local Postgres DB operates exclusively on port `54322` without external dependencies.
+- **Local Migration Command**: `supabase db reset --local --no-seed` applies baseline migrations 001 through `20260902_p2a_publish_commercial_contract_alignment.sql`.
 
 ---
 
@@ -41,4 +33,4 @@
 ## Deployment & Gate Status
 - **Staging Deployment**: `UNTOUCHED` (`https://lari-staging.vercel.app/`)
 - **Frontend Integration**: `NOT STARTED`
-- **Next Gate**: Pushed P2A.0-R3a feature branch commit to GitHub; waiting for automated disposable CI run execution.
+- **Next Gate**: Pushed database-only P2A.0-R3b workflow to GitHub; waiting for CI run execution.

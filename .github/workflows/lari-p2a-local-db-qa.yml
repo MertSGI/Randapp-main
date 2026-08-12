@@ -10,7 +10,7 @@ on:
 
 jobs:
   p2a-local-db-qa:
-    name: Disposable Supabase DB Full-Chain QA & Provisioning Tests
+    name: Disposable Database-Only QA & Provisioning Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -30,24 +30,22 @@ jobs:
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: 'latest'
+          version: '1.145.0'
 
-      - name: Start Disposable Local Supabase Stack (Debug Mode)
-        id: start_supabase
+      - name: Start Disposable Local Postgres Database Container
+        id: start_db
         run: |
-          supabase start --debug
+          supabase db start
+          supabase --version
 
-      - name: Diagnostic Collector on Startup Failure
-        if: failure() && steps.start_supabase.outcome == 'failure'
+      - name: Verify & Reset Local Migration Chain (001 to 20260902)
         run: |
-          echo "=== DISPOSABLE SUPABASE STARTUP DIAGNOSTIC REPORT ==="
-          docker ps -a
-          echo "=== DOCKER LOGS (CONTAINER STATES) ==="
-          docker logs $(docker ps -a -q | head -n 5) || true
-
-      - name: Reset & Execute Full Migration Chain (001 to 20260902)
-        run: |
+          # Apply full local migration chain from 001 to 20260902 without seed data
           supabase db reset --local --no-seed
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== VERIFYING LOCAL APPLIED MIGRATION COUNT ==="
+          psql "$DB_URL" -c "SELECT count(*) FROM supabase_migrations.schema_migrations;"
+          psql "$DB_URL" -c "SELECT version FROM supabase_migrations.schema_migrations ORDER BY version DESC LIMIT 3;"
 
       - name: Install DB Test Dependencies
         run: |
@@ -59,17 +57,17 @@ jobs:
           echo "=== RUNNING STATIC INTEGRITY SUITE ==="
           psql "$DB_URL" -f supabase/tests/p2a_tenant_provisioning_static_test.sql
 
-      - name: Run Sequential DB Integration Suite
+      - name: Run Sequential DB Integration & RLS Privacy Matrix Suite
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          echo "=== RUNNING SEQUENTIAL PROVISIONING INTEGRATION MATRIX SUITE ==="
+          echo "=== RUNNING SEQUENTIAL PROVISIONING INTEGRATION & RLS PRIVACY MATRIX SUITE ==="
           psql "$DB_URL" -f supabase/tests/p2a_tenant_provisioning_integration_tests.sql
 
       - name: Run Multi-Session Real DB Concurrency Harness
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx ts-node supabase/tests/p2a_concurrency_harness.ts
 
-      - name: Stop Local Supabase Stack
+      - name: Stop Disposable Local Database Stack
         if: always()
         run: |
-          supabase stop --no-backup
+          supabase db stop || supabase stop --no-backup
