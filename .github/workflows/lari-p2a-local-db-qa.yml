@@ -27,14 +27,23 @@ jobs:
           docker --version
           docker info
 
-      - name: Setup Supabase CLI (Pinned Version)
+      - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: '1.145.0'
+          version: 'latest'
 
-      - name: Start Disposable Local Supabase Stack
+      - name: Start Disposable Local Supabase Stack (Debug Mode)
+        id: start_supabase
         run: |
-          supabase start
+          supabase start --debug
+
+      - name: Diagnostic Collector on Startup Failure
+        if: failure() && steps.start_supabase.outcome == 'failure'
+        run: |
+          echo "=== DISPOSABLE SUPABASE STARTUP DIAGNOSTIC REPORT ==="
+          docker ps -a
+          echo "=== DOCKER LOGS (CONTAINER STATES) ==="
+          docker logs $(docker ps -a -q | head -n 5) || true
 
       - name: Reset & Execute Full Migration Chain (001 to 20260902)
         run: |
