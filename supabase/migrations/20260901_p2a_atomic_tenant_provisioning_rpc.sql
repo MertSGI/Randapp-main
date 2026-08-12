@@ -1,19 +1,15 @@
 -- 20260901_p2a_atomic_tenant_provisioning_rpc.sql
--- Parallel Lane P2A — Server-Authoritative Hardened Atomic Tenant Provisioning & Onboarding Initialization RPC (P2A.0-R1)
+-- Parallel Lane P2A — Server-Authoritative Hardened Atomic Tenant Provisioning & Onboarding Initialization RPC (P2A.0-R2)
 -- Governance: FILE ONLY. DO NOT APPLY TO LIVE STAGING DATABASE.
 -- Description:
 --   Provisions a new tenant atomically and idempotently for an authenticated user (auth.uid()).
---   P2A.0-R1 Hardening & Safeguards:
---     1. Server-authoritative binding via auth.uid() only (never caller-supplied tenant_id / owner_user_id / role).
---     2. Owner-level concurrency serialization via pg_advisory_xact_lock.
---     3. Owner-scoped idempotency table (owner_user_id, idempotency_key).
---     4. Profile safety check — explicit fail-closed guard against rewriting super_admin, staff, or existing tenant_owner.
---     5. Proven existing column alignment for tenant_business_profiles (short_description, about_text, business_category, address, city, phone, email, is_public_profile_enabled).
---     6. Canonical plan request validation (is_active = true, is_assignable = true, is_public = true). Fail-closed on invalid/non-assignable/legacy plans.
---     7. Currently effective published plan_version resolution (lifecycle_status = 'published', effective_from <= now(), effective_to IS NULL OR > now()).
---     8. Pre-commercial non-entitlement-active subscription status ('pending_onboarding', billing_mode = 'manual'). Requested plan is recorded without granting active paid commercial access.
---     9. Onboarding checklist initialized to false for all steps requiring operator/owner action. Non-public tenant publish state (public_site_status = 'draft', go_live_status = 'draft').
---    10. Audit logging via canonical public.audit_events.
+--   P2A.0-R2 Schema Truth & Privacy Safeguards:
+--     1. Populates canonical public.tenants columns (owner_user_id, official_business_name, public_display_name, category, city, phone, name, slug).
+--     2. Business profile draft privacy: tenant_business_profiles.is_public_profile_enabled set to FALSE initially.
+--     3. Forward-hardens public SELECT policy on tenant_business_profiles so anonymous public reads require is_public_profile_enabled = true AND tenant.public_site_status = 'published' AND tenant.onboarding_status = 'completed'.
+--     4. Neutral initial business profile description (no premature 'online randevu kabul etmeye başlamıştır' claims).
+--     5. Concurrency: Dual pg_advisory_xact_lock (owner-scoped & base-slug-scoped) preventing both same-owner and cross-owner slug race conditions.
+--     6. Canonical plan request validation & effective plan_version resolution. Pre-commercial subscription status set to 'pending_onboarding' (billing_mode = 'manual').
 -- Security:
 --   - SECURITY DEFINER hardened with search_path = pg_catalog, public
 --   - Strict auth.uid() identity binding
@@ -60,6 +56,9 @@ DECLARE
     v_result JSONB;
     v_cached_payload JSONB;
     v_clean_idempotency_key TEXT;
+    v_official_name TEXT;
+    v_display_name TEXT;
+    v_category TEXT;
 BEGIN
     -- 1. Authentication check
     v_caller_id := auth.uid();
@@ -105,9 +104,13 @@ BEGIN
     END IF;
 
     -- Validate business name
-    IF trim(COALESCE(p_business_name, '')) = '' THEN
+    v_official_name := trim(COALESCE(p_business_name, ''));
+    IF v_official_name = '' THEN
         RAISE EXCEPTION 'INVALID_BUSINESS_NAME: Business name cannot be empty.' USING ERRCODE = 'P0001';
     END IF;
+
+    v_display_name := trim(COALESCE(p_business_display_name, v_official_name));
+    v_category := COALESCE(trim(p_business_category), 'Hair Salon');
 
     -- 5. Canonical Plan Selection & Authorization Validation
     v_resolved_plan_code := lower(trim(COALESCE(p_requested_plan_code, 'baslangic')));
@@ -145,12 +148,15 @@ BEGIN
       AND (effective_to IS NULL OR effective_to > now())
     LIMIT 1;
 
-    -- 6. Deterministic and Unique Slug Generation
-    v_base_slug := lower(regexp_replace(COALESCE(p_business_display_name, p_business_name), '[^a-zA-Z0-9]+', '-', 'g'));
+    -- 6. Deterministic and Unique Slug Generation with Cross-Owner Advisory Lock
+    v_base_slug := lower(regexp_replace(v_display_name, '[^a-zA-Z0-9]+', '-', 'g'));
     v_base_slug := regexp_replace(v_base_slug, '^-+|-+$', '', 'g');
     IF v_base_slug = '' THEN
         v_base_slug := 'salon';
     END IF;
+
+    -- Lock slug namespace to prevent cross-owner slug generation race conditions
+    PERFORM pg_advisory_xact_lock(hashtextextended(v_base_slug, 8823910));
 
     v_slug := v_base_slug;
     LOOP
@@ -160,28 +166,44 @@ BEGIN
         v_slug := v_base_slug || '-' || v_counter;
     END LOOP;
 
-    -- 7. Create Tenant Row (Draft / Non-Public)
+    -- 7. Create Tenant Row (Populating Complete Canonical Identity & Draft Status)
     v_tenant_id := gen_random_uuid();
     INSERT INTO public.tenants (
         id,
         slug,
         name,
+        official_business_name,
+        public_display_name,
+        owner_user_id,
+        category,
+        city,
+        phone,
         status,
         provisioning_status,
         go_live_status,
         onboarding_status,
         public_site_status,
+        verification_status,
+        business_risk_status,
         created_at,
         updated_at
     ) VALUES (
         v_tenant_id,
         v_slug,
-        trim(p_business_name),
+        v_display_name,
+        v_official_name,
+        v_display_name,
+        v_caller_id,
+        v_category,
+        p_city,
+        p_phone,
         'active',
         'onboarding_required',
         'draft',
         'onboarding_required',
         'draft',
+        'not_submitted',
+        'normal',
         now(),
         now()
     );
@@ -198,7 +220,7 @@ BEGIN
     ) VALUES (
         v_caller_id,
         v_tenant_id,
-        trim(p_business_name) || ' Owner',
+        v_display_name || ' Owner',
         'tenant_owner',
         true,
         now(),
@@ -210,7 +232,7 @@ BEGIN
         active = true,
         updated_at = now();
 
-    -- 9. Create Business Profile Details (Proven Schema Columns Only)
+    -- 9. Create Business Profile Details (Neutral Initial Copy & is_public_profile_enabled = false)
     INSERT INTO public.tenant_business_profiles (
         tenant_id,
         short_description,
@@ -225,14 +247,14 @@ BEGIN
         updated_at
     ) VALUES (
         v_tenant_id,
-        'Hoşgeldiniz! ' || COALESCE(trim(p_business_display_name), trim(p_business_name)) || ' olarak hizmetinizdeyiz.',
-        'Tesisimiz online randevu kabul etmeye başlamıştır.',
-        COALESCE(p_business_category, 'Hair Salon'),
+        NULL,
+        NULL,
+        v_category,
         p_city,
         p_city,
         p_phone,
         v_caller_email,
-        true,
+        false, -- Draft business profile MUST NOT be public initially
         now(),
         now()
     )
@@ -248,7 +270,7 @@ BEGIN
         updated_at
     ) VALUES (
         v_tenant_id,
-        COALESCE(trim(p_business_display_name), trim(p_business_name)),
+        v_display_name,
         '#4f46e5',
         p_city,
         now(),
@@ -367,6 +389,22 @@ BEGIN
     RETURN v_result;
 END;
 $$;
+
+-- Forward-Harden Public RLS Policy on tenant_business_profiles
+DROP POLICY IF EXISTS "Public can view enabled business profiles" ON public.tenant_business_profiles;
+CREATE POLICY "Public can view enabled and published business profiles"
+    ON public.tenant_business_profiles
+    FOR SELECT TO public
+    USING (
+        is_public_profile_enabled = true
+        AND EXISTS (
+            SELECT 1 FROM public.tenants t
+            WHERE t.id = tenant_business_profiles.tenant_id
+              AND t.status IN ('active', 'manual_active')
+              AND t.onboarding_status = 'completed'
+              AND t.public_site_status = 'published'
+        )
+    );
 
 -- Revoke public execution permissions
 REVOKE EXECUTE ON FUNCTION public.provision_tenant_for_authenticated_owner(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;

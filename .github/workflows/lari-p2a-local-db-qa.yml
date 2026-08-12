@@ -1,0 +1,52 @@
+name: LARI P2A Isolated Local DB QA & Migration Verification
+
+on:
+  push:
+    branches:
+      - feature/p2a-commercial-core-foundation
+  pull_request:
+    branches:
+      - feature/p2a-commercial-core-foundation
+
+jobs:
+  p2a-local-db-qa:
+    name: Disposable Supabase DB Full-Chain QA & Provisioning Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 'latest'
+
+      - name: Start Disposable Local Supabase Stack
+        run: |
+          supabase start
+
+      - name: Reset & Execute Full Migration Chain (001 to 20260902)
+        run: |
+          supabase db reset --local --no-seed
+
+      - name: Run Executable P2A DB Tests via psql Harness
+        run: |
+          # Obtain local Postgres connection URL from supabase status
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          
+          echo "=== RUNNING STATIC INTEGRITY SUITE ==="
+          psql "$DB_URL" -f supabase/tests/p2a_tenant_provisioning_static_test.sql
+          
+          echo "=== RUNNING FULL PROVISIONING & PRIVACY INTEGRATION SUITE ==="
+          psql "$DB_URL" -f supabase/tests/p2a_tenant_provisioning_integration_tests.sql
+
+      - name: Stop Local Supabase Stack
+        if: always()
+        run: |
+          supabase stop --no-backup
