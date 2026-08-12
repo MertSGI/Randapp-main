@@ -10,7 +10,7 @@ on:
 
 jobs:
   p2a-local-db-qa:
-    name: Disposable Database-Only QA & Provisioning Tests
+    name: Disposable Direct Supabase Postgres QA & Provisioning Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -27,23 +27,90 @@ jobs:
           docker --version
           docker info
 
-      - name: Setup Supabase CLI
+      - name: Setup Supabase CLI (Pinned Version)
         uses: supabase/setup-cli@v1
         with:
           version: '1.145.0'
 
-      - name: Start Disposable Local Postgres Database Container
-        id: start_db
+      - name: Start Pinned Supabase Postgres Container Directly
+        id: start_direct_db
         run: |
-          supabase db start
-          supabase --version
+          PINNED_IMAGE="supabase/postgres:15.1.0.147"
+          echo "Pulling pinned Supabase Postgres container: ${PINNED_IMAGE}"
+          docker pull "${PINNED_IMAGE}"
+          docker run -d \
+            --name lari-p2a-postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=postgres \
+            -p 54322:5432 \
+            "${PINNED_IMAGE}"
 
-      - name: Verify & Reset Local Migration Chain (001 to 20260902)
+      - name: Direct Postgres Custom Readiness Check
         run: |
-          # Apply full local migration chain from 001 to 20260902 without seed data
-          supabase db reset --local --no-seed
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          echo "=== VERIFYING LOCAL APPLIED MIGRATION COUNT ==="
+          echo "Waiting for direct Postgres readiness on 127.0.0.1:54322..."
+          for i in {1..60}; do
+            if pg_isready -h 127.0.0.1 -p 54322 -U postgres -d postgres; then
+              echo "Postgres container is ready!"
+              break
+            fi
+            sleep 1
+          done
+          psql "$DB_URL" -c "SELECT version();"
+
+      - name: Verify Supabase Database Managed Prerequisites
+        run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== VERIFYING SUPABASE MANAGED ROLES, SCHEMAS & EXTENSIONS ==="
+          psql "$DB_URL" -c "
+            CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";
+            CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+            DO \$$
+            BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+                CREATE ROLE anon NOLOGIN;
+              END IF;
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+                CREATE ROLE authenticated NOLOGIN;
+              END IF;
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+                CREATE ROLE service_role NOLOGIN;
+              END IF;
+            END;
+            \$$;
+
+            CREATE SCHEMA IF NOT EXISTS auth;
+
+            CREATE TABLE IF NOT EXISTS auth.users (
+              id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+              email text,
+              role text DEFAULT 'authenticated',
+              created_at timestamptz DEFAULT now(),
+              updated_at timestamptz DEFAULT now()
+            );
+
+            CREATE OR REPLACE FUNCTION auth.uid()
+            RETURNS uuid
+            LANGUAGE sql STABLE
+            AS \$$
+              SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid;
+            \$$;
+
+            GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
+            GRANT SELECT ON auth.users TO anon, authenticated, service_role;
+            GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated, service_role;
+          "
+          echo "Prerequisites set successfully."
+
+      - name: Apply Complete Migration Chain via Local DB_URL
+        run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== MIGRATION DRY RUN ==="
+          supabase db push --db-url "$DB_URL" --dry-run
+          echo "=== APPLYING FULL LOCAL MIGRATION CHAIN (001 to 20260902) ==="
+          supabase db push --db-url "$DB_URL"
+          echo "=== VERIFYING APPLIED MIGRATION COUNT ==="
           psql "$DB_URL" -c "SELECT count(*) FROM supabase_migrations.schema_migrations;"
           psql "$DB_URL" -c "SELECT version FROM supabase_migrations.schema_migrations ORDER BY version DESC LIMIT 3;"
 
@@ -55,19 +122,20 @@ jobs:
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== RUNNING STATIC INTEGRITY SUITE ==="
-          psql "$DB_URL" -f supabase/tests/p2a_tenant_provisioning_static_test.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_tenant_provisioning_static_test.sql
 
       - name: Run Sequential DB Integration & RLS Privacy Matrix Suite
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== RUNNING SEQUENTIAL PROVISIONING INTEGRATION & RLS PRIVACY MATRIX SUITE ==="
-          psql "$DB_URL" -f supabase/tests/p2a_tenant_provisioning_integration_tests.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_tenant_provisioning_integration_tests.sql
 
       - name: Run Multi-Session Real DB Concurrency Harness
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx ts-node supabase/tests/p2a_concurrency_harness.ts
 
-      - name: Stop Disposable Local Database Stack
+      - name: Cleanup Disposable Container
         if: always()
         run: |
-          supabase db stop || supabase stop --no-backup
+          docker logs lari-p2a-postgres || true
+          docker rm -f lari-p2a-postgres || true
