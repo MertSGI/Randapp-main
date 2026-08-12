@@ -1,16 +1,19 @@
 # P2A Commercial Core Foundation Ledger
 
 **Base Pilot SHA**: `134c8716c2511c909cd400aee0496ebd70f63bf6`  
-**Starting SHA**: `3a9073ca635e4c92d53bfdb7837268f13afb5069`  
-**Current Stage**: `P2A.0-R3d — Deterministic SQL Migration Chain & Runtime QA`  
+**Starting SHA**: `d57c711ce35394ec31146f4df20b592a6c5e801c`  
+**Current Stage**: `P2A.0-R3e — Exact Fresh-Migration Failure Diagnosis`  
 
 ---
 
-## Deterministic SQL Migration Strategy & Correction (P2A.0-R3d)
+## Migration Failure Diagnosis & Pre-Bootstrap Proof
 
-### 1. Correction of Prior Managed Prerequisite Labels
-- **Ledger Correction**: Previous `NATIVE_PASS` labels for `anon`, `authenticated`, `auth.schema`, and `auth.uid()` are corrected to `TEST_RUNTIME_PREREQUISITES_READY`. These primitives are initialized strictly by the explicit test compatibility fixture `supabase/tests/fixtures/p2a_managed_runtime_bootstrap.sql` prior to applying application migrations against the direct Docker container.
-- **Supabase CLI Removed**: Removed `setup-cli` and `supabase db push` from workflow. All application migrations are applied directly in filename-sorted order via `psql -v ON_ERROR_STOP=1`.
+### 1. Pre-Bootstrap Inspection Evidence
+- **Raw Container Audit**: Verified that raw container `supabase/postgres:15.1.0.147` lacks `anon`, `authenticated`, `service_role`, `auth.schema`, and `auth.uid()`.
+- **Test Compatibility Bootstrap**: Explicitly initialized via `supabase/tests/fixtures/p2a_managed_runtime_bootstrap.sql`.
+
+### 2. Failure Diagnostic Indexing Added
+- Added step-level index logging (`APPLYING [0] 001_initial_schema.sql`, `APPLYING [1] 002_subscription_alignment.sql`, ...) and container log dump on failure in `.github/workflows/lari-p2a-local-db-qa.yml` to isolate the exact failing migration file.
 
 ---
 
@@ -31,4 +34,4 @@
 ## Deployment & Gate Status
 - **Staging Deployment**: `UNTOUCHED` (`https://lari-staging.vercel.app/`)
 - **Frontend Integration**: `NOT STARTED`
-- **Next Gate**: Pushed deterministic psql migration workflow to GitHub; waiting for automated CI run execution.
+- **Next Gate**: Pushed diagnostic workflow to GitHub; waiting for automated CI run execution.

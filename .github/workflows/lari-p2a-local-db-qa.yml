@@ -68,6 +68,7 @@ jobs:
           echo "Compatibility bootstrap completed."
 
       - name: Build Migration Manifest & Apply Full SQL Migration Chain
+        id: apply_migrations
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== BUILDING ORDERED MIGRATION MANIFEST ==="
@@ -79,11 +80,20 @@ jobs:
           printf '%s\n' "${MIGRATIONS[@]}"
           APPLIED_COUNT=0
           for migration in "${MIGRATIONS[@]}"; do
-            echo "=== APPLYING ${migration} ==="
-            psql "$DB_URL" -v ON_ERROR_STOP=1 -f "supabase/migrations/${migration}"
+            echo "=== APPLYING [${APPLIED_COUNT}] ${migration} ==="
+            if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -f "supabase/migrations/${migration}"; then
+              echo "!!! FATAL MIGRATION FAILURE ON FILE [${APPLIED_COUNT}]: ${migration} !!!"
+              exit 1
+            fi
             APPLIED_COUNT=$((APPLIED_COUNT + 1))
           done
           echo "Successfully applied ${APPLIED_COUNT} migration files."
+
+      - name: Detailed Failure Diagnostic Dump
+        if: failure() && steps.apply_migrations.outcome == 'failure'
+        run: |
+          echo "=== DIAGNOSTIC DUMP ON MIGRATION FAILURE ==="
+          docker logs lari-p2a-postgres --tail 100 || true
 
       - name: Verify P2A Schema Post-Proof
         run: |
