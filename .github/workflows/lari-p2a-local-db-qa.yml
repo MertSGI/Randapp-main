@@ -80,21 +80,22 @@ jobs:
           echo "=== MIGRATION MANIFEST FILES ==="
           printf '%s\n' "${MIGRATIONS[@]}"
           APPLIED_COUNT=0
+          ORDINAL=1
           rm -f /tmp/p2a-applied-migrations.txt /tmp/p2a-failure-summary.txt /tmp/p2a-migration-*.log
           for migration in "${MIGRATIONS[@]}"; do
-            echo "=== APPLYING [${APPLIED_COUNT}] ${migration} ==="
+            echo "=== APPLYING [${ORDINAL}/${#MIGRATIONS[@]}] ${migration} ==="
             if ! psql "$DB_URL" \
               -v ON_ERROR_STOP=1 \
               -f "supabase/migrations/${migration}" \
-              2>&1 | tee "/tmp/p2a-migration-${APPLIED_COUNT}.log"; then
+              2>&1 | tee "/tmp/p2a-migration-${ORDINAL}.log"; then
 
-              echo "FAILED_MIGRATION_INDEX=${APPLIED_COUNT}" \
+              echo "FAILED_MIGRATION_ORDINAL=${ORDINAL}" \
                 | tee /tmp/p2a-failure-summary.txt
 
               echo "FAILED_MIGRATION_FILENAME=${migration}" \
                 | tee -a /tmp/p2a-failure-summary.txt
 
-              echo "LAST_SUCCESSFULLY_APPLIED_COUNT=${APPLIED_COUNT}" \
+              echo "SUCCESSFULLY_APPLIED_COUNT_BEFORE_FAILURE=${APPLIED_COUNT}" \
                 | tee -a /tmp/p2a-failure-summary.txt
 
               if [ -f /tmp/p2a-applied-migrations.txt ]; then
@@ -103,15 +104,16 @@ jobs:
               fi
 
               echo "=== LAST 80 LINES OF FAILED MIGRATION LOG ===" | tee -a /tmp/p2a-failure-summary.txt
-              tail -n 80 "/tmp/p2a-migration-${APPLIED_COUNT}.log" \
+              tail -n 80 "/tmp/p2a-migration-${ORDINAL}.log" \
                 | tee -a /tmp/p2a-failure-summary.txt
 
               cat /tmp/p2a-failure-summary.txt >> "$GITHUB_STEP_SUMMARY"
 
               exit 1
             fi
-            echo "index=${APPLIED_COUNT} filename=${migration}" >> /tmp/p2a-applied-migrations.txt
+            echo "ordinal=${ORDINAL} filename=${migration}" >> /tmp/p2a-applied-migrations.txt
             APPLIED_COUNT=$((APPLIED_COUNT + 1))
+            ORDINAL=$((ORDINAL + 1))
           done
           echo "Successfully applied ${APPLIED_COUNT} migration files."
 
