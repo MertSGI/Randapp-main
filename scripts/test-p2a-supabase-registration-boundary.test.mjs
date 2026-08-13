@@ -35,6 +35,23 @@ async function runBoundaryTests() {
     })
   };
 
+  // Mock plans table query for self-serve check
+  supabase.from = (table) => {
+    if (table === 'plans') {
+      return {
+        select: () => ({
+          eq: () => ({
+            single: async () => ({
+              data: { id: 'plan-baslangic-uuid', code: 'baslangic', is_self_serve: true },
+              error: null
+            })
+          })
+        })
+      };
+    }
+    return {};
+  };
+
   // Test 1: Verify registerTenant calls provision_tenant_for_authenticated_owner RPC with exact parameter names
   let rpcCalled = false;
   let rpcName = '';
@@ -107,7 +124,19 @@ async function runBoundaryTests() {
 
   // Test 4: Verify Zero Client-Side UUID Generation or Direct Table Writes
   let directTableWriteAttempted = false;
-  supabase.from = () => {
+  supabase.from = (table) => {
+    if (table === 'plans') {
+      return {
+        select: () => ({
+          eq: () => ({
+            single: async () => ({
+              data: { id: 'plan-baslangic-uuid', code: 'baslangic', is_self_serve: true },
+              error: null
+            })
+          })
+        })
+      };
+    }
     directTableWriteAttempted = true;
     return {
       insert: () => ({ select: () => Promise.resolve({ data: null, error: new Error('Direct table insert blocked') }) }),
