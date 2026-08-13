@@ -1,6 +1,4 @@
-// test-p2a-static-security-scan.test.mjs
-// P2A.1-R1 — Static Source Code Security Scan for Frontend Boundaries
-
+import './test-setup-env.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert';

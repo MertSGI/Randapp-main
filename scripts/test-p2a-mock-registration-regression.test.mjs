@@ -1,9 +1,11 @@
-// test-p2a-mock-registration-regression.test.mjs
-// P2A.1-R1 — Mock Registration Mode Regression Suite
-
+import './test-setup-env.mjs';
 import assert from 'node:assert';
 import { tenantRegistrationService } from '../services/tenantRegistrationService.ts';
 import { planService } from '../services/planService.ts';
+
+// Force mock mode for mock regression suite
+process.env.VITE_DATA_MODE = 'mock';
+delete globalThis.import;
 
 console.log('=== RUNNING P2A.1 MOCK REGISTRATION REGRESSION SUITE ===');
 
