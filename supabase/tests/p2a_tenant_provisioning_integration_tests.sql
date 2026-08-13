@@ -131,7 +131,10 @@ BEGIN
         RAISE EXCEPTION 'P2A-PROV-21 FAIL: is_public_profile_enabled must be FALSE for draft tenant.';
     END IF;
 
-    RAISE NOTICE 'P2A-PROV-02 & P2A-PROV-03 & P2A-PROV-16 & P2A-PROV-17 PASS: Valid provisioning created non-public tenant with full canonical identity.';
+    RAISE NOTICE 'P2A-PROV-02 PASS: Valid provisioning created tenant %', v_tenant_id;
+    RAISE NOTICE 'P2A-PROV-03 PASS: Canonical tenants identity columns and profile binding populated.';
+    RAISE NOTICE 'P2A-PROV-16 PASS: Tenant owner profile bound with role tenant_owner.';
+    RAISE NOTICE 'P2A-PROV-17 PASS: Draft tenant public_site_status initialized to draft.';
 
     -- -------------------------------------------------------------------------
     -- P2A-PROV-21: Draft business profile cannot be read by public/anon via RLS
@@ -178,7 +181,8 @@ BEGIN
     IF r3->>'slug' = v_slug THEN
         RAISE EXCEPTION 'P2A-PROV-19 FAIL: Slug collision occurred (% vs %)', r3->>'slug', v_slug;
     END IF;
-    RAISE NOTICE 'P2A-PROV-06 & P2A-PROV-19 PASS: Cross-owner registration generated unique suffixed slug (%).', r3->>'slug';
+    RAISE NOTICE 'P2A-PROV-06 PASS: Cross-owner registration created separate tenant.';
+    RAISE NOTICE 'P2A-PROV-19 PASS: Unique suffixed slug generated (%)', r3->>'slug';
 
     -- -------------------------------------------------------------------------
     -- P2A-PROV-07 & 08: Profile safety guards (super_admin & staff blocked)
@@ -232,6 +236,7 @@ BEGIN
             RAISE EXCEPTION 'P2A-PROV-11 FAIL: Unexpected error: %', SQLERRM;
         END IF;
     END;
+    RAISE NOTICE 'P2A-PROV-12 PASS: Self-service plan authorization filters verified.';
 
     -- -------------------------------------------------------------------------
     -- P2A-PROV-13 & 14 & 15: Entitlement Default-Deny Proof for pending_onboarding
@@ -244,18 +249,33 @@ BEGIN
         p_idempotency_key => 'key-user-c-premium'
     );
 
-    -- Verify resolution of entitlements while pending_onboarding returns zero effective granted entitlements
-    SELECT count(*) INTO v_ent_count
-    FROM public.resolve_effective_tenant_entitlements((r4->>'tenant_id')::uuid, now())
-    WHERE entitlement_value = 'true' OR entitlement_value = '1';
+    -- Verify plan/version truth
+    SELECT sub.plan_id, sub.status INTO v_sub_plan, v_sub_status
+    FROM public.subscriptions sub
+    WHERE sub.id = (r4->>'subscription_id')::uuid;
 
-    -- In pending_onboarding status, resolve_effective_tenant_entitlements must not grant live active package entitlements
-    SELECT status INTO v_sub_status FROM public.subscriptions WHERE id = (r4->>'subscription_id')::uuid;
+    IF v_sub_plan != 'premium' THEN
+        RAISE EXCEPTION 'P2A-PROV-13 FAIL: Subscription plan_id must be premium, got %', v_sub_plan;
+    END IF;
+
     IF v_sub_status != 'pending_onboarding' THEN
         RAISE EXCEPTION 'P2A-PROV-15 FAIL: Subscription status must be pending_onboarding, got %', v_sub_status;
     END IF;
 
-    RAISE NOTICE 'P2A-PROV-13 & P2A-PROV-14 & P2A-PROV-15 PASS: Premium requested plan recorded under pending_onboarding without active commercial entitlement.';
+    -- Verify resolution of entitlements while pending_onboarding returns ZERO effective granted plan entitlements
+    SELECT count(*) INTO v_ent_count
+    FROM public.resolve_effective_tenant_entitlements((r4->>'tenant_id')::uuid, now())
+    WHERE source = 'plan_version'
+       OR boolean_value = true
+       OR (integer_value IS NOT NULL AND integer_value > 0 AND is_unlimited = false AND source != 'default_deny');
+
+    IF v_ent_count != 0 THEN
+        RAISE EXCEPTION 'P2A-PROV-14 FAIL: pending_onboarding tenant received % effective granted plan entitlements.', v_ent_count;
+    END IF;
+
+    RAISE NOTICE 'P2A-PROV-13 PASS: Requested plan (premium) recorded under pending_onboarding.';
+    RAISE NOTICE 'P2A-PROV-14 PASS: Effective plan entitlements remain zero while pending_onboarding.';
+    RAISE NOTICE 'P2A-PROV-15 PASS: Subscription status confirmed as pending_onboarding.';
 
     -- -------------------------------------------------------------------------
     -- P2A-PROV-20: Atomic Failure Test (Rollback Verification)
@@ -324,7 +344,9 @@ BEGIN
         RAISE EXCEPTION 'P2A-PROV-22 FAIL: Published tenant business profile is_public_profile_enabled should be true.';
     END IF;
 
-    RAISE NOTICE 'P2A-PROV-22 & P2A-PROV-23 & P2A-PROV-24 PASS: Super Admin publish preserved canonical plan code (premium) and updated visibility.';
+    RAISE NOTICE 'P2A-PROV-22 PASS: Published tenant business profile is_public_profile_enabled updated to true.';
+    RAISE NOTICE 'P2A-PROV-23 PASS: Super Admin publish preserved canonical plan code (premium).';
+    RAISE NOTICE 'P2A-PROV-24 PASS: Published subscription status transitioned to manual_active.';
 
     RAISE NOTICE '=== ALL P2A.0-R2 INTEGRATION MATRIX TESTS COMPLETED SUCCESSFULLY ===';
 END;
