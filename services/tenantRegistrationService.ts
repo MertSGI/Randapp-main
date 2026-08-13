@@ -111,7 +111,8 @@ export const tenantRegistrationService = {
         });
 
         if (signUpError) {
-          if (signUpError.message?.toLowerCase().includes('already registered') || signUpError.message?.toLowerCase().includes('already exists')) {
+          const msg = (signUpError.message || '').toLowerCase();
+          if (msg.includes('already registered') || msg.includes('already exists')) {
             const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
               email: data.ownerEmail,
               password: data.password,

@@ -29,10 +29,24 @@ globalThis.sessionStorage = {
 async function runBoundaryTests() {
   let directTableWriteAttempted = false;
 
-  // Mock authenticated session for registration boundary tests
+  // Mock authenticated session & auth operations for registration boundary tests
   supabase.auth = {
     getSession: async () => ({
       data: { session: { user: { id: '11111111-1111-1111-1111-111111111111' } } },
+      error: null
+    }),
+    signUp: async () => ({
+      data: {
+        session: { user: { id: '11111111-1111-1111-1111-111111111111' } },
+        user: { id: '11111111-1111-1111-1111-111111111111' }
+      },
+      error: null
+    }),
+    signInWithPassword: async () => ({
+      data: {
+        session: { user: { id: '11111111-1111-1111-1111-111111111111' } },
+        user: { id: '11111111-1111-1111-1111-111111111111' }
+      },
       error: null
     })
   };
