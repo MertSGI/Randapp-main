@@ -175,7 +175,11 @@ jobs:
           set -o pipefail
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== RUNNING DISPOSABLE DB OWNER ONBOARDING INTEGRATION SUITE ==="
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_onboarding_integration_tests.sql
+          if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_onboarding_integration_tests.sql 2>&1 | tee /tmp/p2a-onboarding-suite.log; then
+            echo "=== ONBOARDING DB TEST SUITE FAILURE ===" >> "$GITHUB_STEP_SUMMARY"
+            tail -n 80 /tmp/p2a-onboarding-suite.log >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
       - name: Run Frontend Owner Onboarding & Registration Boundary Matrix
         run: |
