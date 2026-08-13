@@ -307,6 +307,10 @@ BEGIN
 END;
 $$;
 
+-- Unique index for availability rules idempotency
+CREATE UNIQUE INDEX IF NOT EXISTS uq_availability_rules_tenant_staff_weekday 
+ON public.availability_rules (tenant_id, staff_id, weekday);
+
 -- 4. RPC: Create Owner First Staff (Atomic Staff + Service Mapping + Branch + Availability Rules)
 CREATE OR REPLACE FUNCTION public.create_owner_first_staff(
     p_name TEXT,
@@ -365,12 +369,12 @@ BEGIN
 
     IF v_branch_id IS NULL THEN
         v_branch_id := gen_random_uuid();
-        INSERT INTO public.branches (id, tenant_id, name, city, address, timezone, is_primary, active, created_at, updated_at)
-        VALUES (v_branch_id, v_tenant_id, 'Merkez Şube', 'İstanbul', 'Merkez Adres', 'Europe/Istanbul', true, true, NOW(), NOW());
+        INSERT INTO public.branches (id, tenant_id, name, timezone, is_primary, is_active, created_at, updated_at)
+        VALUES (v_branch_id, v_tenant_id, 'Merkez Şube', 'Europe/Istanbul', true, true, NOW(), NOW());
     END IF;
 
     -- Check existing staff by name
-    SELECT id INTO v_existing_id FROM public.staff WHERE tenant_id = v_tenant_id AND name = v_clean_name AND active = true LIMIT 1;
+    SELECT id INTO v_existing_id FROM public.staff WHERE tenant_id = v_tenant_id AND name = v_clean_name AND (active = true OR is_active = true) LIMIT 1;
     IF v_existing_id IS NOT NULL THEN
         v_staff_id := v_existing_id;
     ELSE
@@ -396,12 +400,9 @@ BEGIN
     -- Availability rules
     IF p_work_days IS NOT NULL AND array_length(p_work_days, 1) > 0 THEN
         FOREACH v_day IN ARRAY p_work_days LOOP
+            DELETE FROM public.availability_rules WHERE tenant_id = v_tenant_id AND staff_id = v_staff_id AND weekday = v_day;
             INSERT INTO public.availability_rules (tenant_id, staff_id, weekday, start_time, end_time, is_active)
-            VALUES (v_tenant_id, v_staff_id, v_day, COALESCE(p_start_time, '09:00:00'::TIME), COALESCE(p_end_time, '18:00:00'::TIME), true)
-            ON CONFLICT (tenant_id, staff_id, weekday) DO UPDATE SET
-                start_time = EXCLUDED.start_time,
-                end_time = EXCLUDED.end_time,
-                is_active = true;
+            VALUES (v_tenant_id, v_staff_id, v_day, COALESCE(p_start_time, '09:00:00'::TIME), COALESCE(p_end_time, '18:00:00'::TIME), true);
         END LOOP;
     END IF;
 
