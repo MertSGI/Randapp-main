@@ -122,10 +122,15 @@ async function runBoundaryTests() {
 
   console.log('✅ Test 1 PASSED: registerTenant maps exact RPC parameters to provision_tenant_for_authenticated_owner.');
 
-  // Test 2: Idempotency Key Stability across Retries
+  // Test 2: Idempotency Key Stability across Retries (retryable failure case)
   let capturedIdempKeys = [];
+  let callCount = 0;
   supabase.rpc = async (name, args) => {
     capturedIdempKeys.push(args.p_idempotency_key);
+    callCount++;
+    if (callCount === 1) {
+      return { data: null, error: new Error('P2A_RETRYABLE_NETWORK_TIMEOUT') };
+    }
     return { data: { success: true, tenant_id: '11111111-1111-1111-1111-111111111111' }, error: null };
   };
 
@@ -165,7 +170,7 @@ async function runBoundaryTests() {
   };
 
   await tenantRegistrationService.registerTenant({ ownerEmail: 'crypto@test.com', businessName: 'Crypto Key Salon', planId: 'baslangic' });
-  assert.ok(generatedKey.startsWith('reg-') || generatedKey.length >= 16, 'Test 5 FAIL: Idempotency key missing prefix or weak');
+  assert.ok(generatedKey.startsWith('idemp-') || generatedKey.length >= 16, 'Test 5 FAIL: Idempotency key missing prefix or weak');
   console.log('✅ Test 5 PASSED: Cryptographic idempotency key format validated.');
 
   // Test 6: Verify Zero Mock Fallback in Supabase Mode
