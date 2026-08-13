@@ -147,7 +147,7 @@ jobs:
 
       - name: Install DB Test Dependencies
         run: |
-          npm install pg @types/pg ts-node typescript --no-save
+          npm install pg @types/pg tsx ts-node typescript --no-save
 
       - name: Run Static SQL Security & Contract Suite
         run: |
@@ -168,7 +168,7 @@ jobs:
 
       - name: Run Multi-Session Real DB Concurrency Harness
         run: |
-          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx ts-node supabase/tests/p2a_concurrency_harness.ts
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx tsx supabase/tests/p2a_concurrency_harness.ts
 
       - name: Cleanup Disposable Container
         if: always()
