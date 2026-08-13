@@ -304,6 +304,9 @@ BEGIN
     -- Setup readiness checklist fixtures for User C tenant
     v_tenant_id := (r4->>'tenant_id')::uuid;
 
+    -- Temporarily set subscription status to manual_active so readiness checklist fixtures pass commercial triggers
+    UPDATE public.subscriptions SET status = 'manual_active' WHERE tenant_id = v_tenant_id;
+
     INSERT INTO public.services (id, tenant_id, name, duration, price, active)
     VALUES (gen_random_uuid(), v_tenant_id, 'Kesim & Fön', 30, 200, true)
     RETURNING id INTO v_service_id;
@@ -317,6 +320,9 @@ BEGIN
 
     INSERT INTO public.availability_rules (tenant_id, staff_id, weekday, start_time, end_time, is_active)
     VALUES (v_tenant_id, v_staff_id, 1, '09:00:00'::time, '18:00:00'::time, true);
+
+    -- Reset status back to pending_onboarding before executing approve_and_publish_tenant to test full publish transition
+    UPDATE public.subscriptions SET status = 'pending_onboarding' WHERE tenant_id = v_tenant_id;
 
     -- Execute publish RPC as Super Admin
     PERFORM set_config('request.jwt.claim.sub', v_super_admin_id::text, true);
