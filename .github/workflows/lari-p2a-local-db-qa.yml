@@ -171,6 +171,8 @@ jobs:
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx tsx supabase/tests/p2a_concurrency_harness.ts
 
       - name: Run Disposable DB Owner Onboarding Integration Suite
+        env:
+          PGPASSWORD: postgres
         run: |
           set -o pipefail
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
