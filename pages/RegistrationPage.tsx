@@ -4,10 +4,7 @@ import { planService } from '../services/planService';
 import { launchModeService } from '../services/launchModeService';
 import { useLanguage } from '../contexts/LanguageContext';
 import { translations } from '../utils/translations';
-import { tenantRegistrationService, RegistrationData } from '../services/tenantRegistrationService';
-import { subscriptionService } from '../services/subscriptionService';
-import { FeatureBadge } from '../components/FeatureBadge';
-import { CheckoutPreviewModal } from '../components/CheckoutPreviewModal';
+import { tenantRegistrationService, RegistrationData, RegistrationStatus } from '../services/tenantRegistrationService';
 
 export default function RegistrationPage() {
   const { language } = useLanguage();
@@ -16,14 +13,18 @@ export default function RegistrationPage() {
   const navigate = useNavigate();
   
   const queryParams = new URLSearchParams(location.search);
-  const selectedPlanId = queryParams.get('planId') || 'professional';
+  const rawPlanId = queryParams.get('planId') || 'baslangic';
   const billingPeriod = queryParams.get('billingPeriod') || 'monthly';
   const referralCode = queryParams.get('ref') || undefined;
   
-  const plan = planService.getPlan(selectedPlanId);
+  // Public Self-Service Plan Selection Safety: Ensure only assignable public plans are selectable
+  const publicPlans = planService.getPublicSelfServicePlans();
+  const validatedPlanId = publicPlans.some(p => p.id === rawPlanId) ? rawPlanId : 'baslangic';
+  const plan = planService.getPlan(validatedPlanId) || publicPlans[0];
+  
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showCheckoutPreview, setShowCheckoutPreview] = useState(false);
+  const [submissionState, setSubmissionState] = useState<RegistrationStatus>('AUTH_SIGNUP_PENDING');
   
   const [formData, setFormData] = useState<RegistrationData>({
     ownerName: '',
@@ -37,7 +38,7 @@ export default function RegistrationPage() {
     businessCategory: 'Hair Salon',
     city: '',
     instagramHandle: '',
-    planId: selectedPlanId,
+    planId: validatedPlanId,
     billingPeriod: billingPeriod as 'monthly' | 'annual',
     acceptTerms: false,
     referralCode: referralCode,
@@ -53,42 +54,12 @@ export default function RegistrationPage() {
     }));
   };
 
-  const [registeredTenantId, setRegisteredTenantId] = useState<string | null>(null);
-
-  const handleCheckoutHandoff = async () => {
-    if (!registeredTenantId || !plan) return;
-    setLoading(true);
-    setError('');
-    
-    try {
-      const checkoutUrl = await subscriptionService.startCheckout(registeredTenantId, plan.id, {
-         name: formData.ownerName,
-         surname: formData.ownerSurname,
-         email: formData.ownerEmail,
-         phone: formData.ownerPhone,
-         city: formData.city,
-         billingPeriod: formData.billingPeriod
-      });
-      
-      if (checkoutUrl) {
-         window.location.href = checkoutUrl;
-      } else {
-         // Fallback or mock mode
-         window.location.href = '/#/admin?tab=kurulum&registration=success';
-      }
-    } catch (err: any) {
-      console.error(err);
-      setError(language === 'tr' ? 'Ödeme sayfası hazırlanamadı. Lütfen tekrar deneyin.' : 'Unable to prepare checkout page. Please try again.');
-      setShowCheckoutPreview(false);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return; // Prevent duplicate clicks (REG-03)
+
     if (!formData.acceptTerms) {
-      setError(language === 'tr' ? 'Lütfen KVKK ve Kulanım Şartlarını kabul edin.' : 'Please accept terms and conditions.');
+      setError(language === 'tr' ? 'Lütfen KVKK ve Kullanım Şartlarını kabul edin.' : 'Please accept terms and conditions.');
       return;
     }
     if (formData.password !== formData.confirmPassword) {
@@ -97,15 +68,23 @@ export default function RegistrationPage() {
     }
     setError('');
     setLoading(true);
+    setSubmissionState('PROVISIONING_IN_PROGRESS');
 
     try {
       const result = await tenantRegistrationService.registerTenant(formData);
+      
+      if (result.status === 'EMAIL_CONFIRMATION_REQUIRED') {
+        setSubmissionState('EMAIL_CONFIRMATION_REQUIRED');
+        setError(result.error || (language === 'tr' ? 'Lütfen e-posta adresinizi doğrulayın.' : 'Please verify your email address.'));
+        setLoading(false);
+        return;
+      }
+
       if (result.success) {
-        // Registration successful
-        
-        // Record owner terms acceptance
+        setSubmissionState('PROVISIONED');
+
+        // Record legal acceptance asynchronously
         import('../services/consentService').then(({ consentService }) => {
-           // We might not have ownerUserId here as it registers a tenant, so we use email as ownerUserId for now or 'owner_' + tenantId
            consentService.recordBusinessOwnerTermsAcceptance(result.tenantId || 'unknown_tenant', formData.ownerEmail);
         }).catch(e => console.error(e));
 
@@ -130,28 +109,19 @@ export default function RegistrationPage() {
            });
         }).catch(e => console.error(e));
 
-        import('../services/consentLedgerService').then(({ consentLedgerService }) => {
-           consentLedgerService.recordConsent({
-             tenantId: result.tenantId || 'unknown_tenant',
-             actorType: 'tenant_owner',
-             actorId: formData.ownerEmail,
-             contact: formData.ownerPhone,
-             consentType: 'booking_transactional',
-             status: 'granted',
-             source: 'registration_page',
-             legalDocumentType: 'terms_of_service'
-           });
-        }).catch(e => console.error(e));
-
-        // Depending on local vs prod mode, we would redirect to a real checkout init or admin
-        // For now, render checkout preview (handoff)
-        setRegisteredTenantId(result.tenantId || null);
-        setShowCheckoutPreview(true);
+        // Route to canonical onboarding entry point (resumable onboarding entry)
+        if (result.status === 'USER_ALREADY_HAS_TENANT') {
+          navigate('/admin?tab=kurulum&notice=existing_account');
+        } else {
+          navigate('/admin?tab=kurulum&registration=success');
+        }
       } else {
-        setError(result.error || 'Registration failed');
+        setSubmissionState(result.status || 'PROVISIONING_FAILED_TERMINAL');
+        setError(result.error || (language === 'tr' ? 'Kayıt işlemi başarısız oldu.' : 'Registration failed.'));
       }
     } catch (err: any) {
-      setError(err.message || 'An error occurred.');
+      setSubmissionState('PROVISIONING_FAILED_RETRYABLE');
+      setError(err.message || (language === 'tr' ? 'Bir hata oluştu.' : 'An error occurred.'));
     } finally {
       setLoading(false);
     }
@@ -170,16 +140,22 @@ export default function RegistrationPage() {
           <p className="text-slate-500 dark:text-slate-400 mb-8 max-w-xl">
              {!launchModeService.isOnlinePaymentEnabled() ? (
                 language === 'tr'
-                  ? 'Kayıt işlemini tamamladıktan sonra hesabınız manuel aktivasyon sürecine alınır. Online ödeme sistemi devreye girene kadar aboneliğiniz LARİ ekibi tarafından yönetilecektir.'
-                  : 'After completing the registration, your account will be manually activated. The LARİ team will manage your subscription until online payments are enabled.'
+                  ? 'Kayıt işlemini tamamladıktan sonra hesabınız kurulum ve doğrulama sürecine alınır.'
+                  : 'After completing registration, your account enters onboarding setup and verification.'
               ) : (
                 language === 'tr'
-                  ? '14 günlük ücretsiz denemeyi başlatmak için kartınızı güvenli ödeme sayfasında doğrulamanız gerekir. LARİ kart bilgilerinizi doğrudan almaz. 14 gün içinde iptal ederseniz ücret ödemezsiniz; iptal etmezseniz seçtiğiniz plan deneme sonunda otomatik olarak başlar.'
-                  : 'To start your 14-day free trial, you must verify your card on the secure payment page. LARİ does not collect your card details directly. If you cancel within 14 days, you will not be charged; if you do not cancel, your selected plan will automatically start at the end of the trial.'
+                  ? 'Ücretsiz denemenizi başlatmak için kaydınızı oluşturun.'
+                  : 'Complete your registration to start your trial.'
               )}
           </p>
 
-          {error && (
+          {submissionState === 'EMAIL_CONFIRMATION_REQUIRED' && (
+            <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 rounded-xl text-sm border border-amber-200 dark:border-amber-800">
+              ✉️ {error || (language === 'tr' ? 'Lütfen e-posta kutunuzu kontrol ederek hesabınızı doğrulayın.' : 'Please check your email inbox to verify your account.')}
+            </div>
+          )}
+
+          {error && submissionState !== 'EMAIL_CONFIRMATION_REQUIRED' && (
             <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl text-sm border border-red-100 dark:border-red-800">
               {error}
             </div>
@@ -193,27 +169,27 @@ export default function RegistrationPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                  <div>
                    <label className="block text-sm font-medium mb-1 dark:text-slate-300">İsim *</label>
-                   <input required type="text" name="ownerName" value={formData.ownerName} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100" />
+                   <input required type="text" name="ownerName" value={formData.ownerName} onChange={handleChange} disabled={loading} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100 disabled:opacity-50" />
                  </div>
                  <div>
                    <label className="block text-sm font-medium mb-1 dark:text-slate-300">Soyisim *</label>
-                   <input required type="text" name="ownerSurname" value={formData.ownerSurname} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100" />
+                   <input required type="text" name="ownerSurname" value={formData.ownerSurname} onChange={handleChange} disabled={loading} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100 disabled:opacity-50" />
                  </div>
                  <div>
                    <label className="block text-sm font-medium mb-1 dark:text-slate-300">E-posta adresi *</label>
-                   <input required type="email" name="ownerEmail" value={formData.ownerEmail} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100" />
+                   <input required type="email" name="ownerEmail" value={formData.ownerEmail} onChange={handleChange} disabled={loading} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100 disabled:opacity-50" />
                  </div>
                  <div>
                    <label className="block text-sm font-medium mb-1 dark:text-slate-300">Telefon *</label>
-                   <input required type="tel" name="ownerPhone" value={formData.ownerPhone} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100" />
+                   <input required type="tel" name="ownerPhone" value={formData.ownerPhone} onChange={handleChange} disabled={loading} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100 disabled:opacity-50" />
                  </div>
                  <div>
                    <label className="block text-sm font-medium mb-1 dark:text-slate-300">Şifre *</label>
-                   <input required type="password" name="password" value={formData.password} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100" />
+                   <input required type="password" name="password" value={formData.password} onChange={handleChange} disabled={loading} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100 disabled:opacity-50" />
                  </div>
                  <div>
                    <label className="block text-sm font-medium mb-1 dark:text-slate-300">Şifre Tekrar *</label>
-                   <input required type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100" />
+                   <input required type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} disabled={loading} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100 disabled:opacity-50" />
                  </div>
               </div>
             </div>
@@ -225,19 +201,19 @@ export default function RegistrationPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                  <div className="sm:col-span-2">
                    <label className="block text-sm font-medium mb-1 dark:text-slate-300">Resmi İşletme Adı (Fatura İçin) *</label>
-                   <input required type="text" name="businessName" value={formData.businessName} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100" />
+                   <input required type="text" name="businessName" value={formData.businessName} onChange={handleChange} disabled={loading} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100 disabled:opacity-50" />
                  </div>
                  <div>
                    <label className="block text-sm font-medium mb-1 dark:text-slate-300">Halka Açık Görünüm Adı *</label>
-                   <input required type="text" name="businessDisplayName" value={formData.businessDisplayName} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100" />
+                   <input required type="text" name="businessDisplayName" value={formData.businessDisplayName} onChange={handleChange} disabled={loading} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100 disabled:opacity-50" />
                  </div>
                  <div>
                    <label className="block text-sm font-medium mb-1 dark:text-slate-300">İlçe / İl *</label>
-                   <input required type="text" name="city" value={formData.city} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100" />
+                   <input required type="text" name="city" value={formData.city} onChange={handleChange} disabled={loading} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100 disabled:opacity-50" />
                  </div>
                  <div>
                    <label className="block text-sm font-medium mb-1 dark:text-slate-300">Kategori</label>
-                   <select name="businessCategory" value={formData.businessCategory} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100">
+                   <select name="businessCategory" value={formData.businessCategory} onChange={handleChange} disabled={loading} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100 disabled:opacity-50">
                      <option value="Hair Salon">Kuaför / Saç Tasarım</option>
                      <option value="Beauty Center">Güzellik Merkezi</option>
                      <option value="Barbershop">Berber</option>
@@ -247,14 +223,14 @@ export default function RegistrationPage() {
                  </div>
                  <div>
                    <label className="block text-sm font-medium mb-1 dark:text-slate-300">Instagram Handle (Opsiyonel)</label>
-                   <input type="text" name="instagramHandle" placeholder="@kullanici_adi" value={formData.instagramHandle} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100" />
+                   <input type="text" name="instagramHandle" placeholder="@kullanici_adi" value={formData.instagramHandle} onChange={handleChange} disabled={loading} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 dark:text-slate-100 disabled:opacity-50" />
                  </div>
               </div>
             </div>
 
             <div className="space-y-4">
               <label className="flex items-start gap-3 cursor-pointer p-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-700/50">
-                <input required type="checkbox" name="acceptTerms" checked={formData.acceptTerms} onChange={handleChange} className="mt-1 w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                <input required type="checkbox" name="acceptTerms" checked={formData.acceptTerms} onChange={handleChange} disabled={loading} className="mt-1 w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50" />
                 <span className="text-sm text-slate-600 dark:text-slate-400">
                   {language === 'tr' ? (
                      <>
@@ -267,12 +243,8 @@ export default function RegistrationPage() {
 
             <button disabled={loading} type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-500/30 transition transform hover:-translate-y-0.5 disabled:opacity-70 disabled:hover:translate-y-0 text-lg">
                {loading ? 'İşleniyor...' : (
-               !launchModeService.isOnlinePaymentEnabled() ? (
-                 language === 'tr' ? 'Hemen Kaydol ve Başla' : 'Register and Start Now'
-               ) : (
-                 language === 'tr' ? 'Kartla 14 Gün Ücretsiz Başlat' : 'Start 14-Day Free Trial with Card'
-               )
-             )}
+                language === 'tr' ? 'İşletmeyi Oluştur ve Başla' : 'Create Business and Start'
+              )}
             </button>
             <p className="text-xs text-center text-slate-500 mt-4">
               Zaten hesabınız var mı? <Link to="/login" className="text-blue-600 font-medium hover:underline">Giriş Yap</Link>
@@ -300,8 +272,8 @@ export default function RegistrationPage() {
               </ul>
 
               <div className="bg-white/5 rounded-xl p-4 mb-4">
-                 <p className="text-sm text-slate-300 font-medium mb-1">✅ 14 Gün Ücretsiz Deneme</p>
-                 <p className="text-xs text-slate-400">Ücretsiz deneme için kart doğrulaması gerekir. 14 gün boyunca ücret alınmaz ve istediğiniz zaman iptal edebilirsiniz.</p>
+                 <p className="text-sm text-slate-300 font-medium mb-1">✅ Kurulum ve Onboarding Süreci</p>
+                 <p className="text-xs text-slate-400">Kayıt sonrası işletmeniz taslak modunda açılır. Kurulum adımlarını tamamladıktan sonra yayına alınır.</p>
               </div>
 
               <div className="text-center">
@@ -312,12 +284,6 @@ export default function RegistrationPage() {
            </div>
         </div>
       </div>
-      <CheckoutPreviewModal  
-         isOpen={showCheckoutPreview} 
-         onClose={() => setShowCheckoutPreview(false)}
-         onConfirm={handleCheckoutHandoff}
-         plan={plan} 
-      />
     </div>
   );
 }

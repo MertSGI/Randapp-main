@@ -1,19 +1,29 @@
 # P2A Commercial Core Foundation Ledger
 
 **Base Pilot SHA**: `134c8716c2511c909cd400aee0496ebd70f63bf6`  
-**Starting SHA**: `d57c711ce35394ec31146f4df20b592a6c5e801c`  
-**Current Stage**: `P2A.0-R3e — Exact Fresh-Migration Failure Diagnosis`  
+**Foundation Closed SHA**: `c8f4b984581df5a9031a42f0851de6b44edf7828` (CI `31670377898` SUCCESS)  
+**Current Stage**: `P2A.1 — Isolated Real /register + Onboarding Frontend Integration`  
 
 ---
 
-## Migration Failure Diagnosis & Pre-Bootstrap Proof
+## P2A.0 Provisioning Foundation Closure
+- **State**: `CLOSED / GO`
+- **Validated Artifacts**:
+  - Atomic authenticated tenant provisioning (`public.provision_tenant_for_authenticated_owner`)
+  - Owner-scoped idempotency and multi-session concurrency safety (CONC-01, CONC-02)
+  - Canonical plan/version selection (`baslangic`, `premium`)
+  - `pending_onboarding` entitlement default-deny & draft profile RLS privacy
+  - Atomic rollback safety & operator publish plan/version preservation
+  - Zero payment/provider artifact delta
 
-### 1. Pre-Bootstrap Inspection Evidence
-- **Raw Container Audit**: Verified that raw container `supabase/postgres:15.1.0.147` lacks `anon`, `authenticated`, `service_role`, `auth.schema`, and `auth.uid()`.
-- **Test Compatibility Bootstrap**: Explicitly initialized via `supabase/tests/fixtures/p2a_managed_runtime_bootstrap.sql`.
+---
 
-### 2. Failure Diagnostic Indexing Added
-- Added step-level index logging (`APPLYING [0] 001_initial_schema.sql`, `APPLYING [1] 002_subscription_alignment.sql`, ...) and container log dump on failure in `.github/workflows/lari-p2a-local-db-qa.yml` to isolate the exact failing migration file.
+## P2A.1 /register Frontend Integration Architecture
+- **Server Authority**: `/register` flow invokes `public.provision_tenant_for_authenticated_owner` RPC as sole authority for tenant creation. No client-side tenant UUID generation or local subscription writing in Supabase mode.
+- **Client Idempotency Key**: Cryptographically random attempt idempotency key generated per logical registration attempt and persisted in `sessionStorage` for logical retries.
+- **State Machine**: Tracks `AUTH_SIGNUP_PENDING`, `EMAIL_CONFIRMATION_REQUIRED`, `AUTHENTICATED_READY_FOR_PROVISIONING`, `PROVISIONING_IN_PROGRESS`, `PROVISIONED`, `PROVISIONING_FAILED_RETRYABLE`, `PROVISIONING_FAILED_TERMINAL`, `USER_ALREADY_HAS_TENANT`.
+- **Public Plan Contract**: Public self-service UI exposes assignable public plans (`baslangic`, `premium`) and rejects non-public (`kurumsal`) / legacy (`standart`) plans.
+- **Onboarding Entry & Resumable Handoff**: Successful provisioning stores canonical tenant state (`lari_active_tenant_id`, `lari_active_tenant_slug`, `lari_active_owner_session`) and routes to `/admin?tab=kurulum`. Existing owners landing on `/register` are safely routed to existing tenant onboarding.
 
 ---
 
@@ -25,7 +35,7 @@
 
 ---
 
-## Migrations Created (FILES ONLY - NOT APPLIED)
+## Migrations Created (FILES ONLY - NOT APPLIED TO STAGING)
 1. `supabase/migrations/20260901_p2a_atomic_tenant_provisioning_rpc.sql`
 2. `supabase/migrations/20260902_p2a_publish_commercial_contract_alignment.sql`
 
@@ -33,8 +43,8 @@
 
 ## Deployment & Gate Status
 - **Staging Deployment**: `UNTOUCHED` (`https://lari-staging.vercel.app/`)
-- **Frontend Integration**: `NOT STARTED`
-- **Next Gate**: Historical replay compatibility bridge applied for disposable CI run; awaiting automated CI completion.
+- **Frontend Integration**: `P2A.1 IMPLEMENTED & TESTED`
+- **Next Gate**: P2B Commercial Operator & UI Flow Verification
 
 ---
 

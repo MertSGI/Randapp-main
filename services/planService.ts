@@ -218,6 +218,9 @@ export const planService = {
   getActivePlans(): PricingPlan[] {
     return this.getAllPlans().filter(p => p.isActive !== false);
   },
+  getPublicSelfServicePlans(): PricingPlan[] {
+    return this.getActivePlans().filter(p => !['kurumsal', 'standart'].includes(p.id));
+  },
   getPlan(planId: string): PricingPlan | undefined {
     return this.getStoredPlans()[planId];
   },

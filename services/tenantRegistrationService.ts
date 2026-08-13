@@ -1,9 +1,8 @@
-import { authService } from './authService';
 import { dataProvider } from './dataProvider';
 import { businessProfileService } from './businessProfileService';
-import { tenantService } from './tenantService';
 import { planService } from './planService';
 import { TRIAL_CONFIG } from './trialConfigService';
+import { supabase } from './supabaseClient';
 
 export interface RegistrationData {
   ownerName: string;
@@ -23,22 +22,262 @@ export interface RegistrationData {
   referralCode?: string;
 }
 
+export type RegistrationStatus =
+  | 'AUTH_SIGNUP_PENDING'
+  | 'EMAIL_CONFIRMATION_REQUIRED'
+  | 'AUTHENTICATED_READY_FOR_PROVISIONING'
+  | 'PROVISIONING_IN_PROGRESS'
+  | 'PROVISIONED'
+  | 'PROVISIONING_FAILED_RETRYABLE'
+  | 'PROVISIONING_FAILED_TERMINAL'
+  | 'USER_ALREADY_HAS_TENANT';
+
+export interface RegistrationResult {
+  success: boolean;
+  error?: string;
+  reasonCode?: string;
+  tenantId?: string;
+  slug?: string;
+  role?: string;
+  subscriptionId?: string;
+  planCode?: string;
+  onboardingStatus?: string;
+  status?: RegistrationStatus;
+}
+
+function isSupabaseMode(): boolean {
+  try {
+    const env = (import.meta as any).env || (globalThis as any).import?.meta?.env || {};
+    const mode = (env.VITE_DATA_MODE || '').trim();
+    return mode === 'supabase_staging' || mode === 'supabase_production';
+  } catch (e) {
+    return false;
+  }
+}
+
 export const tenantRegistrationService = {
-  async registerTenant(data: RegistrationData): Promise<{ success: boolean; error?: string; tenantId?: string }> {
+  async registerTenant(data: RegistrationData): Promise<RegistrationResult> {
+    // Plan contract validation for self-service registration
+    const publicPlans = planService.getPublicSelfServicePlans().map(p => p.id);
+    if (!publicPlans.includes(data.planId)) {
+      return {
+        success: false,
+        status: 'PROVISIONING_FAILED_TERMINAL',
+        reasonCode: 'PLAN_NOT_ASSIGNABLE',
+        error: 'Seçilen paket self-servis kayıtlara açık değil.'
+      };
+    }
+
+    if (isSupabaseMode()) {
+      return this.registerTenantSupabase(data);
+    } else {
+      return this.registerTenantMock(data);
+    }
+  },
+
+  async registerTenantSupabase(data: RegistrationData): Promise<RegistrationResult> {
     try {
-      // 1. Create unique tenantId
-      const tenantId = data.businessName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.floor(Math.random() * 1000);
+      // 1. Check active session or perform sign up
+      let session = (await supabase.auth.getSession()).data.session;
       
-      // 2. Initialize a local tenant profile (or via Supabase if active)
-      // Since we don't have full database setup guaranteed, store metadata securely in data provider
+      if (!session) {
+        const { data: authData, error: signUpError } = await supabase.auth.signUp({
+          email: data.ownerEmail,
+          password: data.password,
+          options: {
+            data: {
+              name: `${data.ownerName} ${data.ownerSurname}`,
+              phone: data.ownerPhone,
+            }
+          }
+        });
+
+        if (signUpError) {
+          // If user already exists in auth, attempt sign-in with provided password
+          if (signUpError.message?.toLowerCase().includes('already registered') || signUpError.message?.toLowerCase().includes('already exists')) {
+            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+              email: data.ownerEmail,
+              password: data.password,
+            });
+
+            if (signInError || !signInData.session) {
+              return {
+                success: false,
+                status: 'PROVISIONING_FAILED_TERMINAL',
+                reasonCode: 'AUTH_FAILED',
+                error: 'Bu e-posta adresi zaten kayıtlı. Lütfen giriş yapın veya şifrenizi kontrol edin.'
+              };
+            }
+            session = signInData.session;
+          } else {
+            return {
+              success: false,
+              status: 'PROVISIONING_FAILED_TERMINAL',
+              reasonCode: 'AUTH_FAILED',
+              error: signUpError.message || 'Kullanıcı kaydı oluşturulamadı.'
+            };
+          }
+        } else {
+          session = authData.session;
+          // If signup created user but no active session returned (e.g. email confirmation required)
+          if (!session && authData.user) {
+            return {
+              success: false,
+              status: 'EMAIL_CONFIRMATION_REQUIRED',
+              reasonCode: 'EMAIL_CONFIRMATION_REQUIRED',
+              error: 'Hesabınız oluşturuldu. Lütfen e-posta adresinize gönderilen doğrulama bağlantısına tıklayın.'
+            };
+          }
+        }
+      }
+
+      if (!session || !session.user) {
+        return {
+          success: false,
+          status: 'PROVISIONING_FAILED_RETRYABLE',
+          reasonCode: 'SESSION_MISSING',
+          error: 'Oturum açılamadı. Lütfen tekrar deneyin.'
+        };
+      }
+
+      // 2. Client-side registration attempt idempotency key persistence
+      let idempotencyKey = '';
+      try {
+        idempotencyKey = sessionStorage.getItem(`lari_idemp_${data.ownerEmail}`) || '';
+      } catch (e) {}
+
+      if (!idempotencyKey) {
+        idempotencyKey = 'idemp-' + (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2));
+        try {
+          sessionStorage.setItem(`lari_idemp_${data.ownerEmail}`, idempotencyKey);
+        } catch (e) {}
+      }
+
+      // 3. Call Server-Authoritative Provisioning RPC
+      const { data: rpcRes, error: rpcError } = await supabase.rpc('provision_tenant_for_authenticated_owner', {
+        p_business_name: data.businessName,
+        p_business_display_name: data.businessDisplayName || data.businessName,
+        p_category: data.businessCategory || 'Hair Salon',
+        p_city: data.city || 'Istanbul',
+        p_phone: data.ownerPhone || '',
+        p_requested_plan_code: data.planId,
+        p_idempotency_key: idempotencyKey
+      });
+
+      if (rpcError) {
+        const errMsg = rpcError.message || '';
+
+        if (errMsg.includes('USER_ALREADY_HAS_TENANT')) {
+          // Resolve existing owner state safely
+          const { data: profile } = await supabase.from('users_profile').select('tenant_id, role').eq('id', session.user.id).single();
+          const existingTenantId = profile?.tenant_id;
+          if (existingTenantId) {
+            const { data: tenantRow } = await supabase.from('tenants').select('slug, status, onboarding_status').eq('id', existingTenantId).single();
+            localStorage.setItem('lari_active_tenant_id', existingTenantId);
+            if (tenantRow?.slug) localStorage.setItem('lari_active_tenant_slug', tenantRow.slug);
+            return {
+              success: true,
+              status: 'USER_ALREADY_HAS_TENANT',
+              reasonCode: 'USER_ALREADY_HAS_TENANT',
+              tenantId: existingTenantId,
+              slug: tenantRow?.slug,
+              role: profile?.role || 'tenant_owner',
+              onboardingStatus: tenantRow?.onboarding_status || 'onboarding_required'
+            };
+          }
+          return {
+            success: false,
+            status: 'PROVISIONING_FAILED_TERMINAL',
+            reasonCode: 'USER_ALREADY_HAS_TENANT',
+            error: 'Bu kullanıcı hesabına ait aktif bir mağaza zaten mevcut.'
+          };
+        }
+
+        if (errMsg.includes('PROFILE_NOT_PROVISIONABLE')) {
+          return {
+            success: false,
+            status: 'PROVISIONING_FAILED_TERMINAL',
+            reasonCode: 'PROFILE_NOT_PROVISIONABLE',
+            error: 'Sistem yöneticisi veya personel hesapları mağaza kaydı yapamaz.'
+          };
+        }
+
+        if (errMsg.includes('PLAN_NOT_ASSIGNABLE')) {
+          return {
+            success: false,
+            status: 'PROVISIONING_FAILED_TERMINAL',
+            reasonCode: 'PLAN_NOT_ASSIGNABLE',
+            error: 'Seçilen paket self-servis kayıtlara açık değil.'
+          };
+        }
+
+        if (errMsg.includes('MISSING_IDEMPOTENCY_KEY')) {
+          return {
+            success: false,
+            status: 'PROVISIONING_FAILED_RETRYABLE',
+            reasonCode: 'MISSING_IDEMPOTENCY_KEY',
+            error: 'İşlem anahtarı eksik. Lütfen tekrar deneyin.'
+          };
+        }
+
+        return {
+          success: false,
+          status: 'PROVISIONING_FAILED_RETRYABLE',
+          reasonCode: 'SERVER_ERROR',
+          error: 'Mağaza oluşturulurken bir hata meydana geldi. Lütfen tekrar deneyin.'
+        };
+      }
+
+      // Clear attempt idempotency key on full success
+      try {
+        sessionStorage.removeItem(`lari_idemp_${data.ownerEmail}`);
+      } catch (e) {}
+
+      // Store canonical authenticated state from server RPC truth
+      const tenantId = rpcRes.tenant_id;
+      const slug = rpcRes.slug;
+      const role = rpcRes.role;
+
+      localStorage.setItem('lari_active_tenant_id', tenantId);
+      localStorage.setItem('lari_active_tenant_slug', slug);
+      localStorage.setItem('lari_active_owner_session', JSON.stringify({
+        id: session.user.id,
+        tenant_id: tenantId,
+        role: role,
+        email: data.ownerEmail,
+        name: `${data.ownerName} ${data.ownerSurname}`
+      }));
+
+      return {
+        success: true,
+        status: 'PROVISIONED',
+        tenantId,
+        slug,
+        role,
+        subscriptionId: rpcRes.subscription_id,
+        planCode: rpcRes.plan_code,
+        onboardingStatus: rpcRes.onboarding_status
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        status: 'PROVISIONING_FAILED_RETRYABLE',
+        reasonCode: 'UNKNOWN_ERROR',
+        error: err.message || 'Üyelik oluşturulurken beklenmeyen bir hata oluştu.'
+      };
+    }
+  },
+
+  async registerTenantMock(data: RegistrationData): Promise<RegistrationResult> {
+    try {
+      const tenantId = data.businessName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.floor(Math.random() * 1000);
       await dataProvider.set(`lari:${tenantId}:is_seeded`, 'false');
       
       if (data.referralCode) {
         const { referralProgramService } = await import('./referralProgramService');
         referralProgramService.markReferralRegistered(data.referralCode, tenantId, data.ownerEmail);
       }
-      
-      // 3. Save basic business form details for setup phase
+
       const businessDetails = {
         id: `biz-${tenantId}`,
         tenant_id: tenantId,
@@ -60,7 +299,6 @@ export const tenantRegistrationService = {
       });
       await businessProfileService.updateBusinessProfile(tenantId, businessDetails);
 
-      // 4. Set their mock subscription / selected plan preserving state
       const plans = planService.getActivePlans();
       const plan = plans.find(p => p.id === data.planId) || plans[0];
       
@@ -72,8 +310,6 @@ export const tenantRegistrationService = {
         cancelAtPeriodEnd: false
       });
 
-      // 5. Mock Auth / Provisioning status
-      // We store the owner auth securely
       const authPayload = {
         id: `usr-${tenantId}`,
         tenant_id: tenantId,
@@ -83,12 +319,10 @@ export const tenantRegistrationService = {
         onboarding_completed: false
       };
       
-      // Save for login simulation (mock store)
       localStorage.setItem('lari_active_owner_session', JSON.stringify(authPayload));
       localStorage.setItem('lari_active_tenant_id', tenantId);
       localStorage.setItem('lari_selected_plan', data.planId);
       localStorage.setItem('lari_registration_context', JSON.stringify(data));
-      // Fallback
       localStorage.setItem('lari_mock_user', JSON.stringify(authPayload));
       
       const { publicLinkService } = await import('./publicLinkService');
@@ -112,10 +346,17 @@ export const tenantRegistrationService = {
       await dataProvider.set(`lari:${tenantId}:provisioning_status`, 'setup_in_progress');
       await dataProvider.set(`lari:${tenantId}:go_live_status`, 'paused');
 
-      return { success: true, tenantId };
+      return {
+        success: true,
+        status: 'PROVISIONED',
+        tenantId,
+        slug: initialSlug,
+        role: 'tenant_owner',
+        planCode: data.planId,
+        onboardingStatus: 'onboarding_required'
+      };
     } catch (err: any) {
-      console.error("Registration error:", err);
-      return { success: false, error: err.message || 'Üyelik oluşturulurken bir hata oluştu.' };
+      return { success: false, status: 'PROVISIONING_FAILED_TERMINAL', error: err.message || 'Üyelik oluşturulurken bir hata oluştu.' };
     }
   }
 };
