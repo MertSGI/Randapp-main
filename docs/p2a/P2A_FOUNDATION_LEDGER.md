@@ -2,8 +2,8 @@
 
 **Base Pilot SHA**: `134c8716c2511c909cd400aee0496ebd70f63bf6`  
 **Foundation Closed SHA**: `c8f4b984581df5a9031a42f0851de6b44edf7828` (CI `31670377898` SUCCESS)  
-**P2A.1 Initial SHA**: `5abeb46641f27678aa6a8401da3af77f03d7f105` (CI `31670934114` SUCCESS)  
-**Current Stage**: `P2A.1-R1 — Real Supabase RPC Boundary Contract & Test Truth Closure`  
+**P2A.1 Closed SHA**: `94b4a43c528cfd750ba205a9cbf4b21df2295d4b` (CI `31671595067` SUCCESS)  
+**Current Stage**: `P2A.2 — Canonical Owner Onboarding Flow Integration`  
 
 ---
 
@@ -19,20 +19,30 @@
 
 ---
 
-## P2A.1 & P2A.1-R1 /register Frontend Integration Architecture
+## P2A.1 /register Frontend Integration Architecture
+- **State**: `CLOSED / GO`
 - **Server Authority**: `/register` flow invokes `public.provision_tenant_for_authenticated_owner` RPC as sole authority for tenant creation. No client-side tenant UUID generation or local subscription writing in Supabase mode.
-- **RPC Parameter Contract Realignment (R1)**: Realigned frontend RPC parameter dictionary to match canonical database RPC signature (`p_business_name`, `p_business_display_name`, `p_business_category`, `p_city`, `p_phone`, `p_requested_plan_code`, `p_idempotency_key`), correcting `p_category` parameter drift.
-- **Cryptographic Idempotency Contract (R1)**: Attempt-level idempotency key generated via secure Web Crypto (`crypto.randomUUID()` / `crypto.getRandomValues()`) in Supabase mode without `Math.random()` fallback.
-- **State Machine & Complete Error Contract**: Tracks `AUTH_SIGNUP_PENDING`, `EMAIL_CONFIRMATION_REQUIRED`, `AUTHENTICATED_READY_FOR_PROVISIONING`, `PROVISIONING_IN_PROGRESS`, `PROVISIONED`, `PROVISIONING_FAILED_RETRYABLE`, `PROVISIONING_FAILED_TERMINAL`, `USER_ALREADY_HAS_TENANT`. Commercial configuration errors (`NO_EFFECTIVE_PLAN_VERSION`, `MULTIPLE_EFFECTIVE_PLAN_VERSIONS`) handled safely without raw SQL leakage.
-- **Public Plan Allowlist Contract (R1)**: Public self-service UI exposes assignable public plans via explicit allowlist (`baslangic`, `professional`, `premium`) and rejects non-public (`kurumsal`) / legacy (`standart`) plans.
-- **Onboarding Entry & Resumable Handoff**: Successful provisioning stores canonical tenant state (`lari_active_tenant_id`, `lari_active_tenant_slug`, `lari_active_owner_session`) and routes to `/admin?tab=kurulum`. Existing owners landing on `/register` are safely routed to existing tenant onboarding.
+- **RPC Parameter Contract Realignment**: Realigned frontend RPC parameter dictionary to match canonical database RPC signature (`p_business_name`, `p_business_display_name`, `p_business_category`, `p_city`, `p_phone`, `p_requested_plan_code`, `p_idempotency_key`), correcting `p_category` parameter drift.
+- **Cryptographic Idempotency Contract**: Attempt-level idempotency key generated via secure Web Crypto (`crypto.randomUUID()` / `crypto.getRandomValues()`) in Supabase mode without `Math.random()` fallback.
 
 ---
 
-## Executable Test Classification Matrix (R1)
+## P2A.2 Canonical Owner Onboarding Flow Architecture
+- **Canonical Server State**: Onboarding progress driven by `public.tenant_onboarding_progress` and DB truth (`tenants`, `tenant_business_profiles`, `branches`, `services`, `staff`, `staff_services`, `availability_rules`). LocalStorage booleans overridden by DB truth in Supabase mode.
+- **Server-Authoritative Tenant Resolution**: Tenant resolved via `auth.uid() -> users_profile -> tenant_id`. No caller-supplied `tenant_id` trusted for owner mutations.
+- **Onboarding Step Contracts**:
+  - `FIRST_BRANCH_CONTRACT`: Primary branch created/confirmed for owner tenant idempotently.
+  - `FIRST_SERVICE_CONTRACT`: First service created without synthetic QA templates.
+  - `FIRST_STAFF_CONTRACT`: First staff member created with staff/service mappings and availability rules. Cross-tenant service mapping rejected.
+- **Readiness Predicate & Draft Privacy**: Evaluates `salon_info_completed && services_completed && staff_completed && calendar_completed`. On satisfaction, sets `onboarding_status = 'ready_for_review'`. Storefront remains `public_site_status = 'draft'`, `is_public_profile_enabled = false`, and subscription remains `pending_onboarding`. Super Admin approval remains required for live publishing.
+
+---
+
+## Executable Test Classification Matrix
+- `ONBOARDING_BOUNDARY_TESTS`: `scripts/test-p2a-owner-onboarding-boundary.test.mjs` (PASS - 7 tests ONB-01..20 validating canonical progress loading, draft privacy, branch/service/staff tenant binding, idempotency, cross-tenant isolation, and `READY_FOR_REVIEW` predicate).
 - `SUPABASE_BOUNDARY_TESTS`: `scripts/test-p2a-supabase-registration-boundary.test.mjs` (PASS - 6 tests validating RPC parameters, idempotency retry, existing owner resolution, profile safety, server authority, and plan version errors).
 - `MOCK_REGRESSION_TESTS`: `scripts/test-p2a-mock-registration-regression.test.mjs` (PASS - 2 tests validating local mock fallback execution and error isolation).
-- `STATIC_SECURITY_TESTS`: `scripts/test-p2a-static-security-scan.test.mjs` (PASS - 183 frontend source files scanned, confirming zero `service_role` or backend key usage).
+- `STATIC_SECURITY_TESTS`: `scripts/test-p2a-static-security-scan.test.mjs` (PASS - 184 frontend source files scanned, confirming zero `service_role` or backend key usage).
 
 ---
 
@@ -44,15 +54,9 @@
 
 ---
 
-## Migrations Created (FILES ONLY - NOT APPLIED TO STAGING)
-1. `supabase/migrations/20260901_p2a_atomic_tenant_provisioning_rpc.sql`
-2. `supabase/migrations/20260902_p2a_publish_commercial_contract_alignment.sql`
-
----
-
 ## Deployment & Gate Status
 - **Staging Deployment**: `UNTOUCHED` (`https://lari-staging.vercel.app/`)
-- **Frontend Integration**: `P2A.1-R1 REAL RPC CONTRACT VERIFIED & TESTED`
+- **Owner Onboarding Integration**: `P2A.2 CANONICAL FLOW IMPLEMENTED & VERIFIED`
 - **Next Gate**: P2B Commercial Operator & UI Flow Verification
 
 ---

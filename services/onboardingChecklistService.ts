@@ -58,17 +58,17 @@ export const onboardingChecklistService = {
     const staff = await getStaffList(tenantId, { activeOnly: true });
     const sub = await subscriptionService.getCurrentSubscription(tenantId);
 
-    const isPendingCheckout = sub?.status === 'pending_checkout' || !sub;
-    const isTrialingOrActive = sub?.status === 'trialing' || sub?.status === 'active';
+    const isPendingCheckout = sub?.status === 'pending_checkout';
+    const isTrialingOrActive = sub?.status === 'trialing' || sub?.status === 'active' || sub?.status === 'pending_onboarding';
 
     // 3. Define Criteria checks
-    const hasBusinessProfile = !!tenant?.name && !!profile?.business_category && !!profile?.city && !!profile?.district;
+    const hasBusinessProfile = !!tenant?.name && !!profile?.business_category && !!profile?.city;
     const hasContactLocation = !!(profile?.phone || profile?.whatsapp_number || tenant?.branding?.whatsappNumber) && !!(profile?.address || tenant?.branding?.address);
     const hasServices = services.length > 0;
     const hasStaff = staff.length > 0;
     
     // Check if availability configured (either default hour has been agreed or staff exists and is active)
-    const isAvailabilityConfigured = localStorage.getItem(`lari_availability_${tenantId}_configured`) === 'true' || hasStaff;
+    const isAvailabilityConfigured = hasStaff;
 
     const hasLogo = !!(tenant?.branding?.logoUrl || profile?.logo_url);
     const hasGalleryOrCover = !!(profile?.cover_image_url || (profile?.cover_images && profile.cover_images.length > 0) || (profile?.gallery_images && profile.gallery_images.length > 0));
