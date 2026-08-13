@@ -76,6 +76,10 @@ BEGIN
 END;
 $$;
 
+-- Unique index for tenant_business_profiles tenant_id
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_business_profiles_tenant_id 
+ON public.tenant_business_profiles (tenant_id);
+
 -- 1. RPC: Save Owner Business Profile
 CREATE OR REPLACE FUNCTION public.save_owner_business_profile(
     p_business_name TEXT DEFAULT NULL,
@@ -120,29 +124,33 @@ BEGIN
     v_final_addr := COALESCE(trim(p_address), v_existing_profile.address);
     v_final_phone := COALESCE(trim(p_phone), v_existing_profile.phone);
 
-    INSERT INTO public.tenant_business_profiles (
-        tenant_id, business_category, city, address, phone, short_description, about_text, is_public_profile_enabled, updated_at
-    )
-    VALUES (
-        v_tenant_id,
-        COALESCE(v_final_cat, 'Güzellik Salonu'),
-        COALESCE(v_final_city, 'İstanbul'),
-        COALESCE(v_final_addr, 'Merkez Adres'),
-        COALESCE(v_final_phone, ''),
-        trim(p_short_description),
-        trim(p_about_text),
-        false, -- Draft privacy strictly preserved!
-        NOW()
-    )
-    ON CONFLICT (tenant_id) DO UPDATE SET
-        business_category = COALESCE(EXCLUDED.business_category, tenant_business_profiles.business_category),
-        city = COALESCE(EXCLUDED.city, tenant_business_profiles.city),
-        address = COALESCE(EXCLUDED.address, tenant_business_profiles.address),
-        phone = COALESCE(EXCLUDED.phone, tenant_business_profiles.phone),
-        short_description = COALESCE(EXCLUDED.short_description, tenant_business_profiles.short_description),
-        about_text = COALESCE(EXCLUDED.about_text, tenant_business_profiles.about_text),
-        is_public_profile_enabled = false,
-        updated_at = NOW();
+    IF v_existing_profile.id IS NOT NULL THEN
+        UPDATE public.tenant_business_profiles
+        SET business_category = COALESCE(trim(p_business_category), business_category),
+            city = COALESCE(trim(p_city), city),
+            address = COALESCE(trim(p_address), address),
+            phone = COALESCE(trim(p_phone), phone),
+            short_description = COALESCE(trim(p_short_description), short_description),
+            about_text = COALESCE(trim(p_about_text), about_text),
+            is_public_profile_enabled = false,
+            updated_at = NOW()
+        WHERE tenant_id = v_tenant_id;
+    ELSE
+        INSERT INTO public.tenant_business_profiles (
+            tenant_id, business_category, city, address, phone, short_description, about_text, is_public_profile_enabled, updated_at
+        )
+        VALUES (
+            v_tenant_id,
+            COALESCE(v_final_cat, 'Güzellik Salonu'),
+            COALESCE(v_final_city, 'İstanbul'),
+            COALESCE(v_final_addr, 'Merkez Adres'),
+            COALESCE(v_final_phone, ''),
+            trim(p_short_description),
+            trim(p_about_text),
+            false,
+            NOW()
+        );
+    END IF;
 
     IF p_business_name IS NOT NULL AND trim(p_business_name) != '' THEN
         UPDATE public.tenants
