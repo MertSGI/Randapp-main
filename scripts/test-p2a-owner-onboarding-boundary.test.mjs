@@ -1,5 +1,15 @@
 // test-p2a-owner-onboarding-boundary.test.mjs
-// P2A.2-R1 — Canonical Owner Onboarding Flow Boundary Integration Test Suite (ONB-01 .. ONB-20)
+// P2A.2-R1 — Server-Authoritative Owner Onboarding Boundary Matrix & Test Truth Suite
+
+if (typeof globalThis.WebSocket === 'undefined') {
+  globalThis.WebSocket = class MockWebSocket {
+    constructor() {}
+    addEventListener() {}
+    removeEventListener() {}
+    send() {}
+    close() {}
+  };
+}
 
 import assert from 'node:assert';
 import { tenantOnboardingFlowService } from '../services/tenantOnboardingFlowService.ts';

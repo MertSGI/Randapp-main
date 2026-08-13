@@ -1,6 +1,16 @@
 // test-p2a-supabase-registration-boundary.test.mjs
 // P2A.1-R1 — Real Supabase RPC Boundary Contract & Integration Test Suite
 
+if (typeof globalThis.WebSocket === 'undefined') {
+  globalThis.WebSocket = class MockWebSocket {
+    constructor() {}
+    addEventListener() {}
+    removeEventListener() {}
+    send() {}
+    close() {}
+  };
+}
+
 import assert from 'node:assert';
 import { tenantRegistrationService } from '../services/tenantRegistrationService.ts';
 import { supabase } from '../services/supabaseClient.ts';
