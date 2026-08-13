@@ -5,6 +5,16 @@ process.env.VITE_DATA_MODE = 'supabase_staging';
 process.env.VITE_SUPABASE_URL = 'https://mock.supabase.co';
 process.env.VITE_SUPABASE_ANON_KEY = 'mock-anon-key';
 
+globalThis.import = {
+  meta: {
+    env: {
+      VITE_DATA_MODE: 'supabase_staging',
+      VITE_SUPABASE_URL: 'https://mock.supabase.co',
+      VITE_SUPABASE_ANON_KEY: 'mock-anon-key'
+    }
+  }
+};
+
 if (typeof globalThis.WebSocket === 'undefined') {
   globalThis.WebSocket = class MockWebSocket {
     constructor() {}

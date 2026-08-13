@@ -47,7 +47,7 @@ export interface RegistrationResult {
 
 function isSupabaseMode(): boolean {
   try {
-    const env = (import.meta as any).env || (globalThis as any).import?.meta?.env || {};
+    const env = (import.meta as any).env || (globalThis as any).import?.meta?.env || (globalThis as any).process?.env || {};
     const mode = (env.VITE_DATA_MODE || '').trim();
     return mode === 'supabase_staging' || mode === 'supabase_production';
   } catch (e) {
