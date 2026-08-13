@@ -298,6 +298,10 @@ BEGIN
         IF v_count != 1 THEN
             RAISE EXCEPTION 'DB-ONB-07 FAILED: Expected exactly 1 primary branch after concurrent requests, got %', v_count;
         END IF;
+
+        -- Restore context to Owner A
+        PERFORM set_config('request.jwt.claim.sub', v_owner_a_id::text, true);
+
         RAISE NOTICE '✅ DB-ONB-07 PASSED: Real concurrent first-branch calls leave exactly one primary branch.';
     END;
 
