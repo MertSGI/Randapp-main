@@ -55,11 +55,29 @@ function isSupabaseMode(): boolean {
   }
 }
 
+/**
+  Cryptographically secure idempotency key generator for Supabase provisioning.
+  Fails safely without Math.random fallback in Supabase self-service mode.
+ */
+function generateSecureIdempotencyKey(): string | null {
+  if (typeof crypto !== 'undefined') {
+    if (typeof crypto.randomUUID === 'function') {
+      return 'idemp-' + crypto.randomUUID();
+    }
+    if (typeof crypto.getRandomValues === 'function') {
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+      return 'idemp-' + hex;
+    }
+  }
+  return null;
+}
+
 export const tenantRegistrationService = {
   async registerTenant(data: RegistrationData): Promise<RegistrationResult> {
-    // Plan contract validation for self-service registration
-    const publicPlans = planService.getPublicSelfServicePlans().map(p => p.id);
-    if (!publicPlans.includes(data.planId)) {
+    // Public plan contract validation via explicit allowlist
+    if (!planService.isPublicSelfServicePlan(data.planId)) {
       return {
         success: false,
         status: 'PROVISIONING_FAILED_TERMINAL',
@@ -78,7 +96,7 @@ export const tenantRegistrationService = {
   async registerTenantSupabase(data: RegistrationData): Promise<RegistrationResult> {
     try {
       // 1. Check active session or perform sign up
-      let session = (await supabase.auth.getSession()).data.session;
+      let session = (await supabase.auth.getSession()).data?.session;
       
       if (!session) {
         const { data: authData, error: signUpError } = await supabase.auth.signUp({
@@ -93,7 +111,6 @@ export const tenantRegistrationService = {
         });
 
         if (signUpError) {
-          // If user already exists in auth, attempt sign-in with provided password
           if (signUpError.message?.toLowerCase().includes('already registered') || signUpError.message?.toLowerCase().includes('already exists')) {
             const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
               email: data.ownerEmail,
@@ -119,7 +136,6 @@ export const tenantRegistrationService = {
           }
         } else {
           session = authData.session;
-          // If signup created user but no active session returned (e.g. email confirmation required)
           if (!session && authData.user) {
             return {
               success: false,
@@ -147,17 +163,26 @@ export const tenantRegistrationService = {
       } catch (e) {}
 
       if (!idempotencyKey) {
-        idempotencyKey = 'idemp-' + (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2));
+        const secureKey = generateSecureIdempotencyKey();
+        if (!secureKey) {
+          return {
+            success: false,
+            status: 'PROVISIONING_FAILED_RETRYABLE',
+            reasonCode: 'SECURE_CRYPTO_UNAVAILABLE',
+            error: 'Güvenli tarayıcı ortamı sağlanamadı. Lütfen tarayıcınızı güncelleyin veya tekrar deneyin.'
+          };
+        }
+        idempotencyKey = secureKey;
         try {
           sessionStorage.setItem(`lari_idemp_${data.ownerEmail}`, idempotencyKey);
         } catch (e) {}
       }
 
-      // 3. Call Server-Authoritative Provisioning RPC
+      // 3. Call Server-Authoritative Provisioning RPC (Exact parameter contract matching public.provision_tenant_for_authenticated_owner)
       const { data: rpcRes, error: rpcError } = await supabase.rpc('provision_tenant_for_authenticated_owner', {
         p_business_name: data.businessName,
         p_business_display_name: data.businessDisplayName || data.businessName,
-        p_category: data.businessCategory || 'Hair Salon',
+        p_business_category: data.businessCategory || 'Hair Salon',
         p_city: data.city || 'Istanbul',
         p_phone: data.ownerPhone || '',
         p_requested_plan_code: data.planId,
@@ -168,7 +193,6 @@ export const tenantRegistrationService = {
         const errMsg = rpcError.message || '';
 
         if (errMsg.includes('USER_ALREADY_HAS_TENANT')) {
-          // Resolve existing owner state safely
           const { data: profile } = await supabase.from('users_profile').select('tenant_id, role').eq('id', session.user.id).single();
           const existingTenantId = profile?.tenant_id;
           if (existingTenantId) {
@@ -211,6 +235,24 @@ export const tenantRegistrationService = {
           };
         }
 
+        if (errMsg.includes('NO_EFFECTIVE_PLAN_VERSION')) {
+          return {
+            success: false,
+            status: 'PROVISIONING_FAILED_TERMINAL',
+            reasonCode: 'NO_EFFECTIVE_PLAN_VERSION',
+            error: 'Sistem paket konfigürasyon hatası. Lütfen daha sonra tekrar deneyin veya destek ile iletişime geçin.'
+          };
+        }
+
+        if (errMsg.includes('MULTIPLE_EFFECTIVE_PLAN_VERSIONS')) {
+          return {
+            success: false,
+            status: 'PROVISIONING_FAILED_TERMINAL',
+            reasonCode: 'MULTIPLE_EFFECTIVE_PLAN_VERSIONS',
+            error: 'Sistem paket konfigürasyon hatası. Lütfen daha sonra tekrar deneyin veya destek ile iletişime geçin.'
+          };
+        }
+
         if (errMsg.includes('MISSING_IDEMPOTENCY_KEY')) {
           return {
             success: false,
@@ -233,7 +275,7 @@ export const tenantRegistrationService = {
         sessionStorage.removeItem(`lari_idemp_${data.ownerEmail}`);
       } catch (e) {}
 
-      // Store canonical authenticated state from server RPC truth
+      // Store canonical authenticated state from server RPC truth ONLY
       const tenantId = rpcRes.tenant_id;
       const slug = rpcRes.slug;
       const role = rpcRes.role;

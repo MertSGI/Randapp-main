@@ -2,7 +2,8 @@
 
 **Base Pilot SHA**: `134c8716c2511c909cd400aee0496ebd70f63bf6`  
 **Foundation Closed SHA**: `c8f4b984581df5a9031a42f0851de6b44edf7828` (CI `31670377898` SUCCESS)  
-**Current Stage**: `P2A.1 — Isolated Real /register + Onboarding Frontend Integration`  
+**P2A.1 Initial SHA**: `5abeb46641f27678aa6a8401da3af77f03d7f105` (CI `31670934114` SUCCESS)  
+**Current Stage**: `P2A.1-R1 — Real Supabase RPC Boundary Contract & Test Truth Closure`  
 
 ---
 
@@ -18,12 +19,20 @@
 
 ---
 
-## P2A.1 /register Frontend Integration Architecture
+## P2A.1 & P2A.1-R1 /register Frontend Integration Architecture
 - **Server Authority**: `/register` flow invokes `public.provision_tenant_for_authenticated_owner` RPC as sole authority for tenant creation. No client-side tenant UUID generation or local subscription writing in Supabase mode.
-- **Client Idempotency Key**: Cryptographically random attempt idempotency key generated per logical registration attempt and persisted in `sessionStorage` for logical retries.
-- **State Machine**: Tracks `AUTH_SIGNUP_PENDING`, `EMAIL_CONFIRMATION_REQUIRED`, `AUTHENTICATED_READY_FOR_PROVISIONING`, `PROVISIONING_IN_PROGRESS`, `PROVISIONED`, `PROVISIONING_FAILED_RETRYABLE`, `PROVISIONING_FAILED_TERMINAL`, `USER_ALREADY_HAS_TENANT`.
-- **Public Plan Contract**: Public self-service UI exposes assignable public plans (`baslangic`, `premium`) and rejects non-public (`kurumsal`) / legacy (`standart`) plans.
+- **RPC Parameter Contract Realignment (R1)**: Realigned frontend RPC parameter dictionary to match canonical database RPC signature (`p_business_name`, `p_business_display_name`, `p_business_category`, `p_city`, `p_phone`, `p_requested_plan_code`, `p_idempotency_key`), correcting `p_category` parameter drift.
+- **Cryptographic Idempotency Contract (R1)**: Attempt-level idempotency key generated via secure Web Crypto (`crypto.randomUUID()` / `crypto.getRandomValues()`) in Supabase mode without `Math.random()` fallback.
+- **State Machine & Complete Error Contract**: Tracks `AUTH_SIGNUP_PENDING`, `EMAIL_CONFIRMATION_REQUIRED`, `AUTHENTICATED_READY_FOR_PROVISIONING`, `PROVISIONING_IN_PROGRESS`, `PROVISIONED`, `PROVISIONING_FAILED_RETRYABLE`, `PROVISIONING_FAILED_TERMINAL`, `USER_ALREADY_HAS_TENANT`. Commercial configuration errors (`NO_EFFECTIVE_PLAN_VERSION`, `MULTIPLE_EFFECTIVE_PLAN_VERSIONS`) handled safely without raw SQL leakage.
+- **Public Plan Allowlist Contract (R1)**: Public self-service UI exposes assignable public plans via explicit allowlist (`baslangic`, `professional`, `premium`) and rejects non-public (`kurumsal`) / legacy (`standart`) plans.
 - **Onboarding Entry & Resumable Handoff**: Successful provisioning stores canonical tenant state (`lari_active_tenant_id`, `lari_active_tenant_slug`, `lari_active_owner_session`) and routes to `/admin?tab=kurulum`. Existing owners landing on `/register` are safely routed to existing tenant onboarding.
+
+---
+
+## Executable Test Classification Matrix (R1)
+- `SUPABASE_BOUNDARY_TESTS`: `scripts/test-p2a-supabase-registration-boundary.test.mjs` (PASS - 6 tests validating RPC parameters, idempotency retry, existing owner resolution, profile safety, server authority, and plan version errors).
+- `MOCK_REGRESSION_TESTS`: `scripts/test-p2a-mock-registration-regression.test.mjs` (PASS - 2 tests validating local mock fallback execution and error isolation).
+- `STATIC_SECURITY_TESTS`: `scripts/test-p2a-static-security-scan.test.mjs` (PASS - 183 frontend source files scanned, confirming zero `service_role` or backend key usage).
 
 ---
 
@@ -43,7 +52,7 @@
 
 ## Deployment & Gate Status
 - **Staging Deployment**: `UNTOUCHED` (`https://lari-staging.vercel.app/`)
-- **Frontend Integration**: `P2A.1 IMPLEMENTED & TESTED`
+- **Frontend Integration**: `P2A.1-R1 REAL RPC CONTRACT VERIFIED & TESTED`
 - **Next Gate**: P2B Commercial Operator & UI Flow Verification
 
 ---

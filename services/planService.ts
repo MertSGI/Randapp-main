@@ -199,6 +199,8 @@ export const DEFAULT_PLANS: Record<string, PricingPlan> = {
   }
 };
 
+export const PUBLIC_SELF_SERVICE_PLANS = ['baslangic', 'professional', 'premium'] as const;
+
 export const planService = {
   getStoredPlans(): Record<string, PricingPlan> {
     const raw = localStorage.getItem('lari_plans');
@@ -219,7 +221,10 @@ export const planService = {
     return this.getAllPlans().filter(p => p.isActive !== false);
   },
   getPublicSelfServicePlans(): PricingPlan[] {
-    return this.getActivePlans().filter(p => !['kurumsal', 'standart'].includes(p.id));
+    return this.getActivePlans().filter(p => (PUBLIC_SELF_SERVICE_PLANS as readonly string[]).includes(p.id));
+  },
+  isPublicSelfServicePlan(planId: string): boolean {
+    return (PUBLIC_SELF_SERVICE_PLANS as readonly string[]).includes(planId);
   },
   getPlan(planId: string): PricingPlan | undefined {
     return this.getStoredPlans()[planId];
