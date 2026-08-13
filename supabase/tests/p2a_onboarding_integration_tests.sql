@@ -290,8 +290,8 @@ BEGIN
         BEGIN PERFORM dblink_disconnect('conn1'); EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN PERFORM dblink_disconnect('conn2'); EXCEPTION WHEN OTHERS THEN NULL; END;
 
-        PERFORM dblink_connect('conn1', 'dbname=postgres user=postgres password=postgres host=127.0.0.1 port=5432');
-        PERFORM dblink_connect('conn2', 'dbname=postgres user=postgres password=postgres host=127.0.0.1 port=5432');
+        PERFORM dblink_connect('conn1', 'dbname=postgres user=postgres host=/tmp port=5432');
+        PERFORM dblink_connect('conn2', 'dbname=postgres user=postgres host=/tmp port=5432');
 
         PERFORM dblink_send_query('conn1', 'BEGIN; SELECT set_config(''request.jwt.claim.sub'', ''' || v_owner_c_id || ''', true); SELECT set_config(''request.jwt.claim.role'', ''authenticated'', true); SELECT public.create_owner_first_branch(''Conc Branch 1''); COMMIT;');
         PERFORM dblink_send_query('conn2', 'BEGIN; SELECT set_config(''request.jwt.claim.sub'', ''' || v_owner_c_id || ''', true); SELECT set_config(''request.jwt.claim.role'', ''authenticated'', true); SELECT public.create_owner_first_branch(''Conc Branch 2''); COMMIT;');
