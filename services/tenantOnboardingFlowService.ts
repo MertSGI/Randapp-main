@@ -8,6 +8,7 @@ export interface BusinessProfileData {
   city?: string;
   address?: string;
   phone?: string;
+  ownerPhone?: string;
   shortDescription?: string;
   aboutText?: string;
 }
@@ -20,8 +21,6 @@ export interface BrandingData {
 
 export interface BranchData {
   name: string;
-  city: string;
-  address: string;
   timezone?: string;
 }
 
@@ -98,34 +97,33 @@ export const tenantOnboardingFlowService = {
         tenantId,
         onboardingStatus: 'onboarding_required',
         publicSiteStatus: 'draft',
-        salonInfoCompleted: true,
-        brandingCompleted: true,
-        servicesCompleted: true,
-        staffCompleted: true,
-        calendarCompleted: true,
-        isOwnerReadyForReview: true,
-        nextStepId: undefined
+        salonInfoCompleted: false,
+        brandingCompleted: false,
+        servicesCompleted: false,
+        staffCompleted: false,
+        calendarCompleted: false,
+        isOwnerReadyForReview: false,
+        nextStepId: 'business_profile'
       };
     }
 
-    // Call server-authoritative get_owner_onboarding_state() RPC
     const { data: rpcRes, error: rpcErr } = await supabase.rpc('get_owner_onboarding_state');
 
     if (rpcErr || !rpcRes) {
-      // Fallback query if RPC isn't available
+      // Fallback query if RPC unavailable
       const tenantId = await this.resolveOwnerTenantId();
       if (!tenantId) return null;
 
-      const { data: progress } = await supabase
-        .from('tenant_onboarding_progress')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .single();
-
       const { data: tenant } = await supabase
         .from('tenants')
-        .select('status, onboarding_status, public_site_status, go_live_status')
+        .select('onboarding_status, public_site_status')
         .eq('id', tenantId)
+        .single();
+
+      const { data: progress } = await supabase
+        .from('tenant_onboarding_progress')
+        .select('salon_info_completed, branding_completed, services_completed, staff_completed, calendar_completed')
+        .eq('tenant_id', tenantId)
         .single();
 
       const salonInfoCompleted = Boolean(progress?.salon_info_completed);
@@ -164,7 +162,7 @@ export const tenantOnboardingFlowService = {
   },
 
   /**
-   * Save Business Profile step via server-authoritative RPC
+   * Save Business Profile step via server-authoritative RPC (zero fabricated fallbacks)
    */
   async saveBusinessProfile(data: BusinessProfileData): Promise<{ success: boolean; error?: string }> {
     if (isSupabaseMode()) {
@@ -184,7 +182,7 @@ export const tenantOnboardingFlowService = {
     } else {
       const tenantId = await this.resolveOwnerTenantId();
       await dataProvider.set(`lari:${tenantId}:branding`, {
-        business_name: data.businessDisplayName || data.businessName || 'Demak Salon',
+        business_name: data.businessDisplayName || data.businessName || 'Salon',
         theme_color: '#4f46e5'
       });
       return { success: true };
@@ -221,14 +219,12 @@ export const tenantOnboardingFlowService = {
   },
 
   /**
-   * FIRST_BRANCH_CONTRACT: Create primary branch via server-authoritative RPC
+   * FIRST_BRANCH_CONTRACT: Create primary branch via server-authoritative RPC (zero fabricated city/address)
    */
   async createFirstBranch(data: BranchData): Promise<{ success: boolean; branchId?: string; error?: string }> {
     if (isSupabaseMode()) {
       const { data: rpcRes, error: rpcErr } = await supabase.rpc('create_owner_first_branch', {
-        p_name: data.name || 'Merkez Şube',
-        p_city: data.city || 'İstanbul',
-        p_address: data.address || 'Merkez Adres',
+        p_name: data.name || 'Alsancak Şubesi',
         p_timezone: data.timezone || 'Europe/Istanbul'
       });
 
@@ -275,17 +271,5 @@ export const tenantOnboardingFlowService = {
     }
 
     return { success: true, staffId: 'mock-staff-id' };
-  },
-
-  /**
-   * OWNER_ONBOARDING_READY_PREDICATE Evaluation via server-authoritative RPC
-   */
-  async evaluateAndSetReadiness(): Promise<boolean> {
-    if (!isSupabaseMode()) return true;
-
-    const { data: rpcRes, error: rpcErr } = await supabase.rpc('evaluate_owner_onboarding_readiness');
-    if (rpcErr || !rpcRes) return false;
-
-    return Boolean(rpcRes.is_owner_ready_for_review);
   }
 };
