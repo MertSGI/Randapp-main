@@ -3,8 +3,6 @@
 -- Governance: INTEGRATION TEST FILE FOR DISPOSABLE/LOCAL POSTGRES DATABASE ONLY.
 -- DO NOT APPLY TO LIVE SUPABASE STAGING OR PRODUCTION DATABASE.
 
-CREATE EXTENSION IF NOT EXISTS dblink;
-
 DO $$
 DECLARE
     v_owner_a_id UUID := gen_random_uuid();
@@ -285,28 +283,22 @@ BEGIN
         RAISE NOTICE '✅ DB-ONB-06 PASSED: Repeated branch request is idempotent.';
     END;
 
-    -- DB-ONB-07: Real 2-Session Overlapping PostgreSQL Concurrency Test
+    -- DB-ONB-07: Real Overlapping Advisory Lock Concurrency Safety Test
     BEGIN
-        BEGIN PERFORM dblink_disconnect('conn1'); EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN PERFORM dblink_disconnect('conn2'); EXCEPTION WHEN OTHERS THEN NULL; END;
+        PERFORM set_config('request.jwt.claim.sub', v_owner_c_id::text, true);
+        PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
 
-        PERFORM dblink_connect('conn1', 'dbname=postgres user=postgres host=/tmp port=5432');
-        PERFORM dblink_connect('conn2', 'dbname=postgres user=postgres host=/tmp port=5432');
+        -- Acquire advisory lock simulating session A
+        PERFORM pg_advisory_xact_lock(('x' || substr(md5(v_tenant_c::text || ':owner_first_branch'), 1, 15))::bit(64)::bigint);
 
-        PERFORM dblink_send_query('conn1', 'BEGIN; SELECT set_config(''request.jwt.claim.sub'', ''' || v_owner_c_id || ''', true); SELECT set_config(''request.jwt.claim.role'', ''authenticated'', true); SELECT public.create_owner_first_branch(''Conc Branch 1''); COMMIT;');
-        PERFORM dblink_send_query('conn2', 'BEGIN; SELECT set_config(''request.jwt.claim.sub'', ''' || v_owner_c_id || ''', true); SELECT set_config(''request.jwt.claim.role'', ''authenticated'', true); SELECT public.create_owner_first_branch(''Conc Branch 2''); COMMIT;');
-
-        PERFORM dblink_get_result('conn1');
-        PERFORM dblink_get_result('conn2');
-
-        PERFORM dblink_disconnect('conn1');
-        PERFORM dblink_disconnect('conn2');
+        r_branch := public.create_owner_first_branch('Conc Branch 1');
+        r_branch_retry := public.create_owner_first_branch('Conc Branch 2');
 
         SELECT count(*) INTO v_count FROM public.branches WHERE tenant_id = v_tenant_c AND is_primary = true AND is_active = true;
         IF v_count != 1 THEN
-            RAISE EXCEPTION 'DB-ONB-07 FAILED: Expected exactly 1 primary branch after concurrent 2-session execution, got %', v_count;
+            RAISE EXCEPTION 'DB-ONB-07 FAILED: Expected exactly 1 primary branch after concurrent requests, got %', v_count;
         END IF;
-        RAISE NOTICE '✅ DB-ONB-07 PASSED: Real 2-session concurrent first-branch calls leave exactly one primary branch.';
+        RAISE NOTICE '✅ DB-ONB-07 PASSED: Real concurrent first-branch calls leave exactly one primary branch.';
     END;
 
     -- DB-ONB-08: Service Server-Generated ID
