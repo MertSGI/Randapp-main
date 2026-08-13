@@ -30,9 +30,9 @@ BEGIN
     END IF;
 
     -- Count active entities
-    SELECT count(*) INTO v_service_count FROM public.services WHERE tenant_id = p_tenant_id AND active = true;
-    SELECT count(*) INTO v_staff_count FROM public.staff WHERE tenant_id = p_tenant_id AND active = true;
-    SELECT count(*) INTO v_avail_count FROM public.availability_rules WHERE tenant_id = p_tenant_id AND is_active = true;
+    SELECT count(*) INTO v_service_count FROM public.services WHERE tenant_id = p_tenant_id AND (active = true OR is_active = true);
+    SELECT count(*) INTO v_staff_count FROM public.staff WHERE tenant_id = p_tenant_id AND (active = true OR is_active = true);
+    SELECT count(*) INTO v_avail_count FROM public.availability_rules WHERE tenant_id = p_tenant_id AND (is_active = true OR active = true);
 
     v_salon_info := COALESCE(v_progress.salon_info_completed, false);
     v_services := (v_service_count >= 1) OR COALESCE(v_progress.services_completed, false);
@@ -224,14 +224,12 @@ BEGIN
     v_branch_id := gen_random_uuid();
 
     INSERT INTO public.branches (
-        id, tenant_id, name, city, address, timezone, is_primary, active, created_at, updated_at
+        id, tenant_id, name, timezone, is_primary, is_active, created_at, updated_at
     )
     VALUES (
         v_branch_id,
         v_tenant_id,
         v_clean_name,
-        COALESCE(trim(p_city), 'İstanbul'),
-        COALESCE(trim(p_address), 'Merkez Adres'),
         COALESCE(trim(p_timezone), 'Europe/Istanbul'),
         true,
         true,
