@@ -271,11 +271,16 @@ export const tenantRegistrationService = {
   async registerTenantMock(data: RegistrationData): Promise<RegistrationResult> {
     try {
       const tenantId = data.businessName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.floor(Math.random() * 1000);
-      await dataProvider.set(`lari:${tenantId}:is_seeded`, 'false');
+      
+      try {
+        await dataProvider.set(`lari:${tenantId}:is_seeded`, 'false');
+      } catch (e) {}
       
       if (data.referralCode) {
-        const { referralProgramService } = await import('./referralProgramService');
-        referralProgramService.markReferralRegistered(data.referralCode, tenantId, data.ownerEmail);
+        try {
+          const { referralProgramService } = await import('./referralProgramService');
+          referralProgramService.markReferralRegistered(data.referralCode, tenantId, data.ownerEmail);
+        } catch (e) {}
       }
 
       const businessDetails = {
@@ -291,24 +296,29 @@ export const tenantRegistrationService = {
         email: data.ownerEmail,
         website_url: ''
       };
-      await dataProvider.set(`lari:${tenantId}:branding`, {
-        theme_color: '#4f46e5',
-        business_name: data.businessDisplayName,
-        logo_url: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80&w=200&h=200',
-        cover_image_url: 'https://images.unsplash.com/photo-1600948836101-f9ff5112fa61?auto=format&fit=crop&q=80&w=1200'
-      });
-      await businessProfileService.updateBusinessProfile(tenantId, businessDetails);
+
+      try {
+        await dataProvider.set(`lari:${tenantId}:branding`, {
+          theme_color: '#4f46e5',
+          business_name: data.businessDisplayName,
+          logo_url: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80&w=200&h=200',
+          cover_image_url: 'https://images.unsplash.com/photo-1600948836101-f9ff5112fa61?auto=format&fit=crop&q=80&w=1200'
+        });
+        await businessProfileService.updateBusinessProfile(tenantId, businessDetails);
+      } catch (e) {}
 
       const plans = planService.getActivePlans();
       const plan = plans.find(p => p.id === data.planId) || plans[0];
       
-      await dataProvider.set(`lari:${tenantId}:subscription`, {
-        planId: data.planId,
-        billingPeriod: data.billingPeriod,
-        status: 'pending_checkout',
-        currentPeriodEnd: new Date(Date.now() + (plan.trialDays || TRIAL_CONFIG.trialDayCount) * 24 * 60 * 60 * 1000).toISOString(),
-        cancelAtPeriodEnd: false
-      });
+      try {
+        await dataProvider.set(`lari:${tenantId}:subscription`, {
+          planId: data.planId,
+          billingPeriod: data.billingPeriod,
+          status: 'pending_checkout',
+          currentPeriodEnd: new Date(Date.now() + (plan.trialDays || TRIAL_CONFIG.trialDayCount) * 24 * 60 * 60 * 1000).toISOString(),
+          cancelAtPeriodEnd: false
+        });
+      } catch (e) {}
 
       const authPayload = {
         id: `usr-${tenantId}`,
@@ -319,32 +329,41 @@ export const tenantRegistrationService = {
         onboarding_completed: false
       };
       
-      localStorage.setItem('lari_active_owner_session', JSON.stringify(authPayload));
-      localStorage.setItem('lari_active_tenant_id', tenantId);
-      localStorage.setItem('lari_selected_plan', data.planId);
-      localStorage.setItem('lari_registration_context', JSON.stringify(data));
-      localStorage.setItem('lari_mock_user', JSON.stringify(authPayload));
+      try {
+        localStorage.setItem('lari_active_owner_session', JSON.stringify(authPayload));
+        localStorage.setItem('lari_active_tenant_id', tenantId);
+        localStorage.setItem('lari_selected_plan', data.planId);
+        localStorage.setItem('lari_registration_context', JSON.stringify(data));
+        localStorage.setItem('lari_mock_user', JSON.stringify(authPayload));
+      } catch (e) {}
       
-      const { publicLinkService } = await import('./publicLinkService');
-      const initialSlug = publicLinkService.generateTenantSlug(data.businessDisplayName);
+      let initialSlug = data.businessDisplayName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+      try {
+        const { publicLinkService } = await import('./publicLinkService');
+        initialSlug = publicLinkService.generateTenantSlug(data.businessDisplayName);
+      } catch (e) {}
 
-      const registered = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
-      registered.push({
-         id: tenantId,
-         slug: initialSlug,
-         businessName: data.businessDisplayName,
-         ownerEmail: data.ownerEmail,
-         created_at: new Date().toISOString(),
-         planId: data.planId,
-         billingPeriod: data.billingPeriod,
-         verificationStatus: 'not_submitted',
-         publicSiteStatus: 'draft',
-         businessRiskStatus: 'normal'
-      });
-      localStorage.setItem('lari_registered_tenants', JSON.stringify(registered));
+      try {
+        const registered = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+        registered.push({
+           id: tenantId,
+           slug: initialSlug,
+           businessName: data.businessDisplayName,
+           ownerEmail: data.ownerEmail,
+           created_at: new Date().toISOString(),
+           planId: data.planId,
+           billingPeriod: data.billingPeriod,
+           verificationStatus: 'not_submitted',
+           publicSiteStatus: 'draft',
+           businessRiskStatus: 'normal'
+        });
+        localStorage.setItem('lari_registered_tenants', JSON.stringify(registered));
+      } catch (e) {}
       
-      await dataProvider.set(`lari:${tenantId}:provisioning_status`, 'setup_in_progress');
-      await dataProvider.set(`lari:${tenantId}:go_live_status`, 'paused');
+      try {
+        await dataProvider.set(`lari:${tenantId}:provisioning_status`, 'setup_in_progress');
+        await dataProvider.set(`lari:${tenantId}:go_live_status`, 'paused');
+      } catch (e) {}
 
       return {
         success: true,

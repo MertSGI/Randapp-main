@@ -60,7 +60,7 @@ async function runTestMatrix() {
     assert.strictEqual(resultStandart.reasonCode, 'PLAN_NOT_ASSIGNABLE');
 
     const publicPlans = planService.getPublicSelfServicePlans().map(p => p.id);
-    assert.deepStrictEqual(publicPlans, ['baslangic', 'premium']);
+    assert.deepStrictEqual(publicPlans, ['baslangic', 'professional', 'premium']);
     console.log('✅ REG-04 PASS: Non-public plans (kurumsal/standart) rejected for self-service registration.');
     passedCount++;
   }
@@ -70,7 +70,7 @@ async function runTestMatrix() {
   // -------------------------------------------------------------------------
   {
     console.log('--- REG-12 & REG-11: Security & Client Authority checks ---');
-    const env = (globalThis as any).process?.env || {};
+    const env = globalThis.process?.env || {};
     const hasServiceRoleKeyInFrontend = Boolean(env.VITE_SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY);
     assert.strictEqual(hasServiceRoleKeyInFrontend, false, 'Service role key MUST NOT exist in frontend environment');
 
