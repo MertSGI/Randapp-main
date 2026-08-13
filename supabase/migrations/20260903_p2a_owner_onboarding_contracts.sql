@@ -2,138 +2,61 @@
 -- Parallel Lane P2A — Server-Authoritative Owner Onboarding RPC Contracts & Readiness Derivation (P2A.2-R1)
 -- Governance: FILE ONLY. DO NOT APPLY TO LIVE STAGING DATABASE.
 
--- Update resolve_effective_tenant_entitlements to resolve plan quotas for pending_onboarding status during owner onboarding
-CREATE OR REPLACE FUNCTION public.resolve_effective_tenant_entitlements(
+-- Quota Resolver Helper: Resolves requested plan quota during pending_onboarding status while preserving default-deny entitlements in resolve_effective_tenant_entitlements
+CREATE OR REPLACE FUNCTION public.resolve_commercial_quota(
     p_tenant_id UUID,
-    p_at TIMESTAMPTZ DEFAULT now()
+    p_feature_key TEXT
 )
-RETURNS TABLE (
-    feature_key TEXT,
-    value_type TEXT,
-    boolean_value BOOLEAN,
-    integer_value BIGINT,
-    text_value TEXT,
-    json_value JSONB,
-    is_unlimited BOOLEAN,
-    source TEXT,
-    plan_version_id UUID,
-    override_id UUID
-)
+RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-    v_sub_plan_version_id UUID;
+    v_ent_row RECORD;
+    v_sub RECORD;
 BEGIN
-    IF p_tenant_id IS NULL THEN
-        RETURN;
+    -- Check if tenant has a pending_onboarding subscription
+    SELECT status, plan_version_id INTO v_sub
+    FROM public.subscriptions
+    WHERE tenant_id = p_tenant_id
+    ORDER BY created_at DESC LIMIT 1;
+
+    IF v_sub.status = 'pending_onboarding' AND v_sub.plan_version_id IS NOT NULL THEN
+        -- Resolve requested plan version quota for onboarding setup
+        SELECT value_type, boolean_value, integer_value, is_unlimited INTO v_ent_row
+        FROM public.plan_entitlements
+        WHERE plan_version_id = v_sub.plan_version_id AND feature_key = p_feature_key;
+
+        IF v_ent_row.is_unlimited IS TRUE THEN
+            RETURN jsonb_build_object('is_unlimited', true, 'limit_value', NULL);
+        END IF;
+
+        IF v_ent_row.value_type = 'integer' AND v_ent_row.integer_value IS NOT NULL THEN
+            RETURN jsonb_build_object('is_unlimited', false, 'limit_value', v_ent_row.integer_value);
+        END IF;
+
+        RETURN jsonb_build_object('is_unlimited', false, 'limit_value', 1);
     END IF;
 
-    -- Resolve active or pending_onboarding subscription's plan_version_id for this tenant
-    SELECT sub.plan_version_id INTO v_sub_plan_version_id
-    FROM public.subscriptions sub
-    WHERE sub.tenant_id = p_tenant_id
-      AND sub.status IN ('active', 'manual_active', 'comped', 'trialing', 'pending_onboarding')
-      AND (sub.current_period_end IS NULL OR sub.current_period_end > p_at)
-    ORDER BY sub.created_at DESC
-    LIMIT 1;
+    -- Standard resolution for active subscriptions
+    SELECT * INTO v_ent_row
+    FROM public.resolve_effective_tenant_entitlements(p_tenant_id)
+    WHERE feature_key = p_feature_key;
 
-    RETURN QUERY
-    WITH all_keys AS (
-        SELECT f.feature_key AS fkey, f.value_type AS vtype
-        FROM public.commercial_feature_definitions f
-    ),
-    -- Level 1: Platform / System Restriction (Highest Precedence)
-    platform_rest AS (
-        SELECT DISTINCT ON (pr.feature_key)
-            pr.feature_key AS fkey
-        FROM public.platform_system_restrictions pr
-        WHERE (pr.tenant_id = p_tenant_id OR pr.tenant_id IS NULL)
-          AND pr.is_restricted = true
-          AND pr.starts_at <= p_at
-          AND (pr.expires_at IS NULL OR pr.expires_at > p_at)
-        ORDER BY pr.feature_key, pr.tenant_id NULLS LAST, pr.starts_at DESC
-    ),
-    -- Level 2: Active Tenant Override
-    active_overrides AS (
-        SELECT DISTINCT ON (o.feature_key)
-            o.id AS ovr_id,
-            o.feature_key AS fkey,
-            o.value_type AS vtype,
-            o.boolean_value AS bval,
-            o.integer_value AS ival,
-            o.text_value AS tval,
-            o.json_value AS jval,
-            o.is_unlimited AS unlim
-        FROM public.tenant_entitlement_overrides o
-        WHERE o.tenant_id = p_tenant_id
-          AND o.starts_at <= p_at
-          AND (o.expires_at IS NULL OR o.expires_at > p_at)
-          AND o.revoked_at IS NULL
-        ORDER BY o.feature_key, o.starts_at DESC, o.created_at DESC
-    ),
-    -- Level 3: Assigned Plan Version Default
-    plan_defaults AS (
-        SELECT
-            pe.feature_key AS fkey,
-            pe.value_type AS vtype,
-            pe.boolean_value AS bval,
-            pe.integer_value AS ival,
-            pe.text_value AS tval,
-            pe.json_value AS jval,
-            pe.is_unlimited AS unlim
-        FROM public.plan_entitlements pe
-        WHERE pe.plan_version_id = v_sub_plan_version_id
-    )
-    SELECT
-        k.fkey AS feature_key,
-        k.vtype AS value_type,
-        CASE
-            WHEN pr.fkey IS NOT NULL AND k.vtype = 'boolean' THEN false
-            WHEN pr.fkey IS NOT NULL THEN NULL
-            WHEN o.ovr_id IS NOT NULL THEN o.bval
-            WHEN pd.fkey IS NOT NULL THEN pd.bval
-            WHEN k.vtype = 'boolean' THEN false
-            ELSE NULL
-        END AS boolean_value,
-        CASE
-            WHEN pr.fkey IS NOT NULL THEN 0::bigint
-            WHEN o.ovr_id IS NOT NULL THEN o.ival
-            WHEN pd.fkey IS NOT NULL THEN pd.ival
-            WHEN k.vtype = 'integer' THEN 0::bigint
-            ELSE NULL
-        END AS integer_value,
-        CASE
-            WHEN pr.fkey IS NOT NULL THEN NULL
-            WHEN o.ovr_id IS NOT NULL THEN o.tval
-            WHEN pd.fkey IS NOT NULL THEN pd.tval
-            ELSE NULL
-        END AS text_value,
-        CASE
-            WHEN pr.fkey IS NOT NULL THEN NULL
-            WHEN o.ovr_id IS NOT NULL THEN o.jval
-            WHEN pd.fkey IS NOT NULL THEN pd.jval
-            ELSE NULL
-        END AS json_value,
-        CASE
-            WHEN pr.fkey IS NOT NULL THEN false
-            WHEN o.ovr_id IS NOT NULL THEN COALESCE(o.unlim, false)
-            WHEN pd.fkey IS NOT NULL THEN COALESCE(pd.unlim, false)
-            ELSE false
-        END AS is_unlimited,
-        CASE
-            WHEN pr.fkey IS NOT NULL THEN 'platform_restriction'
-            WHEN o.ovr_id IS NOT NULL THEN 'tenant_override'
-            WHEN pd.fkey IS NOT NULL THEN 'plan_default'
-            ELSE 'system_default'
-        END AS source,
-        v_sub_plan_version_id AS plan_version_id,
-        o.ovr_id AS override_id
-    FROM all_keys k
-    LEFT JOIN platform_rest pr ON pr.fkey = k.fkey
-    LEFT JOIN active_overrides o ON o.fkey = k.fkey
-    LEFT JOIN plan_defaults pd ON pd.fkey = k.fkey;
+    IF v_ent_row.feature_key IS NULL THEN
+        RETURN jsonb_build_object('is_unlimited', false, 'limit_value', 0);
+    END IF;
+
+    IF v_ent_row.is_unlimited IS TRUE THEN
+        RETURN jsonb_build_object('is_unlimited', true, 'limit_value', NULL);
+    END IF;
+
+    IF v_ent_row.value_type = 'integer' AND v_ent_row.integer_value IS NOT NULL THEN
+        RETURN jsonb_build_object('is_unlimited', false, 'limit_value', v_ent_row.integer_value);
+    END IF;
+
+    RETURN jsonb_build_object('is_unlimited', false, 'limit_value', 0);
 END;
 $$;
 
