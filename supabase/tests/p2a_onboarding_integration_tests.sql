@@ -38,11 +38,7 @@ BEGIN
     (v_owner_b_id, '00000000-0000-0000-0000-000000000000', 'onboarding.owner.b@p2a-test.invalid', '$2a$10$abcdefghijklmnopqrstuuu', NOW(), '{"provider":"email","providers":["email"]}', '{"name":"Owner B"}', NOW(), NOW(), 'authenticated')
     ON CONFLICT (id) DO NOTHING;
 
-    INSERT INTO public.users_profile (id, role, name, active)
-    VALUES 
-    (v_owner_a_id, 'tenant_owner', 'Owner A', true),
-    (v_owner_b_id, 'tenant_owner', 'Owner B', true)
-    ON CONFLICT (id) DO NOTHING;
+    -- Note: provision_tenant_for_authenticated_owner creates users_profile automatically during tenant provisioning
 
     -- Provision Tenant A under Owner A identity
     PERFORM set_config('request.jwt.claim.sub', v_owner_a_id::text, true);
