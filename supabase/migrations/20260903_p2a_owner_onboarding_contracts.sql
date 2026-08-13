@@ -563,7 +563,7 @@ BEGIN
     IF p_work_days IS NOT NULL THEN
         FOREACH v_day IN ARRAY p_work_days LOOP
             INSERT INTO public.availability_rules (
-                id, tenant_id, staff_id, weekday, start_time, end_time, is_active, created_at, updated_at
+                id, tenant_id, staff_id, weekday, start_time, end_time, is_active, created_at
             ) VALUES (
                 gen_random_uuid(),
                 v_tenant_id,
@@ -572,14 +572,12 @@ BEGIN
                 COALESCE(p_start_time, '09:00:00'::TIME),
                 COALESCE(p_end_time, '18:00:00'::TIME),
                 true,
-                NOW(),
                 NOW()
             )
             ON CONFLICT (tenant_id, staff_id, weekday) DO UPDATE
             SET start_time = EXCLUDED.start_time,
                 end_time = EXCLUDED.end_time,
-                is_active = true,
-                updated_at = NOW();
+                is_active = true;
         END LOOP;
     END IF;
 
