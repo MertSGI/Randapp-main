@@ -469,14 +469,14 @@ BEGIN
         RAISE EXCEPTION 'INVALID_STAFF_NAME: Staff name cannot be empty';
     END IF;
 
-    -- Strict Cross-Tenant Mapping Check: Fail atomically if any requested service belongs to another tenant!
+    -- Strict Cross-Tenant Mapping Check: Fail atomically if any requested service does not belong to owner tenant!
     IF p_service_ids IS NOT NULL AND array_length(p_service_ids, 1) > 0 THEN
         SELECT count(*) INTO v_foreign_count
         FROM public.services
-        WHERE id = ANY(p_service_ids) AND tenant_id != v_tenant_id;
+        WHERE id = ANY(p_service_ids) AND tenant_id = v_tenant_id;
 
-        IF v_foreign_count > 0 THEN
-            RAISE EXCEPTION 'FOREIGN_TENANT_SERVICE_REJECTED: Requested services belong to another tenant';
+        IF v_foreign_count != array_length(p_service_ids, 1) THEN
+            RAISE EXCEPTION 'FOREIGN_TENANT_SERVICE_REJECTED: Requested services belong to another tenant or do not exist';
         END IF;
     END IF;
 
