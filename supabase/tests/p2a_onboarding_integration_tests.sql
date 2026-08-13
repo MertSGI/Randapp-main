@@ -33,11 +33,13 @@ BEGIN
 
     -- 1. Setup Auth Users
     BEGIN
-        INSERT INTO auth.users (id, instance_id, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, role)
-        VALUES 
-        (v_owner_a_id, '00000000-0000-0000-0000-000000000000', 'onboarding.owner.a@p2a-test.invalid', '$2a$10$abcdefghijklmnopqrstuuu', NOW(), '{"provider":"email","providers":["email"]}', '{"name":"Owner A"}', NOW(), NOW(), 'authenticated'),
-        (v_owner_b_id, '00000000-0000-0000-0000-000000000000', 'onboarding.owner.b@p2a-test.invalid', '$2a$10$abcdefghijklmnopqrstuuu', NOW(), '{"provider":"email","providers":["email"]}', '{"name":"Owner B"}', NOW(), NOW(), 'authenticated')
-        ON CONFLICT (id) DO NOTHING;
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
+            INSERT INTO auth.users (id, email, role, created_at, updated_at)
+            VALUES 
+            (v_owner_a_id, 'onboarding.owner.a@p2a-test.invalid', 'authenticated', NOW(), NOW()),
+            (v_owner_b_id, 'onboarding.owner.b@p2a-test.invalid', 'authenticated', NOW(), NOW())
+            ON CONFLICT (id) DO NOTHING;
+        END IF;
     EXCEPTION WHEN OTHERS THEN
         RAISE EXCEPTION 'STEP 1 AUTH USERS FAIL: % (%)', SQLERRM, SQLSTATE;
     END;
