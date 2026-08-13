@@ -27,6 +27,8 @@ globalThis.sessionStorage = {
 };
 
 async function runBoundaryTests() {
+  let directTableWriteAttempted = false;
+
   // Mock authenticated session for registration boundary tests
   supabase.auth = {
     getSession: async () => ({
@@ -35,21 +37,27 @@ async function runBoundaryTests() {
     })
   };
 
-  // Mock plans table query for self-serve check
+  // Robust mock for supabase.from() table queries
   supabase.from = (table) => {
     if (table === 'plans') {
+      const planResult = {
+        data: { id: 'plan-baslangic-uuid', code: 'baslangic', is_self_serve: true },
+        error: null
+      };
       return {
         select: () => ({
           eq: () => ({
-            single: async () => ({
-              data: { id: 'plan-baslangic-uuid', code: 'baslangic', is_self_serve: true },
-              error: null
-            })
-          })
+            single: async () => planResult
+          }),
+          single: async () => planResult
         })
       };
     }
-    return {};
+    directTableWriteAttempted = true;
+    return {
+      insert: () => ({ select: () => Promise.resolve({ data: null, error: new Error('Direct table insert blocked') }) }),
+      update: () => ({ eq: () => Promise.resolve({ data: null, error: new Error('Direct table update blocked') }) })
+    };
   };
 
   // Test 1: Verify registerTenant calls provision_tenant_for_authenticated_owner RPC with exact parameter names
@@ -123,27 +131,7 @@ async function runBoundaryTests() {
   console.log('✅ Test 3 PASSED: RPC failure handled cleanly without throwing uncaught exception.');
 
   // Test 4: Verify Zero Client-Side UUID Generation or Direct Table Writes
-  let directTableWriteAttempted = false;
-  supabase.from = (table) => {
-    if (table === 'plans') {
-      return {
-        select: () => ({
-          eq: () => ({
-            single: async () => ({
-              data: { id: 'plan-baslangic-uuid', code: 'baslangic', is_self_serve: true },
-              error: null
-            })
-          })
-        })
-      };
-    }
-    directTableWriteAttempted = true;
-    return {
-      insert: () => ({ select: () => Promise.resolve({ data: null, error: new Error('Direct table insert blocked') }) }),
-      update: () => ({ eq: () => Promise.resolve({ data: null, error: new Error('Direct table update blocked') }) })
-    };
-  };
-
+  directTableWriteAttempted = false;
   supabase.rpc = async () => ({ data: { success: true, tenant_id: 'server-gen-uuid' }, error: null });
   await tenantRegistrationService.registerTenant({ name: 'No Direct Write Salon' });
 
