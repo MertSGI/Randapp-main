@@ -60,6 +60,57 @@ BEGIN
 END;
 $$;
 
+-- Action Authorization Resolver Helper: Allows feature actions during pending_onboarding status for onboarding setup
+CREATE OR REPLACE FUNCTION public.assert_tenant_commercial_action_allowed(
+    p_tenant_id UUID,
+    p_feature_key TEXT,
+    p_at TIMESTAMPTZ DEFAULT now()
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_elig       JSONB;
+    v_ent_row    RECORD;
+    v_sub        RECORD;
+BEGIN
+    SELECT status, plan_version_id INTO v_sub
+    FROM public.subscriptions
+    WHERE tenant_id = p_tenant_id
+    ORDER BY created_at DESC LIMIT 1;
+
+    -- Allow initial management actions during pending_onboarding status
+    IF v_sub.status = 'pending_onboarding' THEN
+        RETURN jsonb_build_object('allowed', true, 'reason_code', 'commercial_allowed');
+    END IF;
+
+    -- Standard check for non-onboarding statuses
+    v_elig := public.resolve_tenant_commercial_eligibility(p_tenant_id, p_at);
+    IF NOT (v_elig->>'eligible')::boolean THEN
+        RETURN jsonb_build_object('allowed', false, 'reason_code', v_elig->>'reason_code');
+    END IF;
+
+    -- Check feature entitlement via 4-level resolver
+    SELECT * INTO v_ent_row
+    FROM public.resolve_effective_tenant_entitlements(p_tenant_id)
+    WHERE feature_key = p_feature_key;
+
+    IF v_ent_row.feature_key IS NULL THEN
+        RETURN jsonb_build_object('allowed', false, 'reason_code', 'commercial_feature_disabled');
+    END IF;
+
+    IF v_ent_row.value_type = 'boolean' THEN
+        IF v_ent_row.boolean_value IS NOT TRUE THEN
+            RETURN jsonb_build_object('allowed', false, 'reason_code', 'commercial_feature_disabled');
+        END IF;
+    END IF;
+
+    RETURN jsonb_build_object('allowed', true, 'reason_code', 'commercial_allowed');
+END;
+$$;
+
 -- Internal Helper: Derives readiness and transitions onboarding_status to 'ready_for_review' if all 4 required steps pass
 CREATE OR REPLACE FUNCTION public.evaluate_owner_onboarding_readiness_internal(p_tenant_id UUID)
 RETURNS JSONB
