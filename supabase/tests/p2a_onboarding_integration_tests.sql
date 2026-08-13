@@ -205,16 +205,18 @@ BEGIN
     -- SECTION 2: CANONICAL ONBOARDING MATRIX (DB-ONB-01..24)
     -- =========================================================================
 
-    -- DB-ONB-02: Incomplete profile remains incomplete when optional fields missing
+    -- DB-ONB-02: Incomplete profile remains incomplete when required field (address) is empty
     BEGIN
         PERFORM set_config('request.jwt.claim.sub', v_owner_b_id::text, true);
+        UPDATE public.tenant_business_profiles SET address = NULL WHERE tenant_id = v_tenant_b;
         r_prof := public.save_owner_business_profile(
             p_business_name := 'Incomplete Owner B Salon',
-            p_city := NULL,
-            p_address := NULL
+            p_business_category := 'Clinic',
+            p_city := 'Ankara',
+            p_address := ''
         );
         IF (r_prof->>'salon_info_completed')::BOOLEAN = true THEN
-            RAISE EXCEPTION 'DB-ONB-02 FAILED: Profile with NULL city/address must remain incomplete!';
+            RAISE EXCEPTION 'DB-ONB-02 FAILED: Profile with empty address must remain incomplete!';
         END IF;
         RAISE NOTICE '✅ DB-ONB-02 PASSED: Incomplete profile remains incomplete.';
     END;
