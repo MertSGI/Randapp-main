@@ -3,8 +3,8 @@
 **Base Pilot SHA**: `134c8716c2511c909cd400aee0496ebd70f63bf6`  
 **Foundation Closed SHA**: `c8f4b984581df5a9031a42f0851de6b44edf7828` (CI `31670377898` SUCCESS)  
 **P2A.1 Closed SHA**: `94b4a43c528cfd750ba205a9cbf4b21df2295d4b` (CI `31671595067` SUCCESS)  
-**P2A.2 Initial SHA**: `62f04bc695441a1efa4828463e7f7cfa46bdb309` (CI `31672003497` SUCCESS)  
-**Current Stage**: `P2A.2-R1 — Server-Authoritative Owner Onboarding Contract & Test Truth Closure`  
+**P2A.2-R1 Closed SHA**: `4d3a60ab3e0f7fca13f6406a463a562cae1eb6a4` (CI `31673868411` SUCCESS)  
+**Current Stage**: `P2A.2-R1 — Server-Authoritative Owner Onboarding Contract & Test Truth Closure (CLOSED / GO)`  
 
 ---
 
