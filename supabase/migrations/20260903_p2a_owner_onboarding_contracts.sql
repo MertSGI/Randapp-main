@@ -60,6 +60,8 @@ BEGIN
         SET reviewed_by_admin = false,
             updated_at = NOW()
         WHERE tenant_id = p_tenant_id;
+
+        SELECT * INTO v_tenant FROM public.tenants WHERE id = p_tenant_id;
     END IF;
 
     RETURN jsonb_build_object(
