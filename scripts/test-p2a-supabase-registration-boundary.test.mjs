@@ -32,7 +32,7 @@ async function runBoundaryTests() {
   let rpcName = '';
   let rpcArgs = null;
 
-  supabase.rpc = (async (name, args) => {
+  supabase.rpc = async (name, args) => {
     rpcCalled = true;
     rpcName = name;
     rpcArgs = args;
@@ -45,7 +45,7 @@ async function runBoundaryTests() {
       },
       error: null
     };
-  }) as any;
+  };
 
   const result = await tenantRegistrationService.registerTenant({
     name: 'Test Salon',
@@ -73,10 +73,10 @@ async function runBoundaryTests() {
 
   // Test 2: Idempotency Key Stability across Retries
   let capturedIdempKeys = [];
-  supabase.rpc = (async (name, args) => {
+  supabase.rpc = async (name, args) => {
     capturedIdempKeys.push(args.p_idempotency_key);
     return { data: { success: true, tenant_id: '11111111-1111-1111-1111-111111111111' }, error: null };
-  }) as any;
+  };
 
   // Clear session storage to generate new key
   sessionStorageStore.clear();
@@ -88,9 +88,9 @@ async function runBoundaryTests() {
   console.log('✅ Test 2 PASSED: Idempotency key remains stable across attempt retries.');
 
   // Test 3: RPC Failure Handling (clean error return without crash)
-  supabase.rpc = (async () => {
+  supabase.rpc = async () => {
     return { data: null, error: new Error('PG_RAISE_EXCEPTION: PROFILE_NOT_PROVISIONABLE') };
-  }) as any;
+  };
 
   const failResult = await tenantRegistrationService.registerTenant({ name: 'Fail Salon' });
   assert.strictEqual(failResult.success, false, 'Test 3 FAIL: Result success must be false on RPC error');
@@ -99,15 +99,15 @@ async function runBoundaryTests() {
 
   // Test 4: Verify Zero Client-Side UUID Generation or Direct Table Writes
   let directTableWriteAttempted = false;
-  supabase.from = (() => {
+  supabase.from = () => {
     directTableWriteAttempted = true;
     return {
       insert: () => ({ select: () => Promise.resolve({ data: null, error: new Error('Direct table insert blocked') }) }),
       update: () => ({ eq: () => Promise.resolve({ data: null, error: new Error('Direct table update blocked') }) })
-    } as any;
-  }) as any;
+    };
+  };
 
-  supabase.rpc = (async () => ({ data: { success: true, tenant_id: 'server-gen-uuid' }, error: null })) as any;
+  supabase.rpc = async () => ({ data: { success: true, tenant_id: 'server-gen-uuid' }, error: null });
   await tenantRegistrationService.registerTenant({ name: 'No Direct Write Salon' });
 
   assert.strictEqual(directTableWriteAttempted, false, 'Test 4 FAIL: Direct table write via supabase.from() attempted in Supabase mode!');
@@ -116,17 +116,17 @@ async function runBoundaryTests() {
   // Test 5: Verify Cryptographic Idempotency Key Generation (No Math.random fallback)
   sessionStorageStore.clear();
   let generatedKey = '';
-  supabase.rpc = (async (name, args) => {
+  supabase.rpc = async (name, args) => {
     generatedKey = args.p_idempotency_key;
     return { data: { success: true }, error: null };
-  }) as any;
+  };
 
   await tenantRegistrationService.registerTenant({ name: 'Crypto Key Salon' });
   assert.ok(generatedKey.startsWith('reg-') || generatedKey.length >= 16, 'Test 5 FAIL: Idempotency key missing prefix or weak');
   console.log('✅ Test 5 PASSED: Cryptographic idempotency key format validated.');
 
   // Test 6: Verify Zero Mock Fallback in Supabase Mode
-  supabase.rpc = (async () => ({ data: null, error: new Error('P2A_TEST_ERROR: Network failed') })) as any;
+  supabase.rpc = async () => ({ data: null, error: new Error('P2A_TEST_ERROR: Network failed') });
   const noFallbackRes = await tenantRegistrationService.registerTenant({ name: 'No Fallback Salon' });
   assert.strictEqual(noFallbackRes.success, false, 'Test 6 FAIL: Supabase mode must not fall back to mock registration on network error');
   console.log('✅ Test 6 PASSED: Supabase mode does not silently fall back to mock implementation on failure.');

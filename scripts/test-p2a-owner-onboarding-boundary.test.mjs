@@ -23,7 +23,7 @@ async function runOwnerOnboardingBoundaryTests() {
   let rpcName = '';
   let rpcArgs = null;
 
-  supabase.rpc = (async (name, args) => {
+  supabase.rpc = async (name, args) => {
     rpcCalled = true;
     rpcName = name;
     rpcArgs = args;
@@ -57,7 +57,7 @@ async function runOwnerOnboardingBoundaryTests() {
       };
     }
     return { data: null, error: new Error(`Unknown RPC ${name}`) };
-  }) as any;
+  };
 
   // ONB-01: Save business profile RPC routing
   rpcCalled = false;
@@ -143,7 +143,7 @@ async function runOwnerOnboardingBoundaryTests() {
   console.log('✅ ONB-07 PASSED: loadOnboardingState routes to get_owner_onboarding_state RPC.');
 
   // ONB-08: RPC Error Handling (clean failure response)
-  supabase.rpc = (async () => ({ data: null, error: new Error('PG_RAISE_EXCEPTION: INVALID_BUSINESS_NAME') })) as any;
+  supabase.rpc = async () => ({ data: null, error: new Error('PG_RAISE_EXCEPTION: INVALID_BUSINESS_NAME') });
   const resErr = await tenantOnboardingFlowService.saveBusinessProfile({ businessName: '' });
   assert.strictEqual(resErr.success, false, 'ONB-08 FAIL: Should return success: false on RPC error');
   assert.ok(resErr.error?.includes('INVALID_BUSINESS_NAME'), 'ONB-08 FAIL: Error message should be returned');
@@ -151,46 +151,46 @@ async function runOwnerOnboardingBoundaryTests() {
 
   // ONB-09: No client-side UUID generation for branch
   let passedIdCheck = true;
-  supabase.rpc = (async (name, args) => {
+  supabase.rpc = async (name, args) => {
     if (args?.p_id || args?.id) passedIdCheck = false;
     return { data: { success: true, branch_id: 'server-gen-uuid' }, error: null };
-  }) as any;
+  };
   await tenantOnboardingFlowService.createFirstBranch({ name: 'Test' });
   assert.strictEqual(passedIdCheck, true, 'ONB-09 FAIL: Client must not supply branch UUID to RPC');
   console.log('✅ ONB-09 PASSED: Server generates branch UUID.');
 
   // ONB-10: No client-side UUID generation for service
   passedIdCheck = true;
-  supabase.rpc = (async (name, args) => {
+  supabase.rpc = async (name, args) => {
     if (args?.p_id || args?.id) passedIdCheck = false;
     return { data: { success: true, service_id: 'server-gen-uuid' }, error: null };
-  }) as any;
+  };
   await tenantOnboardingFlowService.createFirstService({ name: 'Test', duration: 30, price: 100 });
   assert.strictEqual(passedIdCheck, true, 'ONB-10 FAIL: Client must not supply service UUID to RPC');
   console.log('✅ ONB-10 PASSED: Server generates service UUID.');
 
   // ONB-11: No client-side UUID generation for staff
   passedIdCheck = true;
-  supabase.rpc = (async (name, args) => {
+  supabase.rpc = async (name, args) => {
     if (args?.p_id || args?.id) passedIdCheck = false;
     return { data: { success: true, staff_id: 'server-gen-uuid' }, error: null };
-  }) as any;
+  };
   await tenantOnboardingFlowService.createFirstStaff({ name: 'Test' });
   assert.strictEqual(passedIdCheck, true, 'ONB-11 FAIL: Client must not supply staff UUID to RPC');
   console.log('✅ ONB-11 PASSED: Server generates staff UUID.');
 
   // ONB-12: Zero table writes via direct supabase.from() in Supabase mode
   let directTableWriteAttempted = false;
-  supabase.from = (() => {
+  supabase.from = () => {
     directTableWriteAttempted = true;
     return {
       insert: () => ({ select: () => Promise.resolve({ data: null, error: new Error('Direct table insert blocked') }) }),
       update: () => ({ eq: () => Promise.resolve({ data: null, error: new Error('Direct table update blocked') }) }),
       upsert: () => ({ onConflict: () => Promise.resolve({ data: null, error: new Error('Direct table upsert blocked') }) })
-    } as any;
-  }) as any;
+    };
+  };
 
-  supabase.rpc = (async () => ({ data: { success: true }, error: null })) as any;
+  supabase.rpc = async () => ({ data: { success: true }, error: null });
   await tenantOnboardingFlowService.saveBusinessProfile({ businessName: 'Test' });
   await tenantOnboardingFlowService.createFirstBranch({ name: 'Test' });
   await tenantOnboardingFlowService.createFirstService({ name: 'Test', duration: 30, price: 100 });
@@ -200,7 +200,7 @@ async function runOwnerOnboardingBoundaryTests() {
   console.log('✅ ONB-12 PASSED: Zero direct table writes during onboarding mutations.');
 
   // ONB-13: Storefront remains draft after onboarding RPC calls
-  supabase.rpc = (async () => ({
+  supabase.rpc = async () => ({
     data: {
       tenant_id: 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa',
       onboarding_status: 'ready_for_review',
@@ -208,33 +208,33 @@ async function runOwnerOnboardingBoundaryTests() {
       is_owner_ready_for_review: true
     },
     error: null
-  })) as any;
+  });
   const readyState = await tenantOnboardingFlowService.loadOnboardingState();
   assert.strictEqual(readyState?.publicSiteStatus, 'draft', 'ONB-13 FAIL: publicSiteStatus must remain draft');
   console.log('✅ ONB-13 PASSED: Storefront publicSiteStatus remains draft.');
 
   // ONB-14: No mock fallback when in Supabase mode
-  supabase.rpc = (async () => ({ data: null, error: new Error('P2A_TEST_ERROR: Connection failed') })) as any;
+  supabase.rpc = async () => ({ data: null, error: new Error('P2A_TEST_ERROR: Connection failed') });
   const failRes = await tenantOnboardingFlowService.saveBusinessProfile({ businessName: 'Test' });
   assert.strictEqual(failRes.success, false, 'ONB-14 FAIL: Supabase mode must not fall back to mock data');
   console.log('✅ ONB-14 PASSED: Zero silent fallback to mock data on Supabase error.');
 
   // ONB-15: Default duration fallback for service
   let capturedDuration = 0;
-  supabase.rpc = (async (name, args) => {
+  supabase.rpc = async (name, args) => {
     capturedDuration = args.p_duration;
     return { data: { success: true }, error: null };
-  }) as any;
+  };
   await tenantOnboardingFlowService.createFirstService({ name: 'Test', duration: 0, price: 0 });
   assert.strictEqual(capturedDuration, 30, 'ONB-15 FAIL: Default duration must be 30 when 0 supplied');
   console.log('✅ ONB-15 PASSED: Default service duration fallback verified.');
 
   // ONB-16: Default work days for staff
   let capturedWorkDays = [];
-  supabase.rpc = (async (name, args) => {
+  supabase.rpc = async (name, args) => {
     capturedWorkDays = args.p_work_days;
     return { data: { success: true }, error: null };
-  }) as any;
+  };
   await tenantOnboardingFlowService.createFirstStaff({ name: 'Test' });
   assert.deepStrictEqual(capturedWorkDays, [1, 2, 3, 4, 5, 6], 'ONB-16 FAIL: Default workDays must be [1,2,3,4,5,6]');
   console.log('✅ ONB-16 PASSED: Default staff work days fallback verified.');
@@ -242,11 +242,11 @@ async function runOwnerOnboardingBoundaryTests() {
   // ONB-17: Default work hours for staff
   let capturedStart = '';
   let capturedEnd = '';
-  supabase.rpc = (async (name, args) => {
+  supabase.rpc = async (name, args) => {
     capturedStart = args.p_start_time;
     capturedEnd = args.p_end_time;
     return { data: { success: true }, error: null };
-  }) as any;
+  };
   await tenantOnboardingFlowService.createFirstStaff({ name: 'Test' });
   assert.strictEqual(capturedStart, '09:00:00', 'ONB-17 FAIL: Default startTime must be 09:00:00');
   assert.strictEqual(capturedEnd, '18:00:00', 'ONB-17 FAIL: Default endTime must be 18:00:00');
@@ -262,10 +262,10 @@ async function runOwnerOnboardingBoundaryTests() {
   supabase.auth = {
     getSession: async () => {
       authChecked = true;
-      return { data: { session: { user: { id: 'owner-user-uuid' } } }, error: null } as any;
+      return { data: { session: { user: { id: 'owner-user-uuid' } } }, error: null };
     }
-  } as any;
-  supabase.from = ((table: string) => {
+  };
+  supabase.from = (table) => {
     if (table === 'users_profile') {
       return {
         select: () => ({
@@ -273,10 +273,10 @@ async function runOwnerOnboardingBoundaryTests() {
             single: async () => ({ data: { tenant_id: 'canonical-tenant-uuid', role: 'tenant_owner' }, error: null })
           })
         })
-      } as any;
+      };
     }
-    return {} as any;
-  }) as any;
+    return {};
+  };
 
   const tenantId = await tenantOnboardingFlowService.resolveOwnerTenantId();
   assert.strictEqual(authChecked, true, 'ONB-19 FAIL: getSession must be called');
@@ -285,8 +285,8 @@ async function runOwnerOnboardingBoundaryTests() {
 
   // ONB-20: Unauthenticated session returns null tenant_id
   supabase.auth = {
-    getSession: async () => ({ data: { session: null }, error: null }) as any
-  } as any;
+    getSession: async () => ({ data: { session: null }, error: null })
+  };
   const unauthTenantId = await tenantOnboardingFlowService.resolveOwnerTenantId();
   assert.strictEqual(unauthTenantId, null, 'ONB-20 FAIL: Unauthenticated session must return null tenant_id');
   console.log('✅ ONB-20 PASSED: Unauthenticated session returns null tenant_id cleanly.');
