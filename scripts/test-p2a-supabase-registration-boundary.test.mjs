@@ -150,7 +150,8 @@ async function runBoundaryTests() {
 
   const failResult = await tenantRegistrationService.registerTenant({ ownerEmail: 'fail@test.com', businessName: 'Fail Salon', planId: 'baslangic' });
   assert.strictEqual(failResult.success, false, 'Test 3 FAIL: Result success must be false on RPC error');
-  assert.ok(failResult.error?.includes('PROFILE_NOT_PROVISIONABLE'), 'Test 3 FAIL: Error message should be returned');
+  assert.strictEqual(failResult.reasonCode, 'PROFILE_NOT_PROVISIONABLE', 'Test 3 FAIL: reasonCode should be PROFILE_NOT_PROVISIONABLE');
+  assert.ok(typeof failResult.error === 'string' && failResult.error.length > 0, 'Test 3 FAIL: Error message should be returned');
   console.log('✅ Test 3 PASSED: RPC failure handled cleanly without throwing uncaught exception.');
 
   // Test 4: Verify Zero Client-Side UUID Generation or Direct Table Writes
