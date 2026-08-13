@@ -304,8 +304,8 @@ BEGIN
     -- Setup readiness checklist fixtures for User C tenant
     v_tenant_id := (r4->>'tenant_id')::uuid;
 
-    -- Temporarily set subscription status to manual_active so readiness checklist fixtures pass commercial triggers
-    UPDATE public.subscriptions SET status = 'manual_active' WHERE tenant_id = v_tenant_id;
+    -- Temporarily set subscription status to active so readiness checklist fixtures pass commercial triggers
+    UPDATE public.subscriptions SET status = 'active' WHERE tenant_id = v_tenant_id;
 
     INSERT INTO public.services (id, tenant_id, name, duration, price, active)
     VALUES (gen_random_uuid(), v_tenant_id, 'Kesim & Fön', 30, 200, true)
