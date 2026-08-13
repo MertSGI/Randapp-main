@@ -3,7 +3,8 @@
 **Base Pilot SHA**: `134c8716c2511c909cd400aee0496ebd70f63bf6`  
 **Foundation Closed SHA**: `c8f4b984581df5a9031a42f0851de6b44edf7828` (CI `31670377898` SUCCESS)  
 **P2A.1 Closed SHA**: `94b4a43c528cfd750ba205a9cbf4b21df2295d4b` (CI `31671595067` SUCCESS)  
-**Current Stage**: `P2A.2 — Canonical Owner Onboarding Flow Integration`  
+**P2A.2 Initial SHA**: `62f04bc695441a1efa4828463e7f7cfa46bdb309` (CI `31672003497` SUCCESS)  
+**Current Stage**: `P2A.2-R1 — Server-Authoritative Owner Onboarding Contract & Test Truth Closure`  
 
 ---
 
@@ -27,22 +28,25 @@
 
 ---
 
-## P2A.2 Canonical Owner Onboarding Flow Architecture
-- **Canonical Server State**: Onboarding progress driven by `public.tenant_onboarding_progress` and DB truth (`tenants`, `tenant_business_profiles`, `branches`, `services`, `staff`, `staff_services`, `availability_rules`). LocalStorage booleans overridden by DB truth in Supabase mode.
-- **Server-Authoritative Tenant Resolution**: Tenant resolved via `auth.uid() -> users_profile -> tenant_id`. No caller-supplied `tenant_id` trusted for owner mutations.
-- **Onboarding Step Contracts**:
-  - `FIRST_BRANCH_CONTRACT`: Primary branch created/confirmed for owner tenant idempotently.
-  - `FIRST_SERVICE_CONTRACT`: First service created without synthetic QA templates.
-  - `FIRST_STAFF_CONTRACT`: First staff member created with staff/service mappings and availability rules. Cross-tenant service mapping rejected.
-- **Readiness Predicate & Draft Privacy**: Evaluates `salon_info_completed && services_completed && staff_completed && calendar_completed`. On satisfaction, sets `onboarding_status = 'ready_for_review'`. Storefront remains `public_site_status = 'draft'`, `is_public_profile_enabled = false`, and subscription remains `pending_onboarding`. Super Admin approval remains required for live publishing.
+## P2A.2 & P2A.2-R1 Server-Authoritative Owner Onboarding Architecture
+- **Server-Authoritative Onboarding RPCs (R1)**:
+  - `20260903_p2a_owner_onboarding_contracts.sql` migration defines `save_owner_business_profile`, `create_owner_first_branch`, `create_owner_first_service`, `create_owner_first_staff`, `get_owner_onboarding_state`, and `evaluate_owner_onboarding_readiness`.
+  - All tenant authorities derived inside PostgreSQL from `auth.uid() -> users_profile -> tenant_id`. Caller-supplied tenant IDs or roles rejected.
+  - All branch/service/staff entity UUIDs generated server-side via `gen_random_uuid()`. No frontend UUID generation.
+- **Business Profile Completion Predicate (R1)**: Real `SALON_INFO_COMPLETION_PREDICATE` checks required non-empty business fields (`name`, `category`, `city`, `address`, `phone`) without fabricated defaults (`Hair Salon` / `Istanbul`).
+- **Atomic First Staff & Cross-Tenant Isolation (R1)**: `create_owner_first_staff` atomically creates staff, links `staff_branches`, maps `staff_services` (rejecting foreign-tenant services with `FOREIGN_TENANT_SERVICE_REJECTED`), and sets `availability_rules`.
+- **Readiness Predicate & Draft Privacy**: Evaluates `salon_info_completed && services_completed && staff_completed && calendar_completed`. On satisfaction, sets `onboarding_status = 'ready_for_review'`. Storefront remains `public_site_status = 'draft'`, `is_public_profile_enabled = false`, and subscription remains `pending_onboarding`. Super Admin approval via `approve_and_publish_tenant` remains required for live publishing.
 
 ---
 
 ## Executable Test Classification Matrix
-- `ONBOARDING_BOUNDARY_TESTS`: `scripts/test-p2a-owner-onboarding-boundary.test.mjs` (PASS - 7 tests ONB-01..20 validating canonical progress loading, draft privacy, branch/service/staff tenant binding, idempotency, cross-tenant isolation, and `READY_FOR_REVIEW` predicate).
-- `SUPABASE_BOUNDARY_TESTS`: `scripts/test-p2a-supabase-registration-boundary.test.mjs` (PASS - 6 tests validating RPC parameters, idempotency retry, existing owner resolution, profile safety, server authority, and plan version errors).
-- `MOCK_REGRESSION_TESTS`: `scripts/test-p2a-mock-registration-regression.test.mjs` (PASS - 2 tests validating local mock fallback execution and error isolation).
+- `PROVISIONING_DB_TESTS`: `supabase/tests/p2a_tenant_provisioning_integration_tests.sql` (PASS - PROV-01..24).
+- `REGISTRATION_BOUNDARY_TESTS`: `scripts/test-p2a-supabase-registration-boundary.test.mjs` (PASS - 6 RPC boundary tests).
+- `ONBOARDING_DB_TESTS`: `supabase/tests/p2a_onboarding_integration_tests.sql` (PASS - 24 disposable DB integration tests DB-ONB-01..24).
+- `ONBOARDING_FRONTEND_BOUNDARY_TESTS`: `scripts/test-p2a-owner-onboarding-boundary.test.mjs` (PASS - 20 frontend boundary tests ONB-01..20).
+- `MOCK_REGRESSION_TESTS`: `scripts/test-p2a-mock-registration-regression.test.mjs` (PASS - 2 mock regression tests).
 - `STATIC_SECURITY_TESTS`: `scripts/test-p2a-static-security-scan.test.mjs` (PASS - 184 frontend source files scanned, confirming zero `service_role` or backend key usage).
+- `BUILD_TESTS`: Production Vite build (`npm run build`) and whitespace check (`git diff --check`) verified cleanly.
 
 ---
 
@@ -54,9 +58,16 @@
 
 ---
 
+## Migrations Created (FILES ONLY - NOT APPLIED TO STAGING)
+1. `supabase/migrations/20260901_p2a_atomic_tenant_provisioning_rpc.sql`
+2. `supabase/migrations/20260902_p2a_publish_commercial_contract_alignment.sql`
+3. `supabase/migrations/20260903_p2a_owner_onboarding_contracts.sql`
+
+---
+
 ## Deployment & Gate Status
 - **Staging Deployment**: `UNTOUCHED` (`https://lari-staging.vercel.app/`)
-- **Owner Onboarding Integration**: `P2A.2 CANONICAL FLOW IMPLEMENTED & VERIFIED`
+- **Owner Onboarding Integration**: `P2A.2-R1 SERVER-AUTHORITATIVE CONTRACTS VERIFIED & TESTED`
 - **Next Gate**: P2B Commercial Operator & UI Flow Verification
 
 ---

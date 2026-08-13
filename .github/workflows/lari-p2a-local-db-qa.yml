@@ -170,6 +170,31 @@ jobs:
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx tsx supabase/tests/p2a_concurrency_harness.ts
 
+      - name: Run Disposable DB Owner Onboarding Integration Suite
+        run: |
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== RUNNING DISPOSABLE DB OWNER ONBOARDING INTEGRATION SUITE ==="
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_onboarding_integration_tests.sql
+
+      - name: Run Frontend Owner Onboarding & Registration Boundary Matrix
+        run: |
+          echo "=== RUNNING FRONTEND OWNER ONBOARDING & REGISTRATION BOUNDARY MATRIX ==="
+          npx tsx scripts/test-p2a-owner-onboarding-boundary.test.mjs
+          npx tsx scripts/test-p2a-supabase-registration-boundary.test.mjs
+          npx tsx scripts/test-p2a-mock-registration-regression.test.mjs
+          npx tsx scripts/test-p2a-static-security-scan.test.mjs
+
+      - name: Run Frontend Production Build Verification
+        run: |
+          echo "=== RUNNING PRODUCTION FRONTEND BUILD ==="
+          npm run build
+
+      - name: Run Git Diff & Whitespace Check
+        run: |
+          echo "=== RUNNING GIT DIFF & WHITESPACE CHECK ==="
+          git diff --check
+
       - name: Cleanup Disposable Container
         if: always()
         run: |
