@@ -27,6 +27,14 @@ globalThis.sessionStorage = {
 };
 
 async function runBoundaryTests() {
+  // Mock authenticated session for registration boundary tests
+  supabase.auth = {
+    getSession: async () => ({
+      data: { session: { user: { id: '11111111-1111-1111-1111-111111111111' } } },
+      error: null
+    })
+  };
+
   // Test 1: Verify registerTenant calls provision_tenant_for_authenticated_owner RPC with exact parameter names
   let rpcCalled = false;
   let rpcName = '';
@@ -56,7 +64,7 @@ async function runBoundaryTests() {
     requestedPlanCode: 'baslangic'
   });
 
-  assert.strictEqual(result.success, true, 'Test 1 FAIL: Registration should return success');
+  assert.strictEqual(result.success, true, `Test 1 FAIL: Registration should return success. Got error: ${result.error}`);
   assert.strictEqual(rpcCalled, true, 'Test 1 FAIL: supabase.rpc should have been called');
   assert.strictEqual(rpcName, 'provision_tenant_for_authenticated_owner', 'Test 1 FAIL: RPC name must match canonical RPC name');
   
