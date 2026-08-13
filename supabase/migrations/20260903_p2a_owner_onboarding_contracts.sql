@@ -30,9 +30,9 @@ BEGIN
     END IF;
 
     -- Count active entities
-    SELECT count(*) INTO v_service_count FROM public.services WHERE tenant_id = p_tenant_id AND (active = true OR is_active = true);
-    SELECT count(*) INTO v_staff_count FROM public.staff WHERE tenant_id = p_tenant_id AND (active = true OR is_active = true);
-    SELECT count(*) INTO v_avail_count FROM public.availability_rules WHERE tenant_id = p_tenant_id AND (is_active = true OR active = true);
+    SELECT count(*) INTO v_service_count FROM public.services WHERE tenant_id = p_tenant_id AND active = true;
+    SELECT count(*) INTO v_staff_count FROM public.staff WHERE tenant_id = p_tenant_id AND active = true;
+    SELECT count(*) INTO v_avail_count FROM public.availability_rules WHERE tenant_id = p_tenant_id AND is_active = true;
 
     v_salon_info := COALESCE(v_progress.salon_info_completed, false);
     v_services := (v_service_count >= 1) OR COALESCE(v_progress.services_completed, false);
@@ -374,7 +374,7 @@ BEGIN
     END IF;
 
     -- Check existing staff by name
-    SELECT id INTO v_existing_id FROM public.staff WHERE tenant_id = v_tenant_id AND name = v_clean_name AND (active = true OR is_active = true) LIMIT 1;
+    SELECT id INTO v_existing_id FROM public.staff WHERE tenant_id = v_tenant_id AND name = v_clean_name AND active = true LIMIT 1;
     IF v_existing_id IS NOT NULL THEN
         v_staff_id := v_existing_id;
     ELSE
