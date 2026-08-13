@@ -503,8 +503,8 @@ BEGIN
     END IF;
 
     -- Branch association
-    INSERT INTO public.staff_branches (staff_id, branch_id)
-    VALUES (v_staff_id, v_branch_id)
+    INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)
+    VALUES (v_tenant_id, v_staff_id, v_branch_id)
     ON CONFLICT (staff_id, branch_id) DO NOTHING;
 
     -- Service mappings
