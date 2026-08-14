@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/p2a-commercial-core-foundation
+      - ci/p2a2-exact-sha-evidence-20260814
   pull_request:
     branches:
       - feature/p2a-commercial-core-foundation
@@ -16,6 +17,19 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          ref: 80297685cb3fd1c73a41207e6fd3dd1faedfbab2
+
+      - name: Verify Exact Product SHA Match
+        run: |
+          REQUESTED_PRODUCT_SHA="80297685cb3fd1c73a41207e6fd3dd1faedfbab2"
+          ACTUAL_TEST_WORKTREE_SHA=$(git rev-parse HEAD)
+          echo "REQUESTED_PRODUCT_SHA:    ${REQUESTED_PRODUCT_SHA}"
+          echo "ACTUAL_TEST_WORKTREE_SHA: ${ACTUAL_TEST_WORKTREE_SHA}"
+          if [ "${ACTUAL_TEST_WORKTREE_SHA}" != "${REQUESTED_PRODUCT_SHA}" ]; then
+            echo "ERROR: Checked out worktree SHA does not match expected product SHA!"
+            exit 1
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
