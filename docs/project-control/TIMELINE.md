@@ -1,0 +1,18 @@
+# Append-Only Project Timeline & Event History
+
+- **UNKNOWN**: Project Day 0 / Commencement (Initial commit history; exact Day 0 date UNKNOWN).
+- **2026-08-12T13:51:59Z**: Milestone `P1C/P1D` main pilot branch created (`staging/supabase-staging-consistency` at `134c8716c2511c909cd400aee0496ebd70f63bf6`).
+- **2026-08-14T06:52:02Z**: Milestone `P1D.1A` manifest built for 64+64 atomic cleanup.
+- **2026-08-14T10:48:55Z**: Milestone `P1D.1A` post-commit remote verification completed (`P1C4B_REMOTE_CLEANUP_FINAL_STATUS = CLOSED_VERIFIED`, single surviving Canary A appointment `22f6f1f6...`).
+- **2026-08-14T10:50:00Z**: Milestone `P1D.1A` read-only rearm verified (`P1D1A_EXECUTION_STATE = ARMED_FOR_EXACTLY_ONE_REAL_CONTROLLED_PARTICIPANT`).
+- **2026-08-14T11:00:00Z**: Milestone `P2A.0` / `P2A.1` / `P2A.2` Commercial Core baseline frozen on branch `feature/p2a-commercial-core-foundation` at exact SHA `80297685cb3fd1c73a41207e6fd3dd1faedfbab2`.
+- **2026-08-14T11:43:26Z**: Milestone `P2A` isolated CI evidence branch created (`ci/p2a2-exact-sha-evidence-20260814` at `ed6d381b9c3843b3089fdc8ab4987cf6c38bb9d9`).
+- **2026-08-14T11:44:38Z**: Milestone `P2A.2` exact-SHA CI execution completed (GitHub Actions Run `31797365055` SUCCESS; tested product SHA `80297685...`; 4/4 DB acceptance suites PASS; 5-session concurrency PASS).
+- **2026-08-14T14:52:14Z**: Milestone `P2A.3` onboarding state handoff verified (`CLOSED_PROVEN` on exact product SHA `80297685...`).
+- **2026-08-17T05:34:52Z**: Milestone `CORE-RC.3` evidence audit conducted:
+  - Rejected prior `CLOSED_PROVEN` claim for `CORE-RC.3`.
+  - Confirmed `integration/core-rc3-runtime` branch does NOT exist.
+  - Confirmed UI V2 candidate branch is NOT found.
+  - Corrected migration count truth to 59 files (last migration: `20260903_p2a_owner_onboarding_contracts.sql`).
+  - Set `CORE-RC.3` status to `HOLD_PENDING_LITERAL_EXECUTION_TRUTH`.
+- **2026-08-17T08:57:55Z**: Milestone `PROJECT_CONTROL` canonical project control plane established on branch `control/lari-project-control-plane`.
