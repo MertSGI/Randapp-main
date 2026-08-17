@@ -1,13 +1,19 @@
-# PROJECT_CONTROL.md — LARI Project Control Plane Landing Page
+# PROJECT_CONTROL.md — LARİ Project Control Plane Landing Page
 
 ## Executive Summary & Current Status
 
-- **Project**: LARI SaaS Platform (Randapp)
+- **Project**: LARİ SaaS Platform (Repository: `MertSGI/Randapp-main`)
 - **Current Core Status**: Commercial Core Foundation Baseline Closed & Verified (`P2A.0` to `P2A.3` `CLOSED_PROVEN`).
-- **Core-RC Hardening**: `CORE-RC.1` CLOSED, `CORE-RC.2B` CLOSED_PROVEN, `CORE-RC.3` HOLD_PENDING_LITERAL_EXECUTION_TRUTH.
-- **Pilot Arm State**: `P1D.1A` CLOSED_PROVEN / ARMED (Staging data clean, Melis allowed, canonical fixture blocked, Canary A preserved).
+- **Active Core Milestone**: `CORE-RC.3` (`ACTIVE` / `HOLD_PENDING_LITERAL_EXECUTION_TRUTH`).
+- **Core-RC Progress**:
+  - `CORE-RC.1`: `INTEGRATION_ALREADY_SATISFIED`
+  - `CORE-RC.2A`: `PRESENT_ON_CORE_BASELINE` (Outbox/provider abstraction present; provider config pending)
+  - `CORE-RC.2B`: `PRESENT_ON_CORE_BASELINE` (Public Booking Anti-Abuse RPCs present)
+  - `CORE-RC.2C`: `PRESENT_ON_CORE_BASELINE` (Demo isolation & tenant subdomain readiness present; wildcard DNS pending)
+  - `CORE-RC.3`: `HOLD_PENDING_LITERAL_EXECUTION_TRUTH` (Parallel execution model: Core Runtime ready; UI V2 input pending)
+- **Main Pilot Status**: `P1D.1A` `CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE` (Staging data clean, Canary A preserved, real customer/payment mutations = 0, technical browser acceptance verified at 2026-08-14T16:55:15+03:00).
 - **Master Product Delivery Train**:
-  `LARI CORE` -> `PACKAGE / CUSTOMER CUSTOMIZATION` -> `LARI CLINIC` -> `LARI HEALTH TOURISM` -> `FINAL DELIVERY`
+  `LARİ CORE` -> `PACKAGE / CUSTOMER CUSTOMIZATION` -> `LARİ CLINIC` -> `LARİ HEALTH TOURISM` -> `FINAL DELIVERY`
 
 ---
 
@@ -15,7 +21,7 @@
 
 | Component / Workstream | Branch Name | Canonical SHA | Status |
 | :--- | :--- | :--- | :--- |
-| **Main Pilot Staging** | `staging/supabase-staging-consistency` | `134c8716c2511c909cd400aee0496ebd70f63bf6` | `ARMED_UNCHANGED` |
+| **Main Pilot Staging** | `staging/supabase-staging-consistency` | `134c8716c2511c909cd400aee0496ebd70f63bf6` | `CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE` |
 | **Commercial Core Baseline** | `feature/p2a-commercial-core-foundation` | `80297685cb3fd1c73a41207e6fd3dd1faedfbab2` | `CLOSED_PROVEN` |
 | **CI Evidence Trigger** | `ci/p2a2-exact-sha-evidence-20260814` | `ed6d381b9c3843b3089fdc8ab4987cf6c38bb9d9` | `CI_RUN_31797365055_SUCCESS` |
 | **Project Control Plane** | `control/lari-project-control-plane` | (Current Branch) | `ACTIVE_GOVERNANCE` |
@@ -24,17 +30,18 @@
 
 ## Milestone Status Summary
 
-### Closed & Verified Gates (`CLOSED_PROVEN` / `CLOSED`)
-- **`P1D.1A`**: Technical staging acceptance complete & remote cleanup verified.
-- **`P2A.0`**: Server-authoritative atomic tenant provisioning RPC (`provision_tenant_for_authenticated_owner`).
-- **`P2A.1`**: Commercial contract alignment & registration boundary tests.
-- **`P2A.2`**: Server-authoritative owner onboarding contracts, readiness predicate, least-privilege commercial policies.
-- **`P2A.3`**: Onboarding state machine handoff and readiness contracts.
-- **`CORE-RC.1`**: Core domain architecture and RPC boundary hardening.
-- **`CORE-RC.2B`**: Paymentless pilot authorization and eligibility boundary execution.
+### Closed & Verified Gates
+- **`P1D.1A`**: `CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE` (Technical browser acceptance verified at 2026-08-14T16:55:15+03:00; Canary A preserved; zero external message sends; zero real customer/payment mutations).
+- **`P2A.0`**: `CLOSED_PROVEN` (Server-authoritative atomic tenant provisioning RPC `provision_tenant_for_authenticated_owner`).
+- **`P2A.1`**: `CLOSED_PROVEN` (Commercial contract alignment & registration boundary tests).
+- **`P2A.2`**: `CLOSED_PROVEN` (Server-authoritative owner onboarding contracts, readiness predicate, least-privilege commercial policies).
+- **`P2A.3`**: `CLOSED_PROVEN` (Onboarding state machine handoff and readiness contracts verified at 2026-08-14T16:13:12+03:00).
+- **`CORE-RC.1`**: `INTEGRATION_ALREADY_SATISFIED` (Accepted main-pilot baseline proven as strict ancestor of Commercial Core baseline).
 
-### Active / Hold Gates
-- **`CORE-RC.3`**: `HOLD_PENDING_LITERAL_EXECUTION_TRUTH` (Integration branch `integration/core-rc3-runtime` pending creation; UI V2 candidate pending input; real browser E2E pending runner invocation).
+### Active Milestones & Parallel Workstreams
+- **`CORE-RC.3`**: `ACTIVE` / `HOLD_PENDING_LITERAL_EXECUTION_TRUTH`.
+  - **Lane CORE_RUNTIME** (`READY_TO_EXECUTE`): Execute real browser `/register` flow, synthetic owner onboarding, `ready_for_review` transition, Super Admin publish, public storefront, customer booking/manage/owner visibility in isolated non-production runtime.
+  - **Lane UI_V2** (`INPUT_PENDING`): Materialize parallel UI V2 candidate from dedicated UI workstream, verify backend compatibility, and integrate when ready.
 
 ---
 
@@ -42,17 +49,18 @@
 
 - **Authoritative P2A Exact-SHA CI Run**: GitHub Actions Run `31797365055` (`push` event, tested product SHA `80297685...`, 4/4 DB acceptance suites PASS, 5-session concurrency PASS).
 - **Rejected Claims**:
-  - `P2B.1` (Synthesized agent phase — REJECTED).
+  - Synthesized agent phases (REJECTED).
   - Previous `CORE-RC.3 CLOSED_PROVEN` claim (REJECTED due to missing branch, missing UI V2 candidate, and elevated SQL integration tests).
+  - Generic reuse of Run `31797365055` for non-P2A RC gates (REJECTED).
 
 ---
 
 ## Quick File Index
 
-- [`docs/project-control/STATE.json`](file:///C:/tmp/p2a_control_worktree/docs/project-control/STATE.json): Machine-readable project state.
-- [`docs/project-control/ROADMAP_12W.md`](file:///C:/tmp/p2a_control_worktree/docs/project-control/ROADMAP_12W.md): Master 12-week roadmap & phase tracking.
-- [`docs/project-control/EVIDENCE.jsonl`](file:///C:/tmp/p2a_control_worktree/docs/project-control/EVIDENCE.jsonl): Append-only evidence ledger.
-- [`docs/project-control/DECISIONS.md`](file:///C:/tmp/p2a_control_worktree/docs/project-control/DECISIONS.md): Architectural decision record.
-- [`docs/project-control/NOMENCLATURE.md`](file:///C:/tmp/p2a_control_worktree/docs/project-control/NOMENCLATURE.md): Naming convention mapping.
-- [`docs/project-control/AI_HANDOFF.md`](file:///C:/tmp/p2a_control_worktree/docs/project-control/AI_HANDOFF.md): Bootstrap instructions for AI sessions.
-- [`docs/project-control/UPDATE_PROTOCOL.md`](file:///C:/tmp/p2a_control_worktree/docs/project-control/UPDATE_PROTOCOL.md): Rules for control plane updates.
+- [`docs/project-control/STATE.json`](docs/project-control/STATE.json): Machine-readable project state.
+- [`docs/project-control/ROADMAP_12W.md`](docs/project-control/ROADMAP_12W.md): Master 12-week roadmap & phase tracking.
+- [`docs/project-control/EVIDENCE.jsonl`](docs/project-control/EVIDENCE.jsonl): Append-only evidence ledger.
+- [`docs/project-control/DECISIONS.md`](docs/project-control/DECISIONS.md): Architectural decision register.
+- [`docs/project-control/NOMENCLATURE.md`](docs/project-control/NOMENCLATURE.md): Naming convention mapping.
+- [`docs/project-control/AI_HANDOFF.md`](docs/project-control/AI_HANDOFF.md): Bootstrap instructions for AI sessions.
+- [`docs/project-control/UPDATE_PROTOCOL.md`](docs/project-control/UPDATE_PROTOCOL.md): Rules for control plane updates.

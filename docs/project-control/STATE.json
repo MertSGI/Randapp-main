@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-08-17T08:57:55Z",
-  "product": "LARI SaaS Platform",
+  "updated_at": "2026-08-17T08:57:55+03:00",
+  "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
     "duration_weeks": 12,
@@ -10,19 +10,19 @@
     "reset_from_today_allowed": false
   },
   "master_delivery_train": [
-    "LARI Core",
+    "LARİ Core",
     "Package/Customer Customization",
-    "LARI Clinic",
-    "LARI Health Tourism",
+    "LARİ Clinic",
+    "LARİ Health Tourism",
     "Final Delivery"
   ],
-  "current_milestone": "P2A.3 / CORE-RC.3",
+  "current_milestone": "CORE-RC.3",
   "current_status": "COMMERCIAL_CORE_PROVEN_RC3_HOLD",
   "canonical_refs": {
     "main_pilot": {
       "branch": "staging/supabase-staging-consistency",
       "sha": "134c8716c2511c909cd400aee0496ebd70f63bf6",
-      "status": "ARMED_UNCHANGED"
+      "status": "CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE"
     },
     "commercial_core_baseline": {
       "branch": "feature/p2a-commercial-core-foundation",
@@ -38,10 +38,10 @@
   "accepted_gates": [
     {
       "gate": "P1D.1A",
-      "status": "CLOSED_PROVEN",
+      "status": "CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE",
       "evidence_level": "E4_SHARED_STAGING_LIVE",
       "tested_sha": "134c8716c2511c909cd400aee0496ebd70f63bf6",
-      "closed_at": "2026-08-14T10:48:55Z",
+      "closed_at": "2026-08-14T16:55:15+03:00",
       "reopen_condition": "Contradictory staging mutation or canary corruption evidence"
     },
     {
@@ -77,34 +77,55 @@
       "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
       "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
       "run_ids": ["31797365055"],
-      "closed_at": "2026-08-14T11:44:38Z",
+      "closed_at": "2026-08-14T16:13:12+03:00",
       "reopen_condition": "Failed onboarding handoff transaction"
     },
     {
       "gate": "CORE-RC.1",
-      "status": "CLOSED",
+      "status": "INTEGRATION_ALREADY_SATISFIED",
       "evidence_level": "E1_SOURCE_PROVEN",
       "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
       "closed_at": "2026-08-13T12:00:00Z",
       "reopen_condition": "Core contract syntax defect"
     },
     {
-      "gate": "CORE-RC.2B",
-      "status": "CLOSED_PROVEN",
-      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "gate": "CORE-RC.2A",
+      "status": "PRESENT_ON_CORE_BASELINE",
+      "evidence_level": "E1_SOURCE_PROVEN",
       "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-      "run_ids": ["31797365055"],
-      "closed_at": "2026-08-14T11:44:38Z",
-      "reopen_condition": "Eligibility boundary regression"
+      "scope": "Communication Outbox / Provider Abstraction",
+      "reopen_condition": "Provider abstraction contract regression"
+    },
+    {
+      "gate": "CORE-RC.2B",
+      "status": "PRESENT_ON_CORE_BASELINE",
+      "evidence_level": "E1_SOURCE_PROVEN",
+      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "scope": "Public Booking Anti-Abuse",
+      "reopen_condition": "Anti-abuse RPC contract regression"
+    },
+    {
+      "gate": "CORE-RC.2C",
+      "status": "PRESENT_ON_CORE_BASELINE",
+      "evidence_level": "E1_SOURCE_PROVEN",
+      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "scope": "Demo Isolation + Tenant Subdomain Readiness",
+      "reopen_condition": "Demo tenant isolation regression"
     }
   ],
   "active_workstreams": {
     "core_rc3": {
       "status": "HOLD_PENDING_LITERAL_EXECUTION_TRUTH",
-      "integration_branch": null,
-      "ui_v2_candidate_branch": null,
-      "ui_v2_state": "INPUT_PENDING",
-      "browser_e2e_state": "NOT_EXECUTED"
+      "lanes": {
+        "core_runtime": {
+          "status": "READY_TO_EXECUTE",
+          "objective": "Execute real browser /register flow, synthetic owner onboarding, ready_for_review transition, Super Admin publish, public storefront, customer booking/manage/owner visibility in isolated non-production runtime"
+        },
+        "ui_v2": {
+          "status": "INPUT_PENDING",
+          "objective": "Materialize parallel UI V2 candidate from dedicated UI workstream, verify backend compatibility, and integrate when ready"
+        }
+      }
     }
   },
   "external_dependencies": {
@@ -116,9 +137,9 @@
     "human_participant_uat": "DEFERRED_FIELD_VALIDATION"
   },
   "current_blockers": [
-    "UI V2 candidate input pending for CORE-RC.3 browser E2E execution"
+    "CORE-RC.3 literal browser/runtime execution evidence pending"
   ],
-  "next_action": "Await UI V2 candidate branch input and execute literal browser E2E for CORE-RC.3",
+  "next_action": "Start CORE_RUNTIME lane execution immediately for CORE-RC.3 while UI_V2 proceeds in parallel",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true
