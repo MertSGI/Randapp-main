@@ -85,7 +85,7 @@
       "status": "INTEGRATION_ALREADY_SATISFIED",
       "evidence_level": "E1_SOURCE_PROVEN",
       "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-      "closed_at": "2026-08-13T12:00:00Z",
+      "closed_at": "2026-08-14T16:36:05+03:00",
       "reopen_condition": "Core contract syntax defect"
     },
     {
