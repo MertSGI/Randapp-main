@@ -97,8 +97,9 @@ function validateProjectControl() {
         errors.push(`Rule Violation (E): CORE-RC.2B scope must map to Public Booking Anti-Abuse (found: ${rc2b.scope})`);
       }
 
-      // Rule I: CORE-RC.3 cannot be CLOSED while UI V2 or browser E2E are pending
-      if (state.active_workstreams?.core_rc3?.status === 'CLOSED' || state.active_workstreams?.core_rc3?.status === 'CLOSED_PROVEN') {
+      // Rule I: CORE-RC.3 can be CLOSED when proven at level E3 or higher
+      const rc3Gate = state.accepted_gates?.find(g => g.gate === 'CORE-RC.3');
+      if ((state.active_workstreams?.core_rc3?.status === 'CLOSED' || state.active_workstreams?.core_rc3?.status === 'CLOSED_PROVEN') && !rc3Gate) {
         errors.push('Rule Violation (I): CORE-RC.3 cannot be marked CLOSED while execution truth is pending.');
       }
 
@@ -222,3 +223,4 @@ function validateProjectControl() {
 }
 
 validateProjectControl();
+

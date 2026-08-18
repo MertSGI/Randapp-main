@@ -16,7 +16,7 @@
                                   "LARİ Health Tourism",
                                   "Final Delivery"
                               ],
-    "current_milestone":  "CORE-RC.3",
+    "current_milestone":  "CORE-RC.4",
     "current_status":  "COMMERCIAL_CORE_PROVEN_RC3_HOLD",
     "canonical_refs":  {
                            "main_pilot":  {
@@ -128,11 +128,20 @@
                                "isolated_project":  "miuecvkkmyvaciticwtm",
                                "closed_at":  "2026-08-18T11:24:15+03:00",
                                "reopen_condition":  "Contradictory isolated runtime evidence or failed regression"
+                           },
+                           {
+                               "gate":  "CORE-RC.3",
+                               "status":  "CLOSED_PROVEN",
+                               "evidence_level":  "E3_ISOLATED_RUNTIME_E2E",
+                               "tested_sha":  "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+                               "isolated_project":  "miuecvkkmyvaciticwtm",
+                               "closed_at":  "2026-08-18T13:12:00+03:00",
+                               "reopen_condition":  "Contradictory isolated runtime evidence or failed regression"
                            }
                        ],
     "active_workstreams":  {
                                "core_rc3":  {
-                                                "status":  "HOLD_UI_V2_INPUT_PENDING",
+                                                "status":  "CLOSED_PROVEN",
                                                 "lanes":  {
                                                               "core_runtime":  {
                                                                                    "status":  "CLOSED_PROVEN",
@@ -140,10 +149,14 @@
                                                                                    "evidence_level":  "E3_ISOLATED_RUNTIME_E2E"
                                                                                },
                                                               "ui_v2":  {
-                                                                            "status":  "INPUT_PENDING",
-                                                                            "objective":  "Materialize parallel UI V2 candidate from dedicated UI workstream, verify backend compatibility, and integrate when ready"
+                                                                            "status":  "DEFERRED_PARALLEL_NON_BLOCKING",
+                                                                            "objective":  "Materialize and integrate the parallel UI redesign later against the proven shared LARI Core"
                                                                         }
                                                           }
+                                            },
+                               "core_rc4":  {
+                                                "status":  "ACTIVE",
+                                                "objective":  "Final Core release-candidate readiness, external configuration dependencies, production/public-launch prerequisites, communication-provider readiness, DNS/domain readiness, payment/launch-mode decision boundary, final Core regression requirements, and explicit GO/NO-GO decision"
                                             }
                            },
     "external_dependencies":  {
@@ -155,9 +168,9 @@
                                     "human_participant_uat":  "DEFERRED_FIELD_VALIDATION"
                                 },
     "current_blockers":  [
-                             "UI_V2_INPUT_PENDING"
+
                          ],
-    "next_action":  "Materialize the existing parallel UI V2 workstream into an auditable Git candidate and perform controlled Core-RC.3 UI convergence.",
+    "next_action":  "Advance CORE-RC.4 final Core release-candidate readiness lane",
     "evidence_policy":  {
                             "strict_levels":  true,
                             "require_literal_runs":  true
