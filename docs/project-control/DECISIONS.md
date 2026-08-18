@@ -28,3 +28,7 @@
 ## DECISION-006: AI Agent Roadmap Authority Boundary
 - **Status**: ACCEPTED
 - **Decision**: Coding assistants and AI agents orchestrate execution against the approved project control plane. Agents NEVER synthesize or invent new canonical roadmap phases (e.g., P2B).
+
+## DECISION-007: CORE-RC.4 Closure & Main Delivery Train Advancement
+- **Status**: ACCEPTED
+- **Decision**: Milestone `CORE-RC.4` is closed as proven (`CLOSED_PROVEN` at level `E2_EXECUTABLE_EXACT_SHA_CI`, exact product SHA `e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a`, GitHub Actions Run `32134598853`). Cross-layer `pending_onboarding` subscription status contract alignment is verified and frozen. The main product delivery train is advanced to `Package/Customer Customization`.
