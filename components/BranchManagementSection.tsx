@@ -19,9 +19,7 @@ const BranchManagementSection: React.FC<BranchManagementSectionProps> = ({ tenan
   const [newBranchName, setNewBranchName] = useState('');
 
   const loadBranches = async () => {
-    // ensuring we have at least primary
-    await branchService.ensurePrimaryBranchForTenant(tenantId);
-    const list = branchService.getStoredBranches(tenantId);
+    const list = await branchService.listBranches(tenantId);
     setBranches(list.filter(b => b.isActive));
   };
 
