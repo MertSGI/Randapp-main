@@ -21,3 +21,4 @@
 - **2026-08-18**: Milestone CORE-RC.3 isolated acceptance project migration parity reached (59/59 canonical migrations applied to miuecvkkmyvaciticwtm).
 - **2026-08-18T11:24:15+03:00**: Milestone CORE-RC.3 CORE_RUNTIME E3 isolated runtime acceptance closed (E3_ISOLATED_RUNTIME_E2E, CORE_RUNTIME lane CLOSED_PROVEN, CORE_RUNTIME removed from critical path, overall state HOLD_UI_V2_INPUT_PENDING awaiting required UI_V2 convergence).
 - **2026-08-18T13:12:00+03:00**: Product decision update: UI V2 classified as DEFERRED_PARALLEL_NON_BLOCKING; milestone CORE-RC.3 overall status closed (CLOSED_PROVEN at level E3_ISOLATED_RUNTIME_E2E); main delivery train advanced to CORE-RC.4 (Final Core Release Candidate Readiness).
+- **2026-08-18T14:32:00+03:00**: Milestone CORE-RC.4 release candidate materialized on branch elease/core-rc4 at exact SHA 3fc5415eaee70c7207ca2c656be68ba62470a51e (RC_CANDIDATE_MATERIALIZED, level E1_SOURCE_PROVEN).

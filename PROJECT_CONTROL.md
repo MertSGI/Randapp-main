@@ -4,7 +4,7 @@
 
 - **Project**: LARİ SaaS Platform (Repository: `MertSGI/Randapp-main`)
 - **Current Core Status**: Commercial Core Foundation Baseline Closed & Verified (`P2A.0` to `P2A.3` `CLOSED_PROVEN`).
-- **Active Core Milestone**: `CORE-RC.4` (`ACTIVE` / Final Core Release Candidate Readiness).
+- **Active Core Milestone**: `CORE-RC.4` (`RC_CANDIDATE_MATERIALIZED` / Candidate SHA `3fc5415eaee70c7207ca2c656be68ba62470a51e`).
 - **Core-RC Progress**:
   - `CORE-RC.1`: `INTEGRATION_ALREADY_SATISFIED`
   - `CORE-RC.2A`: `PRESENT_ON_CORE_BASELINE` (Outbox/provider abstraction present; provider config pending)
@@ -67,4 +67,5 @@
 
 
 - **CORE-RC.4**: ACTIVE / Final Core Release Candidate Readiness (External configuration dependencies, production/public-launch prerequisites, communication-provider readiness, DNS/domain readiness, payment/launch-mode decision boundary, final Core regression requirements, and explicit GO/NO-GO decision).
+
 

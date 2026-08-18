@@ -99,8 +99,9 @@ function validateProjectControl() {
 
       // Rule I: CORE-RC.3 can be CLOSED when proven at level E3 or higher
       const rc3Gate = state.accepted_gates?.find(g => g.gate === 'CORE-RC.3');
-      if ((state.active_workstreams?.core_rc3?.status === 'CLOSED' || state.active_workstreams?.core_rc3?.status === 'CLOSED_PROVEN') && !rc3Gate) {
-        errors.push('Rule Violation (I): CORE-RC.3 cannot be marked CLOSED while execution truth is pending.');
+      const validE3OrHigher = rc3Gate && ['E3_ISOLATED_RUNTIME_E2E', 'E4_SHARED_STAGING_LIVE', 'E5_EXTERNAL_FIELD_UAT'].includes(rc3Gate.evidence_level);
+      if ((state.active_workstreams?.core_rc3?.status === 'CLOSED' || state.active_workstreams?.core_rc3?.status === 'CLOSED_PROVEN') && !validE3OrHigher) {
+        errors.push('Rule Violation (I): CORE-RC.3 cannot be marked CLOSED while execution truth is pending or level is below E3.');
       }
 
       // Check Next Action rule: Must NOT say "Await UI V2 before doing anything"
@@ -223,4 +224,5 @@ function validateProjectControl() {
 }
 
 validateProjectControl();
+
 

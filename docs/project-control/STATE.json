@@ -17,7 +17,7 @@
                                   "Final Delivery"
                               ],
     "current_milestone":  "CORE-RC.4",
-    "current_status":  "COMMERCIAL_CORE_PROVEN_RC3_HOLD",
+    "current_status":  "RC_CANDIDATE_MATERIALIZED",
     "canonical_refs":  {
                            "main_pilot":  {
                                               "branch":  "staging/supabase-staging-consistency",
@@ -155,8 +155,11 @@
                                                           }
                                             },
                                "core_rc4":  {
-                                                "status":  "ACTIVE",
-                                                "objective":  "Final Core release-candidate readiness, external configuration dependencies, production/public-launch prerequisites, communication-provider readiness, DNS/domain readiness, payment/launch-mode decision boundary, final Core regression requirements, and explicit GO/NO-GO decision"
+                                                "status":  "RC_CANDIDATE_MATERIALIZED",
+                                                "candidate_branch":  "release/core-rc4",
+                                                "candidate_sha":  "3fc5415eaee70c7207ca2c656be68ba62470a51e",
+                                                "source_base_sha":  "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+                                                "objective":  "Materialize release/core-rc4 candidate, perform local verification, and await exact-SHA CI evidence"
                                             }
                            },
     "external_dependencies":  {
@@ -170,7 +173,7 @@
     "current_blockers":  [
 
                          ],
-    "next_action":  "Advance CORE-RC.4 final Core release-candidate readiness lane",
+    "next_action":  "Execute exact-SHA evidence run on release/core-rc4 (3fc5415eaee70c7207ca2c656be68ba62470a51e) for official CORE-RC.4 closure",
     "evidence_policy":  {
                             "strict_levels":  true,
                             "require_literal_runs":  true
