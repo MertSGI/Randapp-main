@@ -56,7 +56,8 @@ export const branchService = {
 
   async listPublicBranches(slug: string, tenantId?: string): Promise<BusinessBranch[]> {
     try {
-      const { fetchSupabase, getDataSourceMode } = await import('./repositories/supabaseClient');
+      const { fetchSupabase } = await import('./repositories/supabaseClient');
+      const { getDataSourceMode } = await import('./dataSourceConfig');
       if (getDataSourceMode() === 'supabase') {
         const res = await fetchSupabase('/rest/v1/rpc/get_public_branches', {
           method: 'POST',
@@ -84,7 +85,7 @@ export const branchService = {
       }
     } catch (err) {
       console.error('listPublicBranches RPC failed:', err);
-      const { getDataSourceMode } = await import('./repositories/supabaseClient');
+      const { getDataSourceMode } = await import('./dataSourceConfig');
       if (getDataSourceMode() === 'supabase') {
         return [];
       }

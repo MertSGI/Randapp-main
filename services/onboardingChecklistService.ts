@@ -59,7 +59,7 @@ export const onboardingChecklistService = {
     const sub = await subscriptionService.getCurrentSubscription(tenantId);
 
     const isPendingCheckout = sub?.status === 'pending_checkout';
-    const isTrialingOrActive = sub?.status === 'trialing' || sub?.status === 'active' || sub?.status === 'pending_onboarding';
+    const isTrialingOrActive = sub?.status === 'trialing' || sub?.status === 'active' || sub?.status === 'manual_active';
 
     // 3. Define Criteria checks
     const hasBusinessProfile = !!tenant?.name && !!profile?.business_category && !!profile?.city;
