@@ -144,8 +144,8 @@ BEGIN
 
     -- Assertion L: No cross-tenant branch mapping possible (enforced by (branch_id, tenant_id) composite FK)
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.referential_constraints
-        WHERE constraint_schema = 'public' AND constraint_name LIKE '%branches%'
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema = 'public' AND table_name IN ('service_branches', 'staff_branches') AND constraint_type = 'FOREIGN KEY'
     ) THEN
         RAISE EXCEPTION 'TEST FAILED (L): Composite tenant-isolated foreign keys missing on branch mappings.';
     END IF;

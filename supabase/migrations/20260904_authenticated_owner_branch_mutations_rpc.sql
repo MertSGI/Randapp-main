@@ -1,6 +1,6 @@
 -- =========================================================================
 -- MIGRATION 20260904_authenticated_owner_branch_mutations_rpc.sql
--- Description: Server-authoritative owner branch mutation RPC contracts for Package / Customer Customization Slice 1-R1
+-- Description: Server-authoritative owner branch mutation RPC contracts & RLS policy hardening for Package / Customer Customization Slice 1-R2
 -- Functions:
 --   1. public.create_tenant_branch(p_tenant_id uuid, p_name text, p_slug text DEFAULT NULL, p_timezone text DEFAULT 'Europe/Istanbul') -> jsonb
 --   2. public.update_tenant_branch(p_branch_id uuid, p_name text DEFAULT NULL, p_slug text DEFAULT NULL, p_timezone text DEFAULT NULL) -> jsonb
@@ -61,7 +61,7 @@ DECLARE
     v_is_primary    boolean;
     v_new_branch    record;
 BEGIN
-    -- Gate 1: Authentication
+    -- Step 1: Authentication
     IF v_user_id IS NULL THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'unauthenticated');
     END IF;
@@ -70,10 +70,7 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_tenant');
     END IF;
 
-    -- Acquire tenant-scoped transaction lock to serialize concurrent mutations for this tenant
-    PERFORM pg_advisory_xact_lock(hashtext(p_tenant_id::text));
-
-    -- Gate 2: Authorization check using canonical Super Admin predicate & tenant owner check
+    -- Step 2: Authorize actor BEFORE acquiring tenant advisory lock
     SELECT id, tenant_id, role, active
     INTO v_profile
     FROM public.users_profile
@@ -90,7 +87,10 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'forbidden');
     END IF;
 
-    -- Gate 3: Input validation
+    -- Step 3: Acquire 64-bit tenant-scoped transaction lock after successful authorization
+    PERFORM pg_advisory_xact_lock(hashtextextended(p_tenant_id::text, 0));
+
+    -- Step 4: Input validation
     v_name := trim(p_name);
     IF v_name IS NULL OR v_name = '' THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_name');
@@ -168,14 +168,16 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-    v_user_id     uuid := auth.uid();
-    v_profile     record;
-    v_branch      record;
-    v_new_name    text;
-    v_new_slug    text;
-    v_new_tz      text;
-    v_updated     record;
+    v_user_id           uuid := auth.uid();
+    v_profile           record;
+    v_target_tenant_id  uuid;
+    v_branch            record;
+    v_new_name          text;
+    v_new_slug          text;
+    v_new_tz            text;
+    v_updated           record;
 BEGIN
+    -- Step 1: Authentication
     IF v_user_id IS NULL THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'unauthenticated');
     END IF;
@@ -184,18 +186,16 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'branch_not_found');
     END IF;
 
-    SELECT * INTO v_branch
+    -- Step 2: Resolve target tenant WITHOUT row lock
+    SELECT tenant_id INTO v_target_tenant_id
     FROM public.branches
-    WHERE id = p_branch_id
-    FOR UPDATE;
+    WHERE id = p_branch_id;
 
-    IF NOT FOUND THEN
+    IF v_target_tenant_id IS NULL THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'branch_not_found');
     END IF;
 
-    -- Acquire tenant-scoped transaction lock
-    PERFORM pg_advisory_xact_lock(hashtext(v_branch.tenant_id::text));
-
+    -- Step 3: Authorize actor BEFORE acquiring tenant advisory lock
     SELECT id, tenant_id, role, active
     INTO v_profile
     FROM public.users_profile
@@ -205,11 +205,24 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'forbidden');
     END IF;
 
-    IF (v_profile.role = 'tenant_owner' AND v_profile.tenant_id = v_branch.tenant_id) OR
+    IF (v_profile.role = 'tenant_owner' AND v_profile.tenant_id = v_target_tenant_id) OR
        public.is_super_admin(v_user_id) THEN
         -- Allowed
     ELSE
         RETURN jsonb_build_object('success', false, 'reason_code', 'forbidden');
+    END IF;
+
+    -- Step 4: Acquire 64-bit tenant-scoped transaction lock after authorization
+    PERFORM pg_advisory_xact_lock(hashtextextended(v_target_tenant_id::text, 0));
+
+    -- Step 5: Re-read target branch row under FOR UPDATE
+    SELECT * INTO v_branch
+    FROM public.branches
+    WHERE id = p_branch_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'reason_code', 'branch_not_found');
     END IF;
 
     v_new_name := v_branch.name;
@@ -220,7 +233,7 @@ BEGIN
     v_new_slug := v_branch.slug;
     IF p_slug IS NOT NULL AND trim(p_slug) <> '' THEN
         v_new_slug := public.generate_branch_slug(p_slug);
-        IF EXISTS (SELECT 1 FROM public.branches WHERE tenant_id = v_branch.tenant_id AND slug = v_new_slug AND id <> p_branch_id) THEN
+        IF EXISTS (SELECT 1 FROM public.branches WHERE tenant_id = v_target_tenant_id AND slug = v_new_slug AND id <> p_branch_id) THEN
             RETURN jsonb_build_object('success', false, 'reason_code', 'slug_already_exists');
         END IF;
     END IF;
@@ -266,11 +279,13 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-    v_user_id     uuid := auth.uid();
-    v_profile     record;
-    v_branch      record;
-    v_updated     record;
+    v_user_id           uuid := auth.uid();
+    v_profile           record;
+    v_target_tenant_id  uuid;
+    v_branch            record;
+    v_updated           record;
 BEGIN
+    -- Step 1: Authentication
     IF v_user_id IS NULL THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'unauthenticated');
     END IF;
@@ -279,18 +294,16 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'branch_not_found');
     END IF;
 
-    SELECT * INTO v_branch
+    -- Step 2: Resolve target tenant WITHOUT row lock
+    SELECT tenant_id INTO v_target_tenant_id
     FROM public.branches
-    WHERE id = p_branch_id
-    FOR UPDATE;
+    WHERE id = p_branch_id;
 
-    IF NOT FOUND THEN
+    IF v_target_tenant_id IS NULL THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'branch_not_found');
     END IF;
 
-    -- Acquire tenant-scoped transaction lock
-    PERFORM pg_advisory_xact_lock(hashtext(v_branch.tenant_id::text));
-
+    -- Step 3: Authorize actor BEFORE acquiring tenant advisory lock
     SELECT id, tenant_id, role, active
     INTO v_profile
     FROM public.users_profile
@@ -300,11 +313,24 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'forbidden');
     END IF;
 
-    IF (v_profile.role = 'tenant_owner' AND v_profile.tenant_id = v_branch.tenant_id) OR
+    IF (v_profile.role = 'tenant_owner' AND v_profile.tenant_id = v_target_tenant_id) OR
        public.is_super_admin(v_user_id) THEN
         -- Allowed
     ELSE
         RETURN jsonb_build_object('success', false, 'reason_code', 'forbidden');
+    END IF;
+
+    -- Step 4: Acquire 64-bit tenant-scoped transaction lock after authorization
+    PERFORM pg_advisory_xact_lock(hashtextextended(v_target_tenant_id::text, 0));
+
+    -- Step 5: Re-read target branch row under FOR UPDATE
+    SELECT * INTO v_branch
+    FROM public.branches
+    WHERE id = p_branch_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'reason_code', 'branch_not_found');
     END IF;
 
     IF v_branch.is_active IS NOT TRUE THEN
@@ -315,7 +341,7 @@ BEGIN
     UPDATE public.branches
     SET is_primary = false,
         updated_at = now()
-    WHERE tenant_id = v_branch.tenant_id AND is_primary = true;
+    WHERE tenant_id = v_target_tenant_id AND is_primary = true;
 
     UPDATE public.branches
     SET is_primary = true,
@@ -353,10 +379,12 @@ AS $$
 DECLARE
     v_user_id           uuid := auth.uid();
     v_profile           record;
+    v_target_tenant_id  uuid;
     v_branch            record;
     v_other_active_cnt  integer;
     v_updated           record;
 BEGIN
+    -- Step 1: Authentication
     IF v_user_id IS NULL THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'unauthenticated');
     END IF;
@@ -365,18 +393,16 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'branch_not_found');
     END IF;
 
-    SELECT * INTO v_branch
+    -- Step 2: Resolve target tenant WITHOUT row lock
+    SELECT tenant_id INTO v_target_tenant_id
     FROM public.branches
-    WHERE id = p_branch_id
-    FOR UPDATE;
+    WHERE id = p_branch_id;
 
-    IF NOT FOUND THEN
+    IF v_target_tenant_id IS NULL THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'branch_not_found');
     END IF;
 
-    -- Acquire tenant-scoped transaction lock
-    PERFORM pg_advisory_xact_lock(hashtext(v_branch.tenant_id::text));
-
+    -- Step 3: Authorize actor BEFORE acquiring tenant advisory lock
     SELECT id, tenant_id, role, active
     INTO v_profile
     FROM public.users_profile
@@ -386,11 +412,24 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'forbidden');
     END IF;
 
-    IF (v_profile.role = 'tenant_owner' AND v_profile.tenant_id = v_branch.tenant_id) OR
+    IF (v_profile.role = 'tenant_owner' AND v_profile.tenant_id = v_target_tenant_id) OR
        public.is_super_admin(v_user_id) THEN
         -- Allowed
     ELSE
         RETURN jsonb_build_object('success', false, 'reason_code', 'forbidden');
+    END IF;
+
+    -- Step 4: Acquire 64-bit tenant-scoped transaction lock after authorization
+    PERFORM pg_advisory_xact_lock(hashtextextended(v_target_tenant_id::text, 0));
+
+    -- Step 5: Re-read target branch row under FOR UPDATE
+    SELECT * INTO v_branch
+    FROM public.branches
+    WHERE id = p_branch_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'reason_code', 'branch_not_found');
     END IF;
 
     -- Idempotent check if already inactive
@@ -414,7 +453,7 @@ BEGIN
 
     SELECT count(*) INTO v_other_active_cnt
     FROM public.branches
-    WHERE tenant_id = v_branch.tenant_id AND is_active = true AND id <> p_branch_id;
+    WHERE tenant_id = v_target_tenant_id AND is_active = true AND id <> p_branch_id;
 
     IF v_branch.is_primary IS TRUE THEN
         IF v_other_active_cnt > 0 THEN
@@ -449,20 +488,46 @@ BEGIN
 END;
 $$;
 
--- REVOKE EXECUTE FROM PUBLIC / anon
+-- RLS POLICY HARDENING: RPC-Only Server-Authoritative Branch Mutations
+-- Remove direct DML permissions for Tenant Owners & Super Admins on public.branches
+DROP POLICY IF EXISTS "Tenant Owner - Manage own branches" ON public.branches;
+DROP POLICY IF EXISTS "Super Admins - Full Access on branches" ON public.branches;
+DROP POLICY IF EXISTS "Super Admin - Manage all branches" ON public.branches;
+DROP POLICY IF EXISTS "Tenant Owner - Read own branches" ON public.branches;
+DROP POLICY IF EXISTS "Super Admin - Read all branches" ON public.branches;
+
+-- Create SELECT-ONLY RLS Policies for Tenant Owners and Super Admins
+CREATE POLICY "Tenant Owner - Read own branches"
+ON public.branches FOR SELECT TO authenticated
+USING (
+    auth.uid() IN (
+        SELECT id FROM public.users_profile
+        WHERE tenant_id = branches.tenant_id AND role = 'tenant_owner' AND active = true
+    )
+);
+
+CREATE POLICY "Super Admin - Read all branches"
+ON public.branches FOR SELECT TO authenticated
+USING (public.is_super_admin(auth.uid()));
+
+-- REVOKE EXECUTE FROM PUBLIC / anon / service_role
 REVOKE ALL ON FUNCTION public.create_tenant_branch(uuid, text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.create_tenant_branch(uuid, text, text, text) FROM anon;
+REVOKE ALL ON FUNCTION public.create_tenant_branch(uuid, text, text, text) FROM service_role;
 
 REVOKE ALL ON FUNCTION public.update_tenant_branch(uuid, text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.update_tenant_branch(uuid, text, text, text) FROM anon;
+REVOKE ALL ON FUNCTION public.update_tenant_branch(uuid, text, text, text) FROM service_role;
 
 REVOKE ALL ON FUNCTION public.set_primary_tenant_branch(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.set_primary_tenant_branch(uuid) FROM anon;
+REVOKE ALL ON FUNCTION public.set_primary_tenant_branch(uuid) FROM service_role;
 
 REVOKE ALL ON FUNCTION public.deactivate_tenant_branch(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.deactivate_tenant_branch(uuid) FROM anon;
+REVOKE ALL ON FUNCTION public.deactivate_tenant_branch(uuid) FROM service_role;
 
--- GRANT EXECUTE TO authenticated only (Least privilege: service_role grant removed)
+-- GRANT EXECUTE TO authenticated only (Least privilege)
 GRANT EXECUTE ON FUNCTION public.create_tenant_branch(uuid, text, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.update_tenant_branch(uuid, text, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.set_primary_tenant_branch(uuid) TO authenticated;

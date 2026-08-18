@@ -17,7 +17,7 @@ function assert(condition, message) {
   }
 }
 
-console.log('🏁 Running Package Branch Server-Authority Verification Test Suite (Slice 1-R1)...\n');
+console.log('🏁 Running Package Branch Server-Authority Verification Test Suite (Slice 1-R2)...\n');
 
 // 1. Verify Migration 20260904 Existence & RPC Contents
 const migrationPath = path.join(rootDir, 'supabase/migrations/20260904_authenticated_owner_branch_mutations_rpc.sql');
@@ -34,10 +34,13 @@ if (fs.existsSync(migrationPath)) {
   assert(migContent.includes('REVOKE ALL ON FUNCTION public.set_primary_tenant_branch'), 'Migration revokes PUBLIC/anon on set_primary_tenant_branch');
   assert(migContent.includes('REVOKE ALL ON FUNCTION public.deactivate_tenant_branch'), 'Migration revokes PUBLIC/anon on deactivate_tenant_branch');
   assert(migContent.includes('cannot_deactivate_primary_with_active_branches'), 'Migration preserves active primary deactivation invariant');
-  assert(migContent.includes('pg_advisory_xact_lock'), 'Migration implements tenant-scoped advisory transaction locks (pg_advisory_xact_lock)');
+  assert(migContent.includes('hashtextextended'), 'Migration implements 64-bit hashtextextended tenant-scoped advisory locks');
   assert(!migContent.includes('GRANT EXECUTE ON FUNCTION public.create_tenant_branch(uuid, text, text, text) TO service_role;'), 'Least privilege: service_role execute grant removed');
   assert(migContent.includes('public.is_super_admin(v_user_id)'), 'Super Admin authorization uses canonical predicate public.is_super_admin');
   assert(migContent.includes("RETURN 'sube';"), 'generate_branch_slug is IMMUTABLE and produces deterministic "sube" fallback');
+  assert(migContent.includes('CREATE POLICY "Tenant Owner - Read own branches"'), 'Migration creates SELECT-ONLY Tenant Owner policy on public.branches');
+  assert(migContent.includes('CREATE POLICY "Super Admin - Read all branches"'), 'Migration creates SELECT-ONLY Super Admin policy on public.branches');
+  assert(!migContent.includes('FOR ALL ON public.branches'), 'Migration removes direct DML FOR ALL policies on public.branches');
 }
 
 // 2. Verify SQL Test File Assertions
@@ -58,11 +61,15 @@ const concScriptPath = path.join(rootDir, 'scripts/test-package-branch-concurren
 assert(fs.existsSync(concScriptPath), 'Real multi-session concurrency script test-package-branch-concurrency.mjs exists');
 if (fs.existsSync(concScriptPath)) {
   const concContent = fs.readFileSync(concScriptPath, 'utf8');
-  assert(concContent.includes('C1: Simultaneous First Branch Creates'), 'Concurrency script tests C1 (first branch creates)');
-  assert(concContent.includes('C2: Simultaneous Same-Name Branch Creates'), 'Concurrency script tests C2 (same-name slug allocation)');
-  assert(concContent.includes('C3: Simultaneous Set-Primary'), 'Concurrency script tests C3 (concurrent set_primary)');
-  assert(concContent.includes('C4: Concurrent Set-Primary vs Deactivate'), 'Concurrency script tests C4 (set_primary vs deactivate)');
-  assert(concContent.includes('C5: Concurrent Branch Creates for Different Tenants'), 'Concurrency script tests C5 (cross-tenant lock isolation)');
+  assert(concContent.includes("import { createClient } from '@supabase/supabase-js'"), 'Concurrency script imports createClient for real multi-session DB connections');
+  assert(concContent.includes('Promise.all'), 'Concurrency script executes concurrent Promise.all queries');
+  assert(!concContent.includes('assert(true,'), 'Concurrency script contains ZERO fake unconditional assert(true) statements');
+  assert(concContent.includes('C1: Real Simultaneous First Branch Creates'), 'Concurrency script tests real C1');
+  assert(concContent.includes('C2: Real Simultaneous Same-Name Branch Creates'), 'Concurrency script tests real C2');
+  assert(concContent.includes('C3: Real Simultaneous Set-Primary'), 'Concurrency script tests real C3');
+  assert(concContent.includes('C4: Real Concurrent Set-Primary vs Deactivate'), 'Concurrency script tests real C4');
+  assert(concContent.includes('C5: Real Cross-Tenant Lock Isolation'), 'Concurrency script tests real C5');
+  assert(concContent.includes('DIRECT DML & RLS BOUNDARY TESTS'), 'Concurrency script tests direct owner DML rejection');
 }
 
 // 3. Verify branchService.ts Supabase Fail-Closed Server Authority
