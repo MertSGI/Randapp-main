@@ -35,6 +35,7 @@
     "qa:multi-branch": "node scripts/verify-multi-branch-foundation.mjs",
     "qa:branch-booking": "node scripts/verify-branch-aware-booking.mjs",
     "qa:package-branch-server-authority": "node scripts/test-package-branch-server-authority.mjs",
+    "qa:package-branch-concurrency": "node scripts/test-package-branch-concurrency.mjs",
     "qa:public-links": "node scripts/verify-public-links.mjs",
     "qa:share-toolkit": "node scripts/verify-share-toolkit.mjs",
     "qa:data-governance": "node scripts/verify-data-governance-readiness.mjs",

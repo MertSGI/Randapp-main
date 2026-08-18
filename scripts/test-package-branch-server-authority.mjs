@@ -17,7 +17,7 @@ function assert(condition, message) {
   }
 }
 
-console.log('🏁 Running Package Branch Server-Authority Verification Test Suite...\n');
+console.log('🏁 Running Package Branch Server-Authority Verification Test Suite (Slice 1-R1)...\n');
 
 // 1. Verify Migration 20260904 Existence & RPC Contents
 const migrationPath = path.join(rootDir, 'supabase/migrations/20260904_authenticated_owner_branch_mutations_rpc.sql');
@@ -34,6 +34,10 @@ if (fs.existsSync(migrationPath)) {
   assert(migContent.includes('REVOKE ALL ON FUNCTION public.set_primary_tenant_branch'), 'Migration revokes PUBLIC/anon on set_primary_tenant_branch');
   assert(migContent.includes('REVOKE ALL ON FUNCTION public.deactivate_tenant_branch'), 'Migration revokes PUBLIC/anon on deactivate_tenant_branch');
   assert(migContent.includes('cannot_deactivate_primary_with_active_branches'), 'Migration preserves active primary deactivation invariant');
+  assert(migContent.includes('pg_advisory_xact_lock'), 'Migration implements tenant-scoped advisory transaction locks (pg_advisory_xact_lock)');
+  assert(!migContent.includes('GRANT EXECUTE ON FUNCTION public.create_tenant_branch(uuid, text, text, text) TO service_role;'), 'Least privilege: service_role execute grant removed');
+  assert(migContent.includes('public.is_super_admin(v_user_id)'), 'Super Admin authorization uses canonical predicate public.is_super_admin');
+  assert(migContent.includes("RETURN 'sube';"), 'generate_branch_slug is IMMUTABLE and produces deterministic "sube" fallback');
 }
 
 // 2. Verify SQL Test File Assertions
@@ -48,6 +52,7 @@ if (fs.existsSync(testSqlPath)) {
   assert(sqlTestContent.includes('deactivate_tenant_branch'), 'Test SQL tests deactivate_tenant_branch');
   assert(sqlTestContent.includes('cannot_deactivate_primary_with_active_branches'), 'Test SQL asserts primary deactivation invariant');
   assert(sqlTestContent.includes('get_public_branches'), 'Test SQL tests get_public_branches RPC isolation');
+  assert(sqlTestContent.includes('generate_branch_slug'), 'Test SQL tests deterministic slug function');
 }
 
 // 3. Verify branchService.ts Supabase Fail-Closed Server Authority

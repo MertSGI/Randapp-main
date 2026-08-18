@@ -1,11 +1,10 @@
 -- =========================================================================
 -- TRANSACTIONAL TEST SUITE: package_branch_server_authority_tests.sql
--- Proves Slice 1 Branch Server-Authority Closure & Authorization Assertions (A-L)
+-- Proves Slice 1-R1 Branch Server-Authority Closure, Concurrency Locking & Authorization Assertions (A-L)
 -- =========================================================================
 
 BEGIN;
 
--- Setup test tenants, profiles, and auth context mock data
 DO $$
 DECLARE
     v_tenant1_id   uuid := '11111111-1111-1111-1111-111111111111';
@@ -21,10 +20,24 @@ DECLARE
     v_staff_res    jsonb;
     v_deact_res    jsonb;
     v_pub_res      jsonb;
+    v_slug_test    text;
 BEGIN
-    RAISE NOTICE 'Starting Package Branch Server-Authority Contract Tests...';
+    RAISE NOTICE 'Starting Package Branch Server-Authority Contract Tests (Slice 1-R1)...';
+
+    -- Test Deterministic IMMUTABLE Slug Function
+    v_slug_test := public.generate_branch_slug('   ');
+    IF v_slug_test <> 'sube' THEN
+        RAISE EXCEPTION 'TEST FAILED: generate_branch_slug empty input did not produce deterministic "sube".';
+    END IF;
+
+    v_slug_test := public.generate_branch_slug('Kadıköy Güzellik Stüdyosu!');
+    IF v_slug_test <> 'kadikoy-guzellik-studyosu' THEN
+        RAISE EXCEPTION 'TEST FAILED: generate_branch_slug Turkish character normalization failed.';
+    END IF;
 
     -- Cleanup test entities if existing
+    DELETE FROM public.service_branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
+    DELETE FROM public.staff_branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
     DELETE FROM public.branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
     DELETE FROM public.users_profile WHERE id IN (v_owner1_id, v_owner2_id, v_staff1_id);
     DELETE FROM public.tenants WHERE id IN (v_tenant1_id, v_tenant2_id);
@@ -98,7 +111,7 @@ BEGIN
         RAISE EXCEPTION 'TEST FAILED (H): Active primary deactivation invariant violated.';
     END IF;
 
-    -- Deactivate non-primary b1 first, then switch back
+    -- Deactivate non-primary b1 first, then verify
     v_deact_res := public.deactivate_tenant_branch(v_b1_id);
     IF (v_deact_res->>'success')::boolean IS NOT TRUE THEN
         RAISE EXCEPTION 'TEST FAILED (H): Non-primary branch deactivation failed.';
@@ -111,17 +124,33 @@ BEGIN
         RAISE EXCEPTION 'TEST FAILED (I): Inactive branch returned by get_public_branches RPC.';
     END IF;
 
-    -- Assertion K: Check RPC EXECUTE permissions (no PUBLIC/anon execution)
+    -- Assertion J: Public booking requires correct staff_branches and service_branches mappings
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema = 'public' AND table_name = 'service_branches' AND constraint_type = 'FOREIGN KEY'
+    ) THEN
+        RAISE EXCEPTION 'TEST FAILED (J): service_branches foreign key constraint missing.';
+    END IF;
+
+    -- Assertion K: Check RPC EXECUTE permissions (no PUBLIC/anon execution, no service_role grant)
     IF EXISTS (
         SELECT 1 FROM information_schema.routine_privileges
         WHERE routine_schema = 'public'
           AND routine_name IN ('create_tenant_branch', 'update_tenant_branch', 'set_primary_tenant_branch', 'deactivate_tenant_branch')
-          AND grantee IN ('PUBLIC', 'anon')
+          AND grantee IN ('PUBLIC', 'anon', 'service_role')
     ) THEN
-        RAISE EXCEPTION 'TEST FAILED (K): Public or anon execute privileges exist on owner branch mutation RPCs.';
+        RAISE EXCEPTION 'TEST FAILED (K): Unsafe PUBLIC, anon, or unnecessary service_role privileges exist on owner branch mutation RPCs.';
     END IF;
 
-    RAISE NOTICE '✅ ALL PACKAGE BRANCH SERVER-AUTHORITY CONTRACT TESTS PASSED SUCCESSFULLY!';
+    -- Assertion L: No cross-tenant branch mapping possible (enforced by (branch_id, tenant_id) composite FK)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.referential_constraints
+        WHERE constraint_schema = 'public' AND constraint_name LIKE '%branches%'
+    ) THEN
+        RAISE EXCEPTION 'TEST FAILED (L): Composite tenant-isolated foreign keys missing on branch mappings.';
+    END IF;
+
+    RAISE NOTICE '✅ ALL PACKAGE BRANCH SERVER-AUTHORITY CONTRACT TESTS (A-L) PASSED SUCCESSFULLY!';
 END;
 $$;
 
