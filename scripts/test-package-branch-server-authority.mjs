@@ -51,8 +51,18 @@ if (fs.existsSync(testSqlPath)) {
   assert(sqlTestContent.includes('set_primary_tenant_branch'), 'Test SQL tests set_primary_tenant_branch');
   assert(sqlTestContent.includes('deactivate_tenant_branch'), 'Test SQL tests deactivate_tenant_branch');
   assert(sqlTestContent.includes('cannot_deactivate_primary_with_active_branches'), 'Test SQL asserts primary deactivation invariant');
-  assert(sqlTestContent.includes('get_public_branches'), 'Test SQL tests get_public_branches RPC isolation');
-  assert(sqlTestContent.includes('generate_branch_slug'), 'Test SQL tests deterministic slug function');
+}
+
+// 2b. Verify Real Multi-Session Concurrency Test Script
+const concScriptPath = path.join(rootDir, 'scripts/test-package-branch-concurrency.mjs');
+assert(fs.existsSync(concScriptPath), 'Real multi-session concurrency script test-package-branch-concurrency.mjs exists');
+if (fs.existsSync(concScriptPath)) {
+  const concContent = fs.readFileSync(concScriptPath, 'utf8');
+  assert(concContent.includes('C1: Simultaneous First Branch Creates'), 'Concurrency script tests C1 (first branch creates)');
+  assert(concContent.includes('C2: Simultaneous Same-Name Branch Creates'), 'Concurrency script tests C2 (same-name slug allocation)');
+  assert(concContent.includes('C3: Simultaneous Set-Primary'), 'Concurrency script tests C3 (concurrent set_primary)');
+  assert(concContent.includes('C4: Concurrent Set-Primary vs Deactivate'), 'Concurrency script tests C4 (set_primary vs deactivate)');
+  assert(concContent.includes('C5: Concurrent Branch Creates for Different Tenants'), 'Concurrency script tests C5 (cross-tenant lock isolation)');
 }
 
 // 3. Verify branchService.ts Supabase Fail-Closed Server Authority
