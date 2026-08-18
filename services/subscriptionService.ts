@@ -6,6 +6,7 @@ import { communicationEventService } from './communicationEventService';
 
 export type SubscriptionStatus =
   | 'pending_checkout'
+  | 'pending_onboarding'
   | 'trialing'
   | 'active'
   | 'past_due'
@@ -354,7 +355,7 @@ export const subscriptionService = {
   async canTenantAcceptBookings(tenantId: string): Promise<boolean> {
     const sub = await this.getCurrentSubscription(tenantId);
     if (!sub) return false;
-    if (['paused', 'suspended', 'expired', 'none', 'pending_checkout'].includes(sub.status)) {
+    if (['paused', 'suspended', 'expired', 'none', 'pending_checkout', 'pending_onboarding'].includes(sub.status)) {
       return false;
     }
     return true;

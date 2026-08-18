@@ -48,12 +48,46 @@ const runOnboardingTests = () => {
             passed = false;
         }
 
+        // Check for pending_onboarding in checklist service
+        if (content.includes('pending_onboarding')) {
+            output += `- ✅ Onboarding checklist service accepts 'pending_onboarding' as valid pre-publish subscription state.\n`;
+        } else {
+            output += `- ❌ Missing 'pending_onboarding' in onboardingChecklistService.\n`;
+            passed = false;
+        }
+
         // Check for pilot demo guest bypass
         if (content.includes("tenantId === 'tenant_pilot_demo'") || content.includes('tenant_pilot_demo')) {
             output += `- ✅ Pilot Demo guest bypass checks are isolated from real tenants safely.\n`;
         } else {
             output += `- ❌ Warning: Pilot Demo guest exception is not isolated inside checklist calculation.\n`;
             passed = false;
+        }
+
+        // Check subscriptionService contracts
+        const subSvcPath = path.join(rootDir, 'services', 'subscriptionService.ts');
+        if (fs.existsSync(subSvcPath)) {
+            const subContent = fs.readFileSync(subSvcPath, 'utf8');
+            if (subContent.includes("'pending_onboarding'") && subContent.includes('export type SubscriptionStatus')) {
+                output += `- ✅ SubscriptionStatus contains 'pending_onboarding'.\n`;
+            } else {
+                output += `- ❌ SubscriptionStatus missing 'pending_onboarding'.\n`;
+                passed = false;
+            }
+
+            if (subContent.includes("canTenantPublish") && subContent.includes("['active', 'trialing', 'manual_active', 'comped'].includes(sub.status)")) {
+                output += `- ✅ canTenantPublish strictly excludes 'pending_onboarding'.\n`;
+            } else {
+                output += `- ❌ canTenantPublish rule check failed.\n`;
+                passed = false;
+            }
+
+            if (subContent.includes("canTenantAcceptBookings") && subContent.includes("pending_onboarding")) {
+                output += `- ✅ canTenantAcceptBookings strictly denies 'pending_onboarding'.\n`;
+            } else {
+                output += `- ❌ canTenantAcceptBookings missing 'pending_onboarding' denial check.\n`;
+                passed = false;
+            }
         }
     } else {
         output += `- ❌ onboardingChecklistService.ts not found.\n`;
