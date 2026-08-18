@@ -18,3 +18,5 @@
   - Set `CORE-RC.3` status to `HOLD_PENDING_LITERAL_EXECUTION_TRUTH`.
 - **2026-08-17T08:57:55+03:00**: Milestone `PROJECT_CONTROL` canonical project control plane established on branch `control/lari-project-control-plane`.
 - **2026-08-17T09:37:24+03:00**: Milestone `PROJECT_CONTROL` R1 canonical correction applied (P1D.1A reclassified as `CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE`, CORE-RC.1/2A/2B/2C corrected, CORE-RC.3 parallel sub-lanes defined, brand updated to LARİ, validator enhanced).
+- **2026-08-18**: Milestone CORE-RC.3 isolated acceptance project migration parity reached (59/59 canonical migrations applied to miuecvkkmyvaciticwtm).
+- **2026-08-18T11:24:15+03:00**: Milestone CORE-RC.3 CORE_RUNTIME E3 isolated runtime acceptance closed (E3_ISOLATED_RUNTIME_E2E, CORE_RUNTIME lane CLOSED_PROVEN, CORE_RUNTIME removed from critical path, overall state HOLD_UI_V2_INPUT_PENDING awaiting required UI_V2 convergence).

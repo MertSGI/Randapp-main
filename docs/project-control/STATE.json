@@ -1,150 +1,168 @@
 {
-  "schema_version": "1.0.0",
-  "updated_at": "2026-08-17T08:57:55+03:00",
-  "product": "LARİ SaaS Platform",
-  "repository": "MertSGI/Randapp-main",
-  "delivery_commitment": {
-    "duration_weeks": 12,
-    "day_0": null,
-    "day_0_state": "NEEDS_RECOVERY",
-    "reset_from_today_allowed": false
-  },
-  "master_delivery_train": [
-    "LARİ Core",
-    "Package/Customer Customization",
-    "LARİ Clinic",
-    "LARİ Health Tourism",
-    "Final Delivery"
-  ],
-  "current_milestone": "CORE-RC.3",
-  "current_status": "COMMERCIAL_CORE_PROVEN_RC3_HOLD",
-  "canonical_refs": {
-    "main_pilot": {
-      "branch": "staging/supabase-staging-consistency",
-      "sha": "134c8716c2511c909cd400aee0496ebd70f63bf6",
-      "status": "CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE"
-    },
-    "commercial_core_baseline": {
-      "branch": "feature/p2a-commercial-core-foundation",
-      "sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-      "status": "CLOSED_PROVEN"
-    },
-    "ci_evidence_trigger": {
-      "branch": "ci/p2a2-exact-sha-evidence-20260814",
-      "sha": "ed6d381b9c3843b3089fdc8ab4987cf6c38bb9d9",
-      "status": "CI_RUN_31797365055_SUCCESS"
-    }
-  },
-  "accepted_gates": [
-    {
-      "gate": "P1D.1A",
-      "status": "CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE",
-      "evidence_level": "E4_SHARED_STAGING_LIVE",
-      "tested_sha": "134c8716c2511c909cd400aee0496ebd70f63bf6",
-      "closed_at": "2026-08-14T16:55:15+03:00",
-      "reopen_condition": "Contradictory staging mutation or canary corruption evidence"
-    },
-    {
-      "gate": "P2A.0",
-      "status": "CLOSED_PROVEN",
-      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-      "run_ids": ["31797365055"],
-      "closed_at": "2026-08-14T11:44:38Z",
-      "reopen_condition": "Failed atomic provisioning regression"
-    },
-    {
-      "gate": "P2A.1",
-      "status": "CLOSED_PROVEN",
-      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-      "run_ids": ["31797365055"],
-      "closed_at": "2026-08-14T11:44:38Z",
-      "reopen_condition": "Failed commercial boundary security scan"
-    },
-    {
-      "gate": "P2A.2",
-      "status": "CLOSED_PROVEN",
-      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-      "run_ids": ["31797365055"],
-      "closed_at": "2026-08-14T11:44:38Z",
-      "reopen_condition": "Failed onboarding contract or readiness test"
-    },
-    {
-      "gate": "P2A.3",
-      "status": "CLOSED_PROVEN",
-      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-      "run_ids": ["31797365055"],
-      "closed_at": "2026-08-14T16:13:12+03:00",
-      "reopen_condition": "Failed onboarding handoff transaction"
-    },
-    {
-      "gate": "CORE-RC.1",
-      "status": "INTEGRATION_ALREADY_SATISFIED",
-      "evidence_level": "E1_SOURCE_PROVEN",
-      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-      "closed_at": "2026-08-14T16:36:05+03:00",
-      "reopen_condition": "Core contract syntax defect"
-    },
-    {
-      "gate": "CORE-RC.2A",
-      "status": "PRESENT_ON_CORE_BASELINE",
-      "evidence_level": "E1_SOURCE_PROVEN",
-      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-      "scope": "Communication Outbox / Provider Abstraction",
-      "reopen_condition": "Provider abstraction contract regression"
-    },
-    {
-      "gate": "CORE-RC.2B",
-      "status": "PRESENT_ON_CORE_BASELINE",
-      "evidence_level": "E1_SOURCE_PROVEN",
-      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-      "scope": "Public Booking Anti-Abuse",
-      "reopen_condition": "Anti-abuse RPC contract regression"
-    },
-    {
-      "gate": "CORE-RC.2C",
-      "status": "PRESENT_ON_CORE_BASELINE",
-      "evidence_level": "E1_SOURCE_PROVEN",
-      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-      "scope": "Demo Isolation + Tenant Subdomain Readiness",
-      "reopen_condition": "Demo tenant isolation regression"
-    }
-  ],
-  "active_workstreams": {
-    "core_rc3": {
-      "status": "HOLD_PENDING_LITERAL_EXECUTION_TRUTH",
-      "lanes": {
-        "core_runtime": {
-          "status": "READY_TO_EXECUTE",
-          "objective": "Execute real browser /register flow, synthetic owner onboarding, ready_for_review transition, Super Admin publish, public storefront, customer booking/manage/owner visibility in isolated non-production runtime"
-        },
-        "ui_v2": {
-          "status": "INPUT_PENDING",
-          "objective": "Materialize parallel UI V2 candidate from dedicated UI workstream, verify backend compatibility, and integrate when ready"
-        }
-      }
-    }
-  },
-  "external_dependencies": {
-    "iyzico_payment": "DISABLED_COMMERCIAL_MODE",
-    "external_dns": "PENDING_WILDCARD_SETUP",
-    "sms_provider": "OUTBOX_SIMULATION"
-  },
-  "non_blocking_validation": {
-    "human_participant_uat": "DEFERRED_FIELD_VALIDATION"
-  },
-  "current_blockers": [
-    "CORE-RC.3 literal browser/runtime execution evidence pending"
-  ],
-  "next_action": "Start CORE_RUNTIME lane execution immediately for CORE-RC.3 while UI_V2 proceeds in parallel",
-  "evidence_policy": {
-    "strict_levels": true,
-    "require_literal_runs": true
-  },
-  "reopen_policy": {
-    "require_empirical_proof": true
-  }
+    "schema_version":  "1.0.0",
+    "updated_at":  "2026-08-17T08:57:55+03:00",
+    "product":  "LARİ SaaS Platform",
+    "repository":  "MertSGI/Randapp-main",
+    "delivery_commitment":  {
+                                "duration_weeks":  12,
+                                "day_0":  null,
+                                "day_0_state":  "NEEDS_RECOVERY",
+                                "reset_from_today_allowed":  false
+                            },
+    "master_delivery_train":  [
+                                  "LARİ Core",
+                                  "Package/Customer Customization",
+                                  "LARİ Clinic",
+                                  "LARİ Health Tourism",
+                                  "Final Delivery"
+                              ],
+    "current_milestone":  "CORE-RC.3",
+    "current_status":  "COMMERCIAL_CORE_PROVEN_RC3_HOLD",
+    "canonical_refs":  {
+                           "main_pilot":  {
+                                              "branch":  "staging/supabase-staging-consistency",
+                                              "sha":  "134c8716c2511c909cd400aee0496ebd70f63bf6",
+                                              "status":  "CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE"
+                                          },
+                           "commercial_core_baseline":  {
+                                                            "branch":  "feature/p2a-commercial-core-foundation",
+                                                            "sha":  "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+                                                            "status":  "CLOSED_PROVEN"
+                                                        },
+                           "ci_evidence_trigger":  {
+                                                       "branch":  "ci/p2a2-exact-sha-evidence-20260814",
+                                                       "sha":  "ed6d381b9c3843b3089fdc8ab4987cf6c38bb9d9",
+                                                       "status":  "CI_RUN_31797365055_SUCCESS"
+                                                   }
+                       },
+    "accepted_gates":  [
+                           {
+                               "gate":  "P1D.1A",
+                               "status":  "CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE",
+                               "evidence_level":  "E4_SHARED_STAGING_LIVE",
+                               "tested_sha":  "134c8716c2511c909cd400aee0496ebd70f63bf6",
+                               "closed_at":  "2026-08-14T16:55:15+03:00",
+                               "reopen_condition":  "Contradictory staging mutation or canary corruption evidence"
+                           },
+                           {
+                               "gate":  "P2A.0",
+                               "status":  "CLOSED_PROVEN",
+                               "evidence_level":  "E2_EXECUTABLE_EXACT_SHA_CI",
+                               "tested_sha":  "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+                               "run_ids":  [
+                                               "31797365055"
+                                           ],
+                               "closed_at":  "2026-08-14T11:44:38Z",
+                               "reopen_condition":  "Failed atomic provisioning regression"
+                           },
+                           {
+                               "gate":  "P2A.1",
+                               "status":  "CLOSED_PROVEN",
+                               "evidence_level":  "E2_EXECUTABLE_EXACT_SHA_CI",
+                               "tested_sha":  "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+                               "run_ids":  [
+                                               "31797365055"
+                                           ],
+                               "closed_at":  "2026-08-14T11:44:38Z",
+                               "reopen_condition":  "Failed commercial boundary security scan"
+                           },
+                           {
+                               "gate":  "P2A.2",
+                               "status":  "CLOSED_PROVEN",
+                               "evidence_level":  "E2_EXECUTABLE_EXACT_SHA_CI",
+                               "tested_sha":  "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+                               "run_ids":  [
+                                               "31797365055"
+                                           ],
+                               "closed_at":  "2026-08-14T11:44:38Z",
+                               "reopen_condition":  "Failed onboarding contract or readiness test"
+                           },
+                           {
+                               "gate":  "P2A.3",
+                               "status":  "CLOSED_PROVEN",
+                               "evidence_level":  "E2_EXECUTABLE_EXACT_SHA_CI",
+                               "tested_sha":  "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+                               "run_ids":  [
+                                               "31797365055"
+                                           ],
+                               "closed_at":  "2026-08-14T16:13:12+03:00",
+                               "reopen_condition":  "Failed onboarding handoff transaction"
+                           },
+                           {
+                               "gate":  "CORE-RC.1",
+                               "status":  "INTEGRATION_ALREADY_SATISFIED",
+                               "evidence_level":  "E1_SOURCE_PROVEN",
+                               "tested_sha":  "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+                               "closed_at":  "2026-08-14T16:36:05+03:00",
+                               "reopen_condition":  "Core contract syntax defect"
+                           },
+                           {
+                               "gate":  "CORE-RC.2A",
+                               "status":  "PRESENT_ON_CORE_BASELINE",
+                               "evidence_level":  "E1_SOURCE_PROVEN",
+                               "tested_sha":  "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+                               "scope":  "Communication Outbox / Provider Abstraction",
+                               "reopen_condition":  "Provider abstraction contract regression"
+                           },
+                           {
+                               "gate":  "CORE-RC.2B",
+                               "status":  "PRESENT_ON_CORE_BASELINE",
+                               "evidence_level":  "E1_SOURCE_PROVEN",
+                               "tested_sha":  "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+                               "scope":  "Public Booking Anti-Abuse",
+                               "reopen_condition":  "Anti-abuse RPC contract regression"
+                           },
+                           {
+                               "gate":  "CORE-RC.2C",
+                               "status":  "PRESENT_ON_CORE_BASELINE",
+                               "evidence_level":  "E1_SOURCE_PROVEN",
+                               "tested_sha":  "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+                               "scope":  "Demo Isolation + Tenant Subdomain Readiness",
+                               "reopen_condition":  "Demo tenant isolation regression"
+                           },
+                           {
+                               "gate":  "CORE-RC.3-CORE_RUNTIME",
+                               "status":  "CLOSED_PROVEN",
+                               "evidence_level":  "E3_ISOLATED_RUNTIME_E2E",
+                               "tested_sha":  "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+                               "isolated_project":  "miuecvkkmyvaciticwtm",
+                               "closed_at":  "2026-08-18T11:24:15+03:00",
+                               "reopen_condition":  "Contradictory isolated runtime evidence or failed regression"
+                           }
+                       ],
+    "active_workstreams":  {
+                               "core_rc3":  {
+                                                "status":  "HOLD_UI_V2_INPUT_PENDING",
+                                                "lanes":  {
+                                                              "core_runtime":  {
+                                                                                   "status":  "CLOSED_PROVEN",
+                                                                                   "objective":  "Execute real browser /register flow, synthetic owner onboarding, ready_for_review transition, Super Admin publish, public storefront, customer booking/manage/owner visibility in isolated non-production runtime",
+                                                                                   "evidence_level":  "E3_ISOLATED_RUNTIME_E2E"
+                                                                               },
+                                                              "ui_v2":  {
+                                                                            "status":  "INPUT_PENDING",
+                                                                            "objective":  "Materialize parallel UI V2 candidate from dedicated UI workstream, verify backend compatibility, and integrate when ready"
+                                                                        }
+                                                          }
+                                            }
+                           },
+    "external_dependencies":  {
+                                  "iyzico_payment":  "DISABLED_COMMERCIAL_MODE",
+                                  "external_dns":  "PENDING_WILDCARD_SETUP",
+                                  "sms_provider":  "OUTBOX_SIMULATION"
+                              },
+    "non_blocking_validation":  {
+                                    "human_participant_uat":  "DEFERRED_FIELD_VALIDATION"
+                                },
+    "current_blockers":  [
+                             "UI_V2_INPUT_PENDING"
+                         ],
+    "next_action":  "Materialize the existing parallel UI V2 workstream into an auditable Git candidate and perform controlled Core-RC.3 UI convergence.",
+    "evidence_policy":  {
+                            "strict_levels":  true,
+                            "require_literal_runs":  true
+                        },
+    "reopen_policy":  {
+                          "require_empirical_proof":  true
+                      }
 }
