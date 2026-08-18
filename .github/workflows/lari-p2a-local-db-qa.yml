@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - feature/p2a-commercial-core-foundation
+      - ci/core-rc4-exact-sha-evidence-20260818
+      - ci/core-rc4-exact-sha-evidence-r2-20260818
   pull_request:
     branches:
       - feature/p2a-commercial-core-foundation
@@ -16,6 +18,20 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          ref: e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a
+
+      - name: Verify Exact Product SHA Binding
+        run: |
+          REQUESTED_PRODUCT_SHA="e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a"
+          ACTUAL_TEST_WORKTREE_SHA=$(git rev-parse HEAD)
+          echo "REQUESTED_PRODUCT_SHA=${REQUESTED_PRODUCT_SHA}"
+          echo "ACTUAL_TEST_WORKTREE_SHA=${ACTUAL_TEST_WORKTREE_SHA}"
+          if [ "${ACTUAL_TEST_WORKTREE_SHA}" != "${REQUESTED_PRODUCT_SHA}" ]; then
+            echo "::error::Exact product SHA mismatch! Expected ${REQUESTED_PRODUCT_SHA}, got ${ACTUAL_TEST_WORKTREE_SHA}"
+            exit 1
+          fi
+          echo "Exact product SHA binding verified successfully."
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -190,6 +206,19 @@ jobs:
           npx tsx scripts/test-p2a-supabase-registration-boundary.test.mjs
           npx tsx scripts/test-p2a-mock-registration-regression.test.mjs
           npx tsx scripts/test-p2a-static-security-scan.test.mjs
+
+      - name: Run TypeScript Lint & Secret Scan
+        run: |
+          echo "=== RUNNING TYPESCRIPT LINT & SECRET SCAN ==="
+          npx tsc --noEmit
+          node scripts/scan-frontend-secrets.mjs
+
+      - name: Run Narrow Local QA Regression Suites
+        run: |
+          echo "=== RUNNING NARROW LOCAL QA REGRESSION SUITES ==="
+          npx tsx scripts/test-data-mode-regression.mjs
+          node scripts/verify-onboarding-readiness.mjs
+          node scripts/verify-branch-aware-booking.mjs
 
       - name: Run Frontend Production Build Verification
         run: |
