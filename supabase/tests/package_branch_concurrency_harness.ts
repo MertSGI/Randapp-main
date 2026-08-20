@@ -178,12 +178,18 @@ export async function runPackageBranchConcurrencyHarness() {
       assert(err.message.includes('commercial_quota_exceeded') || err.code === 'P0001', 'COMMERCIAL_BRANCH_QUOTA_NEGATIVE_CONTROL = PASS');
     }
 
-    // 0b. Execute Package Branch Server Authority Functional SQL Suite (Assertions A-L)
+    // 0b. Execute Package Branch Server Authority Functional SQL Suite (Assertions A-L) in isolated connection
     const sqlPath = path.join(process.cwd(), 'supabase/tests/package_branch_server_authority_tests.sql');
     if (fs.existsSync(sqlPath)) {
       const sqlContent = fs.readFileSync(sqlPath, 'utf8');
-      await client1.query(sqlContent);
-      console.log('✅ PASSED: Package Branch Server-Authority Functional SQL Suite (Assertions A-L)');
+      const testClient = new Client({ connectionString: dbUrl });
+      await testClient.connect();
+      try {
+        await testClient.query(sqlContent);
+        console.log('✅ PASSED: Package Branch Server-Authority Functional SQL Suite (Assertions A-L)');
+      } finally {
+        await testClient.end();
+      }
     }
 
     // Helper to catch DB SQLSTATE errors
