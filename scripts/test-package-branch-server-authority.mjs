@@ -54,6 +54,8 @@ if (fs.existsSync(testSqlPath)) {
   assert(sqlTestContent.includes('set_primary_tenant_branch'), 'Test SQL tests set_primary_tenant_branch');
   assert(sqlTestContent.includes('deactivate_tenant_branch'), 'Test SQL tests deactivate_tenant_branch');
   assert(sqlTestContent.includes('cannot_deactivate_primary_with_active_branches'), 'Test SQL asserts primary deactivation invariant');
+  assert(sqlTestContent.includes('tenant_entitlement_overrides'), 'Test SQL creates tenant_entitlement_overrides for multi-branch test tenants');
+  assert(sqlTestContent.includes('COMMERCIAL_BRANCH_QUOTA_NEGATIVE_CONTROL'), 'Test SQL executes commercial quota negative control');
 }
 
 // 2b. Verify Fail-Closed Real Multi-Session Concurrency & RLS Harness
@@ -76,6 +78,8 @@ if (fs.existsSync(harnessPath)) {
   assert(hContent.includes('SAVEPOINT'), 'Harness uses SAVEPOINT for safe transaction recovery during expected RLS failures');
   assert(hContent.includes('ROLLBACK TO SAVEPOINT'), 'Harness uses ROLLBACK TO SAVEPOINT for RLS test recovery');
   assert(hContent.includes('validateUuid') || hContent.includes('UUID_REGEX'), 'Harness validates returned UUID format');
+  assert(hContent.includes('tenant_entitlement_overrides'), 'Harness creates tenant_entitlement_overrides for synthetic multi-branch tenants');
+  assert(hContent.includes('TEST_MULTI_BRANCH_OVERRIDE_RESOLUTION'), 'Harness verifies commercial quota override resolution');
 }
 
 // 3. Verify branchService.ts Supabase Fail-Closed Server Authority

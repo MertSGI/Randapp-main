@@ -89,6 +89,7 @@ export async function runPackageBranchConcurrencyHarness() {
       DELETE FROM public.service_branches WHERE tenant_id IN (${tInList});
       DELETE FROM public.staff_branches WHERE tenant_id IN (${tInList});
       DELETE FROM public.branches WHERE tenant_id IN (${tInList});
+      DELETE FROM public.tenant_entitlement_overrides WHERE tenant_id IN (${tInList});
       DELETE FROM public.users_profile WHERE id IN (${uInList});
       DELETE FROM auth.users WHERE id IN (${uInList});
       DELETE FROM public.tenants WHERE id IN (${tInList});
@@ -103,6 +104,15 @@ export async function runPackageBranchConcurrencyHarness() {
         ('${tenantC5B_id}', 'tenant-c5b', 'Tenant C5B', 'active'),
         ('${tenantRLSA_id}', 'tenant-rlsa', 'Tenant RLS A', 'active'),
         ('${tenantRLSB_id}', 'tenant-rlsb', 'Tenant RLS B', 'active');
+
+      INSERT INTO public.tenant_entitlement_overrides (tenant_id, feature_key, value_type, is_unlimited, integer_value, reason)
+      VALUES
+        ('${tenantC1_id}', 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture'),
+        ('${tenantC2_id}', 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture'),
+        ('${tenantC3_id}', 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture'),
+        ('${tenantC4_id}', 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture'),
+        ('${tenantC5A_id}', 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture'),
+        ('${tenantRLSA_id}', 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture');
 
       INSERT INTO auth.users (id, email, role, created_at, updated_at)
       VALUES
@@ -131,6 +141,10 @@ export async function runPackageBranchConcurrencyHarness() {
         ('${staffRLSA_id}', '${tenantRLSA_id}', 'Staff RLS A', 'staff', true),
         ('${admin_id}', NULL, 'Super Admin', 'super_admin', true);
     `);
+
+    // Verify override resolution
+    const quotaRes = await client1.query(`SELECT is_unlimited FROM public.resolve_commercial_quota('${tenantC1_id}', 'max_branches');`);
+    assert(quotaRes.rows[0]?.is_unlimited === true, 'TEST_MULTI_BRANCH_OVERRIDE_RESOLUTION = PASS (TEST_TENANT_MAX_BRANCHES_SOURCE = tenant_override)');
 
     // 0b. Execute Package Branch Server Authority Functional SQL Suite (Assertions A-L)
     const sqlPath = path.join(process.cwd(), 'supabase/tests/package_branch_server_authority_tests.sql');

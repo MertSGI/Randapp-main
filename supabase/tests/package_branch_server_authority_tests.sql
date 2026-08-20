@@ -9,11 +9,14 @@ DO $$
 DECLARE
     v_tenant1_id   uuid := '11111111-1111-1111-1111-111111111111';
     v_tenant2_id   uuid := '22222222-2222-2222-2222-222222222222';
+    v_neg_tenant_id uuid := '33333333-3333-3333-3333-333333333333';
     v_owner1_id    uuid := 'a1111111-1111-1111-1111-111111111111';
     v_owner2_id    uuid := 'a2222222-2222-2222-2222-222222222222';
+    v_neg_owner_id uuid := 'a3333333-3333-3333-3333-333333333333';
     v_staff1_id    uuid := 'b1111111-1111-1111-1111-111111111111';
     v_b1_res       jsonb;
     v_b2_res       jsonb;
+    v_neg_res      jsonb;
     v_b1_id        uuid;
     v_b2_id        uuid;
     v_cross_res    jsonb;
@@ -22,7 +25,7 @@ DECLARE
     v_pub_res      jsonb;
     v_slug_test    text;
 BEGIN
-    RAISE NOTICE 'Starting Package Branch Server-Authority Contract Tests (Slice 1-R1)...';
+    RAISE NOTICE 'Starting Package Branch Server-Authority Contract Tests (Slice 1-R2.3)...';
 
     -- Test Deterministic IMMUTABLE Slug Function
     v_slug_test := public.generate_branch_slug('   ');
@@ -36,24 +39,31 @@ BEGIN
     END IF;
 
     -- Cleanup test entities if existing
-    DELETE FROM public.service_branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
-    DELETE FROM public.staff_branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
-    DELETE FROM public.branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
-    DELETE FROM public.subscriptions WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
-    DELETE FROM public.tenant_onboarding_progress WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
-    DELETE FROM public.users_profile WHERE id IN (v_owner1_id, v_owner2_id, v_staff1_id);
-    DELETE FROM auth.users WHERE id IN (v_owner1_id, v_owner2_id, v_staff1_id);
-    DELETE FROM public.tenants WHERE id IN (v_tenant1_id, v_tenant2_id);
+    DELETE FROM public.service_branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id, v_neg_tenant_id);
+    DELETE FROM public.staff_branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id, v_neg_tenant_id);
+    DELETE FROM public.branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id, v_neg_tenant_id);
+    DELETE FROM public.tenant_entitlement_overrides WHERE tenant_id IN (v_tenant1_id, v_tenant2_id, v_neg_tenant_id);
+    DELETE FROM public.subscriptions WHERE tenant_id IN (v_tenant1_id, v_tenant2_id, v_neg_tenant_id);
+    DELETE FROM public.tenant_onboarding_progress WHERE tenant_id IN (v_tenant1_id, v_tenant2_id, v_neg_tenant_id);
+    DELETE FROM public.users_profile WHERE id IN (v_owner1_id, v_owner2_id, v_neg_owner_id, v_staff1_id);
+    DELETE FROM auth.users WHERE id IN (v_owner1_id, v_owner2_id, v_neg_owner_id, v_staff1_id);
+    DELETE FROM public.tenants WHERE id IN (v_tenant1_id, v_tenant2_id, v_neg_tenant_id);
 
     -- Create test tenants
     INSERT INTO public.tenants (id, slug, name, status)
     VALUES (v_tenant1_id, 'branch-test-t1', 'Branch Test Tenant 1', 'active'),
-           (v_tenant2_id, 'branch-test-t2', 'Branch Test Tenant 2', 'active');
+           (v_tenant2_id, 'branch-test-t2', 'Branch Test Tenant 2', 'active'),
+           (v_neg_tenant_id, 'branch-test-neg', 'Branch Test Tenant Negative', 'active');
+
+    -- Create max_branches override for multi-branch test tenant 1
+    INSERT INTO public.tenant_entitlement_overrides (tenant_id, feature_key, value_type, is_unlimited, integer_value, reason)
+    VALUES (v_tenant1_id, 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture');
 
     -- Create auth users
     INSERT INTO auth.users (id, email, role, created_at, updated_at)
     VALUES (v_owner1_id, 'owner1@test-branch.invalid', 'authenticated', now(), now()),
            (v_owner2_id, 'owner2@test-branch.invalid', 'authenticated', now(), now()),
+           (v_neg_owner_id, 'negowner@test-branch.invalid', 'authenticated', now(), now()),
            (v_staff1_id, 'staff1@test-branch.invalid', 'authenticated', now(), now())
     ON CONFLICT (id) DO NOTHING;
 
@@ -61,7 +71,26 @@ BEGIN
     INSERT INTO public.users_profile (id, tenant_id, name, role, active)
     VALUES (v_owner1_id, v_tenant1_id, 'Owner 1', 'tenant_owner', true),
            (v_owner2_id, v_tenant2_id, 'Owner 2', 'tenant_owner', true),
+           (v_neg_owner_id, v_neg_tenant_id, 'Neg Owner', 'tenant_owner', true),
            (v_staff1_id, v_tenant1_id, 'Staff 1', 'staff', true);
+
+    -- Commercial Quota Negative Control Verification
+    PERFORM set_config('request.jwt.claims', '', true);
+    PERFORM set_config('request.jwt.claim.sub', v_neg_owner_id::text, true);
+    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+
+    -- First branch creation succeeds
+    v_neg_res := public.create_tenant_branch(v_neg_tenant_id, 'First Branch', 'first');
+    IF (v_neg_res->>'success')::boolean IS NOT TRUE THEN
+        RAISE EXCEPTION 'TEST FAILED (NEG CONTROL): First branch creation for unoverridden tenant failed.';
+    END IF;
+
+    -- Second branch creation MUST fail with commercial_quota_exceeded because tenant has default plan quota (max_branches = 1)
+    v_neg_res := public.create_tenant_branch(v_neg_tenant_id, 'Second Branch Exceeding Quota', 'second');
+    IF (v_neg_res->>'success')::boolean IS TRUE OR v_neg_res->>'reason_code' <> 'commercial_quota_exceeded' THEN
+        RAISE EXCEPTION 'TEST FAILED (NEG CONTROL): Second branch creation did not fail with commercial_quota_exceeded. Got: %', v_neg_res;
+    END IF;
+    RAISE NOTICE '✅ COMMERCIAL_BRANCH_QUOTA_NEGATIVE_CONTROL = PASS';
 
     -- Assertion A & E: Tenant owner can create own branch & first branch becomes primary
     PERFORM set_config('request.jwt.claims', '', true);
