@@ -1,12 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { planService, PricingPlan } from '../../services/planService';
+import { getDataSourceMode } from '../../services/dataSourceConfig';
 import { Plus, Trash2, Save, Star } from 'lucide-react';
 import { useDialog } from '../../contexts/DialogContext';
+import { useNavigate } from 'react-router-dom';
 
 const SuperAdminPlansPage: React.FC = () => {
+    const navigate = useNavigate();
     const [plans, setPlans] = useState<PricingPlan[]>([]);
     const [saved, setSaved] = useState(false);
     const { confirm: showConfirm, alert: showAlert } = useDialog();
+
+    // In supabase mode, redirect to the canonical commercial admin page.
+    // This page performs direct localStorage mutations which violate commercial source-of-truth in supabase mode.
+    useEffect(() => {
+        if (getDataSourceMode() === 'supabase') {
+            navigate('/super-admin/commercial', { replace: true });
+        }
+    }, [navigate]);
 
     useEffect(() => {
         setPlans(planService.getAllPlans());

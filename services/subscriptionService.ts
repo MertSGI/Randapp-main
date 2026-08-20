@@ -1,6 +1,8 @@
 import { supabase } from './supabaseClient';
 import { dataProvider } from './dataProvider';
 import { planService, PricingPlan } from './planService';
+import { getDataSourceMode } from './dataSourceConfig';
+import { commercialCatalogService } from './commercialCatalogService';
 import { communicationEventService } from './communicationEventService';
 
 
@@ -102,6 +104,40 @@ export const subscriptionService = {
   },
 
   async getPlanForTenant(tenantId: string): Promise<PricingPlan | null> {
+    // In supabase mode, use the canonical commercial subscription snapshot
+    if (getDataSourceMode() === 'supabase') {
+      const snapshot = await commercialCatalogService.getMyCommercialSubscriptionSnapshot();
+      if (snapshot?.success && snapshot.assigned_plan_version) {
+        const pv = snapshot.assigned_plan_version;
+        // Use getPlanAsync to get the full PricingPlan shape from the server catalog
+        const serverPlan = await planService.getPlanAsync(pv.plan_code);
+        if (serverPlan) return serverPlan;
+        // If the plan_code is not in the public catalog (e.g. legacy/private plan),
+        // construct a minimal PricingPlan from the snapshot
+        return {
+          id: pv.plan_code,
+          name: pv.public_name,
+          monthlyPrice: pv.monthly_price ?? 0,
+          annualPrice: pv.annual_price ?? 0,
+          annualDiscountPercent: pv.annual_discount_percent ?? 0,
+          setupFee: pv.setup_fee ?? 0,
+          currency: pv.currency ?? 'TRY',
+          maxStaff: 1, maxServices: 10, maxMonthlyAppointments: 9999,
+          customDomainEnabled: false, includedSubdomain: true, customComDomainIncluded: false,
+          multiBranchEnabled: false, maxBranches: 1,
+          aiRecommendationsEnabled: false, aiVisualizationEnabled: false, aiMonthlyQuota: 0,
+          campaignsEnabled: false, advancedReportsEnabled: false,
+          whatsappAutomationEnabled: false, googleCalendarEnabled: true,
+          supportLevel: 'standard', referralEligible: false,
+          isActive: true, isRecommended: false,
+          trialDays: pv.trial_days ?? 0
+        };
+      }
+      console.warn('[subscriptionService] getPlanForTenant: Supabase snapshot failed or no assigned plan. Returning null.');
+      return null;
+    }
+
+    // Local/mock mode: existing sync path
     const sub = await this.getCurrentSubscription(tenantId);
     const planMapping: Record<string, string> = {
       'starter': 'baslangic',
@@ -708,6 +744,28 @@ export const subscriptionService = {
   },
 
   async getEffectiveEntitlements(tenantId: string): Promise<any> {
+    // In supabase mode, use the canonical server-side effective entitlements
+    if (getDataSourceMode() === 'supabase') {
+      const snapshot = await commercialCatalogService.getMyCommercialSubscriptionSnapshot();
+      if (snapshot?.success) {
+        const { entitlementService } = await import('./entitlementService');
+        const mappedEntitlements = entitlementService._mapServerEntitlementsToPlanEntitlements(snapshot.effective_entitlements);
+        const subStatus = snapshot.subscription?.status || 'none';
+        const isActive = ['active', 'trialing', 'manual_active', 'comped'].includes(subStatus);
+        return {
+          ...mappedEntitlements,
+          features: {
+            ...mappedEntitlements.features,
+            website_publication: isActive && mappedEntitlements.features.website_publication,
+            online_booking: isActive && mappedEntitlements.features.online_booking,
+          }
+        };
+      }
+      console.error('[subscriptionService] getEffectiveEntitlements: Supabase snapshot failed. Fail-closed — returning deny-all.');
+      return { features: {}, limits: {} };
+    }
+
+    // Local/mock mode: existing sync path
     const sub = await this.getCurrentSubscription(tenantId);
     const planId = sub ? sub.planId : 'baslangic';
     const { entitlementService } = await import('./entitlementService');

@@ -13,14 +13,33 @@ const PricingPage: React.FC = () => {
   const t = translations[language];
   const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>('monthly');
   const [plans, setPlans] = useState<PricingPlan[]>([]);
+  const [loading, setLoading] = useState(true);
   
   const { alert: showAlert } = useDialog();
   const paymentMode = ((import.meta as any).env.VITE_PAYMENT_PROVIDER as 'mock' | 'sandbox' | 'production' | 'disabled' | 'none') || 'mock';
 
   useEffect(() => {
-    // Only display active plans
-    const activePlans = planService.getActivePlans();
-    setPlans(activePlans);
+    let cancelled = false;
+    async function loadPlans() {
+      setLoading(true);
+      try {
+        const activePlans = await planService.getActivePlansAsync();
+        if (!cancelled) {
+          setPlans(activePlans);
+        }
+      } catch (err) {
+        console.error('[PricingPage] Failed to load plans:', err);
+        if (!cancelled) {
+          setPlans([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+    loadPlans();
+    return () => { cancelled = true; };
   }, []);
 
   const hasAnnualDiscount = plans.some(p => p.annualDiscountPercent > 0);

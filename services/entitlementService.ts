@@ -1,4 +1,7 @@
 import { planService } from './planService';
+import { getDataSourceMode } from './dataSourceConfig';
+import { commercialCatalogService } from './commercialCatalogService';
+import type { CommercialPlanEntitlement } from '../types/commercial';
 
 export type FeatureKey = 
   | 'website_publication'
@@ -216,5 +219,91 @@ export const entitlementService = {
     if (featureKey === 'multi_branch') return 'kurumsal';
     // Fallbacks
     return 'professional';
+  },
+
+  // ===================================================================
+  // ASYNC SERVER-BACKED METHODS (Supabase mode authority)
+  // In supabase mode, these query the canonical Supabase RPCs.
+  // In local mode, these delegate to the existing sync methods above.
+  // ===================================================================
+
+  /**
+   * Maps server-side CommercialPlanEntitlement records to the legacy PlanEntitlements shape.
+   */
+  _mapServerEntitlementsToPlanEntitlements(serverEntitlements: Record<string, CommercialPlanEntitlement>): PlanEntitlements {
+    const featureKeys: FeatureKey[] = [
+      'website_publication', 'online_booking', 'staff_management', 'service_management',
+      'customer_list', 'customer_memory_lite', 'customer_memory_full',
+      'ai_style_assistant_basic', 'ai_style_assistant_full',
+      'campaigns_referrals', 'reports_basic', 'reports_advanced',
+      'custom_domain_manual', 'multi_branch', 'notification_templates',
+      'whatsapp_automation_readiness', 'priority_support', 'super_admin_review_priority',
+      'advanced_branding', 'billing_self_service'
+    ];
+
+    const features = {} as Record<FeatureKey, boolean>;
+    for (const key of featureKeys) {
+      const e = serverEntitlements[key];
+      features[key] = e ? (e.boolean_value === true) : false;
+    }
+
+    const limitKeys: Array<{ featureKey: string; limitKey: LimitKey; fallback: number }> = [
+      { featureKey: 'max_staff', limitKey: 'maxStaff', fallback: 1 },
+      { featureKey: 'max_services', limitKey: 'maxServices', fallback: 10 },
+      { featureKey: 'max_branches', limitKey: 'maxBranches', fallback: 1 },
+      { featureKey: 'max_gallery_images', limitKey: 'maxGalleryImages', fallback: 5 }
+    ];
+
+    const limits = {} as Record<LimitKey, number>;
+    for (const { featureKey, limitKey, fallback } of limitKeys) {
+      const e = serverEntitlements[featureKey];
+      if (e) {
+        limits[limitKey] = e.is_unlimited ? 999 : (e.integer_value ?? fallback);
+      } else {
+        limits[limitKey] = fallback;
+      }
+    }
+
+    return { features, limits };
+  },
+
+  async getPlanEntitlementsAsync(planId: string): Promise<PlanEntitlements> {
+    if (getDataSourceMode() === 'supabase') {
+      const snapshot = await commercialCatalogService.getMyCommercialSubscriptionSnapshot();
+      if (!snapshot || !snapshot.success) {
+        console.error('[entitlementService] getPlanEntitlementsAsync: Supabase subscription snapshot failed. Fail-closed — returning deny-all entitlements.');
+        // Deny-all entitlements: all features false, minimum limits
+        const denyFeatures = {} as Record<FeatureKey, boolean>;
+        const allFeatureKeys: FeatureKey[] = [
+          'website_publication', 'online_booking', 'staff_management', 'service_management',
+          'customer_list', 'customer_memory_lite', 'customer_memory_full',
+          'ai_style_assistant_basic', 'ai_style_assistant_full',
+          'campaigns_referrals', 'reports_basic', 'reports_advanced',
+          'custom_domain_manual', 'multi_branch', 'notification_templates',
+          'whatsapp_automation_readiness', 'priority_support', 'super_admin_review_priority',
+          'advanced_branding', 'billing_self_service'
+        ];
+        for (const k of allFeatureKeys) denyFeatures[k] = false;
+        return { features: denyFeatures, limits: { maxStaff: 0, maxServices: 0, maxBranches: 0, maxGalleryImages: 0 } };
+      }
+      return this._mapServerEntitlementsToPlanEntitlements(snapshot.effective_entitlements);
+    }
+    return this.getPlanEntitlements(planId);
+  },
+
+  async canUseFeatureAsync(planId: string, featureKey: FeatureKey): Promise<boolean> {
+    if (getDataSourceMode() === 'supabase') {
+      const entitlements = await this.getPlanEntitlementsAsync(planId);
+      return entitlements.features[featureKey] === true;
+    }
+    return this.canUseFeature(planId, featureKey);
+  },
+
+  async getLimitAsync(planId: string, limitKey: LimitKey): Promise<number> {
+    if (getDataSourceMode() === 'supabase') {
+      const entitlements = await this.getPlanEntitlementsAsync(planId);
+      return entitlements.limits[limitKey];
+    }
+    return this.getLimit(planId, limitKey);
   }
 };

@@ -106,6 +106,7 @@
     "qa:h1e-c-orchestrator": "node scripts/test-h1e-c-controlled-acceptance-orchestrator.test.mjs",
     "qa:h1e-c-browser": "node scripts/test-h1e-c-controlled-browser.test.mjs",
     "qa:commercial-packaging": "node scripts/verify-commercial-packaging-readiness.mjs",
+    "qa:commercial-source-of-truth": "node scripts/test-commercial-source-of-truth.mjs",
     "qa:communication-notifications": "node scripts/verify-communication-notification-readiness.mjs",
     "qa:full-saas-gap-audit": "node scripts/verify-full-saas-gap-audit.mjs",
     "qa:first-manual-pilot-pack": "node scripts/verify-first-manual-pilot-pack.mjs",

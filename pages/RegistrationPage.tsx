@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
-import { planService } from '../services/planService';
+import { planService, PricingPlan } from '../services/planService';
 import { launchModeService } from '../services/launchModeService';
 import { useLanguage } from '../contexts/LanguageContext';
 import { translations } from '../utils/translations';
@@ -17,10 +17,35 @@ export default function RegistrationPage() {
   const billingPeriod = queryParams.get('billingPeriod') || 'monthly';
   const referralCode = queryParams.get('ref') || undefined;
   
-  // Public Self-Service Plan Selection Safety: Ensure only assignable public plans are selectable
-  const publicPlans = planService.getPublicSelfServicePlans();
-  const validatedPlanId = publicPlans.some(p => p.id === rawPlanId) ? rawPlanId : 'baslangic';
-  const plan = planService.getPlan(validatedPlanId) || publicPlans[0];
+  // Async Public Self-Service Plan Validation
+  const [validatedPlanId, setValidatedPlanId] = useState<string>(rawPlanId);
+  const [plan, setPlan] = useState<PricingPlan | null>(null);
+  const [planLoading, setPlanLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function validatePlan() {
+      setPlanLoading(true);
+      try {
+        const publicPlans = await planService.getPublicSelfServicePlansAsync();
+        if (cancelled) return;
+        const resolvedPlanId = publicPlans.some(p => p.id === rawPlanId) ? rawPlanId : 'baslangic';
+        const resolvedPlan = publicPlans.find(p => p.id === resolvedPlanId) || publicPlans[0] || null;
+        setValidatedPlanId(resolvedPlanId);
+        setPlan(resolvedPlan);
+      } catch (err) {
+        console.error('[RegistrationPage] Failed to load plans:', err);
+        if (!cancelled) {
+          setValidatedPlanId('baslangic');
+          setPlan(null);
+        }
+      } finally {
+        if (!cancelled) setPlanLoading(false);
+      }
+    }
+    validatePlan();
+    return () => { cancelled = true; };
+  }, [rawPlanId]);
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');

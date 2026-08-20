@@ -76,8 +76,9 @@ function generateSecureIdempotencyKey(): string | null {
 
 export const tenantRegistrationService = {
   async registerTenant(data: RegistrationData): Promise<RegistrationResult> {
-    // Public plan contract validation via explicit allowlist
-    if (!planService.isPublicSelfServicePlan(data.planId)) {
+    // Public plan contract validation via server-backed eligibility check
+    const isEligible = await planService.isPublicSelfServicePlanAsync(data.planId);
+    if (!isEligible) {
       return {
         success: false,
         status: 'PROVISIONING_FAILED_TERMINAL',
