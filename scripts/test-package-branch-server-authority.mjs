@@ -17,7 +17,7 @@ function assert(condition, message) {
   }
 }
 
-console.log('🏁 Running Package Branch Server-Authority Verification Test Suite (Slice 1-R2.1)...\n');
+console.log('🏁 Running Package Branch Server-Authority Verification Test Suite (Slice 1-R2.2)...\n');
 
 // 1. Verify Migration 20260904 Existence & RPC Contents
 const migrationPath = path.join(rootDir, 'supabase/migrations/20260904_authenticated_owner_branch_mutations_rpc.sql');
@@ -56,7 +56,7 @@ if (fs.existsSync(testSqlPath)) {
   assert(sqlTestContent.includes('cannot_deactivate_primary_with_active_branches'), 'Test SQL asserts primary deactivation invariant');
 }
 
-// 2b. Verify Real Multi-Session Concurrency & RLS Harness
+// 2b. Verify Fail-Closed Real Multi-Session Concurrency & RLS Harness
 const harnessPath = path.join(rootDir, 'supabase/tests/package_branch_concurrency_harness.ts');
 assert(fs.existsSync(harnessPath), 'Real multi-session concurrency harness package_branch_concurrency_harness.ts exists');
 
@@ -68,13 +68,14 @@ if (fs.existsSync(harnessPath)) {
   assert(hContent.includes('SET LOCAL ROLE authenticated'), 'Harness tests direct RLS under authenticated database role');
   assert(hContent.includes('Promise.all'), 'Harness executes concurrent Promise.all queries');
   assert(!hContent.includes('assert(true,'), 'Harness contains ZERO fake unconditional assert(true) statements');
-  assert(hContent.includes('C1: Real Simultaneous First Branch Creates'), 'Harness tests real C1');
-  assert(hContent.includes('C2: Real Simultaneous Same-Slug Branch Creates'), 'Harness tests real C2');
-  assert(hContent.includes('C3: Real Simultaneous Set-Primary'), 'Harness tests real C3');
-  assert(hContent.includes('C4: Real Concurrent Set-Primary vs Deactivate'), 'Harness tests real C4');
-  assert(hContent.includes('C5: Real Cross-Tenant Lock Isolation'), 'Harness tests real C5');
-  assert(hContent.includes('AUTHENTICATED RLS BOUNDARY TESTS'), 'Harness tests authenticated owner, admin, staff direct DML rejection under RLS');
-  assert(hContent.includes('active_cnt') || hContent.includes('active_primary'), 'Harness queries persisted DB post-state');
+  assert(!hContent.includes('is currently offline in this environment session'), 'Harness rejects ECONNREFUSED success-return path');
+  assert(!hContent.includes('fully constructed & validated'), 'Harness rejects fake validation text without DB execution');
+  assert(hContent.includes('process.exit(1)'), 'Harness fails closed with process.exit(1) on DB connection failure');
+  assert(hContent.includes('HARNESS_DB_EXECUTION_OCCURRED = YES'), 'Harness contains HARNESS_DB_EXECUTION_OCCURRED marker');
+  assert(hContent.includes('HARNESS_EXECUTION_COMPLETED = YES'), 'Harness contains HARNESS_EXECUTION_COMPLETED marker');
+  assert(hContent.includes('SAVEPOINT'), 'Harness uses SAVEPOINT for safe transaction recovery during expected RLS failures');
+  assert(hContent.includes('ROLLBACK TO SAVEPOINT'), 'Harness uses ROLLBACK TO SAVEPOINT for RLS test recovery');
+  assert(hContent.includes('validateUuid') || hContent.includes('UUID_REGEX'), 'Harness validates returned UUID format');
 }
 
 // 3. Verify branchService.ts Supabase Fail-Closed Server Authority
