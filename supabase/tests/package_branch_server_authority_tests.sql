@@ -118,7 +118,7 @@ BEGIN
     END IF;
 
     -- Assertion I: Inactive branches not returned by public branch RPC
-    UPDATE public.tenants SET public_site_status = 'published' WHERE id = v_tenant1_id;
+    UPDATE public.tenants SET public_site_status = 'published', onboarding_status = 'completed' WHERE id = v_tenant1_id;
     v_pub_res := public.get_public_branches('branch-test-t1');
     IF (v_pub_res->>'success')::boolean IS NOT TRUE OR jsonb_array_length(v_pub_res->'branches') <> 1 THEN
         RAISE EXCEPTION 'TEST FAILED (I): Inactive branch returned by get_public_branches RPC.';
