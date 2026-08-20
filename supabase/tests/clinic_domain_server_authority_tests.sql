@@ -68,6 +68,19 @@ BEGIN
     VALUES (v_tenant1_id, 'clinic-t1', 'Clinic Tenant 1', 'active'),
            (v_tenant2_id, 'clinic-t2', 'Clinic Tenant 2', 'active');
 
+    -- Give test tenants active subscriptions and staff entitlement overrides for disposable testing
+    INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
+    SELECT t.id, p.id, pv.id, 'manual_active', 'manual'
+    FROM (VALUES (v_tenant1_id), (v_tenant2_id)) AS t(id)
+    CROSS JOIN public.plans p
+    JOIN public.plan_versions pv ON pv.plan_id = p.id
+    WHERE p.code = 'kurumsal' AND pv.lifecycle_status = 'published'
+    LIMIT 2;
+
+    INSERT INTO public.tenant_entitlement_overrides (tenant_id, feature_key, value_type, is_unlimited, integer_value, reason)
+    VALUES (v_tenant1_id, 'max_staff', 'integer', true, NULL, 'Clinic domain authority disposable test fixture'),
+           (v_tenant2_id, 'max_staff', 'integer', true, NULL, 'Clinic domain authority disposable test fixture');
+
     INSERT INTO auth.users (id, email) VALUES
     (v_owner1_id, 'owner1@clinic.com'),
     (v_owner2_id, 'owner2@clinic.com'),
