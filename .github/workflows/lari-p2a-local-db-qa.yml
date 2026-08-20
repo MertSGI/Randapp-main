@@ -5,6 +5,7 @@ on:
     branches:
       - feature/p2a-commercial-core-foundation
       - ci/package-branch-authority-exact-sha-r2-20260820
+      - ci/package-commercial-source-of-truth-exact-sha-r1-20260820
   pull_request:
     branches:
       - feature/p2a-commercial-core-foundation
@@ -22,7 +23,7 @@ jobs:
 
       - name: Checkout Product SHA & Verify Exact Binding
         run: |
-          REQUESTED_PRODUCT_SHA="83089a0695e0a5f0cf0fda25c7006df5e6ad4c07"
+          REQUESTED_PRODUCT_SHA="4271370c5574ec32e703985f7394c7246b888979"
           git checkout "${REQUESTED_PRODUCT_SHA}"
           ACTUAL_TEST_WORKTREE_SHA=$(git rev-parse HEAD)
           echo "REQUESTED_PRODUCT_SHA = ${REQUESTED_PRODUCT_SHA}"
@@ -209,16 +210,19 @@ jobs:
         run: |
           node scripts/verify-branch-aware-booking.mjs
 
-      - name: Run Frontend Secrets & Data Mode Regression Checks
+      - name: Run Slice 2 Commercial Source-of-Truth Exact-SHA Suite
         run: |
-          npm run check:secrets
-          npx tsx scripts/test-data-mode-regression.mjs
-          npx tsx node_modules/typescript/bin/tsc --noEmit
-
-      - name: Run Frontend Production Build Verification
-        run: |
-          echo "=== RUNNING PRODUCTION FRONTEND BUILD ==="
+          echo "=== RUNNING SLICE 2 COMMERCIAL EXACT-SHA SUITE ==="
+          npm run lint
           npm run build
+          npm run check:secrets
+          npm run qa:data-mode-regression
+          npm run qa:commercial-read-contracts
+          npm run qa:commercial-legacy-compatibility
+          npm run qa:commercial-eligibility-enforcement
+          npm run qa:commercial-packaging
+          npm run qa:entitlements
+          npm run qa:commercial-source-of-truth
 
       - name: Run Git Diff & Whitespace Check
         run: |
