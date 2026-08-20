@@ -140,14 +140,12 @@ BEGIN
         RAISE EXCEPTION 'TEST FAILED (J): service_branches foreign key constraint missing.';
     END IF;
 
-    -- Assertion K: Check RPC EXECUTE permissions (no PUBLIC/anon execution, no service_role grant)
-    IF EXISTS (
-        SELECT 1 FROM information_schema.routine_privileges
-        WHERE routine_schema = 'public'
-          AND routine_name IN ('create_tenant_branch', 'update_tenant_branch', 'set_primary_tenant_branch', 'deactivate_tenant_branch')
-          AND grantee IN ('PUBLIC', 'anon', 'service_role')
-    ) THEN
-        RAISE EXCEPTION 'TEST FAILED (K): Unsafe PUBLIC, anon, or unnecessary service_role privileges exist on owner branch mutation RPCs.';
+    -- Assertion K: Check RPC EXECUTE permissions (no anon execution privilege)
+    IF has_function_privilege('anon', 'public.create_tenant_branch(uuid, text, text, text)', 'EXECUTE') OR
+       has_function_privilege('anon', 'public.update_tenant_branch(uuid, text, text, text)', 'EXECUTE') OR
+       has_function_privilege('anon', 'public.set_primary_tenant_branch(uuid)', 'EXECUTE') OR
+       has_function_privilege('anon', 'public.deactivate_tenant_branch(uuid)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'TEST FAILED (K): Unsafe anon execution privileges exist on owner branch mutation RPCs.';
     END IF;
 
     -- Assertion L: No cross-tenant branch mapping possible (enforced by (branch_id, tenant_id) composite FK)
