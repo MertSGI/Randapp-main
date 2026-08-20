@@ -18,7 +18,7 @@ jobs:
 
       - name: Checkout Product SHA & Verify Exact Binding
         run: |
-          REQUESTED_PRODUCT_SHA="4263df6ca7634f2d8609b9b4ab4ad6ea1e269882"
+          REQUESTED_PRODUCT_SHA="2bb2b32d95387e09da06c7442a8617ccd38e4feb"
           git checkout "${REQUESTED_PRODUCT_SHA}"
           ACTUAL_TEST_WORKTREE_SHA=$(git rev-parse HEAD)
           echo "EXPECTED_PRODUCT_SHA = ${REQUESTED_PRODUCT_SHA}"
