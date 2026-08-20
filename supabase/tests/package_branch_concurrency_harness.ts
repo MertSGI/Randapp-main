@@ -352,8 +352,8 @@ export async function runPackageBranchConcurrencyHarness() {
     // -------------------------------------------------------------------------
     console.log('\n--- SAFE AUTHENTICATED RLS BOUNDARY TESTS ---');
 
-    // Pre-create 1 branch for Tenant RLS A under client2 (postgres) BEFORE starting client1 transaction snapshot
-    await client2.query(`SELECT public.create_tenant_branch('${tenantRLSA_id}', 'RLS A Branch', 'rls-a') as res;`);
+    // Pre-create 1 branch for Tenant RLS A under client2 using execRpc (with auth context) BEFORE starting client1 transaction snapshot
+    await execRpc(client2, ownerRLSA_id, `SELECT public.create_tenant_branch('${tenantRLSA_id}', 'RLS A Branch', 'rls-a') as res;`);
 
     // 1. Owner RLS Boundary
     await client1.query('BEGIN;');
