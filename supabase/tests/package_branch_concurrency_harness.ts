@@ -159,8 +159,9 @@ export async function runPackageBranchConcurrencyHarness() {
     `);
 
     // Verify override resolution
-    const quotaRes = await client1.query(`SELECT * FROM public.resolve_commercial_quota('${tenantC1_id}', 'max_branches');`);
-    assert(quotaRes.rows[0]?.is_unlimited === true, 'TEST_MULTI_BRANCH_OVERRIDE_RESOLUTION = PASS (TEST_TENANT_MAX_BRANCHES_SOURCE = tenant_override)');
+    const quotaRes = await client1.query(`SELECT public.resolve_commercial_quota('${tenantC1_id}', 'max_branches') as res;`);
+    const quotaData = quotaRes.rows[0]?.res;
+    assert(quotaData?.is_unlimited === true, 'TEST_MULTI_BRANCH_OVERRIDE_RESOLUTION = PASS (TEST_TENANT_MAX_BRANCHES_SOURCE = tenant_override)');
 
     // Commercial Branch Quota Negative Control Verification
     await client1.query(`SELECT set_config('request.jwt.claims', '', true); SELECT set_config('request.jwt.claim.sub', '${ownerNeg_id}', true); SELECT set_config('request.jwt.claim.role', 'authenticated', true);`);
