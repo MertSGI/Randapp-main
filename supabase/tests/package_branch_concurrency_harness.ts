@@ -187,12 +187,12 @@ export async function runPackageBranchConcurrencyHarness() {
     assert(negB1.success && negB1.data?.success === true, 'Commercial negative control first branch creation succeeded');
 
     try {
-      await client1.query('SAVEPOINT neg_quota_sp;');
+      await client1.query('BEGIN;');
       await client1.query(`SELECT public.create_tenant_branch('${tenantNeg_id}', 'Neg Branch 2 Exceeding Quota', 'neg-2');`);
-      await client1.query('RELEASE SAVEPOINT neg_quota_sp;');
+      await client1.query('ROLLBACK;');
       assert(false, 'COMMERCIAL_BRANCH_QUOTA_NEGATIVE_CONTROL failed: Expected commercial_quota_exceeded exception');
     } catch (err: any) {
-      await client1.query('ROLLBACK TO SAVEPOINT neg_quota_sp;').catch(() => {});
+      await client1.query('ROLLBACK;').catch(() => {});
       assert(err.message.includes('commercial_quota_exceeded') || err.code === 'P0001', 'COMMERCIAL_BRANCH_QUOTA_NEGATIVE_CONTROL = PASS');
     }
 
