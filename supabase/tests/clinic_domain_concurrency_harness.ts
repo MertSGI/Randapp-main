@@ -1,5 +1,5 @@
 // supabase/tests/clinic_domain_concurrency_harness.ts
-// Real Multi-Session Concurrency & Authenticated RLS Harness for Clinic Block 1
+// Real Multi-Session Concurrency & Authenticated RLS Harness for Clinic Block 1 (R1 Repair)
 // Governance: EXECUTES ONLY ON DISPOSABLE LOCAL SUPABASE QA DB (127.0.0.1:54322) - FAILS CLOSED IF DB UNAVAILABLE
 
 import pg from 'pg';
@@ -89,10 +89,10 @@ export async function runClinicDomainConcurrencyHarness() {
       ('${doc1_id}', 'doc1_c@test.com'),
       ('${doc2_id}', 'doc2_c@test.com');
 
-      INSERT INTO public.users_profile (id, tenant_id, role, full_name) VALUES
-      ('${owner_id}', '${tenant_id}', 'tenant_owner', 'Owner C'),
-      ('${doc1_id}', '${tenant_id}', 'staff', 'Dr. Doc 1'),
-      ('${doc2_id}', '${tenant2_id}', 'staff', 'Dr. Doc 2');
+      INSERT INTO public.users_profile (id, tenant_id, role, full_name, active) VALUES
+      ('${owner_id}', '${tenant_id}', 'tenant_owner', 'Owner C', true),
+      ('${doc1_id}', '${tenant_id}', 'staff', 'Dr. Doc 1', true),
+      ('${doc2_id}', '${tenant2_id}', 'staff', 'Dr. Doc 2', true);
 
       INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active) VALUES
       ('${staff_doc1_id}', '${tenant_id}', '${doc1_id}', 'Dr. Doc 1', true),
@@ -112,14 +112,25 @@ export async function runClinicDomainConcurrencyHarness() {
       ('${appt_id}', '${tenant_id}', '${cust_id}', '${staff_doc1_id}', '${branch_id}', '2026-09-15', '14:00:00', 'confirmed');
     `);
 
-    // SCENARIO A: Concurrent double-start encounter for same appointment
+    // SCENARIO A: Concurrent double-start encounter for same appointment using atomic transaction blocks
     console.log('--- SCENARIO A: Concurrent double-start encounter ---');
-    
-    await client1.query(`SET LOCAL request.jwt.claim.sub = '${doc1_id}'; SET LOCAL ROLE authenticated;`);
-    await client2.query(`SET LOCAL request.jwt.claim.sub = '${doc1_id}'; SET LOCAL ROLE authenticated;`);
 
-    const p1 = client1.query(`SELECT public.clinic_start_encounter('${appt_id}', 'Concurrent start 1');`);
-    const p2 = client2.query(`SELECT public.clinic_start_encounter('${appt_id}', 'Concurrent start 2');`);
+    const runStartEncounterInTx = async (client: pg.Client, user_id: string, reason: string) => {
+      await client.query('BEGIN;');
+      try {
+        await client.query('SET LOCAL ROLE authenticated;');
+        await client.query(`SELECT set_config('request.jwt.claim.sub', '${user_id}', true);`);
+        const res = await client.query(`SELECT public.clinic_start_encounter('${appt_id}', '${reason}') AS res;`);
+        await client.query('COMMIT;');
+        return res.rows[0].res;
+      } catch (err) {
+        await client.query('ROLLBACK;');
+        throw err;
+      }
+    };
+
+    const p1 = runStartEncounterInTx(client1, doc1_id, 'Concurrent start 1');
+    const p2 = runStartEncounterInTx(client2, doc1_id, 'Concurrent start 2');
 
     const results = await Promise.allSettled([p1, p2]);
     const fulfilled = results.filter(r => r.status === 'fulfilled');
@@ -128,43 +139,69 @@ export async function runClinicDomainConcurrencyHarness() {
     assert(fulfilled.length === 1, 'Exactly one simultaneous encounter start call succeeded.');
     assert(rejected.length === 1, 'Exactly one simultaneous encounter start call failed with lock / ALREADY_EXISTS.');
 
-    const encRes = (fulfilled[0] as PromiseFulfilledResult<any>).value.rows[0].clinic_start_encounter;
+    const encRes = (fulfilled[0] as PromiseFulfilledResult<any>).value;
     const encounter_id = encRes.encounter_id;
     validateUuid(encounter_id, 'Encounter ID');
+
 
     // SCENARIO B: Concurrent note writes produce unique sequential versions
     console.log('--- SCENARIO B: Concurrent note writes ---');
 
-    const noteP1 = client1.query(`SELECT public.clinic_save_encounter_note('${encounter_id}', 'Note A', 'Obj A', 'Ass A', 'Plan A', 'draft');`);
-    const noteP2 = client2.query(`SELECT public.clinic_save_encounter_note('${encounter_id}', 'Note B', 'Obj B', 'Ass B', 'Plan B', 'draft');`);
+    const runSaveNoteInTx = async (client: pg.Client, user_id: string, subj: string) => {
+      await client.query('BEGIN;');
+      try {
+        await client.query('SET LOCAL ROLE authenticated;');
+        await client.query(`SELECT set_config('request.jwt.claim.sub', '${user_id}', true);`);
+        const res = await client.query(`SELECT public.clinic_save_encounter_note('${encounter_id}', '${subj}', 'Obj', 'Ass', 'Plan', 'draft') AS res;`);
+        await client.query('COMMIT;');
+        return res.rows[0].res;
+      } catch (err) {
+        await client.query('ROLLBACK;');
+        throw err;
+      }
+    };
+
+    const noteP1 = runSaveNoteInTx(client1, doc1_id, 'Note A');
+    const noteP2 = runSaveNoteInTx(client2, doc1_id, 'Note B');
 
     const noteResults = await Promise.allSettled([noteP1, noteP2]);
     const noteFulfilled = noteResults.filter(r => r.status === 'fulfilled');
 
     assert(noteFulfilled.length === 2, 'Both concurrent note writes completed safely without deadlock.');
 
-    const versions = noteFulfilled.map(r => (r as PromiseFulfilledResult<any>).value.rows[0].clinic_save_encounter_note.version);
+    const versions = noteFulfilled.map(r => (r as PromiseFulfilledResult<any>).value.version);
     versions.sort((a, b) => a - b);
     assert(versions[0] === 1 && versions[1] === 2, `Note versions produced were strictly sequential: [${versions.join(', ')}]`);
 
-    // Verify version 1 and version 2 both exist and version 1 was NOT overwritten
+    // Verify version 1 and version 2 both exist and version 1 was NOT overwritten (with explicit parentheses)
     const checkVersions = await client1.query(`SELECT version, subjective FROM public.clinic_encounter_notes WHERE encounter_id = '${encounter_id}' ORDER BY version ASC;`);
     assert(checkVersions.rows.length === 2, 'Exactly 2 note versions persisted in database.');
-    assert(checkVersions.rows[0].version === 1 && checkVersions.rows[0].subjective === 'Note A' || checkVersions.rows[0].subjective === 'Note B', 'Version 1 preserved original text.');
+    assert(checkVersions.rows[0].version === 1 && (checkVersions.rows[0].subjective === 'Note A' || checkVersions.rows[0].subjective === 'Note B'), 'Version 1 preserved original text.');
 
-    // SCENARIO C: Cross-tenant concurrent call does not escape tenant boundary
-    console.log('--- SCENARIO C: Cross-tenant concurrency boundary check ---');
-    await client2.query(`SET LOCAL request.jwt.claim.sub = '${doc2_id}'; SET LOCAL ROLE authenticated;`);
+
+    // SCENARIO C: Authorized Tenant-2 practitioner concurrently attempts mutation against Tenant-1 encounter
+    console.log('--- SCENARIO C: Authorized Cross-tenant practitioner concurrency boundary check ---');
     
     try {
-      await client2.query(`SELECT public.clinic_save_encounter_note('${encounter_id}', 'Hacked Note', NULL, NULL, NULL, 'draft');`);
+      await runSaveNoteInTx(client2, doc2_id, 'Hacked Cross-Tenant Note');
       assert(false, 'Cross-tenant note save should have thrown FORBIDDEN exception.');
     } catch (err: any) {
-      assert(err.message.includes('FORBIDDEN') || err.message.includes('NOT_FOUND'), 'Cross-tenant call failed closed correctly.');
+      assert(err.message.includes('FORBIDDEN') || err.message.includes('NOT_FOUND'), 'Cross-tenant call failed closed correctly because of tenant boundary.');
     }
 
+
+    // SCENARIO D: Query persisted DB truth and assert literal proof flags
+    console.log('--- SCENARIO D: DB Truth Verification ---');
+
+    const encCount = await client1.query(`SELECT count(*) FROM public.clinic_encounters WHERE appointment_id = '${appt_id}';`);
+    assert(parseInt(encCount.rows[0].count, 10) === 1, 'Persisted DB proof: Exactly 1 encounter exists for the appointment.');
+
+    const noteCount = await client1.query(`SELECT count(*) FROM public.clinic_encounter_notes WHERE encounter_id = '${encounter_id}';`);
+    assert(parseInt(noteCount.rows[0].count, 10) === 2, 'Persisted DB proof: Exactly 2 versioned notes exist for the encounter.');
+
+    console.log('HARNESS_AUTH_CONTEXT_PROVEN = YES');
     console.log('HARNESS_DB_EXECUTION_OCCURRED = YES');
-    console.log('HARNESS_EXECUTION_COMPLETED = YES');
+    console.log('HARNESS_REAL_MULTI_SESSION_CONCURRENCY = YES');
     console.log('\n🎉 ALL CLINIC REAL CONCURRENCY HARNESS TESTS PASSED SUCCESSFULLY!');
   } finally {
     await client1.end();

@@ -142,19 +142,6 @@ DROP POLICY IF EXISTS "No anon access on clinic_staff_profiles" ON public.clinic
 DROP POLICY IF EXISTS "Authorized tenant owner can manage clinic staff profiles" ON public.clinic_staff_profiles;
 DROP POLICY IF EXISTS "Authorized tenant staff can read clinic staff profiles" ON public.clinic_staff_profiles;
 
-CREATE POLICY "Authorized tenant owner can manage clinic staff profiles"
-ON public.clinic_staff_profiles
-FOR ALL
-TO authenticated
-USING (
-    EXISTS (
-        SELECT 1 FROM public.users_profile up
-        WHERE up.id = auth.uid()
-          AND up.tenant_id = clinic_staff_profiles.tenant_id
-          AND up.role = 'tenant_owner'
-    )
-);
-
 CREATE POLICY "Authorized tenant staff can read clinic staff profiles"
 ON public.clinic_staff_profiles
 FOR SELECT
@@ -260,7 +247,7 @@ BEGIN
         RAISE EXCEPTION 'UNAUTHENTICATED: Authentication required.';
     END IF;
 
-    -- Validate target staff exists
+    -- Validate target staff exists AND is active
     SELECT * INTO v_target_staff
     FROM public.staff
     WHERE id = p_staff_id;
@@ -269,15 +256,20 @@ BEGIN
         RAISE EXCEPTION 'NOT_FOUND: Staff member not found.';
     END IF;
 
-    -- Validate caller is active tenant_owner of the exact tenant
+    IF v_target_staff.active IS NOT TRUE THEN
+        RAISE EXCEPTION 'INVALID_STATE: Target staff member is inactive and cannot receive Clinic capabilities.';
+    END IF;
+
+    -- Validate caller is active tenant_owner of the exact tenant (users_profile.active = true)
     SELECT * INTO v_caller_up
     FROM public.users_profile
     WHERE id = v_caller_uid
       AND tenant_id = v_target_staff.tenant_id
-      AND role = 'tenant_owner';
+      AND role = 'tenant_owner'
+      AND active = true;
 
     IF v_caller_up.id IS NULL THEN
-        RAISE EXCEPTION 'FORBIDDEN: Only tenant owner of the exact tenant can set Clinic staff profile.';
+        RAISE EXCEPTION 'FORBIDDEN: Only active tenant owner of the exact tenant can set Clinic staff profile.';
     END IF;
 
     -- Enforce invariant: can_write_clinical_notes implies can_view_clinical_records

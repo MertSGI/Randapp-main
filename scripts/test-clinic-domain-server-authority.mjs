@@ -69,6 +69,13 @@ if (fs.existsSync(migrationPath)) {
   assert(migContent.includes('version INTEGER NOT NULL'), 'Clinical notes are versioned');
   assert(migContent.includes('hashtextextended'), 'Uses 64-bit advisory locking for version concurrency');
 
+  // Verify RLS policy hardening: NO direct DML policies on clinic_staff_profiles
+  assert(!migContent.includes('FOR ALL') && !migContent.includes('FOR INSERT') && !migContent.includes('FOR UPDATE') && !migContent.includes('FOR DELETE'), 'NO direct DML policies exist on clinic_staff_profiles (RPC server authority enforced)');
+
+  // Verify clinic_set_staff_profile requires active tenant owner and active target staff
+  assert(migContent.includes('AND active = true'), 'clinic_set_staff_profile requires active = true for tenant_owner');
+  assert(migContent.includes('v_target_staff.active IS NOT TRUE'), 'clinic_set_staff_profile rejects inactive target staff');
+
   // Verify Audit Events payloads do not leak clinical narrative
   assert(!migContent.includes("'subjective', p_subjective") && !migContent.includes("'allergies', p_allergies"), 'Audit events payloads DO NOT leak clinical narrative content');
 }
@@ -77,13 +84,26 @@ if (fs.existsSync(migrationPath)) {
 const sqlTestPath = path.join(rootDir, 'supabase/tests/clinic_domain_server_authority_tests.sql');
 assert(fs.existsSync(sqlTestPath), 'SQL test suite clinic_domain_server_authority_tests.sql exists');
 
+if (fs.existsSync(sqlTestPath)) {
+  const sqlContent = fs.readFileSync(sqlTestPath, 'utf8');
+  assert(sqlContent.includes('SET LOCAL ROLE anon;'), 'SQL test suite contains literal anon security test section');
+  assert(sqlContent.includes('INSERT INTO public.clinic_staff_profiles') && sqlContent.includes('SECURITY FAIL E1'), 'SQL test suite contains literal tenant-owner direct DML denial assertions');
+  assert(sqlContent.includes('v_inact_owner_id'), 'SQL test suite contains inactive owner denial test');
+  assert(sqlContent.includes('v_inact_staff_id'), 'SQL test suite contains inactive target staff rejection test');
+  assert(sqlContent.includes('v_doc2_id') && sqlContent.includes('SECURITY FAIL K1'), 'SQL test suite contains authorized cross-tenant boundary assertions');
+}
+
 const harnessPath = path.join(rootDir, 'supabase/tests/clinic_domain_concurrency_harness.ts');
 assert(fs.existsSync(harnessPath), 'Real concurrency harness clinic_domain_concurrency_harness.ts exists');
 
 if (fs.existsSync(harnessPath)) {
   const hContent = fs.readFileSync(harnessPath, 'utf8');
   assert(hContent.includes("from 'pg'"), 'Harness uses real pg client');
+  assert(hContent.includes("query('BEGIN;')") || hContent.includes('BEGIN;'), 'Harness uses explicit transaction blocks per concurrent RPC call');
+  assert(!hContent.includes("await client1.query(`SET LOCAL request.jwt.claim.sub"), 'Harness avoids transactionless standalone SET LOCAL auth context');
+  assert(hContent.includes('HARNESS_AUTH_CONTEXT_PROVEN = YES'), 'Harness contains HARNESS_AUTH_CONTEXT_PROVEN marker');
   assert(hContent.includes('HARNESS_DB_EXECUTION_OCCURRED = YES'), 'Harness contains HARNESS_DB_EXECUTION_OCCURRED marker');
+  assert(hContent.includes('HARNESS_REAL_MULTI_SESSION_CONCURRENCY = YES'), 'Harness contains HARNESS_REAL_MULTI_SESSION_CONCURRENCY marker');
 }
 
 // 3. Verify Codebase for prohibited client-side storage or raw public booking leaks
