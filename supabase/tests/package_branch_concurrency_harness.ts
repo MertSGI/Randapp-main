@@ -158,20 +158,33 @@ export async function runPackageBranchConcurrencyHarness() {
         ('${admin_id}', NULL, 'Super Admin', 'super_admin', true);
     `);
 
+    // Helper to catch DB SQLSTATE errors
+    async function execRpc(client: any, userId: string, sql: string) {
+      try {
+        const res = await client.query(`
+          SELECT set_config('request.jwt.claims', '{"sub":"${userId}","role":"authenticated"}', true);
+          SELECT set_config('request.jwt.claim.sub', '${userId}', true);
+          SELECT set_config('request.jwt.claim.role', 'authenticated', true);
+          ${sql}
+        `);
+        const lastResult = Array.isArray(res) ? res[res.length - 1] : res;
+        return { success: true, data: lastResult.rows[0]?.res, error: null };
+      } catch (err: any) {
+        if (err.code === '40P01') rawDeadlockCount++;
+        if (err.code === '23505') rawUniqueViolationCount++;
+        if (err.code === '57014') concurrencyTimeoutCount++;
+        return { success: false, data: null, error: err };
+      }
+    }
+
     // Verify override resolution
     const quotaRes = await client1.query(`SELECT public.resolve_commercial_quota('${tenantC1_id}', 'max_branches') as res;`);
     const quotaData = quotaRes.rows[0]?.res;
     assert(quotaData?.is_unlimited === true, 'TEST_MULTI_BRANCH_OVERRIDE_RESOLUTION = PASS (TEST_TENANT_MAX_BRANCHES_SOURCE = tenant_override)');
 
     // Commercial Branch Quota Negative Control Verification
-    await client1.query(`
-      SELECT set_config('request.jwt.claims', '{"sub": "${ownerNeg_id}", "role": "authenticated"}', true);
-      SELECT set_config('request.jwt.claim.sub', '${ownerNeg_id}', true);
-      SELECT set_config('request.jwt.claim.role', 'authenticated', true);
-    `);
-    const negB1 = await client1.query(`SELECT public.create_tenant_branch('${tenantNeg_id}', 'Neg Branch 1', 'neg-1') as res;`);
-    const negB1Res = negB1.rows[0]?.res;
-    assert(negB1Res?.success === true, 'Commercial negative control first branch creation succeeded');
+    const negB1 = await execRpc(client1, ownerNeg_id, `SELECT public.create_tenant_branch('${tenantNeg_id}', 'Neg Branch 1', 'neg-1') as res;`);
+    assert(negB1.success && negB1.data?.success === true, 'Commercial negative control first branch creation succeeded');
 
     try {
       await client1.query('SAVEPOINT neg_quota_sp;');
@@ -194,25 +207,6 @@ export async function runPackageBranchConcurrencyHarness() {
         console.log('✅ PASSED: Package Branch Server-Authority Functional SQL Suite (Assertions A-L)');
       } finally {
         await testClient.end();
-      }
-    }
-
-    // Helper to catch DB SQLSTATE errors
-    async function execRpc(client: any, userId: string, sql: string) {
-      try {
-        const res = await client.query(`
-          SELECT set_config('request.jwt.claims', '{"sub":"${userId}","role":"authenticated"}', true);
-          SELECT set_config('request.jwt.claim.sub', '${userId}', true);
-          SELECT set_config('request.jwt.claim.role', 'authenticated', true);
-          ${sql}
-        `);
-        const lastResult = Array.isArray(res) ? res[res.length - 1] : res;
-        return { success: true, data: lastResult.rows[0]?.res, error: null };
-      } catch (err: any) {
-        if (err.code === '40P01') rawDeadlockCount++;
-        if (err.code === '23505') rawUniqueViolationCount++;
-        if (err.code === '57014') concurrencyTimeoutCount++;
-        return { success: false, data: null, error: err };
       }
     }
 
