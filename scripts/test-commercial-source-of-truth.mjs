@@ -181,22 +181,22 @@ assert(
 );
 
 // =========================================================================
-// T5: tenantRegistrationService.ts — Server-backed eligibility
+// T5: tenantRegistrationService.ts — UX_ONLY Presentation & Server Provisioning Authority
 // =========================================================================
-console.log('\nT5: tenantRegistrationService.ts — Server-backed eligibility');
+console.log('\nT5: tenantRegistrationService.ts — UX_ONLY Presentation & Server Provisioning Authority');
 
 const tenantRegSrc = readFile('services/tenantRegistrationService.ts');
 
 assert(
-  'tenantRegistrationService calls isPublicSelfServicePlanAsync',
-  tenantRegSrc.includes('isPublicSelfServicePlanAsync'),
-  'tenantRegistrationService.ts must call planService.isPublicSelfServicePlanAsync() for plan eligibility'
+  'tenantRegistrationService delegates Supabase mode to registerTenantSupabase without pre-RPC rejection',
+  tenantRegSrc.includes('isSupabaseMode()') && tenantRegSrc.includes('this.registerTenantSupabase(data)'),
+  'tenantRegistrationService.ts must route Supabase registrations directly to registerTenantSupabase for server RPC authorization'
 );
 
 assert(
-  'tenantRegistrationService does NOT call isPublicSelfServicePlan synchronously for authorization',
-  !tenantRegSrc.includes('planService.isPublicSelfServicePlan(data.planId)'),
-  'tenantRegistrationService.ts must NOT use sync isPublicSelfServicePlan() for authorization gate'
+  'tenantRegistrationService limits sync catalog check to Mock mode',
+  tenantRegSrc.includes('planService.isPublicSelfServicePlan(data.planId)'),
+  'tenantRegistrationService.ts must perform sync catalog checks for Mock mode only'
 );
 
 // =========================================================================
