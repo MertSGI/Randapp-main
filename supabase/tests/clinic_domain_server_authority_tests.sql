@@ -107,25 +107,6 @@ BEGIN
     (v_appt1_id, v_tenant1_id, v_cust1_id, v_staff_doc1_id, v_branch1_id, '2026-09-10', '10:00:00', 'confirmed'),
     (v_appt2_id, v_tenant1_id, v_cust1_id, v_staff_rec1_id, v_branch1_id, '2026-09-10', '11:00:00', 'confirmed');
 
-    -- SEED SEED FIXTURE ROWS AS PRIVILEGED OPERATOR FOR MEANINGFUL ANON / NO-PROFILE VISIBILITY PROOF
-    INSERT INTO public.clinic_staff_profiles (tenant_id, staff_id, practitioner_type, can_manage_patient_profiles, can_view_clinical_records, can_write_clinical_notes) VALUES
-    (v_tenant1_id, v_staff_doc1_id, 'physician', true, true, true);
-
-    INSERT INTO public.clinic_patient_profiles (tenant_id, customer_id, date_of_birth, sex_at_birth, allergies, chronic_conditions) VALUES
-    (v_tenant1_id, v_cust1_id, '1990-05-15', 'male', 'Penicillin', 'Hypertension');
-
-    INSERT INTO public.clinic_encounters (id, tenant_id, appointment_id, customer_id, practitioner_staff_id, branch_id, status, reason_for_visit, started_at, created_by) VALUES
-    ('f1111111-1111-4111-8111-111111111111', v_tenant1_id, v_appt1_id, v_cust1_id, v_staff_doc1_id, v_branch1_id, 'open', 'Initial seed encounter', now(), v_owner1_id);
-
-    INSERT INTO public.clinic_encounter_notes (id, tenant_id, encounter_id, author_staff_id, version, subjective, objective, assessment, plan, note_status, created_at) VALUES
-    ('n1111111-1111-4111-8111-111111111111', v_tenant1_id, 'f1111111-1111-4111-8111-111111111111', v_staff_doc1_id, 1, 'Seed note subjective', 'Seed note objective', 'Seed note assessment', 'Seed note plan', 'draft', now());
-
-    -- Cleanup seed fixture encounter and note after proving insertion
-    DELETE FROM public.clinic_encounter_notes WHERE id = 'n1111111-1111-4111-8111-111111111111';
-    DELETE FROM public.clinic_encounters WHERE id = 'f1111111-1111-4111-8111-111111111111';
-    DELETE FROM public.clinic_patient_profiles WHERE customer_id = v_cust1_id;
-    DELETE FROM public.clinic_staff_profiles WHERE staff_id = v_staff_doc1_id;
-
 
     -- =========================================================================
     -- D & F. ACTIVE TENANT OWNER 1 CONFIGURATION OF STAFF
@@ -315,6 +296,8 @@ BEGIN
         RAISE EXCEPTION 'FIXTURE FAIL: Privileged count on clinic_encounter_notes is expected >= 2, got %', v_priv_count;
     END IF;
 
+    RAISE NOTICE 'ANON_PROTECTED_ROWS_PREEXIST=YES';
+
 
     -- =========================================================================
     -- A. ANON BOUNDARY CHECKS WITH KNOWN PROTECTED ROWS
@@ -328,6 +311,8 @@ BEGIN
        (SELECT count(*) FROM public.clinic_encounter_notes) <> 0 THEN
         RAISE EXCEPTION 'SECURITY FAIL A1: anon has non-zero SELECT visibility on Clinic tables despite pre-existing protected rows!';
     END IF;
+
+    RAISE NOTICE 'ANON_CLINICAL_VISIBILITY_ZERO=YES';
 
     -- A2. Direct INSERT denied and row not persisted
     v_denied := false;
@@ -492,6 +477,8 @@ BEGIN
         RAISE EXCEPTION 'SECURITY FAIL E4: clinic_staff_profiles row was mutated by direct DML!';
     END IF;
 
+    RAISE NOTICE 'OWNER_DIRECT_DML_DENIED=YES';
+
 
     -- =========================================================================
     -- N. NOTE IMMUTABILITY & DIRECT DML DENIAL (PRACTITIONER ROW_COUNT PROOF)
@@ -522,6 +509,8 @@ BEGIN
     IF (SELECT subjective FROM public.clinic_encounter_notes WHERE encounter_id = v_enc1_id AND version = 1) <> 'Patient reports rash on left forearm for 3 days.' THEN
         RAISE EXCEPTION 'SECURITY FAIL N3: Historical clinical note version 1 was mutated or deleted!';
     END IF;
+
+    RAISE NOTICE 'CLINICAL_NOTE_APPEND_ONLY_PROVEN=YES';
 
 
     -- =========================================================================
@@ -594,6 +583,8 @@ BEGIN
         RAISE EXCEPTION 'SECURITY FAIL K3: Tenant 2 practitioner completed Tenant 1 encounter!';
     END IF;
 
+    RAISE NOTICE 'AUTHORIZED_CROSS_TENANT_BOUNDARY_PROVEN=YES';
+
 
     -- =========================================================================
     -- L. BRANCH & APPOINTMENT CONTEXT HARDENING
@@ -655,6 +646,8 @@ BEGIN
         END IF;
     END LOOP;
 
+    RAISE NOTICE 'AUDIT_CLINICAL_CONTENT_LEAK=NO';
+
 
     -- =========================================================================
     -- P. PUBLIC / SELF-SERVICE CLINICAL ISOLATION PROOF
@@ -665,7 +658,10 @@ BEGIN
         RAISE EXCEPTION 'PUBLIC ISOLATION FAIL P1: Public booking functions contain references to Clinic clinical tables!';
     END IF;
 
-    RAISE NOTICE 'SUCCESS: All Expanded Clinic Domain Server Authority SQL Contract Tests Passed (R1.1 Closure)!';
+    RAISE NOTICE 'PUBLIC_SELF_SERVICE_CLINICAL_ISOLATION=PASS';
+
+    RAISE NOTICE 'CLINIC_SQL_DB_EXECUTION=PASS';
+    RAISE NOTICE 'SUCCESS: All Expanded Clinic Domain Server Authority SQL Contract Tests Passed (R1.2 Executable Truth)!';
 END $$;
 
 ROLLBACK;

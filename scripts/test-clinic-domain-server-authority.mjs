@@ -108,6 +108,33 @@ if (fs.existsSync(harnessPath)) {
   assert(hContent.includes('HARNESS_REAL_MULTI_SESSION_CONCURRENCY = YES'), 'Harness contains HARNESS_REAL_MULTI_SESSION_CONCURRENCY marker');
 }
 
+// 3. Static UUID Syntax & Historical Invalid Literal Validation
+console.log('\n🔒 Checking UUID Literal Syntax Integrity in Test Fixtures...');
+const targetTestFiles = [sqlTestPath, harnessPath];
+const validUuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+let invalidUuidCount = 0;
+
+for (const tfPath of targetTestFiles) {
+  if (!fs.existsSync(tfPath)) continue;
+  const fileText = fs.readFileSync(tfPath, 'utf8');
+  assert(!fileText.includes('n1111111-1111-4111-8111-111111111111'), `Historical invalid UUID 'n1111111-1111-4111-8111-111111111111' is absent from ${path.basename(tfPath)}`);
+
+  // Extract all single-quoted or double-quoted UUID-shaped strings (8-4-4-4-12)
+  const matches = fileText.match(/['"]([a-zA-Z0-9-]{36})['"]/g) || [];
+  for (const match of matches) {
+    const rawUuid = match.slice(1, -1);
+    // Ignore known non-UUID placeholders if any, but validate all UUID-shaped strings
+    if (rawUuid.split('-').length === 5 && rawUuid.length === 36) {
+      if (!validUuidRegex.test(rawUuid)) {
+        console.error(`❌ INVALID UUID SYNTAX FOUND: '${rawUuid}' in ${path.basename(tfPath)}`);
+        invalidUuidCount++;
+      }
+    }
+  }
+}
+
+assert(invalidUuidCount === 0, 'All test fixture UUID literals satisfy strict hexadecimal PostgreSQL UUID syntax ([0-9a-fA-F])');
+
 // 3. Verify Codebase for prohibited client-side storage or raw public booking leaks
 const srcDir = path.join(rootDir, 'src');
 if (fs.existsSync(srcDir)) {
