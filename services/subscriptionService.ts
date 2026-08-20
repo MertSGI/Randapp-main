@@ -261,11 +261,14 @@ export const subscriptionService = {
 
   async canCreateAppointment(tenantId: string): Promise<boolean> {
     const plan = await this.getPlanForTenant(tenantId);
-    const usage = await this.getTenantUsage(tenantId);
     if (!plan) return false;
-    // Monthly appointments count is not explicitly limited in the new packages, but keeping existing logic if needed
-    // The previous packages had maxMonthlyAppointments. New ones have it unlimited except maybe basic.
-    return usage.monthlyAppointmentsCount < plan.maxMonthlyAppointments;
+    if (getDataSourceMode() === 'supabase') {
+      if (plan.isMonthlyAppointmentsUnlimited) return true;
+      // Fail closed for bounded monthly appointment quota on frontend if no server usage read contract exists
+      return false;
+    }
+    const usage = await this.getTenantUsage(tenantId);
+    return plan.isMonthlyAppointmentsUnlimited || usage.monthlyAppointmentsCount < plan.maxMonthlyAppointments;
   },
 
   async isFeatureEnabled(tenantId: string, featureKey: keyof PricingPlan): Promise<boolean> {

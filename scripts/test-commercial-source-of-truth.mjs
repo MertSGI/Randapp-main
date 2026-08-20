@@ -264,6 +264,35 @@ assert(
 );
 
 // =========================================================================
+// T9: Monthly Appointment Quota & Explicit Unlimited Quota Audit
+// =========================================================================
+console.log('\nT9: Monthly Appointment Quota & Explicit Unlimited Quota Audit');
+
+assert(
+  'subscriptionService canCreateAppointment in Supabase mode checks plan.isMonthlyAppointmentsUnlimited',
+  subscriptionServiceSrc.includes("getDataSourceMode() === 'supabase'") &&
+  subscriptionServiceSrc.includes('if (plan.isMonthlyAppointmentsUnlimited) return true;'),
+  'canCreateAppointment in Supabase mode must check plan.isMonthlyAppointmentsUnlimited'
+);
+
+assert(
+  'subscriptionService canCreateAppointment does NOT evaluate usage < plan.maxMonthlyAppointments in Supabase mode',
+  subscriptionServiceSrc.includes("if (getDataSourceMode() === 'supabase')") &&
+  subscriptionServiceSrc.includes('if (plan.isMonthlyAppointmentsUnlimited) return true;') &&
+  subscriptionServiceSrc.includes('return false;'),
+  'canCreateAppointment in Supabase mode must fail closed on bounded quota without evaluating fabricated usage'
+);
+
+assert(
+  'All 5 unlimited commercial quotas (staff, services, branches, monthly appts, ai) use explicit boolean flags',
+  subscriptionServiceSrc.includes('unlimitedFlags?.maxStaff') &&
+  subscriptionServiceSrc.includes('unlimitedFlags?.maxServices') &&
+  subscriptionServiceSrc.includes('isMonthlyAppointmentsUnlimited') &&
+  subscriptionServiceSrc.includes('isAiQuotaUnlimited'),
+  'All unlimited commercial quotas must use explicit server boolean flags in Supabase mode'
+);
+
+// =========================================================================
 // SUMMARY
 // =========================================================================
 console.log(`\n${'='.repeat(60)}`);
