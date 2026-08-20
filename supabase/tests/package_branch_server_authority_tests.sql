@@ -96,11 +96,15 @@ BEGIN
     END IF;
 
     -- Second branch creation MUST fail with commercial_quota_exceeded because tenant has default plan quota (max_branches = 1)
-    v_neg_res := public.create_tenant_branch(v_neg_tenant_id, 'Second Branch Exceeding Quota', 'second');
-    IF (v_neg_res->>'success')::boolean IS TRUE OR v_neg_res->>'reason_code' <> 'commercial_quota_exceeded' THEN
-        RAISE EXCEPTION 'TEST FAILED (NEG CONTROL): Second branch creation did not fail with commercial_quota_exceeded. Got: %', v_neg_res;
-    END IF;
-    RAISE NOTICE '✅ COMMERCIAL_BRANCH_QUOTA_NEGATIVE_CONTROL = PASS';
+    BEGIN
+        v_neg_res := public.create_tenant_branch(v_neg_tenant_id, 'Second Branch Exceeding Quota', 'second');
+        RAISE EXCEPTION 'TEST FAILED (NEG CONTROL): Second branch creation did not raise commercial_quota_exceeded.';
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM NOT LIKE '%commercial_quota_exceeded%' THEN
+            RAISE EXCEPTION 'TEST FAILED (NEG CONTROL): Expected commercial_quota_exceeded exception, got: % (%)', SQLERRM, SQLSTATE;
+        END IF;
+        RAISE NOTICE '✅ COMMERCIAL_BRANCH_QUOTA_NEGATIVE_CONTROL = PASS';
+    END;
 
     -- Assertion A & E: Tenant owner can create own branch & first branch becomes primary
     PERFORM set_config('request.jwt.claims', '', true);

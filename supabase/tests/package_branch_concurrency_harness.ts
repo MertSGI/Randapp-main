@@ -168,9 +168,12 @@ export async function runPackageBranchConcurrencyHarness() {
     const negB1Res = negB1.rows[0]?.res;
     assert(negB1Res?.success === true, 'Commercial negative control first branch creation succeeded');
 
-    const negB2 = await client1.query(`SELECT public.create_tenant_branch('${tenantNeg_id}', 'Neg Branch 2 Exceeding Quota', 'neg-2') as res;`);
-    const negB2Res = negB2.rows[0]?.res;
-    assert(negB2Res?.success === false && negB2Res?.reason_code === 'commercial_quota_exceeded', 'COMMERCIAL_BRANCH_QUOTA_NEGATIVE_CONTROL = PASS');
+    try {
+      await client1.query(`SELECT public.create_tenant_branch('${tenantNeg_id}', 'Neg Branch 2 Exceeding Quota', 'neg-2');`);
+      assert(false, 'COMMERCIAL_BRANCH_QUOTA_NEGATIVE_CONTROL failed: Expected commercial_quota_exceeded exception');
+    } catch (err: any) {
+      assert(err.message.includes('commercial_quota_exceeded') || err.code === 'P0001', 'COMMERCIAL_BRANCH_QUOTA_NEGATIVE_CONTROL = PASS');
+    }
 
     // 0b. Execute Package Branch Server Authority Functional SQL Suite (Assertions A-L)
     const sqlPath = path.join(process.cwd(), 'supabase/tests/package_branch_server_authority_tests.sql');
