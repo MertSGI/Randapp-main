@@ -78,7 +78,7 @@ BEGIN
     (v_doc2_id, 'doc2@clinic.com');
 
     -- Users Profile
-    INSERT INTO public.users_profile (id, tenant_id, role, full_name, active) VALUES
+    INSERT INTO public.users_profile (id, tenant_id, role, name, active) VALUES
     (v_owner1_id, v_tenant1_id, 'tenant_owner', 'Dr. Active Owner 1', true),
     (v_owner2_id, v_tenant2_id, 'tenant_owner', 'Dr. Active Owner 2', true),
     (v_inact_owner_id, v_tenant1_id, 'tenant_owner', 'Dr. Inactive Owner', false),
