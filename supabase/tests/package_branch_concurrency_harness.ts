@@ -112,8 +112,9 @@ export async function runPackageBranchConcurrencyHarness() {
       INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
       SELECT '${tenantNeg_id}', p.id, pv.id, 'manual_active', 'manual'
       FROM public.plans p
-      JOIN public.plan_versions pv ON pv.plan_id = p.id AND pv.lifecycle_status = 'published'
+      JOIN public.plan_versions pv ON pv.plan_id = p.id
       WHERE p.code = 'baslangic'
+      ORDER BY (pv.lifecycle_status = 'published') DESC, pv.created_at DESC
       LIMIT 1;
 
       INSERT INTO public.tenant_entitlement_overrides (tenant_id, feature_key, value_type, is_unlimited, integer_value, reason)

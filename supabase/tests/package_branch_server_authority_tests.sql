@@ -59,8 +59,9 @@ BEGIN
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
     SELECT v_neg_tenant_id, p.id, pv.id, 'manual_active', 'manual'
     FROM public.plans p
-    JOIN public.plan_versions pv ON pv.plan_id = p.id AND pv.lifecycle_status = 'published'
+    JOIN public.plan_versions pv ON pv.plan_id = p.id
     WHERE p.code = 'baslangic'
+    ORDER BY (pv.lifecycle_status = 'published') DESC, pv.created_at DESC
     LIMIT 1;
 
     -- Create max_branches override for multi-branch test tenants 1 and 2
