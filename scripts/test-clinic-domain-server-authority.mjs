@@ -87,10 +87,12 @@ assert(fs.existsSync(sqlTestPath), 'SQL test suite clinic_domain_server_authorit
 if (fs.existsSync(sqlTestPath)) {
   const sqlContent = fs.readFileSync(sqlTestPath, 'utf8');
   assert(sqlContent.includes('SET LOCAL ROLE anon;'), 'SQL test suite contains literal anon security test section');
-  assert(sqlContent.includes('INSERT INTO public.clinic_staff_profiles') && sqlContent.includes('SECURITY FAIL E1'), 'SQL test suite contains literal tenant-owner direct DML denial assertions');
-  assert(sqlContent.includes('v_inact_owner_id'), 'SQL test suite contains inactive owner denial test');
-  assert(sqlContent.includes('v_inact_staff_id'), 'SQL test suite contains inactive target staff rejection test');
-  assert(sqlContent.includes('v_doc2_id') && sqlContent.includes('SECURITY FAIL K1'), 'SQL test suite contains authorized cross-tenant boundary assertions');
+  assert(!sqlContent.includes('EXCEPTION WHEN OTHERS THEN NULL;'), 'SQL test suite contains ZERO false-green exception-swallowing patterns (EXCEPTION WHEN OTHERS THEN NULL;)');
+  assert(sqlContent.includes('v_priv_count'), 'SQL test suite asserts pre-existing protected rows before anon / no-profile checks');
+  assert(sqlContent.includes('GET DIAGNOSTICS v_row_count = ROW_COUNT;'), 'SQL test suite uses ROW_COUNT diagnostics for direct DML denial verification');
+  assert(sqlContent.includes('v_owner2_id') && sqlContent.includes('Dr. Active Owner 2'), 'SQL test suite creates real Tenant 2 Owner authority');
+  assert(sqlContent.includes("v_audit_check.payload ? 'subjective'"), 'SQL test suite inspects audit JSON payload keys for forbidden clinical field names');
+  assert(sqlContent.includes('PUBLIC / SELF-SERVICE CLINICAL ISOLATION PROOF'), 'SQL test suite contains literal public booking function clinical table isolation checks');
 }
 
 const harnessPath = path.join(rootDir, 'supabase/tests/clinic_domain_concurrency_harness.ts');

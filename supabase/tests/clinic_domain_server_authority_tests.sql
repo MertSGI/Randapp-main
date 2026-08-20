@@ -1,6 +1,6 @@
 -- =========================================================================
 -- TRANSACTIONAL TEST SUITE: clinic_domain_server_authority_tests.sql
--- Proves Clinic Block 1 Clinical Domain Server Authority, RLS Policies & RPC Contracts (R1 Expanded Security & Authority Truth)
+-- Proves Clinic Block 1 Clinical Domain Server Authority, RLS Policies & RPC Contracts (R1.1 Test-Truth Closure)
 -- Target: Disposable PostgreSQL database / Supabase
 -- =========================================================================
 
@@ -8,41 +8,46 @@ BEGIN;
 
 DO $$
 DECLARE
-    v_tenant1_id     uuid := '11111111-1111-4111-8111-111111111111';
-    v_tenant2_id     uuid := '22222222-2222-4222-8222-222222222222';
+    v_tenant1_id       uuid := '11111111-1111-4111-8111-111111111111';
+    v_tenant2_id       uuid := '22222222-2222-4222-8222-222222222222';
     
-    v_owner1_id      uuid := 'a1111111-1111-4111-8111-111111111111';
-    v_inact_owner_id uuid := 'a5555555-5555-4555-8555-555555555555';
-    v_no_prof_user_id uuid := 'a6666666-6666-4666-8666-666666666666';
-    v_rec1_id        uuid := 'a2222222-2222-4222-8222-222222222222';
-    v_doc1_id        uuid := 'a3333333-3333-4333-8333-333333333333';
-    v_doc2_id        uuid := 'a4444444-4444-4444-8444-444444444444';
+    v_owner1_id        uuid := 'a1111111-1111-4111-8111-111111111111';
+    v_owner2_id        uuid := 'a7777777-7777-4777-8777-777777777777';
+    v_inact_owner_id   uuid := 'a5555555-5555-4555-8555-555555555555';
+    v_no_prof_user_id  uuid := 'a6666666-6666-4666-8666-666666666666';
+    v_rec1_id          uuid := 'a2222222-2222-4222-8222-222222222222';
+    v_doc1_id          uuid := 'a3333333-3333-4333-8333-333333333333';
+    v_doc2_id          uuid := 'a4444444-4444-4444-8444-444444444444';
     
-    v_staff_rec1_id  uuid := 'b1111111-1111-4111-8111-111111111111';
-    v_staff_doc1_id  uuid := 'b2222222-2222-4222-8222-222222222222';
-    v_staff_doc2_id  uuid := 'b3333333-3333-4333-8333-333333333333';
-    v_inact_staff_id uuid := 'b4444444-4444-4444-8444-444444444444';
+    v_staff_rec1_id    uuid := 'b1111111-1111-4111-8111-111111111111';
+    v_staff_doc1_id    uuid := 'b2222222-2222-4222-8222-222222222222';
+    v_staff_doc2_id    uuid := 'b3333333-3333-4333-8333-333333333333';
+    v_inact_staff_id   uuid := 'b4444444-4444-4444-8444-444444444444';
 
-    v_branch1_id     uuid := 'c1111111-1111-4111-8111-111111111111';
-    v_branch2_id     uuid := 'c2222222-2222-4222-8222-222222222222';
+    v_branch1_id       uuid := 'c1111111-1111-4111-8111-111111111111';
+    v_branch2_id       uuid := 'c2222222-2222-4222-8222-222222222222';
 
-    v_cust1_id       uuid := 'd1111111-1111-4111-8111-111111111111';
-    v_cust2_id       uuid := 'd2222222-2222-4222-8222-222222222222';
+    v_cust1_id         uuid := 'd1111111-1111-4111-8111-111111111111';
+    v_cust2_id         uuid := 'd2222222-2222-4222-8222-222222222222';
     
-    v_appt1_id       uuid := 'e1111111-1111-4111-8111-111111111111';
-    v_appt2_id       uuid := 'e2222222-2222-4222-8222-222222222222';
+    v_appt1_id         uuid := 'e1111111-1111-4111-8111-111111111111';
+    v_appt2_id         uuid := 'e2222222-2222-4222-8222-222222222222';
     
-    v_res            jsonb;
-    v_pat_res        jsonb;
-    v_enc1_id        uuid;
-    v_note1_res      jsonb;
-    v_note2_res      jsonb;
-    v_history_res    jsonb;
-    v_audit_count    integer;
-    v_audit_check    record;
-    v_row_count      integer;
+    v_res              jsonb;
+    v_pat_res          jsonb;
+    v_enc1_id          uuid;
+    v_note1_res        jsonb;
+    v_note2_res        jsonb;
+    v_history_res      jsonb;
+    v_audit_count      integer;
+    v_audit_check      record;
+    v_row_count        integer;
+    v_denied           boolean;
+    v_priv_count       integer;
+    v_anon_count       integer;
+    v_sub_check        text;
 BEGIN
-    RAISE NOTICE 'Starting Expanded Clinic Domain Server Authority SQL Contract Tests (R1 Repair)...';
+    RAISE NOTICE 'Starting Clinic Domain Server Authority SQL Contract Tests (R1.1 Test-Truth Closure)...';
 
     -- 1. CLEANUP PREVIOUS TEST FIXTURES IF ANY
     DELETE FROM public.audit_events WHERE tenant_id IN (v_tenant1_id::text, v_tenant2_id::text);
@@ -54,8 +59,8 @@ BEGIN
     DELETE FROM public.staff WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
     DELETE FROM public.customers WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
     DELETE FROM public.branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
-    DELETE FROM public.users_profile WHERE id IN (v_owner1_id, v_inact_owner_id, v_no_prof_user_id, v_rec1_id, v_doc1_id, v_doc2_id);
-    DELETE FROM auth.users WHERE id IN (v_owner1_id, v_inact_owner_id, v_no_prof_user_id, v_rec1_id, v_doc1_id, v_doc2_id);
+    DELETE FROM public.users_profile WHERE id IN (v_owner1_id, v_owner2_id, v_inact_owner_id, v_no_prof_user_id, v_rec1_id, v_doc1_id, v_doc2_id);
+    DELETE FROM auth.users WHERE id IN (v_owner1_id, v_owner2_id, v_inact_owner_id, v_no_prof_user_id, v_rec1_id, v_doc1_id, v_doc2_id);
     DELETE FROM public.tenants WHERE id IN (v_tenant1_id, v_tenant2_id);
 
     -- 2. CREATE SEED TENANTS & AUTH USERS
@@ -65,6 +70,7 @@ BEGIN
 
     INSERT INTO auth.users (id, email) VALUES
     (v_owner1_id, 'owner1@clinic.com'),
+    (v_owner2_id, 'owner2@clinic.com'),
     (v_inact_owner_id, 'inact_owner@clinic.com'),
     (v_no_prof_user_id, 'noprofile@clinic.com'),
     (v_rec1_id, 'rec1@clinic.com'),
@@ -73,7 +79,8 @@ BEGIN
 
     -- Users Profile
     INSERT INTO public.users_profile (id, tenant_id, role, full_name, active) VALUES
-    (v_owner1_id, v_tenant1_id, 'tenant_owner', 'Dr. Active Owner', true),
+    (v_owner1_id, v_tenant1_id, 'tenant_owner', 'Dr. Active Owner 1', true),
+    (v_owner2_id, v_tenant2_id, 'tenant_owner', 'Dr. Active Owner 2', true),
     (v_inact_owner_id, v_tenant1_id, 'tenant_owner', 'Dr. Inactive Owner', false),
     (v_rec1_id, v_tenant1_id, 'staff', 'Receptionist Jane', true),
     (v_doc1_id, v_tenant1_id, 'staff', 'Dr. Alice', true),
@@ -100,85 +107,49 @@ BEGIN
     (v_appt1_id, v_tenant1_id, v_cust1_id, v_staff_doc1_id, v_branch1_id, '2026-09-10', '10:00:00', 'confirmed'),
     (v_appt2_id, v_tenant1_id, v_cust1_id, v_staff_rec1_id, v_branch1_id, '2026-09-10', '11:00:00', 'confirmed');
 
+    -- SEED SEED FIXTURE ROWS AS PRIVILEGED OPERATOR FOR MEANINGFUL ANON / NO-PROFILE VISIBILITY PROOF
+    INSERT INTO public.clinic_staff_profiles (tenant_id, staff_id, practitioner_type, can_manage_patient_profiles, can_view_clinical_records, can_write_clinical_notes) VALUES
+    (v_tenant1_id, v_staff_doc1_id, 'physician', true, true, true);
 
-    -- =========================================================================
-    -- A. ANON BOUNDARY CHECKS
-    -- =========================================================================
-    SET LOCAL ROLE anon;
+    INSERT INTO public.clinic_patient_profiles (tenant_id, customer_id, date_of_birth, sex_at_birth, allergies, chronic_conditions) VALUES
+    (v_tenant1_id, v_cust1_id, '1990-05-15', 'male', 'Penicillin', 'Hypertension');
 
-    -- SELECT zero visibility
-    IF (SELECT count(*) FROM public.clinic_staff_profiles) <> 0 OR
-       (SELECT count(*) FROM public.clinic_patient_profiles) <> 0 OR
-       (SELECT count(*) FROM public.clinic_encounters) <> 0 OR
-       (SELECT count(*) FROM public.clinic_encounter_notes) <> 0 THEN
-        RAISE EXCEPTION 'SECURITY FAIL A1: anon has non-zero SELECT visibility on Clinic tables!';
-    END IF;
+    INSERT INTO public.clinic_encounters (id, tenant_id, appointment_id, customer_id, practitioner_staff_id, branch_id, status, reason_for_visit, started_at, created_by) VALUES
+    ('f1111111-1111-4111-8111-111111111111', v_tenant1_id, v_appt1_id, v_cust1_id, v_staff_doc1_id, v_branch1_id, 'open', 'Initial seed encounter', now(), v_owner1_id);
 
-    -- Direct DML denied
-    BEGIN
-        INSERT INTO public.clinic_staff_profiles (tenant_id, staff_id) VALUES (v_tenant1_id, v_staff_rec1_id);
-        RAISE EXCEPTION 'SECURITY FAIL A2: anon direct INSERT succeeded!';
-    EXCEPTION WHEN OTHERS THEN NULL;
-    END;
+    INSERT INTO public.clinic_encounter_notes (id, tenant_id, encounter_id, author_staff_id, version, subjective, objective, assessment, plan, note_status, created_at) VALUES
+    ('n1111111-1111-4111-8111-111111111111', v_tenant1_id, 'f1111111-1111-4111-8111-111111111111', v_staff_doc1_id, 1, 'Seed note subjective', 'Seed note objective', 'Seed note assessment', 'Seed note plan', 'draft', now());
 
-    -- RPC execution denied
-    BEGIN
-        v_res := public.clinic_set_staff_profile(v_staff_rec1_id);
-        RAISE EXCEPTION 'SECURITY FAIL A3: anon RPC execution succeeded!';
-    EXCEPTION WHEN OTHERS THEN NULL;
-    END;
+    -- Cleanup seed fixture encounter and note after proving insertion
+    DELETE FROM public.clinic_encounter_notes WHERE id = 'n1111111-1111-4111-8111-111111111111';
+    DELETE FROM public.clinic_encounters WHERE id = 'f1111111-1111-4111-8111-111111111111';
+    DELETE FROM public.clinic_patient_profiles WHERE customer_id = v_cust1_id;
+    DELETE FROM public.clinic_staff_profiles WHERE staff_id = v_staff_doc1_id;
 
 
     -- =========================================================================
-    -- B. AUTHENTICATED USER WITHOUT PROFILE DENIAL
+    -- D & F. ACTIVE TENANT OWNER 1 CONFIGURATION OF STAFF
     -- =========================================================================
-    EXECUTE format('SET LOCAL request.jwt.claim.sub = %L', v_no_prof_user_id);
-    SET LOCAL ROLE authenticated;
-
-    BEGIN
-        v_res := public.clinic_set_staff_profile(v_staff_rec1_id);
-        RAISE EXCEPTION 'SECURITY FAIL B1: Auth user without profile was allowed to call clinic_set_staff_profile!';
-    EXCEPTION WHEN OTHERS THEN NULL;
-    END;
-
-    IF (SELECT count(*) FROM public.clinic_staff_profiles) <> 0 THEN
-        RAISE EXCEPTION 'SECURITY FAIL B2: Auth user without profile has SELECT access to clinic_staff_profiles!';
-    END IF;
-
-
-    -- =========================================================================
-    -- C. INACTIVE TENANT OWNER DENIAL
-    -- =========================================================================
-    EXECUTE format('SET LOCAL request.jwt.claim.sub = %L', v_inact_owner_id);
-    SET LOCAL ROLE authenticated;
-
-    BEGIN
-        v_res := public.clinic_set_staff_profile(v_staff_rec1_id, 'receptionist', NULL, NULL, true, false, false);
-        RAISE EXCEPTION 'SECURITY FAIL C1: Inactive tenant owner was allowed to configure staff profile!';
-    EXCEPTION WHEN OTHERS THEN
-        IF SQLERRM NOT LIKE '%FORBIDDEN%' THEN
-            RAISE EXCEPTION 'Unexpected error for inactive owner: %', SQLERRM;
-        END IF;
-    END;
-
-
-    -- =========================================================================
-    -- D & F. ACTIVE TENANT OWNER & INACTIVE TARGET STAFF
-    -- =========================================================================
-    EXECUTE format('SET LOCAL request.jwt.claim.sub = %L', v_owner1_id);
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', v_owner1_id::text, true);
     SET LOCAL ROLE authenticated;
 
     -- F. Inactive target staff MUST be rejected
+    v_denied := false;
     BEGIN
         v_res := public.clinic_set_staff_profile(v_inact_staff_id, 'receptionist', NULL, NULL, true, false, false);
-        RAISE EXCEPTION 'SECURITY FAIL F1: Inactive target staff was granted Clinic profile!';
     EXCEPTION WHEN OTHERS THEN
-        IF SQLERRM NOT LIKE '%INVALID_STATE%' THEN
-            RAISE EXCEPTION 'Unexpected error for inactive target staff: %', SQLERRM;
+        IF SQLERRM LIKE '%INVALID_STATE%' THEN
+            v_denied := true;
+        ELSE
+            RAISE;
         END IF;
     END;
+    IF v_denied IS NOT TRUE THEN
+        RAISE EXCEPTION 'SECURITY FAIL F1: Inactive target staff was granted Clinic profile!';
+    END IF;
 
-    -- D. Active tenant owner configures active staff members
+    -- D. Active tenant owner 1 configures active staff members
     v_res := public.clinic_set_staff_profile(
         p_staff_id => v_staff_rec1_id,
         p_practitioner_type => 'receptionist',
@@ -196,7 +167,7 @@ BEGIN
         p_specialty => 'dermatology',
         p_can_manage_patient_profiles => true,
         p_can_view_clinical_records => false,
-        p_can_write_clinical_notes => true -- Implies can_view_clinical_records = true
+        p_can_write_clinical_notes => true
     );
     IF (v_res->>'can_view_clinical_records')::boolean IS NOT TRUE THEN
         RAISE EXCEPTION 'TEST FAILED D2: can_write_clinical_notes did not imply can_view_clinical_records = true.';
@@ -204,41 +175,10 @@ BEGIN
 
 
     -- =========================================================================
-    -- E. OWNER DIRECT DML DENIAL PROOF (BLOCKER A)
-    -- =========================================================================
-    -- Owner direct INSERT denied
-    BEGIN
-        INSERT INTO public.clinic_staff_profiles (tenant_id, staff_id, can_manage_patient_profiles)
-        VALUES (v_tenant1_id, v_staff_rec1_id, true);
-        RAISE EXCEPTION 'SECURITY FAIL E1: Tenant owner direct INSERT against clinic_staff_profiles succeeded!';
-    EXCEPTION WHEN OTHERS THEN NULL;
-    END;
-
-    -- Owner direct UPDATE denied
-    BEGIN
-        UPDATE public.clinic_staff_profiles
-        SET can_write_clinical_notes = true
-        WHERE staff_id = v_staff_rec1_id;
-        IF FOUND THEN
-            RAISE EXCEPTION 'SECURITY FAIL E2: Tenant owner direct UPDATE updated rows in clinic_staff_profiles!';
-        END IF;
-    EXCEPTION WHEN OTHERS THEN NULL;
-    END;
-
-    -- Owner direct DELETE denied
-    BEGIN
-        DELETE FROM public.clinic_staff_profiles WHERE staff_id = v_staff_rec1_id;
-        IF FOUND THEN
-            RAISE EXCEPTION 'SECURITY FAIL E3: Tenant owner direct DELETE deleted rows from clinic_staff_profiles!';
-        END IF;
-    EXCEPTION WHEN OTHERS THEN NULL;
-    END;
-
-
-    -- =========================================================================
     -- H. RECEPTIONIST-LIKE STAFF BOUNDARY
     -- =========================================================================
-    EXECUTE format('SET LOCAL request.jwt.claim.sub = %L', v_rec1_id);
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', v_rec1_id::text, true);
     SET LOCAL ROLE authenticated;
 
     -- Manage patient profile allowed
@@ -256,41 +196,57 @@ BEGIN
     END IF;
 
     -- Clinical history denied
+    v_denied := false;
     BEGIN
         v_res := public.clinic_get_patient_history(v_cust1_id);
-        RAISE EXCEPTION 'SECURITY FAIL H2: Receptionist was allowed to read clinical history!';
     EXCEPTION WHEN OTHERS THEN
-        IF SQLERRM NOT LIKE '%FORBIDDEN%' THEN
-            RAISE EXCEPTION 'Unexpected error when receptionist read clinical history: %', SQLERRM;
+        IF SQLERRM LIKE '%FORBIDDEN%' THEN
+            v_denied := true;
+        ELSE
+            RAISE;
         END IF;
     END;
+    IF v_denied IS NOT TRUE THEN
+        RAISE EXCEPTION 'SECURITY FAIL H2: Receptionist was allowed to read clinical history!';
+    END IF;
 
     -- Start encounter denied
+    v_denied := false;
     BEGIN
         v_res := public.clinic_start_encounter(v_appt2_id, 'Checkup');
-        RAISE EXCEPTION 'SECURITY FAIL H3: Receptionist was allowed to start encounter!';
     EXCEPTION WHEN OTHERS THEN
-        IF SQLERRM NOT LIKE '%FORBIDDEN%' THEN
-            RAISE EXCEPTION 'Unexpected error when receptionist started encounter: %', SQLERRM;
+        IF SQLERRM LIKE '%FORBIDDEN%' THEN
+            v_denied := true;
+        ELSE
+            RAISE;
         END IF;
     END;
+    IF v_denied IS NOT TRUE THEN
+        RAISE EXCEPTION 'SECURITY FAIL H3: Receptionist was allowed to start encounter!';
+    END IF;
 
 
     -- =========================================================================
     -- I & J. PRACTITIONER & ASSIGNMENT BOUNDARY
     -- =========================================================================
-    EXECUTE format('SET LOCAL request.jwt.claim.sub = %L', v_doc1_id);
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', v_doc1_id::text, true);
     SET LOCAL ROLE authenticated;
 
-    -- J. Assigned practitioner mismatch denied (v_appt2 is assigned to v_staff_rec1)
+    -- J. Assigned practitioner mismatch denied
+    v_denied := false;
     BEGIN
         v_res := public.clinic_start_encounter(v_appt2_id, 'Wrong practitioner start');
-        RAISE EXCEPTION 'SECURITY FAIL J1: Practitioner started encounter assigned to another staff member!';
     EXCEPTION WHEN OTHERS THEN
-        IF SQLERRM NOT LIKE '%FORBIDDEN%' THEN
-            RAISE EXCEPTION 'Unexpected error on assignment mismatch: %', SQLERRM;
+        IF SQLERRM LIKE '%FORBIDDEN%' THEN
+            v_denied := true;
+        ELSE
+            RAISE;
         END IF;
     END;
+    IF v_denied IS NOT TRUE THEN
+        RAISE EXCEPTION 'SECURITY FAIL J1: Practitioner started encounter assigned to another staff member!';
+    END IF;
 
     -- I. Authorized practitioner starts own encounter
     v_res := public.clinic_start_encounter(
@@ -336,40 +292,246 @@ BEGIN
 
 
     -- =========================================================================
-    -- N. NOTE IMMUTABILITY & DIRECT DML DENIAL
+    -- PROOF OF KNOWN PROTECTED ROWS BEFORE ANON / NO-PROFILE / DIRECT DML TESTS
     -- =========================================================================
-    -- N1. Direct authenticated UPDATE denied
-    BEGIN
-        UPDATE public.clinic_encounter_notes
-        SET subjective = 'MUTATED DIRECTLY BY PRACTITIONER'
-        WHERE encounter_id = v_enc1_id AND version = 1;
-        IF FOUND THEN
-            RAISE EXCEPTION 'SECURITY FAIL N1: Direct UPDATE on clinical notes succeeded!';
-        END IF;
-    EXCEPTION WHEN OTHERS THEN NULL;
-    END;
+    RESET ROLE;
+    SELECT count(*) INTO v_priv_count FROM public.clinic_staff_profiles;
+    IF v_priv_count < 2 THEN
+        RAISE EXCEPTION 'FIXTURE FAIL: Privileged count on clinic_staff_profiles is expected >= 2, got %', v_priv_count;
+    END IF;
 
-    -- N2. Direct authenticated DELETE denied
+    SELECT count(*) INTO v_priv_count FROM public.clinic_patient_profiles;
+    IF v_priv_count < 1 THEN
+        RAISE EXCEPTION 'FIXTURE FAIL: Privileged count on clinic_patient_profiles is expected >= 1, got %', v_priv_count;
+    END IF;
+
+    SELECT count(*) INTO v_priv_count FROM public.clinic_encounters;
+    IF v_priv_count < 1 THEN
+        RAISE EXCEPTION 'FIXTURE FAIL: Privileged count on clinic_encounters is expected >= 1, got %', v_priv_count;
+    END IF;
+
+    SELECT count(*) INTO v_priv_count FROM public.clinic_encounter_notes;
+    IF v_priv_count < 2 THEN
+        RAISE EXCEPTION 'FIXTURE FAIL: Privileged count on clinic_encounter_notes is expected >= 2, got %', v_priv_count;
+    END IF;
+
+
+    -- =========================================================================
+    -- A. ANON BOUNDARY CHECKS WITH KNOWN PROTECTED ROWS
+    -- =========================================================================
+    SET LOCAL ROLE anon;
+
+    -- A1. SELECT zero visibility with pre-existing protected rows
+    IF (SELECT count(*) FROM public.clinic_staff_profiles) <> 0 OR
+       (SELECT count(*) FROM public.clinic_patient_profiles) <> 0 OR
+       (SELECT count(*) FROM public.clinic_encounters) <> 0 OR
+       (SELECT count(*) FROM public.clinic_encounter_notes) <> 0 THEN
+        RAISE EXCEPTION 'SECURITY FAIL A1: anon has non-zero SELECT visibility on Clinic tables despite pre-existing protected rows!';
+    END IF;
+
+    -- A2. Direct INSERT denied and row not persisted
+    v_denied := false;
     BEGIN
-        DELETE FROM public.clinic_encounter_notes
-        WHERE encounter_id = v_enc1_id AND version = 1;
-        IF FOUND THEN
-            RAISE EXCEPTION 'SECURITY FAIL N2: Direct DELETE on clinical notes succeeded!';
-        END IF;
-    EXCEPTION WHEN OTHERS THEN NULL;
+        INSERT INTO public.clinic_staff_profiles (tenant_id, staff_id) VALUES (v_tenant1_id, v_staff_rec1_id);
+    EXCEPTION WHEN OTHERS THEN
+        v_denied := true;
     END;
+    IF v_denied IS NOT TRUE THEN
+        RAISE EXCEPTION 'SECURITY FAIL A2: anon direct INSERT unexpectedly succeeded!';
+    END IF;
+
+    -- A3. Direct UPDATE denied / zero rows
+    UPDATE public.clinic_staff_profiles SET practitioner_type = 'hacked' WHERE staff_id = v_staff_rec1_id;
+    GET DIAGNOSTICS v_row_count = ROW_COUNT;
+    IF v_row_count <> 0 THEN
+        RAISE EXCEPTION 'SECURITY FAIL A3: anon direct UPDATE modified % rows!', v_row_count;
+    END IF;
+
+    -- A4. Direct DELETE denied / zero rows
+    DELETE FROM public.clinic_staff_profiles WHERE staff_id = v_staff_rec1_id;
+    GET DIAGNOSTICS v_row_count = ROW_COUNT;
+    IF v_row_count <> 0 THEN
+        RAISE EXCEPTION 'SECURITY FAIL A4: anon direct DELETE deleted % rows!', v_row_count;
+    END IF;
+
+    -- A5. RPC execution denied for all 6 RPCs
+    v_denied := false;
+    BEGIN
+        v_res := public.clinic_set_staff_profile(v_staff_rec1_id);
+    EXCEPTION WHEN OTHERS THEN v_denied := true;
+    END;
+    IF v_denied IS NOT TRUE THEN RAISE EXCEPTION 'SECURITY FAIL A5: anon clinic_set_staff_profile succeeded!'; END IF;
+
+    v_denied := false;
+    BEGIN
+        v_res := public.clinic_upsert_patient_profile(v_cust1_id);
+    EXCEPTION WHEN OTHERS THEN v_denied := true;
+    END;
+    IF v_denied IS NOT TRUE THEN RAISE EXCEPTION 'SECURITY FAIL A5: anon clinic_upsert_patient_profile succeeded!'; END IF;
+
+    v_denied := false;
+    BEGIN
+        v_res := public.clinic_start_encounter(v_appt1_id);
+    EXCEPTION WHEN OTHERS THEN v_denied := true;
+    END;
+    IF v_denied IS NOT TRUE THEN RAISE EXCEPTION 'SECURITY FAIL A5: anon clinic_start_encounter succeeded!'; END IF;
+
+    v_denied := false;
+    BEGIN
+        v_res := public.clinic_save_encounter_note(v_enc1_id);
+    EXCEPTION WHEN OTHERS THEN v_denied := true;
+    END;
+    IF v_denied IS NOT TRUE THEN RAISE EXCEPTION 'SECURITY FAIL A5: anon clinic_save_encounter_note succeeded!'; END IF;
+
+    v_denied := false;
+    BEGIN
+        v_res := public.clinic_complete_encounter(v_enc1_id);
+    EXCEPTION WHEN OTHERS THEN v_denied := true;
+    END;
+    IF v_denied IS NOT TRUE THEN RAISE EXCEPTION 'SECURITY FAIL A5: anon clinic_complete_encounter succeeded!'; END IF;
+
+    v_denied := false;
+    BEGIN
+        v_res := public.clinic_get_patient_history(v_cust1_id);
+    EXCEPTION WHEN OTHERS THEN v_denied := true;
+    END;
+    IF v_denied IS NOT TRUE THEN RAISE EXCEPTION 'SECURITY FAIL A5: anon clinic_get_patient_history succeeded!'; END IF;
+
+
+    -- =========================================================================
+    -- B. AUTHENTICATED USER WITHOUT PROFILE DENIAL WITH KNOWN PROTECTED ROWS
+    -- =========================================================================
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', v_no_prof_user_id::text, true);
+    SET LOCAL ROLE authenticated;
+
+    -- B1. SELECT zero visibility with pre-existing protected rows
+    IF (SELECT count(*) FROM public.clinic_staff_profiles) <> 0 OR
+       (SELECT count(*) FROM public.clinic_patient_profiles) <> 0 OR
+       (SELECT count(*) FROM public.clinic_encounters) <> 0 OR
+       (SELECT count(*) FROM public.clinic_encounter_notes) <> 0 THEN
+        RAISE EXCEPTION 'SECURITY FAIL B1: Auth user without profile has SELECT access to protected Clinic rows!';
+    END IF;
+
+    -- B2. RPC execution denied
+    v_denied := false;
+    BEGIN
+        v_res := public.clinic_set_staff_profile(v_staff_rec1_id);
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM LIKE '%FORBIDDEN%' OR SQLERRM LIKE '%UNAUTHENTICATED%' OR SQLERRM LIKE '%permission denied%' THEN
+            v_denied := true;
+        ELSE
+            RAISE;
+        END IF;
+    END;
+    IF v_denied IS NOT TRUE THEN
+        RAISE EXCEPTION 'SECURITY FAIL B2: Auth user without profile was allowed to call clinic_set_staff_profile!';
+    END IF;
+
+
+    -- =========================================================================
+    -- C. INACTIVE TENANT OWNER DENIAL
+    -- =========================================================================
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', v_inact_owner_id::text, true);
+    SET LOCAL ROLE authenticated;
+
+    v_denied := false;
+    BEGIN
+        v_res := public.clinic_set_staff_profile(v_staff_rec1_id, 'receptionist', NULL, NULL, true, false, false);
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM LIKE '%FORBIDDEN%' THEN
+            v_denied := true;
+        ELSE
+            RAISE;
+        END IF;
+    END;
+    IF v_denied IS NOT TRUE THEN
+        RAISE EXCEPTION 'SECURITY FAIL C1: Inactive tenant owner was allowed to configure staff profile!';
+    END IF;
+
+
+    -- =========================================================================
+    -- E. OWNER DIRECT DML DENIAL PROOF (BLOCKER A & ROW_COUNT DIAGNOSTICS)
+    -- =========================================================================
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', v_owner1_id::text, true);
+    SET LOCAL ROLE authenticated;
+
+    -- E1. Owner direct INSERT denied and row not persisted
+    v_denied := false;
+    BEGIN
+        INSERT INTO public.clinic_staff_profiles (tenant_id, staff_id, can_manage_patient_profiles)
+        VALUES (v_tenant1_id, v_staff_rec1_id, true);
+    EXCEPTION WHEN OTHERS THEN
+        v_denied := true;
+    END;
+    IF v_denied IS NOT TRUE THEN
+        RAISE EXCEPTION 'SECURITY FAIL E1: Tenant owner direct INSERT against clinic_staff_profiles unexpectedly succeeded!';
+    END IF;
+
+    -- E2. Owner direct UPDATE denied / 0 rows affected
+    UPDATE public.clinic_staff_profiles
+    SET can_write_clinical_notes = true
+    WHERE staff_id = v_staff_rec1_id;
+    GET DIAGNOSTICS v_row_count = ROW_COUNT;
+    IF v_row_count <> 0 THEN
+        RAISE EXCEPTION 'SECURITY FAIL E2: Tenant owner direct UPDATE modified % rows in clinic_staff_profiles!', v_row_count;
+    END IF;
+
+    -- E3. Owner direct DELETE denied / 0 rows affected
+    DELETE FROM public.clinic_staff_profiles WHERE staff_id = v_staff_rec1_id;
+    GET DIAGNOSTICS v_row_count = ROW_COUNT;
+    IF v_row_count <> 0 THEN
+        RAISE EXCEPTION 'SECURITY FAIL E3: Tenant owner direct DELETE deleted % rows from clinic_staff_profiles!', v_row_count;
+    END IF;
+
+    -- Verify row still exists unchanged as privileged operator
+    RESET ROLE;
+    IF (SELECT can_write_clinical_notes FROM public.clinic_staff_profiles WHERE staff_id = v_staff_rec1_id) IS NOT FALSE THEN
+        RAISE EXCEPTION 'SECURITY FAIL E4: clinic_staff_profiles row was mutated by direct DML!';
+    END IF;
+
+
+    -- =========================================================================
+    -- N. NOTE IMMUTABILITY & DIRECT DML DENIAL (PRACTITIONER ROW_COUNT PROOF)
+    -- =========================================================================
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', v_doc1_id::text, true);
+    SET LOCAL ROLE authenticated;
+
+    -- N1. Direct authenticated UPDATE denied / 0 rows
+    UPDATE public.clinic_encounter_notes
+    SET subjective = 'MUTATED DIRECTLY BY PRACTITIONER'
+    WHERE encounter_id = v_enc1_id AND version = 1;
+    GET DIAGNOSTICS v_row_count = ROW_COUNT;
+    IF v_row_count <> 0 THEN
+        RAISE EXCEPTION 'SECURITY FAIL N1: Direct UPDATE on clinical notes modified % rows!', v_row_count;
+    END IF;
+
+    -- N2. Direct authenticated DELETE denied / 0 rows
+    DELETE FROM public.clinic_encounter_notes
+    WHERE encounter_id = v_enc1_id AND version = 1;
+    GET DIAGNOSTICS v_row_count = ROW_COUNT;
+    IF v_row_count <> 0 THEN
+        RAISE EXCEPTION 'SECURITY FAIL N2: Direct DELETE on clinical notes deleted % rows!', v_row_count;
+    END IF;
 
     -- Prove Version 1 content remained immutable
+    RESET ROLE;
     IF (SELECT subjective FROM public.clinic_encounter_notes WHERE encounter_id = v_enc1_id AND version = 1) <> 'Patient reports rash on left forearm for 3 days.' THEN
         RAISE EXCEPTION 'SECURITY FAIL N3: Historical clinical note version 1 was mutated or deleted!';
     END IF;
 
 
     -- =========================================================================
-    -- K. AUTHORIZED CROSS-TENANT PRACTITIONER BOUNDARY
+    -- K. AUTHORIZED TENANT 2 OWNER & CROSS-TENANT PRACTITIONER BOUNDARY
     -- =========================================================================
-    -- Configure Dr. Bob as a fully authorized Clinic practitioner in Tenant 2
+    -- K0. Create real Tenant 2 Owner Authority & configure Dr. Bob as fully authorized practitioner
     RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', v_owner2_id::text, true);
+    SET LOCAL ROLE authenticated;
+
     v_res := public.clinic_set_staff_profile(
         p_staff_id => v_staff_doc2_id,
         p_practitioner_type => 'physician',
@@ -378,60 +540,85 @@ BEGIN
         p_can_view_clinical_records => true,
         p_can_write_clinical_notes => true
     );
+    IF (v_res->>'can_write_clinical_notes')::boolean IS NOT TRUE THEN
+        RAISE EXCEPTION 'FIXTURE FAIL: Failed to configure Dr. Bob as fully authorized Tenant 2 practitioner.';
+    END IF;
 
-    EXECUTE format('SET LOCAL request.jwt.claim.sub = %L', v_doc2_id); -- Tenant 2 Practitioner
+    -- Switch explicit identity to Tenant 2 Practitioner (Dr. Bob)
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', v_doc2_id::text, true);
     SET LOCAL ROLE authenticated;
 
-    -- K1. Read Tenant-1 patient history denied
+    -- K1. Read Tenant-1 patient history denied specifically because of TENANT BOUNDARY
+    v_denied := false;
     BEGIN
         v_res := public.clinic_get_patient_history(v_cust1_id);
-        RAISE EXCEPTION 'SECURITY FAIL K1: Tenant 2 practitioner read Tenant 1 patient history!';
     EXCEPTION WHEN OTHERS THEN
-        IF SQLERRM NOT LIKE '%NOT_FOUND%' THEN
-            RAISE EXCEPTION 'Cross-tenant patient history failed with unexpected error: %', SQLERRM;
+        IF SQLERRM LIKE '%NOT_FOUND%' THEN
+            v_denied := true;
+        ELSE
+            RAISE;
         END IF;
     END;
+    IF v_denied IS NOT TRUE THEN
+        RAISE EXCEPTION 'SECURITY FAIL K1: Tenant 2 practitioner read Tenant 1 patient history!';
+    END IF;
 
-    -- K2. Save note to Tenant-1 encounter denied
+    -- K2. Save note to Tenant-1 encounter denied specifically because of TENANT BOUNDARY
+    v_denied := false;
     BEGIN
         v_res := public.clinic_save_encounter_note(v_enc1_id, 'Hacked note', NULL, NULL, NULL, 'draft');
-        RAISE EXCEPTION 'SECURITY FAIL K2: Tenant 2 practitioner saved note to Tenant 1 encounter!';
     EXCEPTION WHEN OTHERS THEN
-        IF SQLERRM NOT LIKE '%FORBIDDEN%' AND SQLERRM NOT LIKE '%NOT_FOUND%' THEN
-            RAISE EXCEPTION 'Cross-tenant note save failed with unexpected error: %', SQLERRM;
+        IF SQLERRM LIKE '%FORBIDDEN%' OR SQLERRM LIKE '%NOT_FOUND%' THEN
+            v_denied := true;
+        ELSE
+            RAISE;
         END IF;
     END;
+    IF v_denied IS NOT TRUE THEN
+        RAISE EXCEPTION 'SECURITY FAIL K2: Tenant 2 practitioner saved note to Tenant 1 encounter!';
+    END IF;
 
-    -- K3. Complete Tenant-1 encounter denied
+    -- K3. Complete Tenant-1 encounter denied specifically because of TENANT BOUNDARY
+    v_denied := false;
     BEGIN
         v_res := public.clinic_complete_encounter(v_enc1_id);
-        RAISE EXCEPTION 'SECURITY FAIL K3: Tenant 2 practitioner completed Tenant 1 encounter!';
     EXCEPTION WHEN OTHERS THEN
-        IF SQLERRM NOT LIKE '%FORBIDDEN%' AND SQLERRM NOT LIKE '%NOT_FOUND%' THEN
-            RAISE EXCEPTION 'Cross-tenant encounter complete failed with unexpected error: %', SQLERRM;
+        IF SQLERRM LIKE '%FORBIDDEN%' OR SQLERRM LIKE '%NOT_FOUND%' THEN
+            v_denied := true;
+        ELSE
+            RAISE;
         END IF;
     END;
+    IF v_denied IS NOT TRUE THEN
+        RAISE EXCEPTION 'SECURITY FAIL K3: Tenant 2 practitioner completed Tenant 1 encounter!';
+    END IF;
 
 
     -- =========================================================================
     -- L. BRANCH & APPOINTMENT CONTEXT HARDENING
     -- =========================================================================
-    EXECUTE format('SET LOCAL request.jwt.claim.sub = %L', v_doc1_id);
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', v_doc1_id::text, true);
     SET LOCAL ROLE authenticated;
 
-    -- Attempt start encounter with invalid appointment ID
+    v_denied := false;
     BEGIN
         v_res := public.clinic_start_encounter('00000000-0000-0000-0000-000000000000', 'Nonexistent appt');
-        RAISE EXCEPTION 'SECURITY FAIL L1: Start encounter succeeded for non-existent appointment!';
     EXCEPTION WHEN OTHERS THEN
-        IF SQLERRM NOT LIKE '%NOT_FOUND%' THEN
-            RAISE EXCEPTION 'Invalid appointment start failed with unexpected error: %', SQLERRM;
+        IF SQLERRM LIKE '%NOT_FOUND%' THEN
+            v_denied := true;
+        ELSE
+            RAISE;
         END IF;
     END;
+    IF v_denied IS NOT TRUE THEN
+        RAISE EXCEPTION 'SECURITY FAIL L1: Start encounter succeeded for non-existent appointment!';
+    END IF;
 
 
     -- =========================================================================
-    -- O. AUDIT NO CLINICAL CONTENT LEAKAGE
+    -- O. AUDIT FORBIDDEN KEYS & NO CLINICAL CONTENT LEAKAGE
     -- =========================================================================
     RESET ROLE;
 
@@ -446,16 +633,39 @@ BEGIN
     FOR v_audit_check IN (
         SELECT action, payload FROM public.audit_events WHERE tenant_id = v_tenant1_id::text
     ) LOOP
+        -- Inspect JSON payload keys for sensitive fields
+        IF (v_audit_check.payload ? 'subjective') OR
+           (v_audit_check.payload ? 'objective') OR
+           (v_audit_check.payload ? 'assessment') OR
+           (v_audit_check.payload ? 'plan') OR
+           (v_audit_check.payload ? 'allergies') OR
+           (v_audit_check.payload ? 'chronic_conditions') OR
+           (v_audit_check.payload ? 'reason_for_visit') OR
+           (v_audit_check.payload ? 'emergency_contact_phone') THEN
+            RAISE EXCEPTION 'AUDIT KEY LEAK FAIL O2: Forbidden clinical field key present in audit payload for action %!', v_audit_check.action;
+        END IF;
+
+        -- Value string checks
         IF v_audit_check.payload::text LIKE '%Contact dermatitis%'
            OR v_audit_check.payload::text LIKE '%hydrocortisone%'
            OR v_audit_check.payload::text LIKE '%Penicillin%'
            OR v_audit_check.payload::text LIKE '%Skin rash%'
            OR v_audit_check.payload::text LIKE '%555-9999%' THEN
-            RAISE EXCEPTION 'AUDIT LEAK FAIL O2: Sensitive clinical/contact content leaked into audit payload for action %!', v_audit_check.action;
+            RAISE EXCEPTION 'AUDIT LEAK FAIL O3: Sensitive clinical/contact content leaked into audit payload for action %!', v_audit_check.action;
         END IF;
     END LOOP;
 
-    RAISE NOTICE 'SUCCESS: All Expanded Clinic Domain Server Authority SQL Contract Tests Passed!';
+
+    -- =========================================================================
+    -- P. PUBLIC / SELF-SERVICE CLINICAL ISOLATION PROOF
+    -- =========================================================================
+    -- Inspect definitions of canonical public booking functions and prove zero references to Clinic tables
+    IF (SELECT count(*) FROM pg_proc WHERE proname IN ('create_public_booking', 'get_public_available_slots', 'can_accept_public_booking')
+        AND (prosrc LIKE '%clinic_patient_profiles%' OR prosrc LIKE '%clinic_encounters%' OR prosrc LIKE '%clinic_encounter_notes%')) <> 0 THEN
+        RAISE EXCEPTION 'PUBLIC ISOLATION FAIL P1: Public booking functions contain references to Clinic clinical tables!';
+    END IF;
+
+    RAISE NOTICE 'SUCCESS: All Expanded Clinic Domain Server Authority SQL Contract Tests Passed (R1.1 Closure)!';
 END $$;
 
 ROLLBACK;
