@@ -1,0 +1,214 @@
+name: LARI Clinic Block 1 Executable Exact-SHA R2 Evidence Gate
+
+on:
+  push:
+    branches:
+      - ci/clinic-block1-exact-sha-r2-20260820
+
+jobs:
+  clinic-block1-r2-qa:
+    name: Disposable Direct Supabase Postgres QA & Clinic Executable Proof
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout Product SHA & Verify Exact Binding
+        run: |
+          REQUESTED_PRODUCT_SHA="117185374046db0c29e289b31d2be6f2ed5ca970"
+          git checkout "${REQUESTED_PRODUCT_SHA}"
+          ACTUAL_TEST_WORKTREE_SHA=$(git rev-parse HEAD)
+          echo "EXPECTED_PRODUCT_SHA = ${REQUESTED_PRODUCT_SHA}"
+          echo "ACTUAL_PRODUCT_SHA = ${ACTUAL_TEST_WORKTREE_SHA}"
+          if [ "${REQUESTED_PRODUCT_SHA}" != "${ACTUAL_TEST_WORKTREE_SHA}" ]; then
+            echo "❌ SHA Mismatch! Requested product SHA does not match actual test worktree HEAD."
+            exit 1
+          fi
+          echo "PRODUCT_SHA_BINDING = PASS"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Preflight Docker & Environment Check
+        run: |
+          docker --version
+          docker info
+
+      - name: Start Pinned Supabase Postgres Container Directly
+        id: start_direct_db
+        run: |
+          PINNED_IMAGE="supabase/postgres:15.1.0.147"
+          echo "Pulling pinned Supabase Postgres container: ${PINNED_IMAGE}"
+          docker pull "${PINNED_IMAGE}"
+          docker run -d \
+            --name lari-p2a-postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=postgres \
+            -p 54322:5432 \
+            "${PINNED_IMAGE}"
+
+      - name: Direct Postgres Custom Readiness Check
+        run: |
+          echo "Waiting for direct Postgres port 54322 readiness..."
+          for i in {1..30}; do
+            if docker exec lari-p2a-postgres pg_isready -U postgres >/dev/null 2>&1; then
+              echo "✅ Direct Postgres ready on attempt ${i}!"
+              break
+            fi
+            echo "Attempt ${i}: Postgres not ready yet..."
+            sleep 1
+          done
+
+      - name: Pre-Bootstrap Raw Container Inspection
+        run: |
+          echo "=== P2A RAW CONTAINER ROLES & PRE-EXISTING TABLES ==="
+          docker exec lari-p2a-postgres psql -U postgres -d postgres -c "\du"
+          docker exec lari-p2a-postgres psql -U postgres -d postgres -c "\dt public.*"
+
+      - name: Execute Disposable Test Compatibility Bootstrap Fixture
+        run: |
+          echo "Applying historical test compatibility bootstrap fixture..."
+          docker exec -i lari-p2a-postgres psql -U postgres -d postgres < supabase/tests/fixtures/p2a_managed_runtime_bootstrap.sql
+          echo "✅ Compatibility bootstrap fixture applied successfully."
+
+      - name: Build Migration Manifest & Apply Full SQL Migration Chain
+        run: |
+          echo "Building ordered migration manifest..."
+          MANIFEST_FILE="migration_apply_manifest.txt"
+          ls -1 supabase/migrations/*.sql | sort > "${MANIFEST_FILE}"
+          MIGRATION_COUNT=$(wc -l < "${MANIFEST_FILE}")
+          echo "Found ${MIGRATION_COUNT} migration files in manifest."
+          echo "MIGRATION_REPLAY_COUNT = ${MIGRATION_COUNT}"
+          if [ "${MIGRATION_COUNT}" -ne 61 ]; then
+            echo "❌ Unexpected migration count! Expected 61, got ${MIGRATION_COUNT}."
+            exit 1
+          fi
+
+          echo "Applying migration manifest sequentially..."
+          while IFS= read -r mig_file; do
+            echo "--> Applying migration: ${mig_file}"
+            docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < "${mig_file}"
+            if [ $? -ne 0 ]; then
+              echo "❌ Migration failed: ${mig_file}"
+              exit 1
+            fi
+          done < "${MANIFEST_FILE}"
+          echo "✅ All 61 migration files applied sequentially without error."
+
+      - name: Detailed Failure Diagnostic Dump
+        if: failure()
+        run: |
+          echo "=== MIGRATION FAILURE DIAGNOSTIC DUMP ==="
+          docker exec lari-p2a-postgres psql -U postgres -d postgres -c "\dt public.*" || true
+          docker exec lari-p2a-postgres psql -U postgres -d postgres -c "SELECT name, version FROM supabase_migrations.schema_migrations ORDER BY version DESC LIMIT 10;" || true
+
+      - name: Verify P2A Schema Post-Proof
+        run: |
+          echo "=== POST-MIGRATION PUBLIC TABLES ==="
+          TABLE_COUNT=$(docker exec lari-p2a-postgres psql -U postgres -d postgres -t -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';")
+          echo "Public table count: ${TABLE_COUNT}"
+          docker exec lari-p2a-postgres psql -U postgres -d postgres -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';"
+
+      - name: Install DB Test Dependencies
+        run: |
+          npm install pg @types/pg
+
+      - name: Run Static SQL Security & Contract Suite
+        run: |
+          echo "Executing p2a_tenant_provisioning_static_test.sql..."
+          docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/p2a_tenant_provisioning_static_test.sql
+          echo "✅ Static SQL security suite passed."
+
+      - name: Run Sequential DB Integration & RLS Privacy Matrix Suite
+        run: |
+          echo "Executing p2a_tenant_provisioning_integration_tests.sql..."
+          docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/p2a_tenant_provisioning_integration_tests.sql
+          echo "✅ Sequential DB integration & RLS matrix suite passed."
+
+      - name: Run Multi-Session Real DB Concurrency Harness
+        run: |
+          echo "Executing p2a_concurrency_harness.ts..."
+          DB_URL="postgresql://postgres:postgres@localhost:54322/postgres" npx tsx supabase/tests/p2a_concurrency_harness.ts
+          echo "✅ Multi-session real DB concurrency harness passed."
+
+      - name: Run Sequential Package Branch Server Authority Functional SQL Suite
+        run: |
+          echo "Executing package_branch_server_authority_tests.sql..."
+          docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/package_branch_server_authority_tests.sql
+          echo "✅ Package branch server authority functional SQL suite passed."
+
+      - name: Run Package Branch Real Multi-Session Concurrency & RLS Harness
+        run: |
+          echo "Executing package_branch_concurrency_harness.ts..."
+          DB_URL="postgresql://postgres:postgres@localhost:54322/postgres" npx tsx supabase/tests/package_branch_concurrency_harness.ts
+          echo "✅ Package branch real multi-session concurrency & RLS harness passed."
+
+      - name: Run Package Branch Static QA
+        run: |
+          node scripts/test-package-branch-server-authority.mjs
+
+      - name: Run Branch Booking QA
+        run: |
+          node scripts/verify-branch-aware-booking.mjs
+
+      - name: Run Clinic Domain Server Authority Functional SQL Suite & Verify Markers
+        run: |
+          echo "Executing clinic_domain_server_authority_tests.sql..."
+          set -o pipefail
+          docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/clinic_domain_server_authority_tests.sql 2>&1 | tee /tmp/clinic-sql.log
+
+          echo "Verifying test-generated execution markers from SQL output..."
+          grep -F 'ANON_PROTECTED_ROWS_PREEXIST=YES' /tmp/clinic-sql.log
+          grep -F 'ANON_CLINICAL_VISIBILITY_ZERO=YES' /tmp/clinic-sql.log
+          grep -F 'OWNER_DIRECT_DML_DENIED=YES' /tmp/clinic-sql.log
+          grep -F 'AUTHORIZED_CROSS_TENANT_BOUNDARY_PROVEN=YES' /tmp/clinic-sql.log
+          grep -F 'CLINICAL_NOTE_APPEND_ONLY_PROVEN=YES' /tmp/clinic-sql.log
+          grep -F 'AUDIT_CLINICAL_CONTENT_LEAK=NO' /tmp/clinic-sql.log
+          grep -F 'PUBLIC_SELF_SERVICE_CLINICAL_ISOLATION=PASS' /tmp/clinic-sql.log
+          grep -F 'CLINIC_SQL_DB_EXECUTION=PASS' /tmp/clinic-sql.log
+          echo "✅ Clinic domain server authority SQL contract suite passed with all test-generated markers verified."
+
+      - name: Run Clinic Domain Real Multi-Session Concurrency Harness & Verify Markers
+        run: |
+          echo "Executing clinic_domain_concurrency_harness.ts..."
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@localhost:54322/postgres" npx tsx supabase/tests/clinic_domain_concurrency_harness.ts 2>&1 | tee /tmp/clinic-concurrency.log
+
+          echo "Verifying harness-generated execution markers from output..."
+          grep -F 'HARNESS_AUTH_CONTEXT_PROVEN = YES' /tmp/clinic-concurrency.log
+          grep -F 'HARNESS_DB_EXECUTION_OCCURRED = YES' /tmp/clinic-concurrency.log
+          grep -F 'HARNESS_REAL_MULTI_SESSION_CONCURRENCY = YES' /tmp/clinic-concurrency.log
+          echo "✅ Clinic domain real multi-session concurrency harness passed with all harness-generated markers verified."
+
+      - name: Run Clinic Domain Static QA
+        run: |
+          node scripts/test-clinic-domain-server-authority.mjs
+
+      - name: Run Slice 2 Commercial Source-of-Truth Exact-SHA Suite
+        run: |
+          echo "=== RUNNING SLICE 2 COMMERCIAL EXACT-SHA SUITE ==="
+          npm run lint
+          npm run build
+          npm run check:secrets
+          npm run qa:data-mode-regression
+          npm run qa:commercial-read-contracts
+          npm run qa:commercial-legacy-compatibility
+          npm run qa:commercial-eligibility-enforcement
+          npm run qa:commercial-packaging
+          npm run qa:entitlements
+          npm run qa:commercial-source-of-truth
+
+      - name: Run Git Diff & Whitespace Check
+        run: |
+          git diff --check
+
+      - name: Cleanup Disposable Container
+        if: always()
+        run: |
+          echo "Cleaning up disposable postgres container..."
+          docker rm -f lari-p2a-postgres || true
