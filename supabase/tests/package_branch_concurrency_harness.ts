@@ -159,7 +159,7 @@ export async function runPackageBranchConcurrencyHarness() {
     `);
 
     // Verify override resolution
-    const quotaRes = await client1.query(`SELECT is_unlimited FROM public.resolve_commercial_quota('${tenantC1_id}', 'max_branches');`);
+    const quotaRes = await client1.query(`SELECT * FROM public.resolve_commercial_quota('${tenantC1_id}', 'max_branches');`);
     assert(quotaRes.rows[0]?.is_unlimited === true, 'TEST_MULTI_BRANCH_OVERRIDE_RESOLUTION = PASS (TEST_TENANT_MAX_BRANCHES_SOURCE = tenant_override)');
 
     // Commercial Branch Quota Negative Control Verification
