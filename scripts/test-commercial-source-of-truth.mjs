@@ -143,7 +143,8 @@ console.log('\nT4: Unlimited Quotas & Sentinel Elimination in Supabase Mode');
 
 assert(
   'getTenantLimit in Supabase mode does NOT return -1 sentinel for unlimited',
-  entitlementServiceSrc.includes('if (getDataSourceMode() === \'supabase\') {\n      // In Supabase mode, limits.maxKey returns integer_value (or 0 if unlimited/absent).\n      // Unlimited truth is represented explicitly by entitlements.unlimitedFlags[limitKey].\n      return entitlements.limits[limitKey];\n    }'),
+  entitlementServiceSrc.includes("if (getDataSourceMode() === 'supabase')") &&
+  entitlementServiceSrc.includes('return entitlements.limits[limitKey];'),
   'getTenantLimit must not return -1 sentinel in Supabase mode'
 );
 

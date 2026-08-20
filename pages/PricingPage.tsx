@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { planService, PricingPlan, BillingPeriod } from '../services/planService';
+import { getDataSourceMode } from '../services/dataSourceConfig';
 import { launchModeService } from '../services/launchModeService';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useDialog } from '../contexts/DialogContext';
