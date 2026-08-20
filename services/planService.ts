@@ -19,15 +19,19 @@ function mapCommercialPublicPlanToPricingPlan(plan: CommercialPublicPlan): Prici
     return false;
   };
 
-  const getIntegerEntitlement = (key: string): number => {
+  const getIntegerQuota = (key: string): { value: number; isUnlimited: boolean } => {
     const e = entitlements[key];
-    if (!e) return 0;
-    if (e.is_unlimited) return 999999;
-    if (e.integer_value !== undefined && e.integer_value !== null) return e.integer_value;
-    return 0;
+    if (!e) return { value: 0, isUnlimited: false };
+    if (e.is_unlimited) return { value: 0, isUnlimited: true };
+    return { value: e.integer_value ?? 0, isUnlimited: false };
   };
 
-  const aiAllowance = getIntegerEntitlement('ai_allowance');
+  const staffQuota = getIntegerQuota('max_staff');
+  const servicesQuota = getIntegerQuota('max_services');
+  const appointmentsQuota = getIntegerQuota('max_monthly_appointments');
+  const branchesQuota = getIntegerQuota('max_branches');
+  const aiQuota = getIntegerQuota('ai_allowance');
+
   const isDedicated = getBooleanEntitlement('dedicated_support');
   const isPriority = getBooleanEntitlement('priority_support');
 
@@ -39,17 +43,22 @@ function mapCommercialPublicPlanToPricingPlan(plan: CommercialPublicPlan): Prici
     annualDiscountPercent: plan.annual_discount_percent ?? 0,
     setupFee: plan.setup_fee ?? 0,
     currency: plan.currency ?? 'TRY',
-    maxStaff: getIntegerEntitlement('max_staff'),
-    maxServices: getIntegerEntitlement('max_services'),
-    maxMonthlyAppointments: getIntegerEntitlement('max_monthly_appointments'),
+    maxStaff: staffQuota.value,
+    isStaffUnlimited: staffQuota.isUnlimited,
+    maxServices: servicesQuota.value,
+    isServicesUnlimited: servicesQuota.isUnlimited,
+    maxMonthlyAppointments: appointmentsQuota.value,
+    isMonthlyAppointmentsUnlimited: appointmentsQuota.isUnlimited,
     customDomainEnabled: getBooleanEntitlement('custom_domain_eligible'),
     includedSubdomain: getBooleanEntitlement('lari_minisite'),
     customComDomainIncluded: getBooleanEntitlement('custom_domain_included'),
     multiBranchEnabled: getBooleanEntitlement('multi_branch'),
-    maxBranches: getIntegerEntitlement('max_branches'),
-    aiRecommendationsEnabled: aiAllowance > 0 || entitlements['ai_allowance']?.is_unlimited === true,
+    maxBranches: branchesQuota.value,
+    isBranchesUnlimited: branchesQuota.isUnlimited,
+    aiRecommendationsEnabled: aiQuota.isUnlimited || aiQuota.value > 0,
     aiVisualizationEnabled: false,
-    aiMonthlyQuota: aiAllowance,
+    aiMonthlyQuota: aiQuota.value,
+    isAiQuotaUnlimited: aiQuota.isUnlimited,
     campaignsEnabled: false,
     advancedReportsEnabled: getBooleanEntitlement('advanced_reporting'),
     whatsappAutomationEnabled: false,
@@ -71,16 +80,21 @@ export interface PricingPlan {
   setupFee: number;
   currency: string;
   maxStaff: number;
+  isStaffUnlimited?: boolean;
   maxServices: number;
+  isServicesUnlimited?: boolean;
   maxMonthlyAppointments: number;
+  isMonthlyAppointmentsUnlimited?: boolean;
   customDomainEnabled: boolean;
   includedSubdomain: boolean;
   customComDomainIncluded: boolean;
   multiBranchEnabled: boolean;
   maxBranches: number;
+  isBranchesUnlimited?: boolean;
   aiRecommendationsEnabled: boolean;
   aiVisualizationEnabled: boolean;
   aiMonthlyQuota: number;
+  isAiQuotaUnlimited?: boolean;
   campaignsEnabled: boolean;
   advancedReportsEnabled: boolean;
   whatsappAutomationEnabled: boolean;

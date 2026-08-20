@@ -34,6 +34,7 @@ export type LimitKey =
 export interface PlanEntitlements {
   features: Record<FeatureKey, boolean>;
   limits: Record<LimitKey, number>;
+  unlimitedFlags?: Record<LimitKey, boolean>;
 }
 
 const ENTITLEMENTS_MAP: Record<string, PlanEntitlements> = {
@@ -259,25 +260,37 @@ export const entitlementService = {
       notification_templates: false, // NO_CANONICAL_EQUIVALENT
       whatsapp_automation_readiness: false, // NO_CANONICAL_EQUIVALENT
       priority_support: getBool('priority_support'),
-      super_admin_review_priority: getBool('dedicated_support'),
-      advanced_branding: getBool('white_label'),
+      super_admin_review_priority: false, // NO_CANONICAL_EQUIVALENT - fail closed in Supabase mode
+      advanced_branding: false, // NO_CANONICAL_EQUIVALENT - fail closed in Supabase mode
       billing_self_service: false // NO_CANONICAL_EQUIVALENT
     };
 
-    const getIntegerLimit = (key: string): number => {
+    const getIntegerLimit = (key: string): { limit: number; isUnlimited: boolean } => {
       const e = serverEntitlements[key];
-      if (!e) return 0; // Fail-closed in Supabase mode (no manufactured defaults)
-      return e.is_unlimited ? 999999 : (e.integer_value ?? 0);
+      if (!e) return { limit: 0, isUnlimited: false }; // Fail-closed in Supabase mode (no manufactured defaults)
+      if (e.is_unlimited) return { limit: 0, isUnlimited: true };
+      return { limit: e.integer_value ?? 0, isUnlimited: false };
     };
 
+    const staffL = getIntegerLimit('max_staff');
+    const servicesL = getIntegerLimit('max_services');
+    const branchesL = getIntegerLimit('max_branches');
+
     const limits: Record<LimitKey, number> = {
-      maxStaff: getIntegerLimit('max_staff'),
-      maxServices: getIntegerLimit('max_services'),
-      maxBranches: getIntegerLimit('max_branches'),
+      maxStaff: staffL.limit,
+      maxServices: servicesL.limit,
+      maxBranches: branchesL.limit,
       maxGalleryImages: 0 // NO_CANONICAL_EQUIVALENT
     };
 
-    return { features, limits };
+    const unlimitedFlags: Record<LimitKey, boolean> = {
+      maxStaff: staffL.isUnlimited,
+      maxServices: servicesL.isUnlimited,
+      maxBranches: branchesL.isUnlimited,
+      maxGalleryImages: false
+    };
+
+    return { features, limits, unlimitedFlags };
   },
 
   /**
@@ -314,6 +327,7 @@ export const entitlementService = {
 
   async getTenantLimit(tenantId: string, limitKey: LimitKey, localPlanId?: string): Promise<number> {
     const entitlements = await this.getTenantEffectiveEntitlements(tenantId, localPlanId);
+    if (entitlements.unlimitedFlags?.[limitKey]) return -1;
     return entitlements.limits[limitKey];
   },
 

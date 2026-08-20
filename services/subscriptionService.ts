@@ -112,8 +112,12 @@ export const subscriptionService = {
         // Use getPlanAsync to get the full PricingPlan shape from the server catalog
         const serverPlan = await planService.getPlanAsync(pv.plan_code);
         if (serverPlan) return serverPlan;
-        // If the plan_code is not in the public catalog (e.g. legacy/private plan),
-        // construct a minimal PricingPlan from the snapshot
+        // If the plan_code is not in the public catalog (e.g. legacy/private plan like 'standart'),
+        // derive the PricingPlan dynamically from snapshot.assigned_plan_version + snapshot.effective_entitlements
+        const effectiveEntitlements = snapshot.effective_entitlements || {};
+        const { entitlementService } = await import('./entitlementService');
+        const mapped = entitlementService._mapServerEntitlementsToPlanEntitlements(effectiveEntitlements);
+
         return {
           id: pv.plan_code,
           name: pv.public_name,
@@ -122,14 +126,29 @@ export const subscriptionService = {
           annualDiscountPercent: pv.annual_discount_percent ?? 0,
           setupFee: pv.setup_fee ?? 0,
           currency: pv.currency ?? 'TRY',
-          maxStaff: 1, maxServices: 10, maxMonthlyAppointments: 9999,
-          customDomainEnabled: false, includedSubdomain: true, customComDomainIncluded: false,
-          multiBranchEnabled: false, maxBranches: 1,
-          aiRecommendationsEnabled: false, aiVisualizationEnabled: false, aiMonthlyQuota: 0,
-          campaignsEnabled: false, advancedReportsEnabled: false,
-          whatsappAutomationEnabled: false, googleCalendarEnabled: true,
-          supportLevel: 'standard', referralEligible: false,
-          isActive: true, isRecommended: false,
+          maxStaff: mapped.limits.maxStaff,
+          isStaffUnlimited: mapped.unlimitedFlags?.maxStaff,
+          maxServices: mapped.limits.maxServices,
+          isServicesUnlimited: mapped.unlimitedFlags?.maxServices,
+          maxMonthlyAppointments: 0,
+          isMonthlyAppointmentsUnlimited: true,
+          customDomainEnabled: mapped.features.custom_domain_manual,
+          includedSubdomain: mapped.features.website_publication,
+          customComDomainIncluded: false,
+          multiBranchEnabled: mapped.features.multi_branch,
+          maxBranches: mapped.limits.maxBranches,
+          isBranchesUnlimited: mapped.unlimitedFlags?.maxBranches,
+          aiRecommendationsEnabled: mapped.features.ai_style_assistant_basic,
+          aiVisualizationEnabled: mapped.features.ai_style_assistant_full,
+          aiMonthlyQuota: 0,
+          campaignsEnabled: mapped.features.campaigns_referrals,
+          advancedReportsEnabled: mapped.features.reports_advanced,
+          whatsappAutomationEnabled: mapped.features.whatsapp_automation_readiness,
+          googleCalendarEnabled: mapped.features.online_booking,
+          supportLevel: mapped.features.super_admin_review_priority ? 'dedicated' : (mapped.features.priority_support ? 'priority' : 'standard'),
+          referralEligible: mapped.features.campaigns_referrals,
+          isActive: true,
+          isRecommended: false,
           trialDays: pv.trial_days ?? 0
         };
       }
