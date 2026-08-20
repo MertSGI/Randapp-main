@@ -64,7 +64,9 @@ BEGIN
            (v_staff1_id, v_tenant1_id, 'Staff 1', 'staff', true);
 
     -- Assertion A & E: Tenant owner can create own branch & first branch becomes primary
+    PERFORM set_config('request.jwt.claims', '', true);
     PERFORM set_config('request.jwt.claim.sub', v_owner1_id::text, true);
+    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
     
     v_b1_res := public.create_tenant_branch(v_tenant1_id, 'Merkez Sube', 'merkez');
     IF (v_b1_res->>'success')::boolean IS NOT TRUE OR (v_b1_res->'branch'->>'is_primary')::boolean IS NOT TRUE THEN
@@ -86,7 +88,9 @@ BEGIN
     END IF;
 
     -- Assertion C: Other tenant owner cannot mutate branch of Tenant 1
+    PERFORM set_config('request.jwt.claims', '', true);
     PERFORM set_config('request.jwt.claim.sub', v_owner2_id::text, true);
+    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
     
     v_cross_res := public.update_tenant_branch(v_b1_id, 'Hacked Name');
     IF (v_cross_res->>'success')::boolean IS TRUE OR v_cross_res->>'reason_code' <> 'forbidden' THEN
@@ -94,14 +98,18 @@ BEGIN
     END IF;
 
     -- Assertion D: Staff cannot mutate branch
+    PERFORM set_config('request.jwt.claims', '', true);
     PERFORM set_config('request.jwt.claim.sub', v_staff1_id::text, true);
+    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
     v_staff_res := public.create_tenant_branch(v_tenant1_id, 'Staff Branch', 'staff-b');
     IF (v_staff_res->>'success')::boolean IS TRUE OR v_staff_res->>'reason_code' <> 'forbidden' THEN
         RAISE EXCEPTION 'TEST FAILED (D): Staff was allowed to create branch.';
     END IF;
 
     -- Switch back to Owner 1
+    PERFORM set_config('request.jwt.claims', '', true);
     PERFORM set_config('request.jwt.claim.sub', v_owner1_id::text, true);
+    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
 
     -- Assertion F & G: Primary switch is atomic and unique primary invariant is preserved
     v_b2_res := public.set_primary_tenant_branch(v_b2_id);
