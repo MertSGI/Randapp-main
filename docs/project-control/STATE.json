@@ -63,6 +63,16 @@
       "branch": "feature/package-customer-customization-foundation",
       "sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
       "status": "CLOSED_PROVEN"
+    },
+    "clinic_block1_authority": {
+      "branch": "feature/lari-clinic-foundation",
+      "sha": "2bb2b32d95387e09da06c7442a8617ccd38e4feb",
+      "status": "CLOSED_PROVEN"
+    },
+    "clinic_block1_ci_evidence": {
+      "branch": "ci/clinic-block1-exact-sha-r2-20260820",
+      "sha": "78c3e49a1883aafb74ff2e8f18acd9876e74a01b",
+      "status": "CI_RUN_32395034938_SUCCESS"
     }
   },
   "accepted_gates": [
@@ -211,6 +221,17 @@
       ],
       "closed_at": "2026-08-20T15:58:00+03:00",
       "reopen_condition": "Contradictory Package branch authority, commercial source-of-truth, entitlement, registration authority, branch booking, RLS/concurrency, or exact-SHA regression evidence"
+    },
+    {
+      "gate": "LARİ Clinic Block 1 Clinical Domain Server Authority",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "2bb2b32d95387e09da06c7442a8617ccd38e4feb",
+      "run_ids": [
+        "32395034938"
+      ],
+      "closed_at": "2026-08-20T19:00:00Z",
+      "reopen_condition": "Contradictory clinical RLS, append-only note immutability, server-authoritative RPC, audit privacy, cross-tenant isolation, or exact-SHA regression evidence"
     }
   ],
   "active_workstreams": {
@@ -256,8 +277,22 @@
       }
     },
     "lari_clinic": {
-      "status": "NOT_STARTED",
-      "objective": "Materialize medical appointment and clinical workflows as downstream package extension on frozen Package customization baseline"
+      "status": "IN_PROGRESS",
+      "branch": "feature/lari-clinic-foundation",
+      "sha": "2bb2b32d95387e09da06c7442a8617ccd38e4feb",
+      "blocks": {
+        "block1_clinical_domain_server_authority": {
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+          "product_sha": "2bb2b32d95387e09da06c7442a8617ccd38e4feb",
+          "evidence_sha": "78c3e49a1883aafb74ff2e8f18acd9876e74a01b",
+          "run_id": "32395034938"
+        },
+        "block2_operational_integration": {
+          "status": "IN_PROGRESS",
+          "objective": "Build operational integration, application services, atomic encounter+appointment completion, and operational day read model without UI"
+        }
+      }
     }
   },
   "external_dependencies": {
@@ -269,7 +304,7 @@
     "human_participant_uat": "DEFERRED_FIELD_VALIDATION"
   },
   "current_blockers": [],
-  "next_action": "Controller-authorized LARİ Clinic foundation materialization and read-only scope/contract gap audit from frozen Package baseline 65a53427f52c21e60aa8f92e02a17d693a201601.",
+  "next_action": "Execute Controller-authorized LARİ Clinic Block 2 Operational Integration & Application Service Layer implementation on feature/lari-clinic-foundation from accepted Block 1 product SHA 2bb2b32d95387e09da06c7442a8617ccd38e4feb.",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true

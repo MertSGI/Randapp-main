@@ -40,3 +40,7 @@
 ## DECISION-009: Package / Customer Customization Phase Closure & Advancement to LARİ Clinic
 - **Status**: ACCEPTED
 - **Decision**: The integrated Package / Customer Customization phase (Phase 2) is closed as proven (`CLOSED_PROVEN` at level `E2_EXECUTABLE_EXACT_SHA_CI`, exact product SHA `65a53427f52c21e60aa8f92e02a17d693a201601`, GitHub Actions Run `32363490123`). Both defined implementation slices (Branch Server Authority and Commercial Source-of-Truth Alignment) are proven together on the integrated baseline. No additional Package implementation slice is defined. The main product delivery train advances to `LARİ Clinic`. `LARİ Clinic` remains `NOT_STARTED` until its foundation materialization task is separately authorized. The frozen Package baseline must not be casually mutated after phase closure.
+
+## DECISION-010: LARİ Clinic Identity & Core Appointment Model Preservation Policy
+- **Status**: ACCEPTED
+- **Decision**: LARİ Clinic preserves the canonical platform identity-role and Core appointment-status models. Clinical practitioner permissions are represented through clinic_staff_profiles; clinical encounter lifecycle remains separate from Core appointment lifecycle; tenant_owner and super_admin receive no implicit clinical-content bypass.
