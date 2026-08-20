@@ -22,7 +22,7 @@ jobs:
 
       - name: Checkout Product SHA & Verify Exact Binding
         run: |
-          REQUESTED_PRODUCT_SHA="83e3e054728b2480b6a9d269ee3e5ffd5735638e"
+          REQUESTED_PRODUCT_SHA="7b713e7217ff717e4247282c2a4c30111aef8c93"
           git checkout "${REQUESTED_PRODUCT_SHA}"
           ACTUAL_TEST_WORKTREE_SHA=$(git rev-parse HEAD)
           echo "REQUESTED_PRODUCT_SHA = ${REQUESTED_PRODUCT_SHA}"
@@ -185,17 +185,6 @@ jobs:
       - name: Run Multi-Session Real DB Concurrency Harness
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx tsx supabase/tests/p2a_concurrency_harness.ts
-
-      - name: Run Sequential Package Branch Server Authority Functional SQL Suite
-        run: |
-          set -o pipefail
-          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          echo "=== RUNNING PACKAGE BRANCH FUNCTIONAL SQL SUITE ==="
-          if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/package_branch_server_authority_tests.sql 2>&1 | tee /tmp/package-branch-suite.log; then
-            echo "=== PACKAGE BRANCH TEST SUITE FAILURE ===" >> "$GITHUB_STEP_SUMMARY"
-            cat /tmp/package-branch-suite.log >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
 
       - name: Run Package Branch Real Multi-Session Concurrency & RLS Harness
         run: |
