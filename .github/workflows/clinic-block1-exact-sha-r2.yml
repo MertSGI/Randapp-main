@@ -91,8 +91,12 @@ jobs:
 
           echo "Applying migration manifest sequentially..."
           while IFS= read -r mig_file; do
+            if [ "${mig_file}" = "supabase/migrations/20260813_h1c_commercial_eligibility_and_quota_enforcement.sql" ]; then
+              echo "=== HISTORICAL REPLAY COMPATIBILITY BRIDGE ==="
+              docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/fixtures/p2a_historical_replay_bridge_before_migration_38.sql
+            fi
             echo "--> Applying migration: ${mig_file}"
-            docker exec -e PGPASSWORD=postgres -i lari-p2a-postgres psql -U postgres -d postgres -h 127.0.0.1 -v ON_ERROR_STOP=1 < "${mig_file}"
+            docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < "${mig_file}"
             if [ $? -ne 0 ]; then
               echo "❌ Migration failed: ${mig_file}"
               exit 1
@@ -121,13 +125,13 @@ jobs:
       - name: Run Static SQL Security & Contract Suite
         run: |
           echo "Executing p2a_tenant_provisioning_static_test.sql..."
-          docker exec -e PGPASSWORD=postgres -i lari-p2a-postgres psql -U postgres -d postgres -h 127.0.0.1 -v ON_ERROR_STOP=1 < supabase/tests/p2a_tenant_provisioning_static_test.sql
+          docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/p2a_tenant_provisioning_static_test.sql
           echo "✅ Static SQL security suite passed."
 
       - name: Run Sequential DB Integration & RLS Privacy Matrix Suite
         run: |
           echo "Executing p2a_tenant_provisioning_integration_tests.sql..."
-          docker exec -e PGPASSWORD=postgres -i lari-p2a-postgres psql -U postgres -d postgres -h 127.0.0.1 -v ON_ERROR_STOP=1 < supabase/tests/p2a_tenant_provisioning_integration_tests.sql
+          docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/p2a_tenant_provisioning_integration_tests.sql
           echo "✅ Sequential DB integration & RLS matrix suite passed."
 
       - name: Run Multi-Session Real DB Concurrency Harness
@@ -139,7 +143,7 @@ jobs:
       - name: Run Sequential Package Branch Server Authority Functional SQL Suite
         run: |
           echo "Executing package_branch_server_authority_tests.sql..."
-          docker exec -e PGPASSWORD=postgres -i lari-p2a-postgres psql -U postgres -d postgres -h 127.0.0.1 -v ON_ERROR_STOP=1 < supabase/tests/package_branch_server_authority_tests.sql
+          docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/package_branch_server_authority_tests.sql
           echo "✅ Package branch server authority functional SQL suite passed."
 
       - name: Run Package Branch Real Multi-Session Concurrency & RLS Harness
@@ -160,7 +164,7 @@ jobs:
         run: |
           echo "Executing clinic_domain_server_authority_tests.sql..."
           set -o pipefail
-          docker exec -e PGPASSWORD=postgres -i lari-p2a-postgres psql -U postgres -d postgres -h 127.0.0.1 -v ON_ERROR_STOP=1 < supabase/tests/clinic_domain_server_authority_tests.sql 2>&1 | tee /tmp/clinic-sql.log
+          docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/clinic_domain_server_authority_tests.sql 2>&1 | tee /tmp/clinic-sql.log
 
           echo "Verifying test-generated execution markers from SQL output..."
           grep -F 'ANON_PROTECTED_ROWS_PREEXIST=YES' /tmp/clinic-sql.log
