@@ -74,11 +74,13 @@ export async function runPackageBranchConcurrencyHarness() {
   const ownerRLSA_id  = '77755555-5555-4555-8555-555555555555';
   const tenantRLSB_id = '88888888-8888-4888-8888-888888888888';
   const ownerRLSB_id  = '88866666-6666-4666-8666-666666666666';
+  const tenantNeg_id  = '99991111-1111-4111-8111-111111111111';
+  const ownerNeg_id   = '99995555-5555-4555-8555-555555555555';
   const staffRLSA_id  = '77788888-8888-4888-8888-888888888888';
   const admin_id      = '99999999-9999-4999-8999-999999999999';
 
-  const allTenantIds = [tenantC1_id, tenantC2_id, tenantC3_id, tenantC4_id, tenantC5A_id, tenantC5B_id, tenantRLSA_id, tenantRLSB_id];
-  const allUserIds   = [ownerC1_id, ownerC2_id, ownerC3_id, ownerC4_id, ownerC5A_id, ownerC5B_id, ownerRLSA_id, ownerRLSB_id, staffRLSA_id, admin_id];
+  const allTenantIds = [tenantC1_id, tenantC2_id, tenantC3_id, tenantC4_id, tenantC5A_id, tenantC5B_id, tenantRLSA_id, tenantRLSB_id, tenantNeg_id];
+  const allUserIds   = [ownerC1_id, ownerC2_id, ownerC3_id, ownerC4_id, ownerC5A_id, ownerC5B_id, ownerRLSA_id, ownerRLSB_id, ownerNeg_id, staffRLSA_id, admin_id];
 
   try {
     // 0. Setup Clean Isolated Fixtures
@@ -103,7 +105,8 @@ export async function runPackageBranchConcurrencyHarness() {
         ('${tenantC5A_id}', 'tenant-c5a', 'Tenant C5A', 'active'),
         ('${tenantC5B_id}', 'tenant-c5b', 'Tenant C5B', 'active'),
         ('${tenantRLSA_id}', 'tenant-rlsa', 'Tenant RLS A', 'active'),
-        ('${tenantRLSB_id}', 'tenant-rlsb', 'Tenant RLS B', 'active');
+        ('${tenantRLSB_id}', 'tenant-rlsb', 'Tenant RLS B', 'active'),
+        ('${tenantNeg_id}', 'tenant-neg', 'Tenant Neg Control', 'active');
 
       INSERT INTO public.tenant_entitlement_overrides (tenant_id, feature_key, value_type, is_unlimited, integer_value, reason)
       VALUES
@@ -112,7 +115,9 @@ export async function runPackageBranchConcurrencyHarness() {
         ('${tenantC3_id}', 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture'),
         ('${tenantC4_id}', 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture'),
         ('${tenantC5A_id}', 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture'),
-        ('${tenantRLSA_id}', 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture');
+        ('${tenantC5B_id}', 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture'),
+        ('${tenantRLSA_id}', 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture'),
+        ('${tenantRLSB_id}', 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture');
 
       INSERT INTO auth.users (id, email, role, created_at, updated_at)
       VALUES
@@ -124,6 +129,7 @@ export async function runPackageBranchConcurrencyHarness() {
         ('${ownerC5B_id}', 'ownerc5b@test-harness.invalid', 'authenticated', now(), now()),
         ('${ownerRLSA_id}', 'owner-rlsa@test-harness.invalid', 'authenticated', now(), now()),
         ('${ownerRLSB_id}', 'owner-rlsb@test-harness.invalid', 'authenticated', now(), now()),
+        ('${ownerNeg_id}', 'owner-neg@test-harness.invalid', 'authenticated', now(), now()),
         ('${staffRLSA_id}', 'staff-rlsa@test-harness.invalid', 'authenticated', now(), now()),
         ('${admin_id}', 'admin@test-harness.invalid', 'authenticated', now(), now())
       ON CONFLICT (id) DO NOTHING;
@@ -138,6 +144,7 @@ export async function runPackageBranchConcurrencyHarness() {
         ('${ownerC5B_id}', '${tenantC5B_id}', 'Owner C5B', 'tenant_owner', true),
         ('${ownerRLSA_id}', '${tenantRLSA_id}', 'Owner RLS A', 'tenant_owner', true),
         ('${ownerRLSB_id}', '${tenantRLSB_id}', 'Owner RLS B', 'tenant_owner', true),
+        ('${ownerNeg_id}', '${tenantNeg_id}', 'Owner Neg', 'tenant_owner', true),
         ('${staffRLSA_id}', '${tenantRLSA_id}', 'Staff RLS A', 'staff', true),
         ('${admin_id}', NULL, 'Super Admin', 'super_admin', true);
     `);
@@ -145,6 +152,16 @@ export async function runPackageBranchConcurrencyHarness() {
     // Verify override resolution
     const quotaRes = await client1.query(`SELECT is_unlimited FROM public.resolve_commercial_quota('${tenantC1_id}', 'max_branches');`);
     assert(quotaRes.rows[0]?.is_unlimited === true, 'TEST_MULTI_BRANCH_OVERRIDE_RESOLUTION = PASS (TEST_TENANT_MAX_BRANCHES_SOURCE = tenant_override)');
+
+    // Commercial Branch Quota Negative Control Verification
+    await client1.query(`SELECT set_config('request.jwt.claims', '', true); SELECT set_config('request.jwt.claim.sub', '${ownerNeg_id}', true); SELECT set_config('request.jwt.claim.role', 'authenticated', true);`);
+    const negB1 = await client1.query(`SELECT public.create_tenant_branch('${tenantNeg_id}', 'Neg Branch 1', 'neg-1') as res;`);
+    const negB1Res = negB1.rows[0]?.res;
+    assert(negB1Res?.success === true, 'Commercial negative control first branch creation succeeded');
+
+    const negB2 = await client1.query(`SELECT public.create_tenant_branch('${tenantNeg_id}', 'Neg Branch 2 Exceeding Quota', 'neg-2') as res;`);
+    const negB2Res = negB2.rows[0]?.res;
+    assert(negB2Res?.success === false && negB2Res?.reason_code === 'commercial_quota_exceeded', 'COMMERCIAL_BRANCH_QUOTA_NEGATIVE_CONTROL = PASS');
 
     // 0b. Execute Package Branch Server Authority Functional SQL Suite (Assertions A-L)
     const sqlPath = path.join(process.cwd(), 'supabase/tests/package_branch_server_authority_tests.sql');
