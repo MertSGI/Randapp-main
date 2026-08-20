@@ -196,10 +196,13 @@ export async function runPackageBranchConcurrencyHarness() {
     async function execRpc(client: any, userId: string, sql: string) {
       try {
         const res = await client.query(`
+          SELECT set_config('request.jwt.claims', '{"sub":"${userId}","role":"authenticated"}', true);
           SELECT set_config('request.jwt.claim.sub', '${userId}', true);
+          SELECT set_config('request.jwt.claim.role', 'authenticated', true);
           ${sql}
         `);
-        return { success: true, data: res[1].rows[0].res, error: null };
+        const lastResult = Array.isArray(res) ? res[res.length - 1] : res;
+        return { success: true, data: lastResult.rows[0]?.res, error: null };
       } catch (err: any) {
         if (err.code === '40P01') rawDeadlockCount++;
         if (err.code === '23505') rawUniqueViolationCount++;
