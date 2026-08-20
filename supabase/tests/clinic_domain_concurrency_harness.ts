@@ -84,12 +84,30 @@ export async function runClinicDomainConcurrencyHarness() {
       ('${tenant_id}', 'conc-t1', 'Concurrency Tenant 1', 'active'),
       ('${tenant2_id}', 'conc-t2', 'Concurrency Tenant 2', 'active');
 
+      INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
+      SELECT '${tenant_id}', p.id, pv.id, 'active', 'manual'
+      FROM public.plans p
+      JOIN public.plan_versions pv ON pv.plan_id = p.id
+      WHERE p.code = 'kurumsal' AND pv.lifecycle_status = 'published'
+      ORDER BY pv.created_at DESC LIMIT 1;
+
+      INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
+      SELECT '${tenant2_id}', p.id, pv.id, 'active', 'manual'
+      FROM public.plans p
+      JOIN public.plan_versions pv ON pv.plan_id = p.id
+      WHERE p.code = 'kurumsal' AND pv.lifecycle_status = 'published'
+      ORDER BY pv.created_at DESC LIMIT 1;
+
+      INSERT INTO public.tenant_entitlement_overrides (tenant_id, feature_key, value_type, is_unlimited, integer_value, reason)
+      VALUES ('${tenant_id}', 'max_staff', 'integer', true, NULL, 'Clinic domain concurrency harness fixture'),
+             ('${tenant2_id}', 'max_staff', 'integer', true, NULL, 'Clinic domain concurrency harness fixture');
+
       INSERT INTO auth.users (id, email) VALUES
       ('${owner_id}', 'owner_c@test.com'),
       ('${doc1_id}', 'doc1_c@test.com'),
       ('${doc2_id}', 'doc2_c@test.com');
 
-      INSERT INTO public.users_profile (id, tenant_id, role, full_name, active) VALUES
+      INSERT INTO public.users_profile (id, tenant_id, role, name, active) VALUES
       ('${owner_id}', '${tenant_id}', 'tenant_owner', 'Owner C', true),
       ('${doc1_id}', '${tenant_id}', 'staff', 'Dr. Doc 1', true),
       ('${doc2_id}', '${tenant2_id}', 'staff', 'Dr. Doc 2', true);
