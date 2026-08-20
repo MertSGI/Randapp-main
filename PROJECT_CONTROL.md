@@ -4,7 +4,9 @@
 
 - **Project**: LARİ SaaS Platform (Repository: `MertSGI/Randapp-main`)
 - **Current Core Status**: LARİ Core Release Candidates Closed & Frozen (`CORE-RC.1` through `CORE-RC.4` `CLOSED_PROVEN`).
-- **Active Delivery Milestone**: `Package/Customer Customization` (Auditing Core extension points and defining shared package/customer customization contracts against frozen Core RC baseline).
+- **Active Delivery Milestone**: `Package/Customer Customization` (Active focus: Commercial Source-of-Truth Alignment audit against implementation SHA `83089a0695e0a5f0cf0fda25c7006df5e6ad4c07`).
+- **Package Customization Progress**:
+  - `Branch Server Authority` (Slice 1): `CLOSED_PROVEN` (`E2_EXECUTABLE_EXACT_SHA_CI` - Implementation SHA `83089a0695e0a5f0cf0fda25c7006df5e6ad4c07` proven via GitHub Actions Run `32340331307` on evidence branch `ci/package-branch-authority-exact-sha-r2-20260820` at SHA `584f276ec5185bbb4080559f7cde08334e5767cd`).
 - **Core-RC Progress**:
   - `CORE-RC.1`: `INTEGRATION_ALREADY_SATISFIED`
   - `CORE-RC.2A`: `PRESENT_ON_CORE_BASELINE` (Outbox/provider abstraction present; provider config pending)
@@ -25,7 +27,9 @@
 | **Main Pilot Staging** | `staging/supabase-staging-consistency` | `134c8716c2511c909cd400aee0496ebd70f63bf6` | `CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE` |
 | **Commercial Core Baseline** | `feature/p2a-commercial-core-foundation` | `80297685cb3fd1c73a41207e6fd3dd1faedfbab2` | `CLOSED_PROVEN` |
 | **Official Core RC Baseline** | `release/core-rc4` | `e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a` | `CLOSED_PROVEN` |
-| **CI Evidence Trigger** | `ci/core-rc4-exact-sha-evidence-r2-20260818` | `61b39627692df4e0784edcfb5b2d2ed695726ec2` | `CI_RUN_32134598853_SUCCESS` |
+| **CI Evidence Trigger (Core RC4)** | `ci/core-rc4-exact-sha-evidence-r2-20260818` | `61b39627692df4e0784edcfb5b2d2ed695726ec2` | `CI_RUN_32134598853_SUCCESS` |
+| **Package Customization Foundation** | `feature/package-customer-customization-foundation` | `83089a0695e0a5f0cf0fda25c7006df5e6ad4c07` | `CLOSED_PROVEN` (Slice 1) |
+| **CI Evidence Trigger (Package Slice 1)** | `ci/package-branch-authority-exact-sha-r2-20260820` | `584f276ec5185bbb4080559f7cde08334e5767cd` | `CI_RUN_32340331307_SUCCESS` |
 | **Project Control Plane** | `control/lari-project-control-plane` | (Current Branch) | `ACTIVE_GOVERNANCE` |
 
 ---
@@ -41,14 +45,16 @@
 - **`CORE-RC.1`**: `INTEGRATION_ALREADY_SATISFIED` (Accepted main-pilot baseline proven as strict ancestor of Commercial Core baseline).
 - **`CORE-RC.3`**: `CLOSED_PROVEN` (`E3_ISOLATED_RUNTIME_E2E` - Isolated acceptance runtime E2E proven).
 - **`CORE-RC.4`**: `CLOSED_PROVEN` (`E2_EXECUTABLE_EXACT_SHA_CI` - Official release candidate `release/core-rc4` at `e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a` proven via GitHub Actions Run `32134598853`).
+- **`Package Branch Server Authority`**: `CLOSED_PROVEN` (`E2_EXECUTABLE_EXACT_SHA_CI` - Implementation SHA `83089a0695e0a5f0cf0fda25c7006df5e6ad4c07` proven via GitHub Actions Run `32340331307`).
 
 ### Active Delivery Phase
-- **`Package/Customer Customization`**: Auditing Core extension points and defining shared package/customer customization contracts against frozen Core RC baseline (`e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a`).
+- **`Package/Customer Customization`**: Active focus is Commercial Source-of-Truth Alignment audit against implementation SHA `83089a0695e0a5f0cf0fda25c7006df5e6ad4c07` (Slice 1 Branch Server Authority closed as proven).
 
 ---
 
 ## Authoritative Evidence Log
 
+- **Authoritative Package Branch Server Authority CI Run**: GitHub Actions Run `32340331307` (`push` event, tested product SHA `83089a0695e0a5f0cf0fda25c7006df5e6ad4c07`, 24/24 steps PASS).
 - **Authoritative CORE-RC.4 Exact-SHA CI Run**: GitHub Actions Run `32134598853` (`push` event, tested product SHA `e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a`, 24/24 steps PASS).
 - **Authoritative P2A Exact-SHA CI Run**: GitHub Actions Run `31797365055` (`push` event, tested product SHA `80297685...`, 4/4 DB acceptance suites PASS, 5-session concurrency PASS).
 

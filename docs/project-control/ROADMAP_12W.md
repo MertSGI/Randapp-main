@@ -4,7 +4,7 @@
 
 ```
 LARİ CORE [FROZEN / CLOSED_PROVEN]
-  └── PACKAGE / CUSTOMER CUSTOMIZATION [IN_PREPARATION]
+  └── PACKAGE / CUSTOMER CUSTOMIZATION [IN_PROGRESS]
         └── LARİ CLINIC
               └── LARİ HEALTH TOURISM
                     └── FINAL DELIVERY
@@ -36,7 +36,8 @@ LARİ CORE [FROZEN / CLOSED_PROVEN]
 | **1. LARİ Core** | Demo Isolation & Subdomain Readiness | `PRESENT_ON_CORE_BASELINE` | E1 (Source Proven) |
 | **1. LARİ Core** | Core Runtime Proof (`CORE-RC.3`) | `CLOSED_PROVEN` | E3 (Isolated Runtime E2E) |
 | **1. LARİ Core** | Release Candidate Finalization (`CORE-RC.4`) | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
-| **2. Package Customization** | Multi-Branch & Tenant Overrides | `IN_PREPARATION` | N/A |
+| **2. Package Customization** | Branch Server Authority (Slice 1) | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
+| **2. Package Customization** | Commercial Source-of-Truth Alignment | `IN_PROGRESS` | N/A |
 | **3. LARİ Clinic** | Medical Appointment & Clinical Workflows | `NOT_STARTED` | N/A |
 | **4. LARİ Health Tourism** | International Patient & Agency Operations | `NOT_STARTED` | N/A |
 | **5. Final Delivery** | Production Cutover & DNS/Commercial Launch | `NOT_STARTED` | N/A |
@@ -52,7 +53,9 @@ LARİ CORE [FROZEN / CLOSED_PROVEN]
   - `CORE-RC.4`: `CLOSED_PROVEN` (`E2_EXECUTABLE_EXACT_SHA_CI`, GitHub Actions Run `32134598853`). Cross-layer `pending_onboarding` subscription status contract alignment verified.
 
 ### Phase 2: Package / Customer Customization (Current Active Focus)
-- **Status**: In Preparation. Begins with auditing Core extension points and defining the shared package/customer customization contract against the frozen Core RC baseline (`e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a`).
+- **Status**: In Progress.
+  - `Branch Server Authority` (Slice 1): `CLOSED_PROVEN` (`E2_EXECUTABLE_EXACT_SHA_CI`, GitHub Actions Run `32340331307`). Server-authoritative RPC mutations, 64-bit advisory locks, SELECT-only RLS policies, and 5-session concurrency matrix verified on `feature/package-customer-customization-foundation` at exact SHA `83089a0695e0a5f0cf0fda25c7006df5e6ad4c07`.
+  - `Commercial Source-of-Truth Alignment` (Slice 2): Active audit focus against implementation SHA `83089a0695e0a5f0cf0fda25c7006df5e6ad4c07`.
 
 ### Phase 3: LARİ Clinic Package
 - **Status**: Not Started. Depends on Package Customization baseline. Extends LARİ Core for medical clinics, consultation scheduling, and doctor/treatment availability.
