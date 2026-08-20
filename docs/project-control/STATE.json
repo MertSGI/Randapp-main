@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-08-20T15:05:00+03:00",
+  "updated_at": "2026-08-20T15:58:00+03:00",
   "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
@@ -16,7 +16,7 @@
     "LARİ Health Tourism",
     "Final Delivery"
   ],
-  "current_milestone": "Package/Customer Customization",
+  "current_milestone": "LARİ Clinic",
   "current_status": "CORE_SOFTWARE_RC_CLOSED_PROVEN",
   "canonical_refs": {
     "main_pilot": {
@@ -58,6 +58,11 @@
       "branch": "ci/package-commercial-source-of-truth-exact-sha-r1-20260820",
       "sha": "a337d85276728beffbec4a129aefc703328624d2",
       "status": "CI_RUN_32363490123_SUCCESS"
+    },
+    "package_customization_baseline": {
+      "branch": "feature/package-customer-customization-foundation",
+      "sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
+      "status": "CLOSED_PROVEN"
     }
   },
   "accepted_gates": [
@@ -195,6 +200,17 @@
       ],
       "closed_at": "2026-08-20T11:23:37Z",
       "reopen_condition": "Contradictory commercial source-of-truth, entitlement projection, Supabase authority, unlimited quota, registration authority, or exact-SHA regression evidence"
+    },
+    {
+      "gate": "Package / Customer Customization Baseline",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
+      "run_ids": [
+        "32363490123"
+      ],
+      "closed_at": "2026-08-20T15:58:00+03:00",
+      "reopen_condition": "Contradictory Package branch authority, commercial source-of-truth, entitlement, registration authority, branch booking, RLS/concurrency, or exact-SHA regression evidence"
     }
   ],
   "active_workstreams": {
@@ -220,9 +236,11 @@
       "closed_at": "2026-08-18T15:02:15+03:00"
     },
     "package_customization": {
-      "status": "IN_PROGRESS",
+      "status": "CLOSED_PROVEN",
       "branch": "feature/package-customer-customization-foundation",
       "sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "run_id": "32363490123",
       "slices": {
         "branch_server_authority": {
           "status": "CLOSED_PROVEN",
@@ -236,6 +254,10 @@
           "product_sha": "65a53427f52c21e60aa8f92e02a17d693a201601"
         }
       }
+    },
+    "lari_clinic": {
+      "status": "NOT_STARTED",
+      "objective": "Materialize medical appointment and clinical workflows as downstream package extension on frozen Package customization baseline"
     }
   },
   "external_dependencies": {
@@ -247,7 +269,7 @@
     "human_participant_uat": "DEFERRED_FIELD_VALIDATION"
   },
   "current_blockers": [],
-  "next_action": "Controller selection of the next Package/Customer Customization slice from the existing product plan; do not advance to LARİ Clinic until the Package Customization baseline is explicitly accepted.",
+  "next_action": "Controller-authorized LARİ Clinic foundation materialization and read-only scope/contract gap audit from frozen Package baseline 65a53427f52c21e60aa8f92e02a17d693a201601.",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true
