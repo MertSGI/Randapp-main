@@ -64,59 +64,81 @@ jobs:
             sleep 1
           done
 
+      - name: Install PostgreSQL Client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
       - name: Pre-Bootstrap Raw Container Inspection
         run: |
-          echo "=== P2A RAW CONTAINER ROLES & PRE-EXISTING TABLES ==="
-          docker exec lari-p2a-postgres psql -U postgres -d postgres -c "\du"
-          docker exec lari-p2a-postgres psql -U postgres -d postgres -c "\dt public.*"
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== PRE-BOOTSTRAP RAW CONTAINER INSPECTION ==="
+          psql "$DB_URL" -c "SELECT rolname FROM pg_roles WHERE rolname IN ('anon', 'authenticated', 'service_role');"
+          psql "$DB_URL" -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'auth';"
 
       - name: Execute Disposable Test Compatibility Bootstrap Fixture
         run: |
-          echo "Applying historical test compatibility bootstrap fixture..."
-          docker exec -i lari-p2a-postgres psql -U postgres -d postgres < supabase/tests/fixtures/p2a_managed_runtime_bootstrap.sql
-          echo "✅ Compatibility bootstrap fixture applied successfully."
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== EXECUTING TEST COMPATIBILITY BOOTSTRAP FIXTURE ==="
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/fixtures/p2a_managed_runtime_bootstrap.sql
+          echo "Compatibility bootstrap completed."
 
       - name: Build Migration Manifest & Apply Full SQL Migration Chain
+        id: apply_migrations
         run: |
-          echo "Building ordered migration manifest..."
-          MANIFEST_FILE="migration_apply_manifest.txt"
-          ls -1 supabase/migrations/*.sql | sort > "${MANIFEST_FILE}"
-          MIGRATION_COUNT=$(wc -l < "${MANIFEST_FILE}")
-          echo "Found ${MIGRATION_COUNT} migration files in manifest."
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== BUILDING ORDERED MIGRATION MANIFEST ==="
+          mapfile -t MIGRATIONS < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)
+          echo "Migration file count: ${#MIGRATIONS[@]}"
+          echo "First migration: ${MIGRATIONS[0]}"
+          echo "Last migration: ${MIGRATIONS[-1]}"
+          MIGRATION_COUNT=${#MIGRATIONS[@]}
           echo "MIGRATION_REPLAY_COUNT = ${MIGRATION_COUNT}"
           if [ "${MIGRATION_COUNT}" -ne 61 ]; then
             echo "❌ Unexpected migration count! Expected 61, got ${MIGRATION_COUNT}."
             exit 1
           fi
 
-          echo "Applying migration manifest sequentially..."
-          while IFS= read -r mig_file; do
-            if [ "${mig_file}" = "supabase/migrations/20260813_h1c_commercial_eligibility_and_quota_enforcement.sql" ]; then
+          APPLIED_COUNT=0
+          ORDINAL=1
+          rm -f /tmp/p2a-applied-migrations.txt /tmp/p2a-failure-summary.txt /tmp/p2a-migration-*.log
+          for migration in "${MIGRATIONS[@]}"; do
+            if [ "${migration}" = "20260813_h1c_commercial_eligibility_and_quota_enforcement.sql" ]; then
               echo "=== HISTORICAL REPLAY COMPATIBILITY BRIDGE ==="
-              docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/fixtures/p2a_historical_replay_bridge_before_migration_38.sql
+              psql "$DB_URL" -v ON_ERROR_STOP=1 -f "supabase/tests/fixtures/p2a_historical_replay_bridge_before_migration_38.sql"
             fi
-            echo "--> Applying migration: ${mig_file}"
-            docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < "${mig_file}"
-            if [ $? -ne 0 ]; then
-              echo "❌ Migration failed: ${mig_file}"
+            echo "=== APPLYING [${ORDINAL}/${#MIGRATIONS[@]}] ${migration} ==="
+            if ! psql "$DB_URL" \
+              -v ON_ERROR_STOP=1 \
+              -f "supabase/migrations/${migration}" \
+              2>&1 | tee "/tmp/p2a-migration-${ORDINAL}.log"; then
+
+              echo "FAILED_MIGRATION_ORDINAL=${ORDINAL}" | tee /tmp/p2a-failure-summary.txt
+              echo "FAILED_MIGRATION_FILENAME=${migration}" | tee -a /tmp/p2a-failure-summary.txt
+              tail -n 80 "/tmp/p2a-migration-${ORDINAL}.log" | tee -a /tmp/p2a-failure-summary.txt
               exit 1
             fi
-          done < "${MANIFEST_FILE}"
-          echo "✅ All 61 migration files applied sequentially without error."
+            echo "ordinal=${ORDINAL} filename=${migration}" >> /tmp/p2a-applied-migrations.txt
+            APPLIED_COUNT=$((APPLIED_COUNT + 1))
+            ORDINAL=$((ORDINAL + 1))
+          done
+          echo "Successfully applied ${APPLIED_COUNT} migration files."
 
       - name: Detailed Failure Diagnostic Dump
         if: failure()
         run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== MIGRATION FAILURE DIAGNOSTIC DUMP ==="
-          docker exec lari-p2a-postgres psql -U postgres -d postgres -c "\dt public.*" || true
-          docker exec lari-p2a-postgres psql -U postgres -d postgres -c "SELECT name, version FROM supabase_migrations.schema_migrations ORDER BY version DESC LIMIT 10;" || true
+          psql "$DB_URL" -c "\dt public.*" || true
 
       - name: Verify P2A Schema Post-Proof
         run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== POST-MIGRATION PUBLIC TABLES ==="
-          TABLE_COUNT=$(docker exec lari-p2a-postgres psql -U postgres -d postgres -t -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';")
+          TABLE_COUNT=$(psql "$DB_URL" -t -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';")
           echo "Public table count: ${TABLE_COUNT}"
-          docker exec lari-p2a-postgres psql -U postgres -d postgres -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';"
+          psql "$DB_URL" -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';"
 
       - name: Install DB Test Dependencies
         run: |
@@ -124,32 +146,35 @@ jobs:
 
       - name: Run Static SQL Security & Contract Suite
         run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "Executing p2a_tenant_provisioning_static_test.sql..."
-          docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/p2a_tenant_provisioning_static_test.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_tenant_provisioning_static_test.sql
           echo "✅ Static SQL security suite passed."
 
       - name: Run Sequential DB Integration & RLS Privacy Matrix Suite
         run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "Executing p2a_tenant_provisioning_integration_tests.sql..."
-          docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/p2a_tenant_provisioning_integration_tests.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_tenant_provisioning_integration_tests.sql
           echo "✅ Sequential DB integration & RLS matrix suite passed."
 
       - name: Run Multi-Session Real DB Concurrency Harness
         run: |
           echo "Executing p2a_concurrency_harness.ts..."
-          DB_URL="postgresql://postgres:postgres@localhost:54322/postgres" npx tsx supabase/tests/p2a_concurrency_harness.ts
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx tsx supabase/tests/p2a_concurrency_harness.ts
           echo "✅ Multi-session real DB concurrency harness passed."
 
       - name: Run Sequential Package Branch Server Authority Functional SQL Suite
         run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "Executing package_branch_server_authority_tests.sql..."
-          docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/package_branch_server_authority_tests.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/package_branch_server_authority_tests.sql
           echo "✅ Package branch server authority functional SQL suite passed."
 
       - name: Run Package Branch Real Multi-Session Concurrency & RLS Harness
         run: |
           echo "Executing package_branch_concurrency_harness.ts..."
-          DB_URL="postgresql://postgres:postgres@localhost:54322/postgres" npx tsx supabase/tests/package_branch_concurrency_harness.ts
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx tsx supabase/tests/package_branch_concurrency_harness.ts
           echo "✅ Package branch real multi-session concurrency & RLS harness passed."
 
       - name: Run Package Branch Static QA
@@ -162,9 +187,27 @@ jobs:
 
       - name: Run Clinic Domain Server Authority Functional SQL Suite & Verify Markers
         run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "Executing clinic_domain_server_authority_tests.sql..."
           set -o pipefail
-          docker exec -i lari-p2a-postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/clinic_domain_server_authority_tests.sql 2>&1 | tee /tmp/clinic-sql.log
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_domain_server_authority_tests.sql 2>&1 | tee /tmp/clinic-sql.log
+
+          echo "Verifying test-generated execution markers from SQL output..."
+          grep -F 'ANON_PROTECTED_ROWS_PREEXIST=YES' /tmp/clinic-sql.log
+          grep -F 'ANON_CLINICAL_VISIBILITY_ZERO=YES' /tmp/clinic-sql.log
+          grep -F 'OWNER_DIRECT_DML_DENIED=YES' /tmp/clinic-sql.log
+          grep -F 'AUTHORIZED_CROSS_TENANT_BOUNDARY_PROVEN=YES' /tmp/clinic-sql.log
+          grep -F 'CLINICAL_NOTE_APPEND_ONLY_PROVEN=YES' /tmp/clinic-sql.log
+          grep -F 'AUDIT_CLINICAL_CONTENT_LEAK=NO' /tmp/clinic-sql.log
+          grep -F 'PUBLIC_SELF_SERVICE_CLINICAL_ISOLATION=PASS' /tmp/clinic-sql.log
+          grep -F 'CLINIC_SQL_DB_EXECUTION=PASS' /tmp/clinic-sql.log
+          echo "✅ Clinic domain server authority SQL contract suite passed with all test-generated markers verified."
+
+      - name: Run Clinic Domain Real Multi-Session Concurrency Harness & Verify Markers
+        run: |
+          echo "Executing clinic_domain_concurrency_harness.ts..."
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx tsx supabase/tests/clinic_domain_concurrency_harness.ts 2>&1 | tee /tmp/clinic-concurrency.log
 
           echo "Verifying test-generated execution markers from SQL output..."
           grep -F 'ANON_PROTECTED_ROWS_PREEXIST=YES' /tmp/clinic-sql.log
