@@ -164,7 +164,11 @@ export async function runPackageBranchConcurrencyHarness() {
     assert(quotaData?.is_unlimited === true, 'TEST_MULTI_BRANCH_OVERRIDE_RESOLUTION = PASS (TEST_TENANT_MAX_BRANCHES_SOURCE = tenant_override)');
 
     // Commercial Branch Quota Negative Control Verification
-    await client1.query(`SELECT set_config('request.jwt.claims', '', true); SELECT set_config('request.jwt.claim.sub', '${ownerNeg_id}', true); SELECT set_config('request.jwt.claim.role', 'authenticated', true);`);
+    await client1.query(`
+      SELECT set_config('request.jwt.claims', '{"sub": "${ownerNeg_id}", "role": "authenticated"}', true);
+      SELECT set_config('request.jwt.claim.sub', '${ownerNeg_id}', true);
+      SELECT set_config('request.jwt.claim.role', 'authenticated', true);
+    `);
     const negB1 = await client1.query(`SELECT public.create_tenant_branch('${tenantNeg_id}', 'Neg Branch 1', 'neg-1') as res;`);
     const negB1Res = negB1.rows[0]?.res;
     assert(negB1Res?.success === true, 'Commercial negative control first branch creation succeeded');
