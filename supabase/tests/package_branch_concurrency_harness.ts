@@ -352,6 +352,9 @@ export async function runPackageBranchConcurrencyHarness() {
     // -------------------------------------------------------------------------
     console.log('\n--- SAFE AUTHENTICATED RLS BOUNDARY TESTS ---');
 
+    // Pre-create 1 branch for Tenant RLS A under client2 (postgres) BEFORE starting client1 transaction snapshot
+    await client2.query(`SELECT public.create_tenant_branch('${tenantRLSA_id}', 'RLS A Branch', 'rls-a') as res;`);
+
     // 1. Owner RLS Boundary
     await client1.query('BEGIN;');
     await client1.query("SET LOCAL ROLE authenticated;");
@@ -360,11 +363,6 @@ export async function runPackageBranchConcurrencyHarness() {
       SELECT set_config('request.jwt.claim.sub', '${ownerRLSA_id}', true);
       SELECT set_config('request.jwt.claim.role', 'authenticated', true);
     `);
-
-    // Pre-create 1 branch for Tenant RLS A
-    await client1.query("SAVEPOINT pre_create;");
-    // Run RPC under postgres to ensure branch exists for SELECT test
-    await client2.query(`SELECT public.create_tenant_branch('${tenantRLSA_id}', 'RLS A Branch', 'rls-a') as res;`);
 
     const ownerAOwnSelect = await client1.query(`SELECT count(*) FROM public.branches WHERE tenant_id = '${tenantRLSA_id}';`);
     assert(parseInt(ownerAOwnSelect.rows[0].count, 10) >= 1, 'Owner A CAN SELECT own tenant branches');
