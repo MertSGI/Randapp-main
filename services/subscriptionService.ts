@@ -118,6 +118,16 @@ export const subscriptionService = {
         const { entitlementService } = await import('./entitlementService');
         const mapped = entitlementService._mapServerEntitlementsToPlanEntitlements(effectiveEntitlements);
 
+        const monthlyApptsEnt = effectiveEntitlements['max_monthly_appointments'];
+        const customIncEnt = effectiveEntitlements['custom_domain_included'];
+        const aiEnt = effectiveEntitlements['ai_allowance'];
+        const calEnt = effectiveEntitlements['calendar_integration'];
+        const dedicatedEnt = effectiveEntitlements['dedicated_support'];
+        const priorityEnt = effectiveEntitlements['priority_support'];
+
+        const isDedicated = dedicatedEnt ? dedicatedEnt.boolean_value === true : false;
+        const isPriority = priorityEnt ? priorityEnt.boolean_value === true : false;
+
         return {
           id: pv.plan_code,
           name: pv.public_name,
@@ -130,23 +140,24 @@ export const subscriptionService = {
           isStaffUnlimited: mapped.unlimitedFlags?.maxStaff,
           maxServices: mapped.limits.maxServices,
           isServicesUnlimited: mapped.unlimitedFlags?.maxServices,
-          maxMonthlyAppointments: 0,
-          isMonthlyAppointmentsUnlimited: true,
+          maxMonthlyAppointments: monthlyApptsEnt ? (monthlyApptsEnt.integer_value ?? 0) : 0,
+          isMonthlyAppointmentsUnlimited: monthlyApptsEnt ? monthlyApptsEnt.is_unlimited === true : false,
           customDomainEnabled: mapped.features.custom_domain_manual,
           includedSubdomain: mapped.features.website_publication,
-          customComDomainIncluded: false,
+          customComDomainIncluded: customIncEnt ? customIncEnt.boolean_value === true : false,
           multiBranchEnabled: mapped.features.multi_branch,
           maxBranches: mapped.limits.maxBranches,
           isBranchesUnlimited: mapped.unlimitedFlags?.maxBranches,
-          aiRecommendationsEnabled: mapped.features.ai_style_assistant_basic,
-          aiVisualizationEnabled: mapped.features.ai_style_assistant_full,
-          aiMonthlyQuota: 0,
-          campaignsEnabled: mapped.features.campaigns_referrals,
+          aiRecommendationsEnabled: aiEnt ? (aiEnt.is_unlimited || (aiEnt.integer_value ?? 0) > 0) : false,
+          aiVisualizationEnabled: false,
+          aiMonthlyQuota: aiEnt ? (aiEnt.integer_value ?? 0) : 0,
+          isAiQuotaUnlimited: aiEnt ? aiEnt.is_unlimited === true : false,
+          campaignsEnabled: false,
           advancedReportsEnabled: mapped.features.reports_advanced,
-          whatsappAutomationEnabled: mapped.features.whatsapp_automation_readiness,
-          googleCalendarEnabled: mapped.features.online_booking,
-          supportLevel: mapped.features.super_admin_review_priority ? 'dedicated' : (mapped.features.priority_support ? 'priority' : 'standard'),
-          referralEligible: mapped.features.campaigns_referrals,
+          whatsappAutomationEnabled: false,
+          googleCalendarEnabled: calEnt ? calEnt.boolean_value === true : false,
+          supportLevel: isDedicated ? 'dedicated' : (isPriority ? 'priority' : 'standard'),
+          referralEligible: false,
           isActive: true,
           isRecommended: false,
           trialDays: pv.trial_days ?? 0
@@ -215,16 +226,30 @@ export const subscriptionService = {
   },
 
   async canAddStaff(tenantId: string): Promise<boolean> {
+    if (getDataSourceMode() === 'supabase') {
+      const { entitlementService } = await import('./entitlementService');
+      const entitlements = await entitlementService.getTenantEffectiveEntitlements(tenantId);
+      const usage = await this.getTenantUsage(tenantId);
+      if (entitlements.unlimitedFlags?.maxStaff) return true;
+      return usage.staffCount < entitlements.limits.maxStaff;
+    }
     const { entitlementService } = await import('./entitlementService');
     const plan = await this.getPlanForTenant(tenantId);
     const usage = await this.getTenantUsage(tenantId);
     if (!plan) return false;
     const max = await entitlementService.getTenantLimit(tenantId, 'maxStaff', plan.id);
-    if (max === -1 || max === 999999 || max === 999) return true; // unlimited
+    if (max === -1 || max === 999999 || max === 999) return true; // unlimited local fallback
     return usage.staffCount < max;
   },
 
   async canAddService(tenantId: string): Promise<boolean> {
+    if (getDataSourceMode() === 'supabase') {
+      const { entitlementService } = await import('./entitlementService');
+      const entitlements = await entitlementService.getTenantEffectiveEntitlements(tenantId);
+      const usage = await this.getTenantUsage(tenantId);
+      if (entitlements.unlimitedFlags?.maxServices) return true;
+      return usage.serviceCount < entitlements.limits.maxServices;
+    }
     const { entitlementService } = await import('./entitlementService');
     const plan = await this.getPlanForTenant(tenantId);
     const usage = await this.getTenantUsage(tenantId);

@@ -327,6 +327,11 @@ export const entitlementService = {
 
   async getTenantLimit(tenantId: string, limitKey: LimitKey, localPlanId?: string): Promise<number> {
     const entitlements = await this.getTenantEffectiveEntitlements(tenantId, localPlanId);
+    if (getDataSourceMode() === 'supabase') {
+      // In Supabase mode, limits.maxKey returns integer_value (or 0 if unlimited/absent).
+      // Unlimited truth is represented explicitly by entitlements.unlimitedFlags[limitKey].
+      return entitlements.limits[limitKey];
+    }
     if (entitlements.unlimitedFlags?.[limitKey]) return -1;
     return entitlements.limits[limitKey];
   },

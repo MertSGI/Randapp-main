@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * QA: Commercial Source-of-Truth Alignment (Slice 2-R2.1 Final Semantic Closure)
+ * QA: Commercial Source-of-Truth Alignment (Slice 2-R2.2 Hardened Strict Verification)
  * 
  * Static source-code analysis test that verifies:
- * 1. Canonical feature key set matches EXACTLY 25 registered H1A definitions in migration SQL
+ * 1. Bidirectional set equality for canonical feature keys (exact 25 keys extracted from migration SQL)
  * 2. Strict mapping matrix for legacy UI keys without speculative derivations (super_admin_review_priority & advanced_branding fail closed)
- * 3. Legacy/private Supabase plan rendering has NO hardcoded commercial fallback
- * 4. Supabase numeric quotas do not use numeric sentinels (999/9999/99999/999999)
+ * 3. Legacy/private Supabase plan rendering has NO hardcoded commercial fallback facts
+ * 4. Supabase numeric quotas do not return numeric sentinels (-1, 999, 999999) from Supabase tenant limit resolution
  * 5. Elimination of localStorage price calculation leaks on PricingPage and RegistrationPage
  * 6. Tenant-aware effective entitlement resolution with tenant_id equality check
  * 7. Public surface fails closed on AI check without calling authenticated my-tenant snapshot
@@ -41,9 +41,9 @@ function readFile(relPath) {
 }
 
 // =========================================================================
-// T1: Exact 25 Canonical Feature Definitions in Migration SQL
+// T1: Bidirectional Exact 25 Canonical Feature Definitions in Migration SQL
 // =========================================================================
-console.log('\nT1: Canonical H1A Feature Registry Verification (Exact 25 Keys)');
+console.log('\nT1: Canonical H1A Feature Registry Verification (Bidirectional Exact 25 Keys)');
 
 const migrationSql = readFile('supabase/migrations/20260810_h1a_commercial_catalog_and_read_contracts.sql');
 
@@ -56,33 +56,45 @@ const EXPECTED_25_KEYS = [
   'crm_level', 'data_export', 'public_api', 'priority_support', 'dedicated_support'
 ];
 
-// Extract seed insert block from migration SQL
+// Extract seed insert VALUES block from migration SQL
 const seedInsertMatch = migrationSql.match(/INSERT INTO public\.commercial_feature_definitions[\s\S]*?VALUES([\s\S]*?);/);
 const seedValuesText = seedInsertMatch ? seedInsertMatch[1] : '';
-const foundKeys = [];
-for (const key of EXPECTED_25_KEYS) {
-  if (seedValuesText.includes(`'${key}'`)) {
-    foundKeys.push(key);
-  }
+
+// Parse all actual feature_key strings from seed VALUES tuples e.g. ('core_booking', 'boolean', ...)
+const actualKeys = [];
+const tupleRegex = /\('([a-z0-9_]+)'\s*,/gi;
+let match;
+while ((match = tupleRegex.exec(seedValuesText)) !== null) {
+  actualKeys.push(match[1]);
 }
 
+const missingKeys = EXPECTED_25_KEYS.filter(k => !actualKeys.includes(k));
+const extraKeys = actualKeys.filter(k => !EXPECTED_25_KEYS.includes(k));
+const duplicates = actualKeys.filter((item, index) => actualKeys.indexOf(item) !== index);
+
 assert(
-  'Exact H1A canonical feature key count is 25',
-  EXPECTED_25_KEYS.length === 25 && foundKeys.length === 25,
-  `Expected exactly 25 keys in migration SQL, found ${foundKeys.length}`
+  'Bidirectional exact set equality for canonical feature keys (count = 25)',
+  EXPECTED_25_KEYS.length === 25 &&
+  actualKeys.length === 25 &&
+  missingKeys.length === 0 &&
+  extraKeys.length === 0 &&
+  duplicates.length === 0,
+  `Expected 25 keys, found actual count ${actualKeys.length}. Missing: [${missingKeys}], Extra: [${extraKeys}], Duplicates: [${duplicates}]`
 );
 
 // =========================================================================
-// T2: Feature Mapping Reconciliation & Speculative Mapping Elimination
+// T2: Feature Mapping Reconciliation & Prohibited Mappings Verification
 // =========================================================================
-console.log('\nT2: Feature Mapping Reconciliation & Speculative Mapping Elimination');
+console.log('\nT2: Feature Mapping Reconciliation & Prohibited Mappings Elimination');
 
 const entitlementServiceSrc = readFile('services/entitlementService.ts');
 const planServiceSrc = readFile('services/planService.ts');
+const subscriptionServiceSrc = readFile('services/subscriptionService.ts');
 
 assert(
   'super_admin_review_priority fails closed in Supabase mode (NO speculative dedicated_support mapping)',
-  entitlementServiceSrc.includes('super_admin_review_priority: false'),
+  entitlementServiceSrc.includes('super_admin_review_priority: false') &&
+  !subscriptionServiceSrc.includes('mapped.features.super_admin_review_priority'),
   'super_admin_review_priority must be false (fail-closed) in Supabase mode'
 );
 
@@ -90,6 +102,12 @@ assert(
   'advanced_branding fails closed in Supabase mode (NO speculative white_label mapping)',
   entitlementServiceSrc.includes('advanced_branding: false'),
   'advanced_branding must be false (fail-closed) in Supabase mode'
+);
+
+assert(
+  'googleCalendarEnabled does NOT derive from core_booking or online_booking',
+  !subscriptionServiceSrc.includes('googleCalendarEnabled: mapped.features.online_booking'),
+  'googleCalendarEnabled must derive from canonical calendar_integration'
 );
 
 assert(
@@ -109,32 +127,46 @@ assert(
 // =========================================================================
 console.log('\nT3: Dynamic Legacy/Private Plan Snapshot Projection');
 
-const subscriptionServiceSrc = readFile('services/subscriptionService.ts');
-
 assert(
-  'getPlanForTenant derives legacy/private plan projection from snapshot entitlements without static fallback',
-  subscriptionServiceSrc.includes('const mapped = entitlementService._mapServerEntitlementsToPlanEntitlements(effectiveEntitlements);') &&
-  subscriptionServiceSrc.includes('maxStaff: mapped.limits.maxStaff,'),
-  'getPlanForTenant must project legacy/private plan from snapshot.effective_entitlements dynamically'
+  'getPlanForTenant derives legacy/private plan projection from canonical snapshot entitlements without static fallback facts',
+  subscriptionServiceSrc.includes('const monthlyApptsEnt = effectiveEntitlements[\'max_monthly_appointments\'];') &&
+  subscriptionServiceSrc.includes('const customIncEnt = effectiveEntitlements[\'custom_domain_included\'];') &&
+  subscriptionServiceSrc.includes('const calEnt = effectiveEntitlements[\'calendar_integration\'];') &&
+  subscriptionServiceSrc.includes('maxMonthlyAppointments: monthlyApptsEnt ? (monthlyApptsEnt.integer_value ?? 0) : 0,'),
+  'getPlanForTenant must project canonical facts from snapshot.effective_entitlements dynamically'
 );
 
 // =========================================================================
-// T4: Unlimited Quotas & Sentinel Elimination
+// T4: Unlimited Quotas & Sentinel Elimination in Supabase Mode
 // =========================================================================
-console.log('\nT4: Unlimited Quotas & Sentinel Elimination');
+console.log('\nT4: Unlimited Quotas & Sentinel Elimination in Supabase Mode');
 
 assert(
-  'entitlementService populates explicit unlimitedFlags without numeric sentinels (no 999999)',
-  !entitlementServiceSrc.includes('999999'),
-  'entitlementService must not return numeric sentinel 999999'
+  'getTenantLimit in Supabase mode does NOT return -1 sentinel for unlimited',
+  entitlementServiceSrc.includes('if (getDataSourceMode() === \'supabase\') {\n      // In Supabase mode, limits.maxKey returns integer_value (or 0 if unlimited/absent).\n      // Unlimited truth is represented explicitly by entitlements.unlimitedFlags[limitKey].\n      return entitlements.limits[limitKey];\n    }'),
+  'getTenantLimit must not return -1 sentinel in Supabase mode'
+);
+
+assert(
+  'canAddStaff in Supabase mode checks explicit unlimitedFlags.maxStaff without 999/999999 sentinels',
+  subscriptionServiceSrc.includes('if (entitlements.unlimitedFlags?.maxStaff) return true;') &&
+  subscriptionServiceSrc.includes('return usage.staffCount < entitlements.limits.maxStaff;'),
+  'canAddStaff in Supabase mode must check explicit unlimitedFlags'
+);
+
+assert(
+  'canAddService in Supabase mode checks explicit unlimitedFlags.maxServices without 999/999999 sentinels',
+  subscriptionServiceSrc.includes('if (entitlements.unlimitedFlags?.maxServices) return true;') &&
+  subscriptionServiceSrc.includes('return usage.serviceCount < entitlements.limits.maxServices;'),
+  'canAddService in Supabase mode must check explicit unlimitedFlags'
 );
 
 const pricingPageSrc = readFile('pages/PricingPage.tsx');
 
 assert(
-  'PricingPage checks plan.isServicesUnlimited for unlimited display',
-  pricingPageSrc.includes('plan.isServicesUnlimited'),
-  'PricingPage must check plan.isServicesUnlimited'
+  'PricingPage in Supabase mode relies ONLY on plan.isServicesUnlimited without numeric threshold (> 900)',
+  pricingPageSrc.includes("getDataSourceMode() === 'supabase' ? plan.isServicesUnlimited"),
+  'PricingPage in Supabase mode must rely strictly on plan.isServicesUnlimited'
 );
 
 // =========================================================================
@@ -235,7 +267,7 @@ assert(
 // SUMMARY
 // =========================================================================
 console.log(`\n${'='.repeat(60)}`);
-console.log(`Commercial Source-of-Truth Final Semantic Alignment: ${passed} passed, ${failed} failed`);
+console.log(`Commercial Source-of-Truth Hardened Strict Verification: ${passed} passed, ${failed} failed`);
 console.log('='.repeat(60));
 
 if (failed > 0) {

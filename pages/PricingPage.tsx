@@ -120,7 +120,7 @@ const PricingPage: React.FC = () => {
                 <li className="flex gap-3">
                    <span className="text-accent font-bold mt-0.5">✓</span>
                    <span className="text-xs md:text-sm pb-1 w-full">
-                     {plan.isServicesUnlimited || plan.maxServices > 900 ? t.marketing.pricing.unlimited_services : t.marketing.pricing.max_services.replace('{count}', plan.maxServices.toString())}
+                     {(getDataSourceMode() === 'supabase' ? plan.isServicesUnlimited : (plan.isServicesUnlimited || plan.maxServices > 900)) ? t.marketing.pricing.unlimited_services : t.marketing.pricing.max_services.replace('{count}', plan.maxServices.toString())}
                    </span>
                 </li>
                 <li className="flex gap-3">
