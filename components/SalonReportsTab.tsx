@@ -32,12 +32,13 @@ const SalonReportsTab: React.FC<SalonReportsTabProps> = ({ appointments, service
 
   useEffect(() => {
     async function checkEntitlement() {
-      const basic = await entitlementService.canUseFeatureAsync(planId, 'reports_basic');
-      const adv = await entitlementService.canUseFeatureAsync(planId, 'reports_advanced');
+      if (!tenant) return;
+      const basic = await entitlementService.canTenantUseFeature(tenant.id, 'reports_basic', planId);
+      const adv = await entitlementService.canTenantUseFeature(tenant.id, 'reports_advanced', planId);
       setHasAccess(basic || adv);
     }
     checkEntitlement();
-  }, [planId]);
+  }, [tenant, planId]);
 
   const metrics = useMemo(() => {
     return reportingService.getReportMetrics(appointments, services, dateRange);

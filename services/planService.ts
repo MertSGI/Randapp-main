@@ -19,13 +19,17 @@ function mapCommercialPublicPlanToPricingPlan(plan: CommercialPublicPlan): Prici
     return false;
   };
 
-  const getIntegerEntitlement = (key: string, fallback: number): number => {
+  const getIntegerEntitlement = (key: string): number => {
     const e = entitlements[key];
-    if (!e) return fallback;
+    if (!e) return 0;
     if (e.is_unlimited) return 999999;
     if (e.integer_value !== undefined && e.integer_value !== null) return e.integer_value;
-    return fallback;
+    return 0;
   };
+
+  const aiAllowance = getIntegerEntitlement('ai_allowance');
+  const isDedicated = getBooleanEntitlement('dedicated_support');
+  const isPriority = getBooleanEntitlement('priority_support');
 
   return {
     id: plan.plan_code,
@@ -35,23 +39,23 @@ function mapCommercialPublicPlanToPricingPlan(plan: CommercialPublicPlan): Prici
     annualDiscountPercent: plan.annual_discount_percent ?? 0,
     setupFee: plan.setup_fee ?? 0,
     currency: plan.currency ?? 'TRY',
-    maxStaff: getIntegerEntitlement('max_staff', 1),
-    maxServices: getIntegerEntitlement('max_services', 10),
-    maxMonthlyAppointments: getIntegerEntitlement('max_monthly_appointments', 9999),
-    customDomainEnabled: getBooleanEntitlement('custom_domain_manual'),
-    includedSubdomain: true,
-    customComDomainIncluded: getBooleanEntitlement('custom_com_domain_included'),
+    maxStaff: getIntegerEntitlement('max_staff'),
+    maxServices: getIntegerEntitlement('max_services'),
+    maxMonthlyAppointments: getIntegerEntitlement('max_monthly_appointments'),
+    customDomainEnabled: getBooleanEntitlement('custom_domain_eligible'),
+    includedSubdomain: getBooleanEntitlement('lari_minisite'),
+    customComDomainIncluded: getBooleanEntitlement('custom_domain_included'),
     multiBranchEnabled: getBooleanEntitlement('multi_branch'),
-    maxBranches: getIntegerEntitlement('max_branches', 1),
-    aiRecommendationsEnabled: getBooleanEntitlement('ai_style_assistant_basic'),
-    aiVisualizationEnabled: getBooleanEntitlement('ai_style_assistant_full'),
-    aiMonthlyQuota: getIntegerEntitlement('ai_monthly_quota', 0),
-    campaignsEnabled: getBooleanEntitlement('campaigns_referrals'),
-    advancedReportsEnabled: getBooleanEntitlement('reports_advanced'),
-    whatsappAutomationEnabled: getBooleanEntitlement('whatsapp_automation_readiness'),
-    googleCalendarEnabled: getBooleanEntitlement('google_calendar_enabled') || true,
-    supportLevel: getBooleanEntitlement('priority_support') ? (getBooleanEntitlement('super_admin_review_priority') ? 'dedicated' : 'priority') : 'standard',
-    referralEligible: getBooleanEntitlement('campaigns_referrals'),
+    maxBranches: getIntegerEntitlement('max_branches'),
+    aiRecommendationsEnabled: aiAllowance > 0 || entitlements['ai_allowance']?.is_unlimited === true,
+    aiVisualizationEnabled: false,
+    aiMonthlyQuota: aiAllowance,
+    campaignsEnabled: false,
+    advancedReportsEnabled: getBooleanEntitlement('advanced_reporting'),
+    whatsappAutomationEnabled: false,
+    googleCalendarEnabled: getBooleanEntitlement('calendar_integration'),
+    supportLevel: isDedicated ? 'dedicated' : (isPriority ? 'priority' : 'standard'),
+    referralEligible: false,
     isActive: true,
     isRecommended: plan.plan_code === 'professional',
     trialDays: plan.trial_days ?? TRIAL_CONFIG.trialDayCount

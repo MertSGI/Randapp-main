@@ -107,7 +107,7 @@ export const subscriptionService = {
     // In supabase mode, use the canonical commercial subscription snapshot
     if (getDataSourceMode() === 'supabase') {
       const snapshot = await commercialCatalogService.getMyCommercialSubscriptionSnapshot();
-      if (snapshot?.success && snapshot.assigned_plan_version) {
+      if (snapshot?.success && snapshot.tenant_id === tenantId && snapshot.assigned_plan_version) {
         const pv = snapshot.assigned_plan_version;
         // Use getPlanAsync to get the full PricingPlan shape from the server catalog
         const serverPlan = await planService.getPlanAsync(pv.plan_code);
@@ -200,7 +200,7 @@ export const subscriptionService = {
     const plan = await this.getPlanForTenant(tenantId);
     const usage = await this.getTenantUsage(tenantId);
     if (!plan) return false;
-    const max = await entitlementService.getLimitAsync(plan.id, 'maxStaff');
+    const max = await entitlementService.getTenantLimit(tenantId, 'maxStaff', plan.id);
     if (max === -1 || max === 999999 || max === 999) return true; // unlimited
     return usage.staffCount < max;
   },
@@ -210,7 +210,7 @@ export const subscriptionService = {
     const plan = await this.getPlanForTenant(tenantId);
     const usage = await this.getTenantUsage(tenantId);
     if (!plan) return false;
-    const max = await entitlementService.getLimitAsync(plan.id, 'maxServices');
+    const max = await entitlementService.getTenantLimit(tenantId, 'maxServices', plan.id);
     if (max === -1 || max === 999999 || max === 999) return true;
     return usage.serviceCount < max;
   },
@@ -436,7 +436,7 @@ export const subscriptionService = {
   async activateManualSubscription(tenantId: string, options: Partial<TenantSubscription> & { planId: string }): Promise<TenantSubscription> {
     const sub: TenantSubscription = {
       tenantId,
-      planId: options.planId || 'baslangic',
+      planId: options.planId,
       status: (options.status as any) || 'manual_active',
       currentPeriodStart: new Date().toISOString(),
       currentPeriodEnd: options.currentPeriodEnd || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
@@ -747,7 +747,7 @@ export const subscriptionService = {
     // In supabase mode, use the canonical server-side effective entitlements
     if (getDataSourceMode() === 'supabase') {
       const snapshot = await commercialCatalogService.getMyCommercialSubscriptionSnapshot();
-      if (snapshot?.success) {
+      if (snapshot?.success && snapshot.tenant_id === tenantId) {
         const { entitlementService } = await import('./entitlementService');
         const mappedEntitlements = entitlementService._mapServerEntitlementsToPlanEntitlements(snapshot.effective_entitlements);
         const subStatus = snapshot.subscription?.status || 'none';

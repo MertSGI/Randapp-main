@@ -228,51 +228,100 @@ export const entitlementService = {
   // ===================================================================
 
   /**
-   * Maps server-side CommercialPlanEntitlement records to the legacy PlanEntitlements shape.
+   * Maps server-side CommercialPlanEntitlement records (keyed by canonical H1A feature keys)
+   * to the legacy PlanEntitlements shape.
    */
   _mapServerEntitlementsToPlanEntitlements(serverEntitlements: Record<string, CommercialPlanEntitlement>): PlanEntitlements {
-    const featureKeys: FeatureKey[] = [
-      'website_publication', 'online_booking', 'staff_management', 'service_management',
-      'customer_list', 'customer_memory_lite', 'customer_memory_full',
-      'ai_style_assistant_basic', 'ai_style_assistant_full',
-      'campaigns_referrals', 'reports_basic', 'reports_advanced',
-      'custom_domain_manual', 'multi_branch', 'notification_templates',
-      'whatsapp_automation_readiness', 'priority_support', 'super_admin_review_priority',
-      'advanced_branding', 'billing_self_service'
-    ];
-
-    const features = {} as Record<FeatureKey, boolean>;
-    for (const key of featureKeys) {
+    const getBool = (key: string): boolean => {
       const e = serverEntitlements[key];
-      features[key] = e ? (e.boolean_value === true) : false;
-    }
+      return e ? e.boolean_value === true : false;
+    };
 
-    const limitKeys: Array<{ featureKey: string; limitKey: LimitKey; fallback: number }> = [
-      { featureKey: 'max_staff', limitKey: 'maxStaff', fallback: 1 },
-      { featureKey: 'max_services', limitKey: 'maxServices', fallback: 10 },
-      { featureKey: 'max_branches', limitKey: 'maxBranches', fallback: 1 },
-      { featureKey: 'max_gallery_images', limitKey: 'maxGalleryImages', fallback: 5 }
-    ];
+    const crmLevel = serverEntitlements['crm_level']?.text_value || '';
+    const aiAllowance = serverEntitlements['ai_allowance'];
+    const hasAiAllowance = aiAllowance ? (aiAllowance.is_unlimited || (aiAllowance.integer_value ?? 0) > 0) : false;
 
-    const limits = {} as Record<LimitKey, number>;
-    for (const { featureKey, limitKey, fallback } of limitKeys) {
-      const e = serverEntitlements[featureKey];
-      if (e) {
-        limits[limitKey] = e.is_unlimited ? 999 : (e.integer_value ?? fallback);
-      } else {
-        limits[limitKey] = fallback;
-      }
-    }
+    const features: Record<FeatureKey, boolean> = {
+      website_publication: getBool('lari_minisite'),
+      online_booking: getBool('core_booking'),
+      staff_management: getBool('staff_management'),
+      service_management: getBool('service_management'),
+      customer_list: false, // NO_CANONICAL_EQUIVALENT - fail closed in Supabase mode
+      customer_memory_lite: crmLevel === 'lite' || crmLevel === 'full',
+      customer_memory_full: crmLevel === 'full',
+      ai_style_assistant_basic: hasAiAllowance,
+      ai_style_assistant_full: false, // NO_CANONICAL_EQUIVALENT
+      campaigns_referrals: false, // NO_CANONICAL_EQUIVALENT
+      reports_basic: false, // NO_CANONICAL_EQUIVALENT
+      reports_advanced: getBool('advanced_reporting'),
+      custom_domain_manual: getBool('custom_domain_eligible'),
+      multi_branch: getBool('multi_branch'),
+      notification_templates: false, // NO_CANONICAL_EQUIVALENT
+      whatsapp_automation_readiness: false, // NO_CANONICAL_EQUIVALENT
+      priority_support: getBool('priority_support'),
+      super_admin_review_priority: getBool('dedicated_support'),
+      advanced_branding: getBool('white_label'),
+      billing_self_service: false // NO_CANONICAL_EQUIVALENT
+    };
+
+    const getIntegerLimit = (key: string): number => {
+      const e = serverEntitlements[key];
+      if (!e) return 0; // Fail-closed in Supabase mode (no manufactured defaults)
+      return e.is_unlimited ? 999999 : (e.integer_value ?? 0);
+    };
+
+    const limits: Record<LimitKey, number> = {
+      maxStaff: getIntegerLimit('max_staff'),
+      maxServices: getIntegerLimit('max_services'),
+      maxBranches: getIntegerLimit('max_branches'),
+      maxGalleryImages: 0 // NO_CANONICAL_EQUIVALENT
+    };
 
     return { features, limits };
   },
 
+  /**
+   * Tenant-aware effective entitlement resolution (Supabase mode authority).
+   * Verifies that the returned snapshot belongs to the requested tenantId.
+   */
+  async getTenantEffectiveEntitlements(tenantId: string, localPlanId?: string): Promise<PlanEntitlements> {
+    if (getDataSourceMode() === 'supabase') {
+      const snapshot = await commercialCatalogService.getMyCommercialSubscriptionSnapshot();
+      if (!snapshot || !snapshot.success || snapshot.tenant_id !== tenantId) {
+        console.error(`[entitlementService] getTenantEffectiveEntitlements: Supabase snapshot failed or tenant mismatch (requested: ${tenantId}, got: ${snapshot?.tenant_id}). Fail-closed — returning deny-all.`);
+        const denyFeatures = {} as Record<FeatureKey, boolean>;
+        const allFeatureKeys: FeatureKey[] = [
+          'website_publication', 'online_booking', 'staff_management', 'service_management',
+          'customer_list', 'customer_memory_lite', 'customer_memory_full',
+          'ai_style_assistant_basic', 'ai_style_assistant_full',
+          'campaigns_referrals', 'reports_basic', 'reports_advanced',
+          'custom_domain_manual', 'multi_branch', 'notification_templates',
+          'whatsapp_automation_readiness', 'priority_support', 'super_admin_review_priority',
+          'advanced_branding', 'billing_self_service'
+        ];
+        for (const k of allFeatureKeys) denyFeatures[k] = false;
+        return { features: denyFeatures, limits: { maxStaff: 0, maxServices: 0, maxBranches: 0, maxGalleryImages: 0 } };
+      }
+      return this._mapServerEntitlementsToPlanEntitlements(snapshot.effective_entitlements);
+    }
+    return this.getPlanEntitlements(localPlanId || 'baslangic');
+  },
+
+  async canTenantUseFeature(tenantId: string, featureKey: FeatureKey, localPlanId?: string): Promise<boolean> {
+    const entitlements = await this.getTenantEffectiveEntitlements(tenantId, localPlanId);
+    return entitlements.features[featureKey] === true;
+  },
+
+  async getTenantLimit(tenantId: string, limitKey: LimitKey, localPlanId?: string): Promise<number> {
+    const entitlements = await this.getTenantEffectiveEntitlements(tenantId, localPlanId);
+    return entitlements.limits[limitKey];
+  },
+
+  /** @deprecated Use tenant-aware getTenantEffectiveEntitlements */
   async getPlanEntitlementsAsync(planId: string): Promise<PlanEntitlements> {
     if (getDataSourceMode() === 'supabase') {
       const snapshot = await commercialCatalogService.getMyCommercialSubscriptionSnapshot();
       if (!snapshot || !snapshot.success) {
-        console.error('[entitlementService] getPlanEntitlementsAsync: Supabase subscription snapshot failed. Fail-closed — returning deny-all entitlements.');
-        // Deny-all entitlements: all features false, minimum limits
         const denyFeatures = {} as Record<FeatureKey, boolean>;
         const allFeatureKeys: FeatureKey[] = [
           'website_publication', 'online_booking', 'staff_management', 'service_management',
@@ -291,6 +340,7 @@ export const entitlementService = {
     return this.getPlanEntitlements(planId);
   },
 
+  /** @deprecated Use tenant-aware canTenantUseFeature */
   async canUseFeatureAsync(planId: string, featureKey: FeatureKey): Promise<boolean> {
     if (getDataSourceMode() === 'supabase') {
       const entitlements = await this.getPlanEntitlementsAsync(planId);
@@ -299,6 +349,7 @@ export const entitlementService = {
     return this.canUseFeature(planId, featureKey);
   },
 
+  /** @deprecated Use tenant-aware getTenantLimit */
   async getLimitAsync(planId: string, limitKey: LimitKey): Promise<number> {
     if (getDataSourceMode() === 'supabase') {
       const entitlements = await this.getPlanEntitlementsAsync(planId);

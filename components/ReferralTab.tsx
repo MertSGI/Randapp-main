@@ -58,11 +58,12 @@ const ReferralTab: React.FC = () => {
 
   useEffect(() => {
     async function checkEntitlement() {
-      const allowed = await entitlementService.canUseFeatureAsync(planId, 'campaigns_referrals');
+      if (!tenant) return;
+      const allowed = await entitlementService.canTenantUseFeature(tenant.id, 'campaigns_referrals', planId);
       setHasAccess(allowed);
     }
     checkEntitlement();
-  }, [planId]);
+  }, [tenant, planId]);
 
   const reloadData = async () => {
     if (tenant) {

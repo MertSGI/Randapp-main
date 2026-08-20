@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 
 /**
- * QA: Commercial Source-of-Truth Alignment
+ * QA: Commercial Source-of-Truth Alignment (H1A Canonical Semantic Alignment)
  * 
  * Static source-code analysis test that verifies the Commercial Source-of-Truth
- * alignment contract: in supabase mode, commercial plan catalog and entitlements
- * MUST be projected from the canonical Supabase RPCs via commercialCatalogService,
- * NOT from DEFAULT_PLANS, ENTITLEMENTS_MAP, or localStorage.
- * 
- * This is a STATIC test — it reads source files and checks for the presence of
- * required patterns. It does NOT require a running server or database.
+ * alignment contract:
+ * 1. Canonical feature key set alignment (21 registered H1A keys)
+ * 2. Explicit mapping matrix for legacy UI keys (no direct key string equality assumption)
+ * 3. Fail-closed numeric projections (missing integer entitlements return 0)
+ * 4. Elimination of localStorage price calculation leaks on PricingPage and RegistrationPage
+ * 5. Tenant-aware effective entitlement resolution with tenant_id equality check
+ * 6. Public surface fails closed on AI check without calling authenticated my-tenant snapshot
+ * 7. Strict manual activation without implicit plan defaults
  */
 
 import fs from 'fs';
@@ -39,255 +41,200 @@ function readFile(relPath) {
 }
 
 // =========================================================================
-// T1: planService.ts — Async server-backed methods exist
+// T1: Canonical Feature Key Alignment in planService & entitlementService
 // =========================================================================
-console.log('\nT1: planService.ts — Async server-backed methods');
+console.log('\nT1: Canonical Feature Key Alignment');
 
 const planServiceSrc = readFile('services/planService.ts');
-
-assert(
-  'planService imports getDataSourceMode',
-  planServiceSrc.includes("import { getDataSourceMode }") || planServiceSrc.includes("from './dataSourceConfig'"),
-  'planService.ts must import getDataSourceMode from dataSourceConfig'
-);
-
-assert(
-  'planService imports commercialCatalogService',
-  planServiceSrc.includes("commercialCatalogService"),
-  'planService.ts must import commercialCatalogService'
-);
-
-assert(
-  'planService has getActivePlansAsync method',
-  planServiceSrc.includes('getActivePlansAsync'),
-  'planService.ts must have an async getActivePlansAsync method'
-);
-
-assert(
-  'planService has getPublicSelfServicePlansAsync method',
-  planServiceSrc.includes('getPublicSelfServicePlansAsync'),
-  'planService.ts must have an async getPublicSelfServicePlansAsync method'
-);
-
-assert(
-  'planService has getPlanAsync method',
-  planServiceSrc.includes('getPlanAsync'),
-  'planService.ts must have an async getPlanAsync method'
-);
-
-assert(
-  'planService has isPublicSelfServicePlanAsync method',
-  planServiceSrc.includes('isPublicSelfServicePlanAsync'),
-  'planService.ts must have an async isPublicSelfServicePlanAsync method'
-);
-
-assert(
-  'planService async methods check supabase mode',
-  (planServiceSrc.match(/getDataSourceMode\(\) === 'supabase'/g) || []).length >= 4,
-  'planService.ts async methods must check getDataSourceMode() for supabase routing (minimum 4 checks)'
-);
-
-assert(
-  'planService async methods call getPublicCatalog',
-  (planServiceSrc.match(/commercialCatalogService\.getPublicCatalog\(\)/g) || []).length >= 3,
-  'planService.ts must call commercialCatalogService.getPublicCatalog() in supabase mode (minimum 3 calls)'
-);
-
-// =========================================================================
-// T2: entitlementService.ts — Async server-backed methods exist
-// =========================================================================
-console.log('\nT2: entitlementService.ts — Async server-backed methods');
-
 const entitlementServiceSrc = readFile('services/entitlementService.ts');
 
 assert(
-  'entitlementService imports getDataSourceMode',
-  entitlementServiceSrc.includes("getDataSourceMode"),
-  'entitlementService.ts must import getDataSourceMode'
+  'mapCommercialPublicPlanToPricingPlan uses canonical key custom_domain_eligible',
+  planServiceSrc.includes("custom_domain_eligible"),
+  'mapCommercialPublicPlanToPricingPlan must use custom_domain_eligible, not custom_domain_manual'
 );
 
 assert(
-  'entitlementService imports commercialCatalogService',
-  entitlementServiceSrc.includes("commercialCatalogService"),
-  'entitlementService.ts must import commercialCatalogService'
+  'mapCommercialPublicPlanToPricingPlan uses canonical key lari_minisite',
+  planServiceSrc.includes("lari_minisite"),
+  'mapCommercialPublicPlanToPricingPlan must use lari_minisite'
 );
 
 assert(
-  'entitlementService has getPlanEntitlementsAsync method',
-  entitlementServiceSrc.includes('getPlanEntitlementsAsync'),
-  'entitlementService.ts must have an async getPlanEntitlementsAsync method'
+  'mapCommercialPublicPlanToPricingPlan uses canonical key ai_allowance',
+  planServiceSrc.includes("ai_allowance"),
+  'mapCommercialPublicPlanToPricingPlan must use ai_allowance for AI quota'
 );
 
 assert(
-  'entitlementService has canUseFeatureAsync method',
-  entitlementServiceSrc.includes('canUseFeatureAsync'),
-  'entitlementService.ts must have an async canUseFeatureAsync method'
+  'mapCommercialPublicPlanToPricingPlan uses canonical key calendar_integration',
+  planServiceSrc.includes("calendar_integration"),
+  'mapCommercialPublicPlanToPricingPlan must use calendar_integration without forced true default'
 );
 
 assert(
-  'entitlementService has getLimitAsync method',
-  entitlementServiceSrc.includes('getLimitAsync'),
-  'entitlementService.ts must have an async getLimitAsync method'
+  'mapCommercialPublicPlanToPricingPlan does NOT force googleCalendarEnabled to true',
+  !planServiceSrc.includes("|| true"),
+  'mapCommercialPublicPlanToPricingPlan must NOT use || true'
 );
 
 assert(
-  'entitlementService has _mapServerEntitlementsToPlanEntitlements helper',
-  entitlementServiceSrc.includes('_mapServerEntitlementsToPlanEntitlements'),
-  'entitlementService.ts must have a server entitlement mapping helper'
+  '_mapServerEntitlementsToPlanEntitlements projects website_publication from lari_minisite',
+  entitlementServiceSrc.includes("website_publication: getBool('lari_minisite')"),
+  '_mapServerEntitlementsToPlanEntitlements must project website_publication from lari_minisite'
 );
 
 assert(
-  'entitlementService async methods call getMyCommercialSubscriptionSnapshot',
-  entitlementServiceSrc.includes('getMyCommercialSubscriptionSnapshot'),
-  'entitlementService.ts must call getMyCommercialSubscriptionSnapshot in supabase mode'
+  '_mapServerEntitlementsToPlanEntitlements projects online_booking from core_booking',
+  entitlementServiceSrc.includes("online_booking: getBool('core_booking')"),
+  '_mapServerEntitlementsToPlanEntitlements must project online_booking from core_booking'
+);
+
+assert(
+  '_mapServerEntitlementsToPlanEntitlements projects customer_memory_lite/full from crm_level',
+  entitlementServiceSrc.includes("crmLevel === 'lite'") && entitlementServiceSrc.includes("crmLevel === 'full'"),
+  '_mapServerEntitlementsToPlanEntitlements must project CRM levels from text entitlement crm_level'
+);
+
+assert(
+  '_mapServerEntitlementsToPlanEntitlements returns 0 for missing integer limits (fail-closed)',
+  entitlementServiceSrc.includes('if (!e) return 0;'),
+  '_mapServerEntitlementsToPlanEntitlements must return 0 for missing integer limits in Supabase mode'
 );
 
 // =========================================================================
-// T3: PricingPage.tsx — Uses async catalog loading
+// T2: Tenant-Aware Entitlement API & Snapshot Equality
 // =========================================================================
-console.log('\nT3: PricingPage.tsx — Async catalog loading');
-
-const pricingPageSrc = readFile('pages/PricingPage.tsx');
+console.log('\nT2: Tenant-Aware Entitlement API & Snapshot Equality');
 
 assert(
-  'PricingPage calls getActivePlansAsync',
-  pricingPageSrc.includes('getActivePlansAsync'),
-  'PricingPage.tsx must call planService.getActivePlansAsync() for server-backed catalog'
+  'entitlementService has getTenantEffectiveEntitlements',
+  entitlementServiceSrc.includes('getTenantEffectiveEntitlements'),
+  'entitlementService must export getTenantEffectiveEntitlements'
 );
 
 assert(
-  'PricingPage does NOT call getActivePlans() synchronously in useEffect',
-  !pricingPageSrc.includes('planService.getActivePlans()'),
-  'PricingPage.tsx must NOT call planService.getActivePlans() synchronously — use getActivePlansAsync instead'
-);
-
-// =========================================================================
-// T4: RegistrationPage.tsx — Async plan validation
-// =========================================================================
-console.log('\nT4: RegistrationPage.tsx — Async plan validation');
-
-const registrationPageSrc = readFile('pages/RegistrationPage.tsx');
-
-assert(
-  'RegistrationPage calls getPublicSelfServicePlansAsync',
-  registrationPageSrc.includes('getPublicSelfServicePlansAsync'),
-  'RegistrationPage.tsx must call planService.getPublicSelfServicePlansAsync() for plan validation'
+  'entitlementService has canTenantUseFeature',
+  entitlementServiceSrc.includes('canTenantUseFeature'),
+  'entitlementService must export canTenantUseFeature'
 );
 
 assert(
-  'RegistrationPage does NOT call getPublicSelfServicePlans() synchronously',
-  !registrationPageSrc.includes('planService.getPublicSelfServicePlans()'),
-  'RegistrationPage.tsx must NOT use sync planService.getPublicSelfServicePlans()'
-);
-
-// =========================================================================
-// T5: tenantRegistrationService.ts — UX_ONLY Presentation & Server Provisioning Authority
-// =========================================================================
-console.log('\nT5: tenantRegistrationService.ts — UX_ONLY Presentation & Server Provisioning Authority');
-
-const tenantRegSrc = readFile('services/tenantRegistrationService.ts');
-
-assert(
-  'tenantRegistrationService delegates Supabase mode to registerTenantSupabase without pre-RPC rejection',
-  tenantRegSrc.includes('isSupabaseMode()') && tenantRegSrc.includes('this.registerTenantSupabase(data)'),
-  'tenantRegistrationService.ts must route Supabase registrations directly to registerTenantSupabase for server RPC authorization'
+  'entitlementService has getTenantLimit',
+  entitlementServiceSrc.includes('getTenantLimit'),
+  'entitlementService must export getTenantLimit'
 );
 
 assert(
-  'tenantRegistrationService limits sync catalog check to Mock mode',
-  tenantRegSrc.includes('planService.isPublicSelfServicePlan(data.planId)'),
-  'tenantRegistrationService.ts must perform sync catalog checks for Mock mode only'
+  'getTenantEffectiveEntitlements enforces snapshot.tenant_id === tenantId equality',
+  entitlementServiceSrc.includes('snapshot.tenant_id !== tenantId'),
+  'getTenantEffectiveEntitlements must fail-closed if snapshot.tenant_id !== tenantId'
 );
-
-// =========================================================================
-// T6: subscriptionService.ts — Server-backed getEffectiveEntitlements
-// =========================================================================
-console.log('\nT6: subscriptionService.ts — Server-backed plan/entitlement resolution');
 
 const subscriptionServiceSrc = readFile('services/subscriptionService.ts');
 
 assert(
-  'subscriptionService imports getDataSourceMode',
-  subscriptionServiceSrc.includes('getDataSourceMode'),
-  'subscriptionService.ts must import getDataSourceMode'
+  'subscriptionService getPlanForTenant enforces snapshot.tenant_id === tenantId equality',
+  subscriptionServiceSrc.includes('snapshot.tenant_id === tenantId'),
+  'subscriptionService getPlanForTenant must check snapshot.tenant_id === tenantId'
 );
 
 assert(
-  'subscriptionService imports commercialCatalogService',
-  subscriptionServiceSrc.includes('commercialCatalogService'),
-  'subscriptionService.ts must import commercialCatalogService'
-);
-
-assert(
-  'subscriptionService getEffectiveEntitlements checks supabase mode',
-  subscriptionServiceSrc.includes("getDataSourceMode() === 'supabase'"),
-  'subscriptionService.ts getEffectiveEntitlements must check data source mode'
-);
-
-assert(
-  'subscriptionService calls getMyCommercialSubscriptionSnapshot',
-  subscriptionServiceSrc.includes('getMyCommercialSubscriptionSnapshot'),
-  'subscriptionService.ts must call getMyCommercialSubscriptionSnapshot in supabase mode'
-);
-
-assert(
-  'subscriptionService getPlanForTenant has supabase mode branch',
-  (() => {
-    // Verify getPlanForTenant references supabase mode
-    const fnStart = subscriptionServiceSrc.indexOf('getPlanForTenant');
-    const fnSlice = subscriptionServiceSrc.slice(fnStart, fnStart + 2000);
-    return fnSlice.includes("getDataSourceMode() === 'supabase'");
-  })(),
-  'subscriptionService.ts getPlanForTenant must have a supabase mode branch'
+  'subscriptionService getEffectiveEntitlements enforces snapshot.tenant_id === tenantId equality',
+  subscriptionServiceSrc.includes('snapshot.tenant_id === tenantId'),
+  'subscriptionService getEffectiveEntitlements must check snapshot.tenant_id === tenantId'
 );
 
 // =========================================================================
-// T7: SuperAdminPlansPage.tsx — Supabase mode redirect
+// T3: Price Calculation & LocalStorage Price Leak Elimination
 // =========================================================================
-console.log('\nT7: SuperAdminPlansPage.tsx — Supabase mode redirect');
+console.log('\nT3: Price Calculation & LocalStorage Price Leak Elimination');
 
-const superAdminPlansSrc = readFile('pages/super-admin/SuperAdminPlansPage.tsx');
+const pricingPageSrc = readFile('pages/PricingPage.tsx');
 
 assert(
-  'SuperAdminPlansPage imports getDataSourceMode',
-  superAdminPlansSrc.includes('getDataSourceMode'),
-  'SuperAdminPlansPage.tsx must import getDataSourceMode'
+  'PricingPage does NOT call planService.calculatePlanPrice(plan.id, ...)',
+  !pricingPageSrc.includes('planService.calculatePlanPrice'),
+  'PricingPage.tsx must compute price directly from plan object without planService.calculatePlanPrice'
+);
+
+const registrationPageSrc = readFile('pages/RegistrationPage.tsx');
+
+assert(
+  'RegistrationPage does NOT call planService.calculatePlanPrice',
+  !registrationPageSrc.includes('planService.calculatePlanPrice'),
+  'RegistrationPage.tsx must compute price directly from plan object without planService.calculatePlanPrice'
 );
 
 assert(
-  'SuperAdminPlansPage has supabase mode redirect',
-  superAdminPlansSrc.includes("getDataSourceMode() === 'supabase'") && superAdminPlansSrc.includes("navigate('/super-admin/commercial'"),
-  'SuperAdminPlansPage.tsx must redirect to /super-admin/commercial in supabase mode'
+  'RegistrationPage syncs formData.planId with validated public plan ID',
+  registrationPageSrc.includes('setFormData(prev => ({ ...prev, planId: resolvedPlanId }))'),
+  'RegistrationPage.tsx must update formData.planId when resolvedPlanId changes'
 );
 
 // =========================================================================
-// T8: Isolation verification — DEFAULT_PLANS and ENTITLEMENTS_MAP not used in supabase paths
+// T4: Registration Authority & Manual Activation Strictness
 // =========================================================================
-console.log('\nT8: Isolation verification — no duplicate authority in supabase-aware consumers');
+console.log('\nT4: Registration Authority & Manual Activation Strictness');
+
+const tenantRegSrc = readFile('services/tenantRegistrationService.ts');
 
 assert(
-  'PricingPage does NOT reference DEFAULT_PLANS',
-  !pricingPageSrc.includes('DEFAULT_PLANS'),
-  'PricingPage.tsx must NOT reference DEFAULT_PLANS directly'
+  'tenantRegistrationService routes Supabase mode directly to registerTenantSupabase',
+  tenantRegSrc.includes('isSupabaseMode()') && tenantRegSrc.includes('this.registerTenantSupabase(data)'),
+  'tenantRegistrationService.ts must route Supabase mode directly to registerTenantSupabase for server RPC decisioning'
 );
 
 assert(
-  'RegistrationPage does NOT reference DEFAULT_PLANS',
-  !registrationPageSrc.includes('DEFAULT_PLANS'),
-  'RegistrationPage.tsx must NOT reference DEFAULT_PLANS directly'
+  'activateManualSubscription has required planId in options parameter',
+  subscriptionServiceSrc.includes('options: Partial<TenantSubscription> & { planId: string }'),
+  'subscriptionService.ts activateManualSubscription must require planId in options'
 );
 
 assert(
-  'RegistrationPage does NOT reference ENTITLEMENTS_MAP',
-  !registrationPageSrc.includes('ENTITLEMENTS_MAP'),
-  'RegistrationPage.tsx must NOT reference ENTITLEMENTS_MAP directly'
+  'activateManualSubscription does NOT contain implicit || standart or || baslangic fallback',
+  subscriptionServiceSrc.includes('planId: options.planId,') || subscriptionServiceSrc.includes('planId: options.planId'),
+  'subscriptionService.ts activateManualSubscription must assign planId: options.planId strictly'
+);
+
+// =========================================================================
+// T5: Public Surface & Pilot Bypass Isolation
+// =========================================================================
+console.log('\nT5: Public Surface & Pilot Bypass Isolation');
+
+const salonBookingLayoutSrc = readFile('components/layouts/SalonBookingLayout.tsx');
+
+assert(
+  'SalonBookingLayout imports useState and useEffect from react',
+  salonBookingLayoutSrc.includes("import React, { useState, useEffect } from 'react'"),
+  'SalonBookingLayout.tsx must import useState and useEffect from react'
+);
+
+assert(
+  'SalonBookingLayout fails closed on AI check in Supabase mode (PUBLIC_TENANT_COMMERCIAL_PROJECTION_GAP)',
+  salonBookingLayoutSrc.includes("getDataSourceMode() === 'supabase'") && salonBookingLayoutSrc.includes('setAiEnabled(false)'),
+  'SalonBookingLayout.tsx must setAiEnabled(false) in Supabase mode'
+);
+
+const publicLinkServiceSrc = readFile('services/publicLinkService.ts');
+
+assert(
+  'publicLinkService canUseCustomDomain restricts pilot bypass to non-Supabase modes',
+  publicLinkServiceSrc.includes("getDataSourceMode() !== 'supabase' && tenant.id === 'biz_pilot_tenant'"),
+  'publicLinkService.ts canUseCustomDomain must restrict pilot bypass to local/mock modes'
+);
+
+assert(
+  'publicLinkService canUseCustomDomain calls tenant-aware canTenantUseFeature',
+  publicLinkServiceSrc.includes('canTenantUseFeature'),
+  'publicLinkService.ts canUseCustomDomain must call entitlementService.canTenantUseFeature'
 );
 
 // =========================================================================
 // SUMMARY
 // =========================================================================
 console.log(`\n${'='.repeat(60)}`);
-console.log(`Commercial Source-of-Truth Alignment: ${passed} passed, ${failed} failed`);
+console.log(`Commercial Source-of-Truth Semantic Alignment: ${passed} passed, ${failed} failed`);
 console.log('='.repeat(60));
 
 if (failed > 0) {

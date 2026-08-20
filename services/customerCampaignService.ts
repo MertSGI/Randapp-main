@@ -31,7 +31,7 @@ function getTenantPlan(tenantId: string): string {
 
 async function verifyEntitlement(tenantId: string): Promise<void> {
   const plan = getTenantPlan(tenantId);
-  const hasAccess = await entitlementService.canUseFeatureAsync(plan, 'campaigns_referrals');
+  const hasAccess = await entitlementService.canTenantUseFeature(tenantId, 'campaigns_referrals', plan);
   if (!hasAccess) {
     throw new Error('Bu özellik mevcut paketinizde yer almıyor. Müşteri referans kampanyalarını kullanmak için Profesyonel pakete geçebilirsiniz.');
   }

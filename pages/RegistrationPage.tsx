@@ -33,6 +33,7 @@ export default function RegistrationPage() {
         const resolvedPlan = publicPlans.find(p => p.id === resolvedPlanId) || publicPlans[0] || null;
         setValidatedPlanId(resolvedPlanId);
         setPlan(resolvedPlan);
+        setFormData(prev => ({ ...prev, planId: resolvedPlanId }));
       } catch (err) {
         console.error('[RegistrationPage] Failed to load plans:', err);
         if (!cancelled) {
@@ -285,7 +286,7 @@ export default function RegistrationPage() {
               </div>
               <h3 className="text-2xl font-bold mb-2">{plan.name}</h3>
               <div className="flex items-end gap-1 mb-6 border-b border-slate-800 pb-6">
-                  <span className="text-4xl font-extrabold tracking-tight">₺{plan[billingPeriod === 'annual' ? 'yearlyPrice' : 'monthlyPrice'] || planService.calculatePlanPrice(plan.id, formData.billingPeriod)}</span>
+                  <span className="text-4xl font-extrabold tracking-tight">₺{plan ? (billingPeriod === 'annual' ? plan.annualPrice / 12 : plan.monthlyPrice) : 0}</span>
                   <span className="text-lg text-slate-400 font-medium mb-1">/{language === 'tr' ? 'ay' : 'mo'}</span>
               </div>
               

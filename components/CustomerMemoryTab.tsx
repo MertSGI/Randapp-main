@@ -46,13 +46,14 @@ const CustomerMemoryTab: React.FC<CustomerMemoryTabProps> = ({ appointments, sta
 
   useEffect(() => {
     async function checkEntitlements() {
-      const lite = await entitlementService.canUseFeatureAsync(planId, 'customer_memory_lite');
-      const full = await entitlementService.canUseFeatureAsync(planId, 'customer_memory_full');
+      if (!tenant) return;
+      const lite = await entitlementService.canTenantUseFeature(tenant.id, 'customer_memory_lite', planId);
+      const full = await entitlementService.canTenantUseFeature(tenant.id, 'customer_memory_full', planId);
       setHasAccess(lite || full);
       setHasFullAccess(full);
     }
     checkEntitlements();
-  }, [planId]);
+  }, [tenant, planId]);
 
   useEffect(() => {
     if (!hasAccess) return;

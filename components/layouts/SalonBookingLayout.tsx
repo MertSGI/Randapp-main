@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useTenant } from '../../contexts/TenantContext';
-import { planService } from '../../services/planService';
+import { getDataSourceMode } from '../../services/dataSourceConfig';
 import { entitlementService } from '../../services/entitlementService';
 
 const ThemeToggle = () => {
@@ -44,6 +44,12 @@ const SalonBookingLayout: React.FC = () => {
 
   useEffect(() => {
     async function checkAi() {
+      if (getDataSourceMode() === 'supabase') {
+        // PUBLIC_TENANT_COMMERCIAL_PROJECTION_GAP: Unauthenticated public storefront surface
+        // cannot call get_my_commercial_subscription_snapshot(). Fail closed for public AI navigation affordance.
+        setAiEnabled(false);
+        return;
+      }
       const basic = await entitlementService.canUseFeatureAsync(planId, 'ai_style_assistant_basic');
       const full = await entitlementService.canUseFeatureAsync(planId, 'ai_style_assistant_full');
       setAiEnabled(basic || full);

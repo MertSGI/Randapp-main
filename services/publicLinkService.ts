@@ -1,5 +1,6 @@
 import { tenantService } from './tenantService';
 import { entitlementService } from './entitlementService';
+import { getDataSourceMode } from './dataSourceConfig';
 import { Tenant } from '../types';
 
 export const RESERVED_SLUGS = [
@@ -91,8 +92,8 @@ export const publicLinkService = {
   },
 
   async canUseCustomDomain(tenant: Tenant): Promise<boolean> {
-    if (tenant.id === 'biz_pilot_tenant') return true;
-    return entitlementService.canUseFeatureAsync(tenant.planId || 'free', 'custom_domain_manual');
+    if (getDataSourceMode() !== 'supabase' && tenant.id === 'biz_pilot_tenant') return true;
+    return entitlementService.canTenantUseFeature(tenant.id, 'custom_domain_manual', tenant.planId || 'baslangic');
   },
 
   getCustomDomainStatus(tenant: Tenant): 'locked' | 'not_requested' | 'under_review' | 'active' | 'rejected' {

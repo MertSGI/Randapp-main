@@ -26,8 +26,8 @@ const BranchManagementSection: React.FC<BranchManagementSectionProps> = ({ tenan
   useEffect(() => {
     loadBranches();
     async function loadEntitlements() {
-      const allowed = await entitlementService.canUseFeatureAsync(planId, 'multi_branch');
-      const limit = await entitlementService.getLimitAsync(planId, 'maxBranches');
+      const allowed = await entitlementService.canTenantUseFeature(tenantId, 'multi_branch', planId);
+      const limit = await entitlementService.getTenantLimit(tenantId, 'maxBranches', planId);
       setIsMultiBranchAllowed(allowed);
       setMaxBranches(limit);
     }
