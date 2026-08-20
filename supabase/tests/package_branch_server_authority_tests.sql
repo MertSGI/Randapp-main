@@ -39,6 +39,8 @@ BEGIN
     DELETE FROM public.service_branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
     DELETE FROM public.staff_branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
     DELETE FROM public.branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
+    DELETE FROM public.subscriptions WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
+    DELETE FROM public.tenant_onboarding_progress WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
     DELETE FROM public.users_profile WHERE id IN (v_owner1_id, v_owner2_id, v_staff1_id);
     DELETE FROM auth.users WHERE id IN (v_owner1_id, v_owner2_id, v_staff1_id);
     DELETE FROM public.tenants WHERE id IN (v_tenant1_id, v_tenant2_id);
