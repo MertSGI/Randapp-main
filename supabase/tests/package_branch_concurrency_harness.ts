@@ -355,7 +355,11 @@ export async function runPackageBranchConcurrencyHarness() {
     // 1. Owner RLS Boundary
     await client1.query('BEGIN;');
     await client1.query("SET LOCAL ROLE authenticated;");
-    await client1.query(`SELECT set_config('request.jwt.claim.sub', '${ownerRLSA_id}', true);`);
+    await client1.query(`
+      SELECT set_config('request.jwt.claims', '{"sub":"${ownerRLSA_id}","role":"authenticated"}', true);
+      SELECT set_config('request.jwt.claim.sub', '${ownerRLSA_id}', true);
+      SELECT set_config('request.jwt.claim.role', 'authenticated', true);
+    `);
 
     // Pre-create 1 branch for Tenant RLS A
     await client1.query("SAVEPOINT pre_create;");
@@ -410,7 +414,11 @@ export async function runPackageBranchConcurrencyHarness() {
     // 2. Super Admin RLS Boundary
     await client1.query('BEGIN;');
     await client1.query("SET LOCAL ROLE authenticated;");
-    await client1.query(`SELECT set_config('request.jwt.claim.sub', '${admin_id}', true);`);
+    await client1.query(`
+      SELECT set_config('request.jwt.claims', '{"sub":"${admin_id}","role":"authenticated"}', true);
+      SELECT set_config('request.jwt.claim.sub', '${admin_id}', true);
+      SELECT set_config('request.jwt.claim.role', 'authenticated', true);
+    `);
 
     const adminSelect = await client1.query(`SELECT count(*) FROM public.branches;`);
     assert(parseInt(adminSelect.rows[0].count, 10) >= 1, 'Super Admin CAN SELECT all branches under RLS');
@@ -432,7 +440,11 @@ export async function runPackageBranchConcurrencyHarness() {
     // 3. Staff RLS Boundary
     await client1.query('BEGIN;');
     await client1.query("SET LOCAL ROLE authenticated;");
-    await client1.query(`SELECT set_config('request.jwt.claim.sub', '${staffRLSA_id}', true);`);
+    await client1.query(`
+      SELECT set_config('request.jwt.claims', '{"sub":"${staffRLSA_id}","role":"authenticated"}', true);
+      SELECT set_config('request.jwt.claim.sub', '${staffRLSA_id}', true);
+      SELECT set_config('request.jwt.claim.role', 'authenticated', true);
+    `);
 
     const staffSelect = await client1.query(`SELECT count(*) FROM public.branches WHERE tenant_id = '${tenantRLSA_id}';`);
     assert(parseInt(staffSelect.rows[0].count, 10) >= 1, 'Staff A CAN SELECT own tenant branches under RLS');
