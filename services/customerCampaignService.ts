@@ -29,11 +29,11 @@ function getTenantPlan(tenantId: string): string {
   return 'baslangic';
 }
 
-function verifyEntitlement(tenantId: string): void {
+async function verifyEntitlement(tenantId: string): Promise<void> {
   const plan = getTenantPlan(tenantId);
-  const hasAccess = entitlementService.canUseFeature(plan, 'campaigns_referrals');
+  const hasAccess = await entitlementService.canUseFeatureAsync(plan, 'campaigns_referrals');
   if (!hasAccess) {
-    throw new Error('Bu özellik mevcut paketinizde yer almıyor. Mü�xteri referans kampanyalarını kullanmak için Profesyonel pakete geçebilirsiniz.');
+    throw new Error('Bu özellik mevcut paketinizde yer almıyor. Müşteri referans kampanyalarını kullanmak için Profesyonel pakete geçebilirsiniz.');
   }
 }
 
@@ -48,7 +48,7 @@ export const customerCampaignService = {
   },
 
   async createCampaign(tenantId: string, input: Partial<BusinessCustomerCampaign>): Promise<BusinessCustomerCampaign> {
-    verifyEntitlement(tenantId);
+    await verifyEntitlement(tenantId);
     const repo = getCampaignRepository();
     
     const newCampaign: BusinessCustomerCampaign = {

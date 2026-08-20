@@ -40,7 +40,16 @@ const SalonBookingLayout: React.FC = () => {
   const logoInitial = businessName.charAt(0).toUpperCase();
 
   const planId = tenant?.planId || 'baslangic';
-  const aiEnabled = entitlementService.canUseFeature(planId, 'ai_style_assistant_basic') || entitlementService.canUseFeature(planId, 'ai_style_assistant_full');
+  const [aiEnabled, setAiEnabled] = useState(false);
+
+  useEffect(() => {
+    async function checkAi() {
+      const basic = await entitlementService.canUseFeatureAsync(planId, 'ai_style_assistant_basic');
+      const full = await entitlementService.canUseFeatureAsync(planId, 'ai_style_assistant_full');
+      setAiEnabled(basic || full);
+    }
+    checkAi();
+  }, [planId]);
 
 
   const isBookRoute = location.pathname === '/book' || 

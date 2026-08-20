@@ -41,7 +41,18 @@ const CustomerMemoryTab: React.FC<CustomerMemoryTabProps> = ({ appointments, sta
   });
 
   const planId = tenant?.planId || 'baslangic';
-  const hasAccess = entitlementService.canUseFeature(planId, 'customer_memory_lite') || entitlementService.canUseFeature(planId, 'customer_memory_full');
+  const [hasAccess, setHasAccess] = useState(false);
+  const [hasFullAccess, setHasFullAccess] = useState(false);
+
+  useEffect(() => {
+    async function checkEntitlements() {
+      const lite = await entitlementService.canUseFeatureAsync(planId, 'customer_memory_lite');
+      const full = await entitlementService.canUseFeatureAsync(planId, 'customer_memory_full');
+      setHasAccess(lite || full);
+      setHasFullAccess(full);
+    }
+    checkEntitlements();
+  }, [planId]);
 
   useEffect(() => {
     if (!hasAccess) return;
@@ -142,7 +153,7 @@ const CustomerMemoryTab: React.FC<CustomerMemoryTabProps> = ({ appointments, sta
     const file = e.target.files?.[0];
     if (!file || !tenant || !selectedCustomer) return;
     
-    if (!entitlementService.canUseFeature(planId, 'customer_memory_full')) {
+    if (!hasFullAccess) {
        alert(language === 'tr' ? 'Fotoğraf yükleme özelliği Full CRM paketlerinde mevcuttur.' : 'Photo upload is available in Full CRM plans.');
        return;
     }

@@ -90,9 +90,9 @@ export const publicLinkService = {
     return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}`;
   },
 
-  canUseCustomDomain(tenant: Tenant): boolean {
+  async canUseCustomDomain(tenant: Tenant): Promise<boolean> {
     if (tenant.id === 'biz_pilot_tenant') return true;
-    return entitlementService.canUseFeature(tenant.planId || 'free', 'custom_domain_manual');
+    return entitlementService.canUseFeatureAsync(tenant.planId || 'free', 'custom_domain_manual');
   },
 
   getCustomDomainStatus(tenant: Tenant): 'locked' | 'not_requested' | 'under_review' | 'active' | 'rejected' {

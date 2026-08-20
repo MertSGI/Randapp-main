@@ -28,7 +28,16 @@ const SalonReportsTab: React.FC<SalonReportsTabProps> = ({ appointments, service
   });
 
   const planId = tenant?.planId || 'baslangic';
-  const hasAccess = entitlementService.canUseFeature(planId, 'reports_basic') || entitlementService.canUseFeature(planId, 'reports_advanced');
+  const [hasAccess, setHasAccess] = useState(false);
+
+  useEffect(() => {
+    async function checkEntitlement() {
+      const basic = await entitlementService.canUseFeatureAsync(planId, 'reports_basic');
+      const adv = await entitlementService.canUseFeatureAsync(planId, 'reports_advanced');
+      setHasAccess(basic || adv);
+    }
+    checkEntitlement();
+  }, [planId]);
 
   const metrics = useMemo(() => {
     return reportingService.getReportMetrics(appointments, services, dateRange);

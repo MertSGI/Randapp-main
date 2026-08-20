@@ -12,8 +12,8 @@ interface BranchManagementSectionProps {
 const BranchManagementSection: React.FC<BranchManagementSectionProps> = ({ tenantId, planId = 'baslangic' }) => {
   const { alert } = useDialog();
   const [branches, setBranches] = useState<BusinessBranch[]>([]);
-  const isMultiBranchAllowed = entitlementService.canUseFeature(planId, 'multi_branch');
-  const maxBranches = entitlementService.getLimit(planId, 'maxBranches');
+  const [isMultiBranchAllowed, setIsMultiBranchAllowed] = useState(false);
+  const [maxBranches, setMaxBranches] = useState(1);
 
   const [isAdding, setIsAdding] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
@@ -25,7 +25,14 @@ const BranchManagementSection: React.FC<BranchManagementSectionProps> = ({ tenan
 
   useEffect(() => {
     loadBranches();
-  }, [tenantId]);
+    async function loadEntitlements() {
+      const allowed = await entitlementService.canUseFeatureAsync(planId, 'multi_branch');
+      const limit = await entitlementService.getLimitAsync(planId, 'maxBranches');
+      setIsMultiBranchAllowed(allowed);
+      setMaxBranches(limit);
+    }
+    loadEntitlements();
+  }, [tenantId, planId]);
 
   const handleAddBranch = async () => {
     if (!newBranchName.trim()) return;

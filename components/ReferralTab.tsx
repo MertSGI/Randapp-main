@@ -54,7 +54,15 @@ const ReferralTab: React.FC = () => {
   const [referredPhone, setReferredPhone] = useState('');
 
   const planId = tenant?.planId || 'baslangic';
-  const hasAccess = entitlementService.canUseFeature(planId, 'campaigns_referrals');
+  const [hasAccess, setHasAccess] = useState(false);
+
+  useEffect(() => {
+    async function checkEntitlement() {
+      const allowed = await entitlementService.canUseFeatureAsync(planId, 'campaigns_referrals');
+      setHasAccess(allowed);
+    }
+    checkEntitlement();
+  }, [planId]);
 
   const reloadData = async () => {
     if (tenant) {

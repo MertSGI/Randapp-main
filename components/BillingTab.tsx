@@ -76,7 +76,8 @@ const BillingTab: React.FC = () => {
     const currentUsage = await subscriptionService.getTenantUsage(tenant.id);
     setUsage(currentUsage);
     
-    setPlans(planService.getActivePlans());
+    const activePlans = await planService.getActivePlansAsync();
+    setPlans(activePlans);
     
     setLoading(false);
   };

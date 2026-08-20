@@ -76,20 +76,21 @@ function generateSecureIdempotencyKey(): string | null {
 
 export const tenantRegistrationService = {
   async registerTenant(data: RegistrationData): Promise<RegistrationResult> {
-    // Public plan contract validation via server-backed eligibility check
-    const isEligible = await planService.isPublicSelfServicePlanAsync(data.planId);
-    if (!isEligible) {
-      return {
-        success: false,
-        status: 'PROVISIONING_FAILED_TERMINAL',
-        reasonCode: 'PLAN_NOT_ASSIGNABLE',
-        error: 'Seçilen paket self-servis kayıtlara açık değil.'
-      };
-    }
-
     if (isSupabaseMode()) {
+      // In Supabase mode, server provisioning RPC is the sole AUTHORIZATION authority.
+      // Frontend catalog checks are presentation/UX-only and must not reject terminal submission prior to RPC invocation.
       return this.registerTenantSupabase(data);
     } else {
+      // Mock mode UX/validation guard
+      const isEligible = planService.isPublicSelfServicePlan(data.planId);
+      if (!isEligible) {
+        return {
+          success: false,
+          status: 'PROVISIONING_FAILED_TERMINAL',
+          reasonCode: 'PLAN_NOT_ASSIGNABLE',
+          error: 'Seçilen paket self-servis kayıtlara açık değil.'
+        };
+      }
       return this.registerTenantMock(data);
     }
   },

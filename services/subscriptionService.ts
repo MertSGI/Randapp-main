@@ -200,8 +200,8 @@ export const subscriptionService = {
     const plan = await this.getPlanForTenant(tenantId);
     const usage = await this.getTenantUsage(tenantId);
     if (!plan) return false;
-    const max = entitlementService.getLimit(plan.id, 'maxStaff');
-    if (max === -1) return true; // unlimited
+    const max = await entitlementService.getLimitAsync(plan.id, 'maxStaff');
+    if (max === -1 || max === 999999 || max === 999) return true; // unlimited
     return usage.staffCount < max;
   },
 
@@ -210,8 +210,8 @@ export const subscriptionService = {
     const plan = await this.getPlanForTenant(tenantId);
     const usage = await this.getTenantUsage(tenantId);
     if (!plan) return false;
-    const max = entitlementService.getLimit(plan.id, 'maxServices');
-    if (max === -1) return true;
+    const max = await entitlementService.getLimitAsync(plan.id, 'maxServices');
+    if (max === -1 || max === 999999 || max === 999) return true;
     return usage.serviceCount < max;
   },
 
@@ -433,10 +433,10 @@ export const subscriptionService = {
     return sub;
   },
 
-  async activateManualSubscription(tenantId: string, options: Partial<TenantSubscription>): Promise<TenantSubscription> {
+  async activateManualSubscription(tenantId: string, options: Partial<TenantSubscription> & { planId: string }): Promise<TenantSubscription> {
     const sub: TenantSubscription = {
       tenantId,
-      planId: options.planId || 'standart',
+      planId: options.planId || 'baslangic',
       status: (options.status as any) || 'manual_active',
       currentPeriodStart: new Date().toISOString(),
       currentPeriodEnd: options.currentPeriodEnd || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
