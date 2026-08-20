@@ -4,6 +4,8 @@
 
 import pg from 'pg';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 const { Client } = pg;
 
 const DB_URL = process.env.DB_URL || 'postgresql://postgres:postgres@127.0.0.1:54322/postgres';
@@ -129,6 +131,14 @@ export async function runPackageBranchConcurrencyHarness() {
         ('${staffRLSA_id}', '${tenantRLSA_id}', 'Staff RLS A', 'staff', true),
         ('${admin_id}', NULL, 'Super Admin', 'super_admin', true);
     `);
+
+    // 0b. Execute Package Branch Server Authority Functional SQL Suite (Assertions A-L)
+    const sqlPath = path.join(process.cwd(), 'supabase/tests/package_branch_server_authority_tests.sql');
+    if (fs.existsSync(sqlPath)) {
+      const sqlContent = fs.readFileSync(sqlPath, 'utf8');
+      await client1.query(sqlContent);
+      console.log('✅ PASSED: Package Branch Server-Authority Functional SQL Suite (Assertions A-L)');
+    }
 
     // Helper to catch DB SQLSTATE errors
     async function execRpc(client: any, userId: string, sql: string) {
