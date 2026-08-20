@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/p2a-commercial-core-foundation
+      - ci/package-branch-authority-exact-sha-20260820
   pull_request:
     branches:
       - feature/p2a-commercial-core-foundation
@@ -16,6 +17,18 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Verify Exact Product SHA Binding
+        run: |
+          REQUESTED_PRODUCT_SHA="2da11ca812391f7144e4e3c3acfc60c33bc4db45"
+          ACTUAL_TEST_WORKTREE_SHA=$(git rev-parse HEAD)
+          echo "REQUESTED_PRODUCT_SHA = ${REQUESTED_PRODUCT_SHA}"
+          echo "ACTUAL_TEST_WORKTREE_SHA = ${ACTUAL_TEST_WORKTREE_SHA}"
+          if [ "${REQUESTED_PRODUCT_SHA}" != "${ACTUAL_TEST_WORKTREE_SHA}" ]; then
+            echo "❌ SHA Mismatch! Requested product SHA does not match actual test worktree HEAD."
+            exit 1
+          fi
+          echo "✅ Product SHA Binding Verified."
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -142,8 +155,8 @@ jobs:
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== VERIFYING P2A SCHEMA POST-PROOF ==="
-          psql "$DB_URL" -c "SELECT proname FROM pg_proc WHERE proname IN ('provision_tenant_for_authenticated_owner', 'approve_and_publish_tenant');"
-          psql "$DB_URL" -c "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('tenant_provisioning_idempotency', 'tenants', 'subscriptions', 'tenant_onboarding_progress');"
+          psql "$DB_URL" -c "SELECT proname FROM pg_proc WHERE proname IN ('provision_tenant_for_authenticated_owner', 'approve_and_publish_tenant', 'create_tenant_branch');"
+          psql "$DB_URL" -c "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('tenant_provisioning_idempotency', 'tenants', 'subscriptions', 'tenant_onboarding_progress', 'branches');"
 
       - name: Install DB Test Dependencies
         run: |
@@ -170,26 +183,29 @@ jobs:
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx tsx supabase/tests/p2a_concurrency_harness.ts
 
-      - name: Run Disposable DB Owner Onboarding Integration Suite
-        env:
-          PGPASSWORD: postgres
+      - name: Run Sequential Package Branch Server Authority Functional SQL Suite
         run: |
-          set -o pipefail
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          echo "=== RUNNING DISPOSABLE DB OWNER ONBOARDING INTEGRATION SUITE ==="
-          if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_onboarding_integration_tests.sql 2>&1 | tee /tmp/p2a-onboarding-suite.log; then
-            echo "=== ONBOARDING DB TEST SUITE FAILURE ===" >> "$GITHUB_STEP_SUMMARY"
-            tail -n 80 /tmp/p2a-onboarding-suite.log >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
+          echo "=== RUNNING PACKAGE BRANCH FUNCTIONAL SQL SUITE ==="
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/package_branch_server_authority_tests.sql
 
-      - name: Run Frontend Owner Onboarding & Registration Boundary Matrix
+      - name: Run Package Branch Real Multi-Session Concurrency & RLS Harness
         run: |
-          echo "=== RUNNING FRONTEND OWNER ONBOARDING & REGISTRATION BOUNDARY MATRIX ==="
-          npx tsx scripts/test-p2a-owner-onboarding-boundary.test.mjs
-          npx tsx scripts/test-p2a-supabase-registration-boundary.test.mjs
-          npx tsx scripts/test-p2a-mock-registration-regression.test.mjs
-          npx tsx scripts/test-p2a-static-security-scan.test.mjs
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx tsx supabase/tests/package_branch_concurrency_harness.ts
+
+      - name: Run Package Branch Static QA
+        run: |
+          node scripts/test-package-branch-server-authority.mjs
+
+      - name: Run Branch Booking QA
+        run: |
+          node scripts/verify-branch-aware-booking.mjs
+
+      - name: Run Frontend Secrets & Data Mode Regression Checks
+        run: |
+          npm run check:secrets
+          npx tsx scripts/test-data-mode-regression.mjs
+          npx tsx node_modules/typescript/bin/tsc --noEmit
 
       - name: Run Frontend Production Build Verification
         run: |
