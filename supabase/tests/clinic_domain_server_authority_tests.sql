@@ -70,12 +70,18 @@ BEGIN
 
     -- Give test tenants active subscriptions and staff entitlement overrides for disposable testing
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
-    SELECT t.id, p.id, pv.id, 'manual_active', 'manual'
-    FROM (VALUES (v_tenant1_id), (v_tenant2_id)) AS t(id)
-    CROSS JOIN public.plans p
+    SELECT v_tenant1_id, p.id, pv.id, 'manual_active', 'manual'
+    FROM public.plans p
     JOIN public.plan_versions pv ON pv.plan_id = p.id
     WHERE p.code = 'kurumsal' AND pv.lifecycle_status = 'published'
-    LIMIT 2;
+    ORDER BY pv.created_at DESC LIMIT 1;
+
+    INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
+    SELECT v_tenant2_id, p.id, pv.id, 'manual_active', 'manual'
+    FROM public.plans p
+    JOIN public.plan_versions pv ON pv.plan_id = p.id
+    WHERE p.code = 'kurumsal' AND pv.lifecycle_status = 'published'
+    ORDER BY pv.created_at DESC LIMIT 1;
 
     INSERT INTO public.tenant_entitlement_overrides (tenant_id, feature_key, value_type, is_unlimited, integer_value, reason)
     VALUES (v_tenant1_id, 'max_staff', 'integer', true, NULL, 'Clinic domain authority disposable test fixture'),
