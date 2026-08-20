@@ -188,9 +188,14 @@ jobs:
 
       - name: Run Sequential Package Branch Server Authority Functional SQL Suite
         run: |
+          set -o pipefail
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== RUNNING PACKAGE BRANCH FUNCTIONAL SQL SUITE ==="
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/package_branch_server_authority_tests.sql
+          if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/package_branch_server_authority_tests.sql 2>&1 | tee /tmp/package-branch-suite.log; then
+            echo "=== PACKAGE BRANCH TEST SUITE FAILURE ===" >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/package-branch-suite.log >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
       - name: Run Package Branch Real Multi-Session Concurrency & RLS Harness
         run: |
