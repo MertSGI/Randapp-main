@@ -19,8 +19,8 @@ export async function runClinicOperationalConcurrencyHarness() {
   const doc1_id  = 'a3333333-3333-4333-8333-333333333333';
   const doc2_id  = 'a4444444-4444-4444-8444-444444444444';
 
-  const staff_doc1_id = 's1111111-1111-4111-8111-111111111111';
-  const staff_doc2_id = 's2222222-2222-4222-8222-222222222222';
+  const staff_doc1_id = '31111111-1111-4111-8111-111111111111';
+  const staff_doc2_id = '32222222-2222-4222-8222-222222222222';
 
   const branch_id = 'b1111111-1111-4111-8111-111111111111';
   const cust_id   = 'c1111111-1111-4111-8111-111111111111';

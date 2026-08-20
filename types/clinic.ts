@@ -1,5 +1,6 @@
 export type PractitionerType = 'physician' | 'dentist' | 'nurse' | 'physiotherapist' | 'psychologist' | 'dietitian' | 'other';
-export type EncounterStatus = 'open' | 'completed' | 'cancelled';
+export type EncounterStatus = 'open' | 'completed' | 'voided';
+export type NoteStatus = 'draft' | 'final';
 
 export type ClinicServiceErrorCode =
   | 'UNAUTHENTICATED'
@@ -10,6 +11,7 @@ export type ClinicServiceErrorCode =
   | 'TENANT_MISMATCH'
   | 'APPOINTMENT_NOT_CONFIRMED'
   | 'INVARIANT_VIOLATION'
+  | 'UNAVAILABLE'
   | 'UNKNOWN';
 
 export interface ClinicStaffContext {
@@ -25,7 +27,6 @@ export interface ClinicStaffContext {
 }
 
 export interface ClinicStaffProfile {
-  id: string;
   tenant_id: string;
   staff_id: string;
   practitioner_type: PractitionerType | null;
@@ -38,8 +39,16 @@ export interface ClinicStaffProfile {
   updated_at: string;
 }
 
+export interface ClinicStaffProfileWriteResult {
+  staff_id: string;
+  tenant_id: string;
+  can_manage_patient_profiles: boolean;
+  can_view_clinical_records: boolean;
+  can_write_clinical_notes: boolean;
+}
+
 export interface ClinicPatientProfile {
-  id: string;
+  id?: string;
   tenant_id: string;
   customer_id: string;
   date_of_birth: string | null;
@@ -50,47 +59,62 @@ export interface ClinicPatientProfile {
   blood_type: string | null;
   allergies: string | null;
   chronic_conditions: string | null;
-  created_by: string | null;
-  updated_by: string | null;
+  created_by?: string | null;
+  updated_by?: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export interface ClinicEncounter {
   id: string;
-  tenant_id: string;
   appointment_id: string;
-  customer_id: string;
-  practitioner_staff_id: string;
   branch_id: string | null;
+  practitioner_staff_id: string;
   status: EncounterStatus;
   reason_for_visit: string | null;
   started_at: string;
   completed_at: string | null;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
+  notes?: ClinicEncounterNote[];
+}
+
+export interface ClinicEncounterStartResult {
+  encounter_id: string;
+  appointment_id?: string;
+  status: EncounterStatus;
+  started_at: string;
 }
 
 export interface ClinicEncounterNote {
   id: string;
-  tenant_id: string;
-  encounter_id: string;
   version: number;
+  author_staff_id: string;
   subjective: string | null;
   objective: string | null;
   assessment: string | null;
   plan: string | null;
-  created_by: string;
+  note_status: NoteStatus;
+  supersedes_note_id: string | null;
   created_at: string;
+}
+
+export interface ClinicEncounterNoteWriteResult {
+  note_id: string;
+  encounter_id: string;
+  version: number;
+  note_status: NoteStatus;
+  created_at: string;
+}
+
+export interface ClinicEncounterCompletionResult {
+  encounter_id: string;
+  encounter_status: EncounterStatus;
+  appointment_status: string;
+  completed_at: string;
 }
 
 export interface ClinicPatientHistory {
   patient_profile: ClinicPatientProfile | null;
-  encounters: Array<{
-    encounter: ClinicEncounter;
-    notes: ClinicEncounterNote[];
-  }>;
+  encounters: ClinicEncounter[];
 }
 
 export interface ClinicOperationalAppointment {

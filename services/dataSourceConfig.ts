@@ -3,7 +3,10 @@ import { resolveDataSourceMode } from './dataSourceModeResolver';
 export type DataSourceMode = 'local' | 'supabase';
 
 export const getDataSourceMode = (): DataSourceMode => {
-  const env = (import.meta as any).env || (globalThis as any).import?.meta?.env || {};
+  const metaEnv = (import.meta as any).env || {};
+  const procEnv = (typeof process !== 'undefined' && process.env) ? process.env : {};
+  const env = { ...procEnv, ...metaEnv };
+
   return resolveDataSourceMode({
     dataMode: env.VITE_DATA_MODE,
     legacyDataSource: env.VITE_LARI_DATA_SOURCE,

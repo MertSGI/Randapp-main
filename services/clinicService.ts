@@ -1,9 +1,9 @@
 import {
   ClinicStaffContext,
-  ClinicStaffProfile,
-  ClinicPatientProfile,
-  ClinicEncounter,
-  ClinicEncounterNote,
+  ClinicStaffProfileWriteResult,
+  ClinicEncounterStartResult,
+  ClinicEncounterNoteWriteResult,
+  ClinicEncounterCompletionResult,
   ClinicPatientHistory,
   ClinicOperationalDay,
   ClinicServiceResult
@@ -11,18 +11,20 @@ import {
 import { supabaseClinicRepository } from './repositories/supabaseClinicRepository';
 import { getDataSourceMode } from './dataSourceConfig';
 
+const UNAVAILABLE_RESPONSE: ClinicServiceResult<any> = {
+  success: false,
+  error: {
+    code: 'UNAVAILABLE',
+    message: 'Clinic application service requires Supabase server authority mode.'
+  }
+};
+
 export const clinicService = {
   async getMyClinicContext(): Promise<ClinicServiceResult<ClinicStaffContext>> {
     if (getDataSourceMode() === 'supabase') {
       return supabaseClinicRepository.getMyClinicContext();
     }
-    return {
-      success: false,
-      error: {
-        code: 'UNAVAILABLE',
-        message: 'Clinic application service requires Supabase server authority mode.'
-      } as any
-    };
+    return UNAVAILABLE_RESPONSE;
   },
 
   async setClinicStaffProfile(params: {
@@ -33,17 +35,11 @@ export const clinicService = {
     can_manage_patient_profiles?: boolean;
     can_view_clinical_records?: boolean;
     can_write_clinical_notes?: boolean;
-  }): Promise<ClinicServiceResult<ClinicStaffProfile>> {
+  }): Promise<ClinicServiceResult<ClinicStaffProfileWriteResult>> {
     if (getDataSourceMode() === 'supabase') {
       return supabaseClinicRepository.setStaffProfile(params);
     }
-    return {
-      success: false,
-      error: {
-        code: 'UNAVAILABLE',
-        message: 'Clinic application service requires Supabase server authority mode.'
-      } as any
-    };
+    return UNAVAILABLE_RESPONSE;
   },
 
   async upsertClinicPatientProfile(params: {
@@ -60,29 +56,17 @@ export const clinicService = {
     if (getDataSourceMode() === 'supabase') {
       return supabaseClinicRepository.upsertPatientProfile(params);
     }
-    return {
-      success: false,
-      error: {
-        code: 'UNAVAILABLE',
-        message: 'Clinic application service requires Supabase server authority mode.'
-      } as any
-    };
+    return UNAVAILABLE_RESPONSE;
   },
 
   async startClinicEncounter(params: {
     appointment_id: string;
     reason_for_visit?: string;
-  }): Promise<ClinicServiceResult<ClinicEncounter>> {
+  }): Promise<ClinicServiceResult<ClinicEncounterStartResult>> {
     if (getDataSourceMode() === 'supabase') {
       return supabaseClinicRepository.startEncounter(params);
     }
-    return {
-      success: false,
-      error: {
-        code: 'UNAVAILABLE',
-        message: 'Clinic application service requires Supabase server authority mode.'
-      } as any
-    };
+    return UNAVAILABLE_RESPONSE;
   },
 
   async saveClinicEncounterNote(params: {
@@ -91,57 +75,34 @@ export const clinicService = {
     objective?: string;
     assessment?: string;
     plan?: string;
-  }): Promise<ClinicServiceResult<ClinicEncounterNote>> {
+    note_status?: string;
+  }): Promise<ClinicServiceResult<ClinicEncounterNoteWriteResult>> {
     if (getDataSourceMode() === 'supabase') {
       return supabaseClinicRepository.saveEncounterNote(params);
     }
-    return {
-      success: false,
-      error: {
-        code: 'UNAVAILABLE',
-        message: 'Clinic application service requires Supabase server authority mode.'
-      } as any
-    };
+    return UNAVAILABLE_RESPONSE;
   },
 
   async completeClinicEncounter(params: {
     encounter_id: string;
-  }): Promise<ClinicServiceResult<{ encounter_id: string; encounter_status: string; appointment_status: string }>> {
+  }): Promise<ClinicServiceResult<ClinicEncounterCompletionResult>> {
     if (getDataSourceMode() === 'supabase') {
       return supabaseClinicRepository.completeEncounterAndAppointment(params);
     }
-    return {
-      success: false,
-      error: {
-        code: 'UNAVAILABLE',
-        message: 'Clinic application service requires Supabase server authority mode.'
-      } as any
-    };
+    return UNAVAILABLE_RESPONSE;
   },
 
   async getClinicPatientHistory(customer_id: string): Promise<ClinicServiceResult<ClinicPatientHistory>> {
     if (getDataSourceMode() === 'supabase') {
       return supabaseClinicRepository.getPatientHistory(customer_id);
     }
-    return {
-      success: false,
-      error: {
-        code: 'UNAVAILABLE',
-        message: 'Clinic application service requires Supabase server authority mode.'
-      } as any
-    };
+    return UNAVAILABLE_RESPONSE;
   },
 
   async getClinicOperationalDay(date: string, branch_id?: string): Promise<ClinicServiceResult<ClinicOperationalDay>> {
     if (getDataSourceMode() === 'supabase') {
       return supabaseClinicRepository.getOperationalDay(date, branch_id);
     }
-    return {
-      success: false,
-      error: {
-        code: 'UNAVAILABLE',
-        message: 'Clinic application service requires Supabase server authority mode.'
-      } as any
-    };
+    return UNAVAILABLE_RESPONSE;
   }
 };

@@ -1,14 +1,51 @@
 import {
   ClinicStaffContext,
-  ClinicStaffProfile,
+  ClinicStaffProfileWriteResult,
   ClinicPatientProfile,
-  ClinicEncounter,
-  ClinicEncounterNote,
+  ClinicEncounterStartResult,
+  ClinicEncounterNoteWriteResult,
+  ClinicEncounterCompletionResult,
   ClinicPatientHistory,
   ClinicOperationalDay,
-  ClinicServiceResult
+  ClinicServiceResult,
+  ClinicServiceErrorCode
 } from '../../types/clinic';
 import { fetchSupabase } from './supabaseClient';
+
+export function normalizeClinicError(status: number, rawText: string): { code: ClinicServiceErrorCode; message: string } {
+  const messageLower = (rawText || '').toLowerCase();
+
+  let code: ClinicServiceErrorCode = 'UNKNOWN';
+  let safeMessage = 'An unexpected clinic operational error occurred.';
+
+  if (status === 401 || messageLower.includes('unauthenticated')) {
+    code = 'UNAUTHENTICATED';
+    safeMessage = 'Authentication required to access clinic services.';
+  } else if (messageLower.includes('appointment_not_confirmed')) {
+    code = 'APPOINTMENT_NOT_CONFIRMED';
+    safeMessage = 'Only confirmed appointments can be started.';
+  } else if (messageLower.includes('already_exists')) {
+    code = 'ALREADY_EXISTS';
+    safeMessage = 'A clinic encounter already exists for this appointment.';
+  } else if (messageLower.includes('invariant_violation')) {
+    code = 'INVARIANT_VIOLATION';
+    safeMessage = 'Operational invariant violation encountered during completion.';
+  } else if (messageLower.includes('invalid_state')) {
+    code = 'INVALID_STATE';
+    safeMessage = 'Invalid operational state for this action.';
+  } else if (messageLower.includes('tenant mismatch')) {
+    code = 'TENANT_MISMATCH';
+    safeMessage = 'Cross-tenant access denied.';
+  } else if (status === 404 || messageLower.includes('not_found') || messageLower.includes('not found')) {
+    code = 'NOT_FOUND';
+    safeMessage = 'Requested clinic resource was not found.';
+  } else if (status === 403 || messageLower.includes('forbidden')) {
+    code = 'FORBIDDEN';
+    safeMessage = 'Insufficient clinic permissions to perform this operation.';
+  }
+
+  return { code, message: safeMessage };
+}
 
 export class SupabaseClinicRepository {
   async getMyClinicContext(): Promise<ClinicServiceResult<ClinicStaffContext>> {
@@ -23,10 +60,7 @@ export class SupabaseClinicRepository {
         const errorText = await res.text();
         return {
           success: false,
-          error: {
-            code: res.status === 401 ? 'UNAUTHENTICATED' : 'FORBIDDEN',
-            message: errorText || 'Failed to fetch clinic context'
-          }
+          error: normalizeClinicError(res.status, errorText)
         };
       }
 
@@ -35,10 +69,7 @@ export class SupabaseClinicRepository {
         return {
           success: false,
           reason_code: data.reason_code,
-          error: {
-            code: data.reason_code === 'unauthenticated' ? 'UNAUTHENTICATED' : 'FORBIDDEN',
-            message: `Clinic context unavailable: ${data.reason_code}`
-          }
+          error: normalizeClinicError(403, `forbidden: ${data.reason_code}`)
         };
       }
 
@@ -59,10 +90,7 @@ export class SupabaseClinicRepository {
     } catch (err: any) {
       return {
         success: false,
-        error: {
-          code: 'UNKNOWN',
-          message: err.message || 'Unexpected network error'
-        }
+        error: { code: 'UNKNOWN', message: 'Network error communicating with clinic service.' }
       };
     }
   }
@@ -75,7 +103,7 @@ export class SupabaseClinicRepository {
     can_manage_patient_profiles?: boolean;
     can_view_clinical_records?: boolean;
     can_write_clinical_notes?: boolean;
-  }): Promise<ClinicServiceResult<ClinicStaffProfile>> {
+  }): Promise<ClinicServiceResult<ClinicStaffProfileWriteResult>> {
     try {
       const res = await fetchSupabase('/rest/v1/rpc/clinic_set_staff_profile', {
         method: 'POST',
@@ -95,22 +123,25 @@ export class SupabaseClinicRepository {
         const errText = await res.text();
         return {
           success: false,
-          error: {
-            code: res.status === 401 ? 'UNAUTHENTICATED' : res.status === 404 ? 'NOT_FOUND' : 'FORBIDDEN',
-            message: errText
-          }
+          error: normalizeClinicError(res.status, errText)
         };
       }
 
       const data = await res.json();
       return {
         success: true,
-        data: data.profile
+        data: {
+          staff_id: data.staff_id,
+          tenant_id: data.tenant_id,
+          can_manage_patient_profiles: !!data.can_manage_patient_profiles,
+          can_view_clinical_records: !!data.can_view_clinical_records,
+          can_write_clinical_notes: !!data.can_write_clinical_notes
+        }
       };
     } catch (err: any) {
       return {
         success: false,
-        error: { code: 'UNKNOWN', message: err.message || 'Network error' }
+        error: { code: 'UNKNOWN', message: 'Network error communicating with clinic service.' }
       };
     }
   }
@@ -147,10 +178,7 @@ export class SupabaseClinicRepository {
         const errText = await res.text();
         return {
           success: false,
-          error: {
-            code: res.status === 404 ? 'NOT_FOUND' : 'FORBIDDEN',
-            message: errText
-          }
+          error: normalizeClinicError(res.status, errText)
         };
       }
 
@@ -162,7 +190,7 @@ export class SupabaseClinicRepository {
     } catch (err: any) {
       return {
         success: false,
-        error: { code: 'UNKNOWN', message: err.message || 'Network error' }
+        error: { code: 'UNKNOWN', message: 'Network error communicating with clinic service.' }
       };
     }
   }
@@ -170,7 +198,7 @@ export class SupabaseClinicRepository {
   async startEncounter(params: {
     appointment_id: string;
     reason_for_visit?: string;
-  }): Promise<ClinicServiceResult<ClinicEncounter>> {
+  }): Promise<ClinicServiceResult<ClinicEncounterStartResult>> {
     try {
       const res = await fetchSupabase('/rest/v1/rpc/clinic_start_encounter', {
         method: 'POST',
@@ -183,25 +211,26 @@ export class SupabaseClinicRepository {
 
       if (!res.ok) {
         const errText = await res.text();
-        let code: any = 'FORBIDDEN';
-        if (errText.includes('APPOINTMENT_NOT_CONFIRMED')) code = 'APPOINTMENT_NOT_CONFIRMED';
-        else if (errText.includes('ALREADY_EXISTS')) code = 'ALREADY_EXISTS';
-        else if (errText.includes('NOT_FOUND')) code = 'NOT_FOUND';
         return {
           success: false,
-          error: { code, message: errText }
+          error: normalizeClinicError(res.status, errText)
         };
       }
 
       const data = await res.json();
       return {
         success: true,
-        data
+        data: {
+          encounter_id: data.encounter_id,
+          appointment_id: data.appointment_id,
+          status: data.status,
+          started_at: data.started_at
+        }
       };
     } catch (err: any) {
       return {
         success: false,
-        error: { code: 'UNKNOWN', message: err.message || 'Network error' }
+        error: { code: 'UNKNOWN', message: 'Network error communicating with clinic service.' }
       };
     }
   }
@@ -212,7 +241,8 @@ export class SupabaseClinicRepository {
     objective?: string;
     assessment?: string;
     plan?: string;
-  }): Promise<ClinicServiceResult<ClinicEncounterNote>> {
+    note_status?: string;
+  }): Promise<ClinicServiceResult<ClinicEncounterNoteWriteResult>> {
     try {
       const res = await fetchSupabase('/rest/v1/rpc/clinic_save_encounter_note', {
         method: 'POST',
@@ -222,7 +252,8 @@ export class SupabaseClinicRepository {
           p_subjective: params.subjective ?? null,
           p_objective: params.objective ?? null,
           p_assessment: params.assessment ?? null,
-          p_plan: params.plan ?? null
+          p_plan: params.plan ?? null,
+          p_note_status: params.note_status ?? 'draft'
         })
       });
 
@@ -230,26 +261,32 @@ export class SupabaseClinicRepository {
         const errText = await res.text();
         return {
           success: false,
-          error: { code: res.status === 404 ? 'NOT_FOUND' : 'FORBIDDEN', message: errText }
+          error: normalizeClinicError(res.status, errText)
         };
       }
 
       const data = await res.json();
       return {
         success: true,
-        data: data.note
+        data: {
+          note_id: data.note_id,
+          encounter_id: data.encounter_id,
+          version: data.version,
+          note_status: data.note_status,
+          created_at: data.created_at
+        }
       };
     } catch (err: any) {
       return {
         success: false,
-        error: { code: 'UNKNOWN', message: err.message || 'Network error' }
+        error: { code: 'UNKNOWN', message: 'Network error communicating with clinic service.' }
       };
     }
   }
 
   async completeEncounterAndAppointment(params: {
     encounter_id: string;
-  }): Promise<ClinicServiceResult<{ encounter_id: string; encounter_status: string; appointment_status: string }>> {
+  }): Promise<ClinicServiceResult<ClinicEncounterCompletionResult>> {
     try {
       const res = await fetchSupabase('/rest/v1/rpc/clinic_complete_encounter_and_appointment', {
         method: 'POST',
@@ -261,13 +298,9 @@ export class SupabaseClinicRepository {
 
       if (!res.ok) {
         const errText = await res.text();
-        let code: any = 'FORBIDDEN';
-        if (errText.includes('INVARIANT_VIOLATION')) code = 'INVARIANT_VIOLATION';
-        else if (errText.includes('INVALID_STATE')) code = 'INVALID_STATE';
-        else if (errText.includes('NOT_FOUND')) code = 'NOT_FOUND';
         return {
           success: false,
-          error: { code, message: errText }
+          error: normalizeClinicError(res.status, errText)
         };
       }
 
@@ -275,12 +308,17 @@ export class SupabaseClinicRepository {
       return {
         success: true,
         reason_code: data.reason_code,
-        data
+        data: {
+          encounter_id: data.encounter_id,
+          encounter_status: data.encounter_status,
+          appointment_status: data.appointment_status,
+          completed_at: data.completed_at
+        }
       };
     } catch (err: any) {
       return {
         success: false,
-        error: { code: 'UNKNOWN', message: err.message || 'Network error' }
+        error: { code: 'UNKNOWN', message: 'Network error communicating with clinic service.' }
       };
     }
   }
@@ -297,7 +335,7 @@ export class SupabaseClinicRepository {
         const errText = await res.text();
         return {
           success: false,
-          error: { code: res.status === 404 ? 'NOT_FOUND' : 'FORBIDDEN', message: errText }
+          error: normalizeClinicError(res.status, errText)
         };
       }
 
@@ -312,7 +350,7 @@ export class SupabaseClinicRepository {
     } catch (err: any) {
       return {
         success: false,
-        error: { code: 'UNKNOWN', message: err.message || 'Network error' }
+        error: { code: 'UNKNOWN', message: 'Network error communicating with clinic service.' }
       };
     }
   }
@@ -332,7 +370,7 @@ export class SupabaseClinicRepository {
         const errText = await res.text();
         return {
           success: false,
-          error: { code: res.status === 404 ? 'NOT_FOUND' : 'FORBIDDEN', message: errText }
+          error: normalizeClinicError(res.status, errText)
         };
       }
 
@@ -348,7 +386,7 @@ export class SupabaseClinicRepository {
     } catch (err: any) {
       return {
         success: false,
-        error: { code: 'UNKNOWN', message: err.message || 'Network error' }
+        error: { code: 'UNKNOWN', message: 'Network error communicating with clinic service.' }
       };
     }
   }
