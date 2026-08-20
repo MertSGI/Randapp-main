@@ -200,7 +200,7 @@ export async function runPackageBranchConcurrencyHarness() {
     const sqlPath = path.join(process.cwd(), 'supabase/tests/package_branch_server_authority_tests.sql');
     if (fs.existsSync(sqlPath)) {
       const sqlContent = fs.readFileSync(sqlPath, 'utf8');
-      const testClient = new Client({ connectionString: dbUrl });
+      const testClient = new Client({ connectionString: DB_URL });
       await testClient.connect();
       try {
         await testClient.query(sqlContent);
