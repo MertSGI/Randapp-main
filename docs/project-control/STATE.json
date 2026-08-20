@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-08-20T10:27:44+03:00",
+  "updated_at": "2026-08-20T15:05:00+03:00",
   "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
@@ -48,6 +48,16 @@
       "branch": "ci/package-branch-authority-exact-sha-r2-20260820",
       "sha": "584f276ec5185bbb4080559f7cde08334e5767cd",
       "status": "CI_RUN_32340331307_SUCCESS"
+    },
+    "commercial_source_of_truth": {
+      "branch": "feature/package-customer-customization-foundation",
+      "sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
+      "status": "CLOSED_PROVEN"
+    },
+    "commercial_source_of_truth_ci_evidence": {
+      "branch": "ci/package-commercial-source-of-truth-exact-sha-r1-20260820",
+      "sha": "a337d85276728beffbec4a129aefc703328624d2",
+      "status": "CI_RUN_32363490123_SUCCESS"
     }
   },
   "accepted_gates": [
@@ -174,6 +184,17 @@
       ],
       "closed_at": "2026-08-20T06:38:00Z",
       "reopen_condition": "Contradictory branch authorization, RLS, commercial quota, primary-branch invariant, or concurrency regression evidence"
+    },
+    {
+      "gate": "Commercial Source-of-Truth Alignment",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
+      "run_ids": [
+        "32363490123"
+      ],
+      "closed_at": "2026-08-20T11:23:37Z",
+      "reopen_condition": "Contradictory commercial source-of-truth, entitlement projection, Supabase authority, unlimited quota, registration authority, or exact-SHA regression evidence"
     }
   ],
   "active_workstreams": {
@@ -201,12 +222,18 @@
     "package_customization": {
       "status": "IN_PROGRESS",
       "branch": "feature/package-customer-customization-foundation",
-      "sha": "83089a0695e0a5f0cf0fda25c7006df5e6ad4c07",
+      "sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
       "slices": {
         "branch_server_authority": {
           "status": "CLOSED_PROVEN",
           "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
           "run_id": "32340331307"
+        },
+        "commercial_source_of_truth": {
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+          "run_id": "32363490123",
+          "product_sha": "65a53427f52c21e60aa8f92e02a17d693a201601"
         }
       }
     }
@@ -220,7 +247,7 @@
     "human_participant_uat": "DEFERRED_FIELD_VALIDATION"
   },
   "current_blockers": [],
-  "next_action": "Commercial Source-of-Truth Alignment audit against implementation SHA 83089a0695e0a5f0cf0fda25c7006df5e6ad4c07",
+  "next_action": "Controller selection of the next Package/Customer Customization slice from the existing product plan; do not advance to LARİ Clinic until the Package Customization baseline is explicitly accepted.",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true

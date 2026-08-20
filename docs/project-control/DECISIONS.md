@@ -32,3 +32,7 @@
 ## DECISION-007: CORE-RC.4 Closure & Main Delivery Train Advancement
 - **Status**: ACCEPTED
 - **Decision**: Milestone `CORE-RC.4` is closed as proven (`CLOSED_PROVEN` at level `E2_EXECUTABLE_EXACT_SHA_CI`, exact product SHA `e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a`, GitHub Actions Run `32134598853`). Cross-layer `pending_onboarding` subscription status contract alignment is verified and frozen. The main product delivery train is advanced to `Package/Customer Customization`.
+
+## DECISION-008: Package Customization Slice 2 Commercial Source-of-Truth Alignment Closure
+- **Status**: ACCEPTED
+- **Decision**: Milestone `Package Customization Commercial Source-of-Truth Alignment` (Slice 2) is closed as proven (`CLOSED_PROVEN` at level `E2_EXECUTABLE_EXACT_SHA_CI`, exact product SHA `65a53427f52c21e60aa8f92e02a17d693a201601`, evidence branch `ci/package-commercial-source-of-truth-exact-sha-r1-20260820` at `a337d85276728beffbec4a129aefc703328624d2`, GitHub Actions Run `32363490123`). The two-commit evidence lineage is accepted (intermediate `7c14a998` superseded by final exact-SHA product binding `a337d852`). Package / Customer Customization overall status remains `IN_PROGRESS`.
