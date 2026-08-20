@@ -40,12 +40,20 @@ BEGIN
     DELETE FROM public.staff_branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
     DELETE FROM public.branches WHERE tenant_id IN (v_tenant1_id, v_tenant2_id);
     DELETE FROM public.users_profile WHERE id IN (v_owner1_id, v_owner2_id, v_staff1_id);
+    DELETE FROM auth.users WHERE id IN (v_owner1_id, v_owner2_id, v_staff1_id);
     DELETE FROM public.tenants WHERE id IN (v_tenant1_id, v_tenant2_id);
 
     -- Create test tenants
     INSERT INTO public.tenants (id, slug, name, status)
     VALUES (v_tenant1_id, 'branch-test-t1', 'Branch Test Tenant 1', 'active'),
            (v_tenant2_id, 'branch-test-t2', 'Branch Test Tenant 2', 'active');
+
+    -- Create auth users
+    INSERT INTO auth.users (id, email, role, created_at, updated_at)
+    VALUES (v_owner1_id, 'owner1@test-branch.invalid', 'authenticated', now(), now()),
+           (v_owner2_id, 'owner2@test-branch.invalid', 'authenticated', now(), now()),
+           (v_staff1_id, 'staff1@test-branch.invalid', 'authenticated', now(), now())
+    ON CONFLICT (id) DO NOTHING;
 
     -- Create profiles
     INSERT INTO public.users_profile (id, tenant_id, name, role, active)

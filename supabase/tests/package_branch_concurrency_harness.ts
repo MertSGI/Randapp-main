@@ -88,6 +88,7 @@ export async function runPackageBranchConcurrencyHarness() {
       DELETE FROM public.staff_branches WHERE tenant_id IN (${tInList});
       DELETE FROM public.branches WHERE tenant_id IN (${tInList});
       DELETE FROM public.users_profile WHERE id IN (${uInList});
+      DELETE FROM auth.users WHERE id IN (${uInList});
       DELETE FROM public.tenants WHERE id IN (${tInList});
 
       INSERT INTO public.tenants (id, slug, name, status)
@@ -100,6 +101,20 @@ export async function runPackageBranchConcurrencyHarness() {
         ('${tenantC5B_id}', 'tenant-c5b', 'Tenant C5B', 'active'),
         ('${tenantRLSA_id}', 'tenant-rlsa', 'Tenant RLS A', 'active'),
         ('${tenantRLSB_id}', 'tenant-rlsb', 'Tenant RLS B', 'active');
+
+      INSERT INTO auth.users (id, email, role, created_at, updated_at)
+      VALUES
+        ('${ownerC1_id}', 'ownerc1@test-harness.invalid', 'authenticated', now(), now()),
+        ('${ownerC2_id}', 'ownerc2@test-harness.invalid', 'authenticated', now(), now()),
+        ('${ownerC3_id}', 'ownerc3@test-harness.invalid', 'authenticated', now(), now()),
+        ('${ownerC4_id}', 'ownerc4@test-harness.invalid', 'authenticated', now(), now()),
+        ('${ownerC5A_id}', 'ownerc5a@test-harness.invalid', 'authenticated', now(), now()),
+        ('${ownerC5B_id}', 'ownerc5b@test-harness.invalid', 'authenticated', now(), now()),
+        ('${ownerRLSA_id}', 'owner-rlsa@test-harness.invalid', 'authenticated', now(), now()),
+        ('${ownerRLSB_id}', 'owner-rlsb@test-harness.invalid', 'authenticated', now(), now()),
+        ('${staffRLSA_id}', 'staff-rlsa@test-harness.invalid', 'authenticated', now(), now()),
+        ('${admin_id}', 'admin@test-harness.invalid', 'authenticated', now(), now())
+      ON CONFLICT (id) DO NOTHING;
 
       INSERT INTO public.users_profile (id, tenant_id, name, role, active)
       VALUES 
