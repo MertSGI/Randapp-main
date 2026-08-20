@@ -55,6 +55,14 @@ BEGIN
            (v_tenant2_id, 'branch-test-t2', 'Branch Test Tenant 2', 'active'),
            (v_neg_tenant_id, 'branch-test-neg', 'Branch Test Tenant Negative', 'active');
 
+    -- Give negative control tenant a standard plan (baslangic with max_branches = 1) subscription
+    INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
+    SELECT v_neg_tenant_id, p.id, pv.id, 'manual_active', 'manual'
+    FROM public.plans p
+    JOIN public.plan_versions pv ON pv.plan_id = p.id AND pv.lifecycle_status = 'published'
+    WHERE p.code = 'baslangic'
+    LIMIT 1;
+
     -- Create max_branches override for multi-branch test tenants 1 and 2
     INSERT INTO public.tenant_entitlement_overrides (tenant_id, feature_key, value_type, is_unlimited, integer_value, reason)
     VALUES (v_tenant1_id, 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture'),

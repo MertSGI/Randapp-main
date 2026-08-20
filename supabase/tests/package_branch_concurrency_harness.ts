@@ -108,6 +108,14 @@ export async function runPackageBranchConcurrencyHarness() {
         ('${tenantRLSB_id}', 'tenant-rlsb', 'Tenant RLS B', 'active'),
         ('${tenantNeg_id}', 'tenant-neg', 'Tenant Neg Control', 'active');
 
+      -- Give negative control tenant a standard plan (baslangic with max_branches = 1) subscription
+      INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
+      SELECT '${tenantNeg_id}', p.id, pv.id, 'manual_active', 'manual'
+      FROM public.plans p
+      JOIN public.plan_versions pv ON pv.plan_id = p.id AND pv.lifecycle_status = 'published'
+      WHERE p.code = 'baslangic'
+      LIMIT 1;
+
       INSERT INTO public.tenant_entitlement_overrides (tenant_id, feature_key, value_type, is_unlimited, integer_value, reason)
       VALUES
         ('${tenantC1_id}', 'max_branches', 'integer', true, NULL, 'Package branch authority disposable test fixture'),
