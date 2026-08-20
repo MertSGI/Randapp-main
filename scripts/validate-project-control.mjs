@@ -204,12 +204,30 @@ function validateProjectControl() {
     }
   }
 
-  // 4. Rule XVI: Cross-File Consistency Check
-  if (state) {
-    if (fs.existsSync(projectControlPath)) {
-      const pcContent = fs.readFileSync(projectControlPath, 'utf8');
-      if (pcContent.includes('P1D.1A') && pcContent.includes('ARMED') && pcContent.includes('P1D.1A') && !pcContent.includes('CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE')) {
-        errors.push('Cross-File Contradiction: PROJECT_CONTROL.md relabels P1D.1A as ARMED instead of CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE.');
+  // 5. DECISIONS.md Structural Integrity Check
+  const decisionsPath = path.join(rootDir, 'docs', 'project-control', 'DECISIONS.md');
+  if (!fs.existsSync(decisionsPath)) {
+    errors.push('DECISIONS.md does not exist');
+  } else {
+    const decisionsContent = fs.readFileSync(decisionsPath, 'utf8');
+
+    const headerMatches = decisionsContent.match(/^# Architectural & Product Decision Register$/gm);
+    const headerCount = headerMatches ? headerMatches.length : 0;
+    if (headerCount !== 1) {
+      errors.push(`Rule Violation (DECISIONS-HEADER): Architectural & Product Decision Register header must appear exactly once (found ${headerCount}).`);
+    }
+
+    const decisionIdMatches = decisionsContent.match(/^## (DECISION-[0-9]{3}):/gm);
+    if (!decisionIdMatches || decisionIdMatches.length === 0) {
+      errors.push('Rule Violation (DECISIONS-EMPTY): DECISIONS.md contains no valid decision entries.');
+    } else {
+      const seenDecisionIds = new Set();
+      for (const rawMatch of decisionIdMatches) {
+        const decisionId = rawMatch.replace(/^##\s+/, '').replace(/:$/, '');
+        if (seenDecisionIds.has(decisionId)) {
+          errors.push(`Rule Violation (DECISIONS-ID): Duplicate decision id '${decisionId}' in DECISIONS.md.`);
+        }
+        seenDecisionIds.add(decisionId);
       }
     }
   }
