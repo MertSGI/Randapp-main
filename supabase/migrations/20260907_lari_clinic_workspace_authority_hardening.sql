@@ -41,7 +41,9 @@ BEGIN
     SELECT s.* INTO v_staff
     FROM public.staff s
     WHERE s.user_profile_id = v_caller_uid
-      AND s.active = true;
+      AND s.active = true
+    ORDER BY s.created_at DESC
+    LIMIT 1;
 
     IF v_staff.id IS NULL THEN
         RAISE EXCEPTION 'FORBIDDEN: Caller has no active staff identity.';
@@ -172,7 +174,9 @@ BEGIN
     SELECT s.* INTO v_staff
     FROM public.staff s
     WHERE s.user_profile_id = v_caller_uid
-      AND s.active = true;
+      AND s.active = true
+    ORDER BY s.created_at DESC
+    LIMIT 1;
 
     IF v_staff.id IS NULL THEN
         RAISE EXCEPTION 'FORBIDDEN: Caller has no active staff identity.';
