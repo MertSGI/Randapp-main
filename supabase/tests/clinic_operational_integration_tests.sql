@@ -131,7 +131,7 @@ BEGIN
     (v_cust1_id, v_tenant1_id, 'Patient John Doe', 'john@patient.com', '5551112233'),
     (v_cust2_id, v_tenant2_id, 'Tenant 2 Patient', 't2@patient.com', '5559998877');
 
-    INSERT INTO public.services (id, tenant_id, name, duration_minutes) VALUES
+    INSERT INTO public.services (id, tenant_id, name, duration) VALUES
     (v_service1_id, v_tenant1_id, 'Cardiology Consultation', 45);
 
     -- Seed patient profile for history contract test
