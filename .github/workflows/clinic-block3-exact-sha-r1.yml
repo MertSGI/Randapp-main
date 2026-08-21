@@ -234,14 +234,17 @@ jobs:
           set +e
           node -e "
             const { execSync } = require('child_process');
+            const fs = require('fs');
+            let content = '';
             try {
-              const out = execSync('psql \"postgresql://postgres:postgres@127.0.0.1:54322/postgres\" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql', { encoding: 'utf8', stdio: 'pipe' });
-              console.log('=== PSQL STDOUT ===\n' + out);
-              require('fs').writeFileSync('/tmp/clinic-block3-sql.log', out);
+              content = execSync('psql \"postgresql://postgres:postgres@127.0.0.1:54322/postgres\" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql', { encoding: 'utf8', stdio: 'pipe' });
+              console.log('=== PSQL SUCCESS ===\n' + content);
             } catch (err) {
-              console.log('=== PSQL ERROR OUTPUT ===\n' + (err.stdout || '') + '\n' + (err.stderr || '') + '\n' + err.message);
-              require('fs').writeFileSync('/tmp/clinic-block3-sql.log', (err.stdout || '') + '\n' + (err.stderr || ''));
+              content = 'STDOUT:\n' + (err.stdout || '') + '\n\nSTDERR:\n' + (err.stderr || '') + '\n\nMESSAGE:\n' + (err.message || '');
+              console.log('=== PSQL ERROR ===\n' + content);
+              process.exitCode = 1;
             }
+            fs.writeFileSync('/tmp/clinic-block3-sql.log', content, 'utf8');
           "
           PSQL_EXIT=$?
           set -e
