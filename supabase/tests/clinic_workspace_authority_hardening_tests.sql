@@ -1,4 +1,4 @@
--- LARİ CLINIC WORKSPACE AUTHORITY HARDENING EXECUTABLE TEST SUITE (R1.2 HARDENED)
+-- LARİ CLINIC WORKSPACE AUTHORITY HARDENING EXECUTABLE TEST SUITE (R1.2 HARDENED ISOLATED)
 -- File: supabase/tests/clinic_workspace_authority_hardening_tests.sql
 -- Purpose:
 --   Executable SQL verification for Migration 63 with REAL TOP-LEVEL DATABASE ROLE STATEMENTS (SET LOCAL ROLE authenticated / anon),
@@ -11,16 +11,16 @@ BEGIN;
 -- =========================================================================
 DO $$
 DECLARE
-    v_tenant_id UUID := '11111111-1111-4111-8111-111111111111'::UUID;
-    v_tenant2_id UUID := '22222222-2222-4222-8222-222222222222'::UUID;
+    v_tenant_id UUID := '88888888-8888-4888-8888-888888888888'::UUID;
+    v_tenant2_id UUID := '88888888-8888-4888-8888-888888888889'::UUID;
 
-    v_owner_uid UUID := 'a1111111-1111-4111-8111-111111111111'::UUID;
-    v_owner2_uid UUID := 'a2222222-2222-4222-8222-222222222222'::UUID;
-    v_inactive_owner_uid UUID := 'a7777777-7777-4777-8777-777777777777'::UUID;
-    v_superadmin_uid UUID := 'a9999999-9999-4999-8999-999999999999'::UUID;
+    v_owner_uid UUID := 'a8888888-8888-4888-8888-888888888881'::UUID;
+    v_owner2_uid UUID := 'a8888888-8888-4888-8888-888888888882'::UUID;
+    v_inactive_owner_uid UUID := 'a8888888-8888-4888-8888-888888888887'::UUID;
+    v_superadmin_uid UUID := 'a8888888-8888-4888-8888-888888888889'::UUID;
 
     v_manage_staff_uid UUID := 'a8888888-8888-4888-8888-888888888888'::UUID;
-    v_view_staff_uid UUID := 'a8888888-8888-4888-8888-888888888889'::UUID;
+    v_view_staff_uid UUID := 'a8888888-8888-4888-8888-888888888883'::UUID;
     v_none_staff_uid UUID := 'a8888888-8888-4888-8888-888888888880'::UUID;
 
     v_manage_staff_id UUID := '38888888-8888-4888-8888-888888888888'::UUID;
@@ -32,11 +32,19 @@ DECLARE
 BEGIN
     RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.2) ===';
 
+    -- Clean any existing isolated test fixture
+    DELETE FROM public.audit_events WHERE tenant_id IN (v_tenant_id::text, v_tenant2_id::text);
+    DELETE FROM public.clinic_patient_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    DELETE FROM public.clinic_staff_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    DELETE FROM public.staff WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    DELETE FROM public.customers WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    DELETE FROM public.users_profile WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+    DELETE FROM public.tenants WHERE id IN (v_tenant_id, v_tenant2_id);
+
     -- Seed Tenants
-    INSERT INTO public.tenants (id, name, slug)
-    VALUES (v_tenant_id, 'Hardening Clinic Tenant 1', 'hardening-clinic-1'),
-           (v_tenant2_id, 'Hardening Clinic Tenant 2', 'hardening-clinic-2')
-    ON CONFLICT (id) DO NOTHING;
+    INSERT INTO public.tenants (id, name, slug, status)
+    VALUES (v_tenant_id, 'Hardening Clinic Tenant 1', 'hardening-clinic-1', 'active'),
+           (v_tenant2_id, 'Hardening Clinic Tenant 2', 'hardening-clinic-2', 'active');
 
     -- Seed Users Profiles (including active = false tenant owner)
     INSERT INTO public.users_profile (id, tenant_id, role, first_name, last_name, active)
@@ -46,21 +54,13 @@ BEGIN
            (v_superadmin_uid, NULL, 'super_admin', 'Super', 'Admin', true),
            (v_manage_staff_uid, v_tenant_id, 'staff', 'Manage', 'Staff', true),
            (v_view_staff_uid, v_tenant_id, 'staff', 'View', 'Staff', true),
-           (v_none_staff_uid, v_tenant_id, 'staff', 'NoCap', 'Staff', true)
-    ON CONFLICT (id) DO UPDATE SET
-        tenant_id = EXCLUDED.tenant_id,
-        role = EXCLUDED.role,
-        active = EXCLUDED.active;
+           (v_none_staff_uid, v_tenant_id, 'staff', 'NoCap', 'Staff', true);
 
     -- Seed Staff Records
     INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active)
     VALUES (v_manage_staff_id, v_tenant_id, v_manage_staff_uid, 'Manage Staff', true),
            (v_view_staff_id, v_tenant_id, v_view_staff_uid, 'View Staff', true),
-           (v_none_staff_id, v_tenant_id, v_none_staff_uid, 'None Staff', true)
-    ON CONFLICT (id) DO UPDATE SET
-        tenant_id = EXCLUDED.tenant_id,
-        user_profile_id = EXCLUDED.user_profile_id,
-        active = EXCLUDED.active;
+           (v_none_staff_id, v_tenant_id, v_none_staff_uid, 'None Staff', true);
 
     -- Seed Clinic Staff Profiles with specific capabilities
     INSERT INTO public.clinic_staff_profiles (
@@ -69,18 +69,12 @@ BEGIN
     ) VALUES 
         (v_tenant_id, v_manage_staff_id, 'nurse', 'Reception', true, false, false),
         (v_tenant_id, v_view_staff_id, 'physician', 'Cardiology', false, true, false),
-        (v_tenant_id, v_none_staff_id, 'other', 'Assistant', false, false, false)
-    ON CONFLICT (tenant_id, staff_id) DO UPDATE SET
-        can_manage_patient_profiles = EXCLUDED.can_manage_patient_profiles,
-        can_view_clinical_records = EXCLUDED.can_view_clinical_records,
-        can_write_clinical_notes = EXCLUDED.can_write_clinical_notes;
+        (v_tenant_id, v_none_staff_id, 'other', 'Assistant', false, false, false);
 
     -- Seed Customers
     INSERT INTO public.customers (id, tenant_id, first_name, last_name, phone)
     VALUES (v_cust_id, v_tenant_id, 'Patient', 'One', '5550001'),
-           (v_cust2_id, v_tenant2_id, 'Tenant2', 'Patient', '5550002')
-    ON CONFLICT (id) DO UPDATE SET
-        tenant_id = EXCLUDED.tenant_id;
+           (v_cust2_id, v_tenant2_id, 'Tenant2', 'Patient', '5550002');
 END;
 $$;
 
@@ -162,7 +156,7 @@ END;
 $$;
 
 -- TEST H, I, J: View-Only Staff
-SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888889', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888883', true);
 
 DO $$
 DECLARE
@@ -195,7 +189,7 @@ END;
 $$;
 
 -- TEST K, L, M: No-Capability Staff
-SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-88888888880', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888880', true);
 
 DO $$
 DECLARE
@@ -271,7 +265,7 @@ END;
 $$;
 
 -- TEST S, T: Active Tenant Owner Setup RPC Success
-SELECT set_config('request.jwt.claim.sub', 'a1111111-1111-4111-8111-111111111111', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888881', true);
 
 DO $$
 DECLARE
@@ -287,7 +281,7 @@ END;
 $$;
 
 -- TEST INACTIVE OWNER SETUP DENIAL (v_inactive_owner_uid: active = false)
-SELECT set_config('request.jwt.claim.sub', 'a7777777-7777-4777-8777-777777777777', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888887', true);
 
 DO $$
 DECLARE
@@ -321,7 +315,7 @@ BEGIN
 END;
 $$;
 
-SELECT set_config('request.jwt.claim.sub', 'a9999999-9999-4999-8999-999999999999', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888889', true);
 DO $$
 DECLARE
     v_res JSONB;
@@ -393,9 +387,9 @@ SELECT set_config('request.jwt.claim.sub', '', true);
 -- =========================================================================
 DO $$
 DECLARE
-    v_tenant_id UUID := '11111111-1111-4111-8111-111111111111'::UUID;
+    v_tenant_id UUID := '88888888-8888-4888-8888-888888888888'::UUID;
     v_cust_id UUID := 'c8888888-8888-4888-8888-888888888888'::UUID;
-    v_owner_uid UUID := 'a1111111-1111-4111-8111-111111111111'::UUID;
+    v_owner_uid UUID := 'a8888888-8888-4888-8888-888888888881'::UUID;
     v_manage_staff_uid UUID := 'a8888888-8888-4888-8888-888888888888'::UUID;
     v_audit RECORD;
     v_res JSONB;
