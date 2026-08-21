@@ -232,7 +232,28 @@ jobs:
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "Executing clinic_workspace_authority_hardening_tests.sql..."
           set +e
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql > /tmp/clinic-block3-sql.log 2>&1
+          npx tsx -e "
+            import fs from 'fs';
+            import pg from 'pg';
+            const client = new pg.Client({ connectionString: process.env.DB_URL });
+            async function main() {
+              let log = '';
+              try {
+                await client.connect();
+                const sql = fs.readFileSync('supabase/tests/clinic_workspace_authority_hardening_tests.sql', 'utf8');
+                const res = await client.query(sql);
+                log = 'SUCCESS:\n' + JSON.stringify(res, null, 2);
+              } catch (err: any) {
+                log = 'ERROR MESSAGE: ' + err.message + '\nERROR CODE: ' + err.code + '\nERROR DETAIL: ' + err.detail + '\nERROR POSITION: ' + err.position + '\nSTACK: ' + err.stack;
+                process.exitCode = 1;
+              } finally {
+                await client.end();
+                fs.writeFileSync('/tmp/clinic-block3-sql.log', log);
+                console.log(log);
+              }
+            }
+            main();
+          "
           PSQL_EXIT=$?
           set -e
 
