@@ -1,0 +1,139 @@
+name: Clinic Block 3 Exact-SHA E2 Verification (R1)
+
+on:
+  push:
+    branches:
+      - ci/clinic-block3-exact-sha-r1-20260821
+
+jobs:
+  verify-clinic-block3-exact-sha:
+    name: Verify Clinic Block 3 Exact-SHA E2 Evidence
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: supabase/postgres:15.1.0.147
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_PASSWORD: postgrespassword
+        ports:
+          - 54322:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: 1. Checkout Evidence Branch
+        uses: actions/checkout@v4
+
+      - name: 2. Hard-Bind and Checkout Exact Product SHA
+        run: |
+          set -eu
+          EXPECTED_PRODUCT_SHA="28c94bbbcc5cd0f82f556f51a62a32fda71e6dfe"
+          echo "EXPECTED_PRODUCT_SHA=$EXPECTED_PRODUCT_SHA"
+          git fetch origin feature/lari-clinic-foundation
+          git checkout "$EXPECTED_PRODUCT_SHA"
+          ACTUAL_PRODUCT_SHA=$(git rev-parse HEAD)
+          echo "ACTUAL_PRODUCT_SHA=$ACTUAL_PRODUCT_SHA"
+          if [ "$EXPECTED_PRODUCT_SHA" != "$ACTUAL_PRODUCT_SHA" ]; then
+            echo "PRODUCT SHA MISMATCH DETECTED!"
+            exit 1
+          fi
+
+      - name: 3. Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 4. Install Node Dependencies
+        run: npm ci
+
+      - name: 5. Verify PostgreSQL Container Ready
+        env:
+          PGPASSWORD: postgrespassword
+        run: |
+          set -eu
+          until psql -h localhost -p 54322 -U postgres -d postgres -c "SELECT 1;" > /dev/null 2>&1; do
+            echo "Waiting for postgres..."
+            sleep 2
+          done
+          echo "PostgreSQL container is ready."
+
+      - name: 6. Apply 63 Database Migrations
+        env:
+          PGPASSWORD: postgrespassword
+        run: |
+          set -eu
+          set -o pipefail
+          MIGRATION_COUNT=$(ls -1 supabase/migrations/*.sql | wc -l)
+          echo "Total migration count: $MIGRATION_COUNT"
+          if [ "$MIGRATION_COUNT" -ne 63 ]; then
+            echo "Migration count mismatch! Expected 63, got $MIGRATION_COUNT"
+            exit 1
+          fi
+          for file in $(ls supabase/migrations/*.sql | sort); do
+            echo "Applying $file..."
+            psql -h localhost -p 54322 -U postgres -d postgres -v ON_ERROR_STOP=1 -f "$file"
+          done
+          echo "All 63 migrations applied successfully."
+
+      - name: 7. Run Block 3 Workspace Authority Hardening SQL Test Suite and Verify Markers
+        env:
+          PGPASSWORD: postgrespassword
+        run: |
+          set -eu
+          set -o pipefail
+          psql -h localhost -p 54322 -U postgres -d postgres -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql 2>&1 | tee /tmp/clinic-block3-hardening.log
+
+          MARKERS=(
+            "CLINIC_PROFILE_MUTATION_MANAGE_ONLY_PROVEN=YES"
+            "CLINIC_PROFILE_MUTATION_AUDIT_CANONICAL=YES"
+            "CLINIC_PROFILE_RESPONSE_CONTRACT_PROVEN=YES"
+            "CLINIC_PROFILE_VIEW_WITHOUT_HISTORY_PROVEN=YES"
+            "CLINIC_VIEW_ONLY_MUTATION_DENIED=YES"
+            "CLINIC_NO_CAPABILITY_DENIAL_PROVEN=YES"
+            "CLINIC_PROFILE_CROSS_TENANT_DENIED=YES"
+            "CLINIC_ANON_PROFILE_ACCESS_DENIED=YES"
+            "CLINIC_OWNER_SETUP_READ_PROVEN=YES"
+            "CLINIC_OWNER_SETUP_CROSS_TENANT_SAFE=YES"
+            "CLINIC_BOUNDED_PROFILE_NO_HISTORY_LEAK=YES"
+            "CLINIC_INACTIVE_OWNER_SETUP_DENIED=YES"
+            "CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN=YES"
+            "CLINIC_ANON_EXECUTE_ACL_DENIED=YES"
+            "CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES"
+            "CLINIC_WORKSPACE_AUTHORITY_HARDENING_DB_EXECUTION=PASS"
+          )
+
+          for marker in "${MARKERS[@]}"; do
+            if ! grep -q "$marker" /tmp/clinic-block3-hardening.log; prefix=""; then
+              echo "MISSING REQUIRED MARKER: $marker"
+              exit 1
+            else
+              echo "FOUND REQUIRED MARKER: $marker"
+            fi
+          done
+          echo "All 16 Block 3 SQL markers verified successfully."
+
+      - name: 8. Execute Full Frontend & Static QA Regression Suite
+        run: |
+          set -eu
+          set -o pipefail
+          npm run lint
+          npm run build
+          npm run check:secrets
+          npm run qa:data-mode-regression
+          npm run qa:commercial-read-contracts
+          npm run qa:commercial-legacy-compatibility
+          npm run qa:commercial-eligibility-enforcement
+          npm run qa:commercial-packaging
+          npm run qa:entitlements
+          npm run qa:commercial-source-of-truth
+          npm run qa:package-branch-server-authority
+          npm run qa:clinic-domain
+          npm run qa:clinic-operational
+          npm run qa:clinic-application-contracts
+          npm run qa:clinic-workspace
+          node scripts/verify-branch-aware-booking.mjs
