@@ -211,7 +211,11 @@ $$;
 -- 3. EXECUTABLE DOMAIN BEHAVIOR (Authenticated Caller Context)
 --    REAL top-level SET LOCAL ROLE authenticated
 -- =========================================================================
-SET LOCAL ROLE authenticated;
+DO $$
+BEGIN
+    EXECUTE 'SET LOCAL ROLE authenticated';
+END;
+$$;
 
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888808', true);
@@ -486,7 +490,11 @@ SELECT set_config('request.jwt.claim.sub', '', true);
 -- 4. EXECUTABLE ANON DENIAL BEHAVIOR (Anon Caller Context)
 --    REAL top-level SET LOCAL ROLE anon
 -- =========================================================================
-SET LOCAL ROLE anon;
+DO $$
+BEGIN
+    EXECUTE 'SET LOCAL ROLE anon';
+END;
+$$;
 
 SELECT set_config('request.jwt.claim.role', 'anon', true);
 SELECT set_config('request.jwt.claim.sub', '', true);
