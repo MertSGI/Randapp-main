@@ -58,15 +58,15 @@ BEGIN
            (v_none_staff_uid, 'none_staff_h@test.com')
     ON CONFLICT (id) DO NOTHING;
 
-    -- Seed Users Profiles (including active = false tenant owner)
-    INSERT INTO public.users_profile (id, tenant_id, role, first_name, last_name, active)
-    VALUES (v_owner_uid, v_tenant_id, 'tenant_owner', 'Owner', 'One', true),
-           (v_owner2_uid, v_tenant2_id, 'tenant_owner', 'Owner', 'Two', true),
-           (v_inactive_owner_uid, v_tenant_id, 'tenant_owner', 'Inactive', 'Owner', false),
-           (v_superadmin_uid, NULL, 'super_admin', 'Super', 'Admin', true),
-           (v_manage_staff_uid, v_tenant_id, 'staff', 'Manage', 'Staff', true),
-           (v_view_staff_uid, v_tenant_id, 'staff', 'View', 'Staff', true),
-           (v_none_staff_uid, v_tenant_id, 'staff', 'NoCap', 'Staff', true);
+    -- Seed Users Profiles (using canonical name column)
+    INSERT INTO public.users_profile (id, tenant_id, role, name, active)
+    VALUES (v_owner_uid, v_tenant_id, 'tenant_owner', 'Owner One', true),
+           (v_owner2_uid, v_tenant2_id, 'tenant_owner', 'Owner Two', true),
+           (v_inactive_owner_uid, v_tenant_id, 'tenant_owner', 'Inactive Owner', false),
+           (v_superadmin_uid, NULL, 'super_admin', 'Super Admin', true),
+           (v_manage_staff_uid, v_tenant_id, 'staff', 'Manage Staff', true),
+           (v_view_staff_uid, v_tenant_id, 'staff', 'View Staff', true),
+           (v_none_staff_uid, v_tenant_id, 'staff', 'NoCap Staff', true);
 
     -- Seed Staff Records
     INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active)
@@ -83,10 +83,10 @@ BEGIN
         (v_tenant_id, v_view_staff_id, 'physician', 'Cardiology', false, true, false),
         (v_tenant_id, v_none_staff_id, 'other', 'Assistant', false, false, false);
 
-    -- Seed Customers
-    INSERT INTO public.customers (id, tenant_id, first_name, last_name, phone)
-    VALUES (v_cust_id, v_tenant_id, 'Patient', 'One', '5550001'),
-           (v_cust2_id, v_tenant2_id, 'Tenant2', 'Patient', '5550002');
+    -- Seed Customers (using canonical name column)
+    INSERT INTO public.customers (id, tenant_id, name, phone)
+    VALUES (v_cust_id, v_tenant_id, 'Patient One', '5550001'),
+           (v_cust2_id, v_tenant2_id, 'Tenant2 Patient', '5550002');
 END;
 $$;
 
