@@ -233,15 +233,19 @@ jobs:
           echo "Executing clinic_workspace_authority_hardening_tests.sql..."
           set +e
           npx tsx -e "
-            import { exec } from 'child_process';
+            import { execSync } from 'child_process';
             import fs from 'fs';
             const cmd = 'psql \"postgresql://postgres:postgres@127.0.0.1:54322/postgres\" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql';
-            exec(cmd, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-              const fullLog = '=== PSQL STDOUT ===\n' + stdout + '\n=== PSQL STDERR ===\n' + stderr + (err ? '\n=== EXIT ERROR ===\n' + err.message : '');
-              fs.writeFileSync('/tmp/clinic-block3-sql.log', fullLog);
-              console.log(fullLog);
-              if (err) process.exit(1);
-            });
+            let fullLog = '';
+            try {
+              const out = execSync(cmd, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+              fullLog = '=== PSQL STDOUT ===\n' + out;
+            } catch (err: any) {
+              fullLog = '=== PSQL STDOUT ===\n' + (err.stdout || '') + '\n=== PSQL STDERR ===\n' + (err.stderr || '') + '\n=== EXIT ERROR ===\n' + err.message;
+              process.exitCode = 1;
+            }
+            fs.writeFileSync('/tmp/clinic-block3-sql.log', fullLog);
+            console.log(fullLog);
           "
           PSQL_EXIT=$?
           set -e
