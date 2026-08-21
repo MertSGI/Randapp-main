@@ -39,12 +39,24 @@ BEGIN
     DELETE FROM public.staff WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     DELETE FROM public.customers WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     DELETE FROM public.users_profile WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+    DELETE FROM auth.users WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
     DELETE FROM public.tenants WHERE id IN (v_tenant_id, v_tenant2_id);
 
     -- Seed Tenants
     INSERT INTO public.tenants (id, name, slug, status)
     VALUES (v_tenant_id, 'Hardening Clinic Tenant 1', 'hardening-clinic-1', 'active'),
            (v_tenant2_id, 'Hardening Clinic Tenant 2', 'hardening-clinic-2', 'active');
+
+    -- Seed Auth Users
+    INSERT INTO auth.users (id, email)
+    VALUES (v_owner_uid, 'owner1_h@test.com'),
+           (v_owner2_uid, 'owner2_h@test.com'),
+           (v_inactive_owner_uid, 'owner_in_h@test.com'),
+           (v_superadmin_uid, 'superadmin_h@test.com'),
+           (v_manage_staff_uid, 'manage_staff_h@test.com'),
+           (v_view_staff_uid, 'view_staff_h@test.com'),
+           (v_none_staff_uid, 'none_staff_h@test.com')
+    ON CONFLICT (id) DO NOTHING;
 
     -- Seed Users Profiles (including active = false tenant owner)
     INSERT INTO public.users_profile (id, tenant_id, role, first_name, last_name, active)
