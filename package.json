@@ -39,6 +39,8 @@
     "qa:clinic-domain": "node scripts/test-clinic-domain-server-authority.mjs",
     "qa:clinic-operational": "node scripts/test-clinic-operational-integration.mjs",
     "qa:clinic-application-contracts": "node --import tsx scripts/test-clinic-application-contracts.mjs",
+    "qa:clinic-workspace": "node --import tsx scripts/test-clinic-workspace-ui.mjs",
+    "qa:clinic-workspace-static": "node scripts/test-clinic-workspace-static-contracts.mjs",
     "qa:public-links": "node scripts/verify-public-links.mjs",
     "qa:share-toolkit": "node scripts/verify-share-toolkit.mjs",
     "qa:data-governance": "node scripts/verify-data-governance-readiness.mjs",

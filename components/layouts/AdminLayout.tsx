@@ -1,5 +1,5 @@
 import React from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTenant } from '../../contexts/TenantContext';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -32,6 +32,12 @@ const AdminLayout: React.FC = () => {
           </span>
         </div>
         <div className="flex items-center gap-4">
+          <Link
+            to="/clinic"
+            className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-800/60 hover:bg-indigo-100 transition-colors"
+          >
+            <span>Klinik Çalışma Alanı</span>
+          </Link>
           <div className="text-sm text-gray-500 dark:text-gray-400 hidden sm:block">
             {currentUser?.email}
           </div>

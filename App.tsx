@@ -7,6 +7,7 @@ import MarketingLayout from './components/layouts/MarketingLayout';
 import SalonBookingLayout from './components/layouts/SalonBookingLayout';
 import AdminLayout from './components/layouts/AdminLayout';
 import SuperAdminLayout from './components/layouts/SuperAdminLayout';
+import ClinicLayout from './components/layouts/ClinicLayout';
 
 // Pages
 import MarketingHomePage from './pages/MarketingHomePage';
@@ -17,6 +18,7 @@ import RegistrationPage from './pages/RegistrationPage';
 import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
 import SupportPage from './pages/SupportPage';
+import { ClinicWorkspacePage } from './pages/clinic/ClinicWorkspacePage';
 
 import BookingPage from './pages/BookingPage';
 import AdminPage from './pages/AdminPage';
@@ -115,8 +117,6 @@ const AppFlowSwitcher: React.FC = () => {
       {/* 2.5 Customer Routes */}
       <Route path="/customer/login" element={<CustomerLoginPage />} />
       <Route path="/customer/appointments" element={<CustomerPortalPage />} />
-      <Route path="/customer" element={<Navigate to="/customer/appointments" replace />} />
-
       {/* 3. Admin Routes */}
       <Route element={<ProtectedRoute allowedRoles={['tenant_owner', 'super_admin']}><AdminLayout /></ProtectedRoute>}>
         <Route path="/admin" element={<AdminPage />} />
@@ -129,6 +129,12 @@ const AppFlowSwitcher: React.FC = () => {
           <SitePreviewPage />
         </ProtectedRoute>
       } />
+
+      {/* 3.5 Dedicated Clinic Routes */}
+      <Route element={<ProtectedRoute allowedRoles={['tenant_owner', 'staff']}><ClinicLayout /></ProtectedRoute>}>
+        <Route path="/clinic" element={<ClinicWorkspacePage />} />
+        <Route path="/clinic/*" element={<ClinicWorkspacePage />} />
+      </Route>
 
       {/* 4. Super Admin Routes */}
       <Route element={<ProtectedRoute allowedRoles={['super_admin']}><SuperAdminLayout /></ProtectedRoute>}>
