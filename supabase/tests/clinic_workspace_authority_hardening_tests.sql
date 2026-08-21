@@ -383,8 +383,12 @@ BEGIN
 END;
 $$;
 
+-- RESET ROLE back to session superuser for Owner Setup tests
+RESET ROLE;
+
 -- TEST S, T: Active Tenant Owner Setup RPC Success
 SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888801', true);
+SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 
 DO $$
 DECLARE
