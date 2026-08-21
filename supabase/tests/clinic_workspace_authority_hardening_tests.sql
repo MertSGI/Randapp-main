@@ -32,8 +32,33 @@ DECLARE
 BEGIN
     RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.2) ===';
 
-    -- Clean any existing isolated test fixture
+    -- Clean any existing isolated test fixture (child relations first)
     DELETE FROM public.audit_events WHERE tenant_id IN (v_tenant_id::text, v_tenant2_id::text);
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_notes') THEN
+        DELETE FROM public.clinic_notes WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_encounters') THEN
+        DELETE FROM public.clinic_encounters WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_consents') THEN
+        DELETE FROM public.clinic_consents WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_prescriptions') THEN
+        DELETE FROM public.clinic_prescriptions WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_medical_documents') THEN
+        DELETE FROM public.clinic_medical_documents WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_vaccinations') THEN
+        DELETE FROM public.clinic_vaccinations WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_lab_results') THEN
+        DELETE FROM public.clinic_lab_results WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_vital_signs') THEN
+        DELETE FROM public.clinic_vital_signs WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+
     DELETE FROM public.clinic_patient_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     DELETE FROM public.clinic_staff_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     DELETE FROM public.appointments WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
@@ -59,29 +84,17 @@ BEGIN
     VALUES (v_tenant_id, 'Hardening Clinic Tenant 1', 'hardening-clinic-1', 'active'),
            (v_tenant2_id, 'Hardening Clinic Tenant 2', 'hardening-clinic-2', 'active');
 
-    -- Seed Auth Users with robust column fallback (instance_id/aud vs basic)
+    -- Seed Auth Users (compile-safe canonical schema)
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
-        BEGIN
-            INSERT INTO auth.users (id, email, role, created_at, updated_at, instance_id, aud)
-            VALUES (v_owner_uid, 'owner1_hardened_b3@test.invalid', 'authenticated', now(), now(), '00000000-0000-0000-0000-000000000000'::uuid, 'authenticated'),
-                   (v_owner2_uid, 'owner2_hardened_b3@test.invalid', 'authenticated', now(), now(), '00000000-0000-0000-0000-000000000000'::uuid, 'authenticated'),
-                   (v_inactive_owner_uid, 'owner_in_hardened_b3@test.invalid', 'authenticated', now(), now(), '00000000-0000-0000-0000-000000000000'::uuid, 'authenticated'),
-                   (v_superadmin_uid, 'superadmin_hardened_b3@test.invalid', 'authenticated', now(), now(), '00000000-0000-0000-0000-000000000000'::uuid, 'authenticated'),
-                   (v_manage_staff_uid, 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now(), '00000000-0000-0000-0000-000000000000'::uuid, 'authenticated'),
-                   (v_view_staff_uid, 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now(), '00000000-0000-0000-0000-000000000000'::uuid, 'authenticated'),
-                   (v_none_staff_uid, 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now(), '00000000-0000-0000-0000-000000000000'::uuid, 'authenticated')
-            ON CONFLICT (id) DO NOTHING;
-        EXCEPTION WHEN OTHERS THEN
-            INSERT INTO auth.users (id, email, role, created_at, updated_at)
-            VALUES (v_owner_uid, 'owner1_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                   (v_owner2_uid, 'owner2_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                   (v_inactive_owner_uid, 'owner_in_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                   (v_superadmin_uid, 'superadmin_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                   (v_manage_staff_uid, 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                   (v_view_staff_uid, 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                   (v_none_staff_uid, 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
-            ON CONFLICT (id) DO NOTHING;
-        END;
+        INSERT INTO auth.users (id, email, role, created_at, updated_at)
+        VALUES (v_owner_uid, 'owner1_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               (v_owner2_uid, 'owner2_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               (v_inactive_owner_uid, 'owner_in_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               (v_superadmin_uid, 'superadmin_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               (v_manage_staff_uid, 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               (v_view_staff_uid, 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               (v_none_staff_uid, 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
+        ON CONFLICT (id) DO NOTHING;
     END IF;
 
     -- Seed Users Profiles (using canonical name column)
