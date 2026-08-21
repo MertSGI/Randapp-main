@@ -32,8 +32,33 @@ DECLARE
 BEGIN
     RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.2) ===';
 
-    -- Clean any existing isolated test fixture
+    -- Clean any existing isolated test fixture (child relations first)
     DELETE FROM public.audit_events WHERE tenant_id IN (v_tenant_id::text, v_tenant2_id::text);
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_notes') THEN
+        DELETE FROM public.clinic_notes WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_encounters') THEN
+        DELETE FROM public.clinic_encounters WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_consents') THEN
+        DELETE FROM public.clinic_consents WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_prescriptions') THEN
+        DELETE FROM public.clinic_prescriptions WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_medical_documents') THEN
+        DELETE FROM public.clinic_medical_documents WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_vaccinations') THEN
+        DELETE FROM public.clinic_vaccinations WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_lab_results') THEN
+        DELETE FROM public.clinic_lab_results WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_vital_signs') THEN
+        DELETE FROM public.clinic_vital_signs WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+
     DELETE FROM public.clinic_patient_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     DELETE FROM public.clinic_staff_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     DELETE FROM public.appointments WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
