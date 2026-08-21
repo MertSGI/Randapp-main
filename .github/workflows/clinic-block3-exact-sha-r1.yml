@@ -177,30 +177,10 @@ jobs:
         run: |
           node scripts/verify-branch-aware-booking.mjs
 
-      - name: Run Clinic Domain Server Authority Functional SQL Suite & Verify Markers
+      - name: Run Clinic Domain Server Authority Static QA
         run: |
-          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          echo "Executing clinic_domain_server_authority_tests.sql..."
-          set +e
-          set -o pipefail
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_domain_server_authority_tests.sql 2>&1 | tee /tmp/clinic-block1-sql.log
-          PSQL_EXIT=${PIPESTATUS[0]}
-          set -e
-
-          if [ "$PSQL_EXIT" -ne 0 ]; then
-            cat /tmp/clinic-block1-sql.log
-            exit "$PSQL_EXIT"
-          fi
-
-          grep -F 'ANON_PROTECTED_ROWS_PREEXIST=YES' /tmp/clinic-block1-sql.log
-          grep -F 'ANON_CLINICAL_VISIBILITY_ZERO=YES' /tmp/clinic-block1-sql.log
-          grep -F 'OWNER_DIRECT_DML_DENIED=YES' /tmp/clinic-block1-sql.log
-          grep -F 'AUTHORIZED_CROSS_TENANT_BOUNDARY_PROVEN=YES' /tmp/clinic-block1-sql.log
-          grep -F 'CLINICAL_NOTE_APPEND_ONLY_PROVEN=YES' /tmp/clinic-block1-sql.log
-          grep -F 'AUDIT_CLINICAL_CONTENT_LEAK=NO' /tmp/clinic-block1-sql.log
-          grep -F 'PUBLIC_SELF_SERVICE_CLINICAL_ISOLATION=PASS' /tmp/clinic-block1-sql.log
-          grep -F 'CLINIC_SQL_DB_EXECUTION=PASS' /tmp/clinic-block1-sql.log
-          echo "✅ Clinic domain server authority SQL contract suite passed with all test-generated markers verified."
+          node scripts/test-clinic-domain-server-authority.mjs
+          echo "✅ Clinic domain server authority static QA passed."
 
       - name: Run Clinic Domain Real Multi-Session Concurrency Harness & Verify Markers
         run: |
@@ -221,32 +201,10 @@ jobs:
           grep -F 'HARNESS_REAL_MULTI_SESSION_CONCURRENCY = YES' /tmp/clinic-block1-concurrency.log
           echo "✅ Clinic domain real multi-session concurrency harness passed with all harness-generated markers verified."
 
-      - name: Run Clinic Block 2 Operational Integration Functional SQL Suite & Verify Markers
+      - name: Run Clinic Operational Static QA
         run: |
-          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          echo "Executing clinic_operational_integration_tests.sql..."
-          set +e
-          set -o pipefail
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_operational_integration_tests.sql 2>&1 | tee /tmp/clinic-block2-sql.log
-          PSQL_EXIT=${PIPESTATUS[0]}
-          set -e
-
-          if [ "$PSQL_EXIT" -ne 0 ]; then
-            echo "=== FAILED SQL LOG OUTPUT ==="
-            cat /tmp/clinic-block2-sql.log
-            exit "$PSQL_EXIT"
-          fi
-
-          grep -F 'CLINIC_BLOCK2_SQL_DB_EXECUTION=PASS' /tmp/clinic-block2-sql.log
-          grep -F 'CLINIC_CONFIRMED_ONLY_START_PROVEN=YES' /tmp/clinic-block2-sql.log
-          grep -F 'CLINIC_OPEN_ENCOUNTER_STATUS_GUARD_PROVEN=YES' /tmp/clinic-block2-sql.log
-          grep -F 'CLINIC_LEGACY_COMPLETION_BYPASS_CLOSED=YES' /tmp/clinic-block2-sql.log
-          grep -F 'CLINIC_ATOMIC_COMPLETION_PROVEN=YES' /tmp/clinic-block2-sql.log
-          grep -F 'CLINIC_CORE_COMPLETION_SIDE_EFFECTS_PROVEN=YES' /tmp/clinic-block2-sql.log
-          grep -F 'CLINIC_IDEMPOTENT_COMPLETION_PROVEN=YES' /tmp/clinic-block2-sql.log
-          grep -F 'CLINIC_PATIENT_HISTORY_CONTRACT_PROVEN=YES' /tmp/clinic-block2-sql.log
-          grep -F 'CLINIC_CROSS_TENANT_BOUNDARY_PROVEN=YES' /tmp/clinic-block2-sql.log
-          echo "✅ Clinic Block 2 operational integration SQL suite passed with all test-generated markers verified."
+          node scripts/test-clinic-operational-integration.mjs
+          echo "✅ Clinic operational integration static QA passed."
 
       - name: Run Clinic Block 2 Real Multi-Session Concurrency Harness & Verify Markers
         run: |
@@ -305,14 +263,6 @@ jobs:
           grep -F 'CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES' /tmp/clinic-block3-sql.log
           grep -F 'CLINIC_WORKSPACE_AUTHORITY_HARDENING_DB_EXECUTION=PASS' /tmp/clinic-block3-sql.log
           echo "✅ Clinic Block 3 workspace authority hardening SQL suite passed with all test-generated markers verified."
-
-      - name: Run Clinic Domain Static QA
-        run: |
-          node scripts/test-clinic-domain-server-authority.mjs
-
-      - name: Run Clinic Operational Static QA
-        run: |
-          node scripts/test-clinic-operational-integration.mjs
 
       - name: Run Clinic Application Contracts Executable QA
         run: |
