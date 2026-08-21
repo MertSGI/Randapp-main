@@ -237,9 +237,12 @@ jobs:
           set -e
 
           if [ -n "$GITHUB_STEP_SUMMARY" ]; then
-            echo "### B64 LOG SUMMARY" >> "$GITHUB_STEP_SUMMARY"
-            base64 -w 0 /tmp/clinic-block3-sql.log >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
+            node -e "
+              const fs = require('fs');
+              let log = fs.readFileSync('/tmp/clinic-block3-sql.log', 'utf8');
+              log = log.replace(/[^\x00-\x7F]/g, '');
+              fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '### CLINIC LOG SUMMARY\n\`\`\`\n' + log + '\n\`\`\`\n');
+            "
           fi
 
           if [ "$PSQL_EXIT" -ne 0 ]; then
