@@ -1,4 +1,4 @@
--- LARİ CLINIC WORKSPACE AUTHORITY HARDENING EXECUTABLE TEST SUITE (R1.2 HARDENED)
+-- LARİ CLINIC WORKSPACE AUTHORITY HARDENING EXECUTABLE TEST SUITE (R1.2 HARDENED ISOLATED)
 -- File: supabase/tests/clinic_workspace_authority_hardening_tests.sql
 -- Purpose:
 --   Executable SQL verification for Migration 63 with REAL TOP-LEVEL DATABASE ROLE STATEMENTS (SET LOCAL ROLE authenticated / anon),
@@ -11,16 +11,16 @@ BEGIN;
 -- =========================================================================
 DO $$
 DECLARE
-    v_tenant_id UUID := '11111111-1111-4111-8111-111111111111'::UUID;
-    v_tenant2_id UUID := '22222222-2222-4222-8222-222222222222'::UUID;
+    v_tenant_id UUID := '88888888-8888-4888-8888-888888888888'::UUID;
+    v_tenant2_id UUID := '88888888-8888-4888-8888-888888888889'::UUID;
 
-    v_owner_uid UUID := 'a1111111-1111-4111-8111-111111111111'::UUID;
-    v_owner2_uid UUID := 'a2222222-2222-4222-8222-222222222222'::UUID;
-    v_inactive_owner_uid UUID := 'a7777777-7777-4777-8777-777777777777'::UUID;
-    v_superadmin_uid UUID := 'a9999999-9999-4999-8999-999999999999'::UUID;
+    v_owner_uid UUID := 'a8888888-8888-4888-8888-888888888881'::UUID;
+    v_owner2_uid UUID := 'a8888888-8888-4888-8888-888888888882'::UUID;
+    v_inactive_owner_uid UUID := 'a8888888-8888-4888-8888-888888888887'::UUID;
+    v_superadmin_uid UUID := 'a8888888-8888-4888-8888-888888888889'::UUID;
 
     v_manage_staff_uid UUID := 'a8888888-8888-4888-8888-888888888888'::UUID;
-    v_view_staff_uid UUID := 'a8888888-8888-4888-8888-888888888889'::UUID;
+    v_view_staff_uid UUID := 'a8888888-8888-4888-8888-888888888883'::UUID;
     v_none_staff_uid UUID := 'a8888888-8888-4888-8888-888888888880'::UUID;
 
     v_manage_staff_id UUID := '38888888-8888-4888-8888-888888888888'::UUID;
@@ -32,10 +32,30 @@ DECLARE
 BEGIN
     RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.2) ===';
 
+    -- Clean any existing isolated test fixture
+    DELETE FROM public.audit_events WHERE tenant_id IN (v_tenant_id::text, v_tenant2_id::text);
+    DELETE FROM public.clinic_patient_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    DELETE FROM public.clinic_staff_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    DELETE FROM public.staff WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    DELETE FROM public.customers WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    DELETE FROM public.users_profile WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+    DELETE FROM auth.users WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+    DELETE FROM public.tenants WHERE id IN (v_tenant_id, v_tenant2_id);
+
     -- Seed Tenants
-    INSERT INTO public.tenants (id, name, slug)
-    VALUES (v_tenant_id, 'Hardening Clinic Tenant 1', 'hardening-clinic-1'),
-           (v_tenant2_id, 'Hardening Clinic Tenant 2', 'hardening-clinic-2')
+    INSERT INTO public.tenants (id, name, slug, status)
+    VALUES (v_tenant_id, 'Hardening Clinic Tenant 1', 'hardening-clinic-1', 'active'),
+           (v_tenant2_id, 'Hardening Clinic Tenant 2', 'hardening-clinic-2', 'active');
+
+    -- Seed Auth Users
+    INSERT INTO auth.users (id, email)
+    VALUES (v_owner_uid, 'owner1_h@test.com'),
+           (v_owner2_uid, 'owner2_h@test.com'),
+           (v_inactive_owner_uid, 'owner_in_h@test.com'),
+           (v_superadmin_uid, 'superadmin_h@test.com'),
+           (v_manage_staff_uid, 'manage_staff_h@test.com'),
+           (v_view_staff_uid, 'view_staff_h@test.com'),
+           (v_none_staff_uid, 'none_staff_h@test.com')
     ON CONFLICT (id) DO NOTHING;
 
     -- Seed Users Profiles (including active = false tenant owner)
@@ -46,21 +66,13 @@ BEGIN
            (v_superadmin_uid, NULL, 'super_admin', 'Super', 'Admin', true),
            (v_manage_staff_uid, v_tenant_id, 'staff', 'Manage', 'Staff', true),
            (v_view_staff_uid, v_tenant_id, 'staff', 'View', 'Staff', true),
-           (v_none_staff_uid, v_tenant_id, 'staff', 'NoCap', 'Staff', true)
-    ON CONFLICT (id) DO UPDATE SET
-        tenant_id = EXCLUDED.tenant_id,
-        role = EXCLUDED.role,
-        active = EXCLUDED.active;
+           (v_none_staff_uid, v_tenant_id, 'staff', 'NoCap', 'Staff', true);
 
     -- Seed Staff Records
     INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active)
     VALUES (v_manage_staff_id, v_tenant_id, v_manage_staff_uid, 'Manage Staff', true),
            (v_view_staff_id, v_tenant_id, v_view_staff_uid, 'View Staff', true),
-           (v_none_staff_id, v_tenant_id, v_none_staff_uid, 'None Staff', true)
-    ON CONFLICT (id) DO UPDATE SET
-        tenant_id = EXCLUDED.tenant_id,
-        user_profile_id = EXCLUDED.user_profile_id,
-        active = EXCLUDED.active;
+           (v_none_staff_id, v_tenant_id, v_none_staff_uid, 'None Staff', true);
 
     -- Seed Clinic Staff Profiles with specific capabilities
     INSERT INTO public.clinic_staff_profiles (
@@ -69,18 +81,12 @@ BEGIN
     ) VALUES 
         (v_tenant_id, v_manage_staff_id, 'nurse', 'Reception', true, false, false),
         (v_tenant_id, v_view_staff_id, 'physician', 'Cardiology', false, true, false),
-        (v_tenant_id, v_none_staff_id, 'other', 'Assistant', false, false, false)
-    ON CONFLICT (tenant_id, staff_id) DO UPDATE SET
-        can_manage_patient_profiles = EXCLUDED.can_manage_patient_profiles,
-        can_view_clinical_records = EXCLUDED.can_view_clinical_records,
-        can_write_clinical_notes = EXCLUDED.can_write_clinical_notes;
+        (v_tenant_id, v_none_staff_id, 'other', 'Assistant', false, false, false);
 
     -- Seed Customers
     INSERT INTO public.customers (id, tenant_id, first_name, last_name, phone)
     VALUES (v_cust_id, v_tenant_id, 'Patient', 'One', '5550001'),
-           (v_cust2_id, v_tenant2_id, 'Tenant2', 'Patient', '5550002')
-    ON CONFLICT (id) DO UPDATE SET
-        tenant_id = EXCLUDED.tenant_id;
+           (v_cust2_id, v_tenant2_id, 'Tenant2', 'Patient', '5550002');
 END;
 $$;
 
@@ -99,7 +105,7 @@ BEGIN
     IF NOT has_function_privilege('authenticated', 'public.clinic_get_staff_setup_profiles()', 'EXECUTE') THEN
         RAISE EXCEPTION 'ACL CHECK FAILED: authenticated role must have EXECUTE on clinic_get_staff_setup_profiles';
     END IF;
-    RAISE NOTICE '✓ AUTHENTICATED EXECUTE ACL PROVEN';
+    RAISE NOTICE 'CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN=YES';
 
     -- Anon Role Revocations
     IF has_function_privilege('anon', 'public.clinic_get_patient_profile(uuid)', 'EXECUTE') THEN
@@ -111,7 +117,7 @@ BEGIN
     IF has_function_privilege('anon', 'public.clinic_get_staff_setup_profiles()', 'EXECUTE') THEN
         RAISE EXCEPTION 'ACL CHECK FAILED: anon role must NOT have EXECUTE on clinic_get_staff_setup_profiles';
     END IF;
-    RAISE NOTICE '✓ ANON EXECUTE ACL DENIED';
+    RAISE NOTICE 'CLINIC_ANON_EXECUTE_ACL_DENIED=YES';
 END;
 $$;
 
@@ -120,8 +126,6 @@ $$;
 -- =========================================================================
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
-
--- TEST A, B, C, D, E, F, G: Manage-Only Staff
 SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888888', true);
 
 DO $$
@@ -136,6 +140,7 @@ BEGIN
     IF (v_res->>'success')::boolean <> true THEN
         RAISE EXCEPTION 'TEST A FAILED: Manage-only staff should read bounded profile';
     END IF;
+    RAISE NOTICE 'CLINIC_PROFILE_VIEW_WITHOUT_HISTORY_PROVEN=YES';
 
     -- History denied FORBIDDEN
     BEGIN
@@ -157,11 +162,13 @@ BEGIN
     IF (v_res->>'success')::boolean <> true OR v_res->>'patient_profile_id' IS NULL THEN
         RAISE EXCEPTION 'TEST C FAILED: Manage-only profile upsert failed or missing patient_profile_id';
     END IF;
+    RAISE NOTICE 'CLINIC_PROFILE_MUTATION_MANAGE_ONLY_PROVEN=YES';
+    RAISE NOTICE 'CLINIC_PROFILE_RESPONSE_CONTRACT_PROVEN=YES';
 END;
 $$;
 
 -- TEST H, I, J: View-Only Staff
-SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888889', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888883', true);
 
 DO $$
 DECLARE
@@ -189,6 +196,7 @@ BEGIN
             RAISE EXCEPTION 'TEST J FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
+    RAISE NOTICE 'CLINIC_VIEW_ONLY_MUTATION_DENIED=YES';
 END;
 $$;
 
@@ -231,6 +239,7 @@ BEGIN
             RAISE EXCEPTION 'TEST M FAILED [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
+    RAISE NOTICE 'CLINIC_NO_CAPABILITY_DENIAL_PROVEN=YES';
 END;
 $$;
 
@@ -263,11 +272,12 @@ BEGIN
             RAISE EXCEPTION 'TEST O FAILED [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
+    RAISE NOTICE 'CLINIC_PROFILE_CROSS_TENANT_DENIED=YES';
 END;
 $$;
 
 -- TEST S, T: Active Tenant Owner Setup RPC Success
-SELECT set_config('request.jwt.claim.sub', 'a1111111-1111-4111-8111-111111111111', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888881', true);
 
 DO $$
 DECLARE
@@ -277,11 +287,13 @@ BEGIN
     IF (v_res->>'success')::boolean <> true OR jsonb_array_length(v_res->'profiles') < 3 THEN
         RAISE EXCEPTION 'TEST S, T FAILED: Active tenant owner setup read failed';
     END IF;
+    RAISE NOTICE 'CLINIC_OWNER_SETUP_READ_PROVEN=YES';
+    RAISE NOTICE 'CLINIC_OWNER_SETUP_CROSS_TENANT_SAFE=YES';
 END;
 $$;
 
 -- TEST INACTIVE OWNER SETUP DENIAL (v_inactive_owner_uid: active = false)
-SELECT set_config('request.jwt.claim.sub', 'a7777777-7777-4777-8777-777777777777', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888887', true);
 
 DO $$
 DECLARE
@@ -298,6 +310,7 @@ BEGIN
             RAISE EXCEPTION 'TEST INACTIVE OWNER FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
+    RAISE NOTICE 'CLINIC_INACTIVE_OWNER_SETUP_DENIED=YES';
 END;
 $$;
 
@@ -314,7 +327,7 @@ BEGIN
 END;
 $$;
 
-SELECT set_config('request.jwt.claim.sub', 'a9999999-9999-4999-8999-999999999999', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888889', true);
 DO $$
 DECLARE
     v_res JSONB;
@@ -327,6 +340,8 @@ END;
 $$;
 
 RESET ROLE;
+SELECT set_config('request.jwt.claim.role', '', true);
+SELECT set_config('request.jwt.claim.sub', '', true);
 
 -- =========================================================================
 -- 4. EXECUTABLE ANON DENIAL BEHAVIOR (SET LOCAL ROLE anon)
@@ -367,23 +382,26 @@ BEGIN
         RAISE EXCEPTION 'TEST R FAILED: Anon caller must NOT read setup profiles';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_state <> '42501' AND v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_msg NOT LIKE '%FORBIDDEN%' THEN
+        IF v_err_state <> '42501' AND v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_state <> '42501' THEN
             RAISE EXCEPTION 'TEST R FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
+    RAISE NOTICE 'CLINIC_ANON_PROFILE_ACCESS_DENIED=YES';
 END;
 $$;
 
 RESET ROLE;
+SELECT set_config('request.jwt.claim.role', '', true);
+SELECT set_config('request.jwt.claim.sub', '', true);
 
 -- =========================================================================
 -- 5. CANONICAL AUDIT & ZERO LEAK POST-CHECKS (Privileged Session Role)
 -- =========================================================================
 DO $$
 DECLARE
-    v_tenant_id UUID := '11111111-1111-4111-8111-111111111111'::UUID;
+    v_tenant_id UUID := '88888888-8888-4888-8888-888888888888'::UUID;
     v_cust_id UUID := 'c8888888-8888-4888-8888-888888888888'::UUID;
-    v_owner_uid UUID := 'a1111111-1111-4111-8111-111111111111'::UUID;
+    v_owner_uid UUID := 'a8888888-8888-4888-8888-888888888881'::UUID;
     v_manage_staff_uid UUID := 'a8888888-8888-4888-8888-888888888888'::UUID;
     v_audit RECORD;
     v_res JSONB;
@@ -406,6 +424,7 @@ BEGIN
     IF v_audit.payload ? 'blood_type' OR v_audit.payload ? 'allergies' THEN
         RAISE EXCEPTION 'CANONICAL AUDIT CHECK FAILED: Payload leaked clinical health content';
     END IF;
+    RAISE NOTICE 'CLINIC_PROFILE_MUTATION_AUDIT_CANONICAL=YES';
 
     -- Zero leak checks
     PERFORM set_config('request.jwt.claim.sub', v_manage_staff_uid::text, true);
@@ -416,25 +435,13 @@ BEGIN
     END IF;
 
     PERFORM set_config('request.jwt.claim.sub', v_owner_uid::text, true);
+    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
     v_res := public.clinic_get_staff_setup_profiles();
     IF (v_res->'profiles'->0) ? 'allergies' THEN
         RAISE EXCEPTION 'LEAK CHECK FAILED: Setup profiles contain patient health data!';
     END IF;
-
-    RAISE NOTICE 'CLINIC_PROFILE_MUTATION_MANAGE_ONLY_PROVEN=YES';
-    RAISE NOTICE 'CLINIC_PROFILE_MUTATION_AUDIT_CANONICAL=YES';
-    RAISE NOTICE 'CLINIC_PROFILE_RESPONSE_CONTRACT_PROVEN=YES';
-    RAISE NOTICE 'CLINIC_PROFILE_VIEW_WITHOUT_HISTORY_PROVEN=YES';
-    RAISE NOTICE 'CLINIC_VIEW_ONLY_MUTATION_DENIED=YES';
-    RAISE NOTICE 'CLINIC_NO_CAPABILITY_DENIAL_PROVEN=YES';
-    RAISE NOTICE 'CLINIC_PROFILE_CROSS_TENANT_DENIED=YES';
-    RAISE NOTICE 'CLINIC_ANON_PROFILE_ACCESS_DENIED=YES';
-    RAISE NOTICE 'CLINIC_OWNER_SETUP_READ_PROVEN=YES';
-    RAISE NOTICE 'CLINIC_OWNER_SETUP_CROSS_TENANT_SAFE=YES';
     RAISE NOTICE 'CLINIC_BOUNDED_PROFILE_NO_HISTORY_LEAK=YES';
-    RAISE NOTICE 'CLINIC_INACTIVE_OWNER_SETUP_DENIED=YES';
-    RAISE NOTICE 'CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN=YES';
-    RAISE NOTICE 'CLINIC_ANON_EXECUTE_ACL_DENIED=YES';
+
     RAISE NOTICE 'CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES';
     RAISE NOTICE 'CLINIC_WORKSPACE_AUTHORITY_HARDENING_DB_EXECUTION=PASS';
 END;
