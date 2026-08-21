@@ -235,14 +235,19 @@ jobs:
             import fs from 'fs';
             import pg from 'pg';
             const client = new pg.Client({ connectionString: 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' });
-            client.on('notice', msg => console.log('NOTICE:', msg.message));
+            let logBuf = '';
+            client.on('notice', msg => {
+              console.log('NOTICE:', msg.message);
+              logBuf += msg.message + '\n';
+            });
             async function main() {
               await client.connect();
               const sql = fs.readFileSync('supabase/tests/clinic_workspace_authority_hardening_tests.sql', 'utf8');
               try {
                 await client.query(sql);
                 console.log('SQL EXECUTION SUCCESSFUL');
-                fs.writeFileSync('/tmp/clinic-block3-sql.log', 'ALL_OK');
+                logBuf += 'SQL_EXECUTION_SUCCESSFUL\n';
+                fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
               } catch (err: any) {
                 console.error('=== EXECUTION ERROR ===');
                 console.error('MESSAGE:', err.message);
@@ -252,6 +257,8 @@ jobs:
                 console.error('WHERE:', err.where);
                 console.error('POSITION:', err.position);
                 console.error('STACK:', err.stack);
+                logBuf += 'EXECUTION_ERROR: ' + err.message + '\n';
+                fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
                 process.exit(1);
               } finally {
                 await client.end();
