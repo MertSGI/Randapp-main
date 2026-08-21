@@ -49,7 +49,8 @@ BEGIN
     DELETE FROM public.tenant_branding WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     DELETE FROM public.users_profile WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
-        DELETE FROM auth.users WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+        DELETE FROM auth.users WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid)
+           OR email LIKE '%_hardened_b3@test.invalid';
     END IF;
     DELETE FROM public.tenants WHERE id IN (v_tenant_id, v_tenant2_id);
 
@@ -58,16 +59,16 @@ BEGIN
     VALUES (v_tenant_id, 'Hardening Clinic Tenant 1', 'hardening-clinic-1', 'active'),
            (v_tenant2_id, 'Hardening Clinic Tenant 2', 'hardening-clinic-2', 'active');
 
-    -- Seed Auth Users
+    -- Seed Auth Users with unique test.invalid emails
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
         INSERT INTO auth.users (id, email, role, created_at, updated_at)
-        VALUES (v_owner_uid, 'owner1_h@test.com', 'authenticated', now(), now()),
-               (v_owner2_uid, 'owner2_h@test.com', 'authenticated', now(), now()),
-               (v_inactive_owner_uid, 'owner_in_h@test.com', 'authenticated', now(), now()),
-               (v_superadmin_uid, 'superadmin_h@test.com', 'authenticated', now(), now()),
-               (v_manage_staff_uid, 'manage_staff_h@test.com', 'authenticated', now(), now()),
-               (v_view_staff_uid, 'view_staff_h@test.com', 'authenticated', now(), now()),
-               (v_none_staff_uid, 'none_staff_h@test.com', 'authenticated', now(), now())
+        VALUES (v_owner_uid, 'owner1_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               (v_owner2_uid, 'owner2_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               (v_inactive_owner_uid, 'owner_in_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               (v_superadmin_uid, 'superadmin_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               (v_manage_staff_uid, 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               (v_view_staff_uid, 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               (v_none_staff_uid, 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
         ON CONFLICT (id) DO NOTHING;
     END IF;
 
@@ -385,7 +386,7 @@ BEGIN
         RAISE EXCEPTION 'TEST Q FAILED: Anon caller must NOT mutate profile';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_state <> '42501' AND v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_msg NOT LIKE '%FORBIDDEN%' THEN
+        IF v_err_state <> '42501' AND v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_state NOT LIKE '%FORBIDDEN%' THEN
             RAISE EXCEPTION 'TEST Q FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
