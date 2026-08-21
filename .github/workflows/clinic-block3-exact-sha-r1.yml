@@ -232,20 +232,7 @@ jobs:
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "Executing clinic_workspace_authority_hardening_tests.sql..."
           set +e
-          node -e "
-            const { execSync } = require('child_process');
-            const fs = require('fs');
-            let content = '';
-            try {
-              content = execSync('psql \"postgresql://postgres:postgres@127.0.0.1:54322/postgres\" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql', { encoding: 'utf8', stdio: 'pipe' });
-              console.log('=== PSQL SUCCESS ===\n' + content);
-            } catch (err) {
-              content = 'STDOUT:\n' + (err.stdout || '') + '\n\nSTDERR:\n' + (err.stderr || '') + '\n\nMESSAGE:\n' + (err.message || '');
-              console.log('=== PSQL ERROR ===\n' + content);
-              process.exitCode = 1;
-            }
-            fs.writeFileSync('/tmp/clinic-block3-sql.log', content, 'utf8');
-          "
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql > /tmp/clinic-block3-sql.log 2>&1
           PSQL_EXIT=$?
           set -e
 
