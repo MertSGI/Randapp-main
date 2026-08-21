@@ -236,11 +236,9 @@ jobs:
           PSQL_EXIT=${PIPESTATUS[0]}
           set -e
 
-          if [ -n "$GITHUB_STEP_SUMMARY" ]; then
-            echo "### CLINIC LOG SUMMARY" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            cat /tmp/clinic-block3-sql.log >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PSQL_EXIT" -ne 0 ]; then
+            echo "❌ PSQL COMMAND RETURNED FAILURE EXIT CODE: $PSQL_EXIT"
+            exit "$PSQL_EXIT"
           fi
 
           MARKERS=(
