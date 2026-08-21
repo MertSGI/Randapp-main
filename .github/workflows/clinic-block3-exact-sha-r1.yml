@@ -271,15 +271,17 @@ jobs:
               echo "  [FOUND] $m"
             else
               echo "  [MISSING] $m"
-              if [ -n "$GITHUB_STEP_SUMMARY" ]; then
-                echo "MISSING_MARKER: $m" >> "$GITHUB_STEP_SUMMARY"
-              fi
               MISSING=1
             fi
           done
 
           if [ "$MISSING" = "1" ]; then
             echo "❌ ONE OR MORE MARKERS MISSING!"
+            echo "=== PSQL LOG HEAD 20 ==="
+            head -n 20 /tmp/clinic-block3-sql.log
+            echo "=== PSQL LOG TAIL 30 ==="
+            tail -n 30 /tmp/clinic-block3-sql.log
+            echo "========================"
             exit 1
           fi
           echo "✅ Clinic Block 3 workspace authority hardening SQL suite passed with all test-generated markers verified."
