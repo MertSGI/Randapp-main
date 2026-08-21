@@ -68,19 +68,24 @@ assert(migration63.includes('action,'), 'Static Check 7.2 Failed: Migration 63 a
 assert(migration63.includes("'patient_profile_id', v_res.id"), 'Static Check 7.3 Failed: Migration 63 must return patient_profile_id');
 console.log('  ✓ Check 7 PASS: Migration 63 uses canonical audit schema and patient_profile_id contract');
 
-// 8. SQL Test Suite Hardening & Real DB Role Checks
+// 8. SQL Test Suite Hardening & Real DB Role Checks (comment-stripped)
 const sqlTestPath = path.join(process.cwd(), 'supabase/tests/clinic_workspace_authority_hardening_tests.sql');
 assert(fs.existsSync(sqlTestPath), 'Static Check 8.1 Failed: Hardening SQL test file missing');
-const sqlTestContent = fs.readFileSync(sqlTestPath, 'utf8');
+const sqlTestContentRaw = fs.readFileSync(sqlTestPath, 'utf8');
 
-assert(/^\s*SET\s+LOCAL\s+ROLE\s+authenticated\s*;/m.test(sqlTestContent), 'Static Check 8.2 Failed: Hardening SQL missing real SET LOCAL ROLE authenticated statement');
-assert(/^\s*SET\s+LOCAL\s+ROLE\s+anon\s*;/m.test(sqlTestContent), 'Static Check 8.3 Failed: Hardening SQL missing real SET LOCAL ROLE anon statement');
+// Strip SQL comments before checking for role statements to prevent false-green from commented-out code
+const sqlTestContentStripped = sqlTestContentRaw
+  .replace(/\/\*[\s\S]*?\*\//g, '')   // Remove block comments
+  .replace(/--.*$/gm, '');             // Remove line comments
 
-assert(sqlTestContent.includes('CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN=YES'), 'Static Check 8.4 Failed: Missing CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN marker');
-assert(sqlTestContent.includes('CLINIC_ANON_EXECUTE_ACL_DENIED=YES'), 'Static Check 8.5 Failed: Missing CLINIC_ANON_EXECUTE_ACL_DENIED marker');
-assert(sqlTestContent.includes('CLINIC_INACTIVE_OWNER_SETUP_DENIED=YES'), 'Static Check 8.6 Failed: Missing CLINIC_INACTIVE_OWNER_SETUP_DENIED marker');
-assert(sqlTestContent.includes('CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES'), 'Static Check 8.7 Failed: Missing CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN marker');
-console.log('  ✓ Check 8 PASS: Hardening SQL contains real top-level DB role statements and all required markers');
+assert(/^\s*SET\s+LOCAL\s+ROLE\s+authenticated\s*;/m.test(sqlTestContentStripped), 'Static Check 8.2 Failed: Hardening SQL missing real (non-comment) SET LOCAL ROLE authenticated statement');
+assert(/^\s*SET\s+LOCAL\s+ROLE\s+anon\s*;/m.test(sqlTestContentStripped), 'Static Check 8.3 Failed: Hardening SQL missing real (non-comment) SET LOCAL ROLE anon statement');
+
+assert(sqlTestContentRaw.includes('CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN=YES'), 'Static Check 8.4 Failed: Missing CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN marker');
+assert(sqlTestContentRaw.includes('CLINIC_ANON_EXECUTE_ACL_DENIED=YES'), 'Static Check 8.5 Failed: Missing CLINIC_ANON_EXECUTE_ACL_DENIED marker');
+assert(sqlTestContentRaw.includes('CLINIC_INACTIVE_OWNER_SETUP_DENIED=YES'), 'Static Check 8.6 Failed: Missing CLINIC_INACTIVE_OWNER_SETUP_DENIED marker');
+assert(sqlTestContentRaw.includes('CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES'), 'Static Check 8.7 Failed: Missing CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN marker');
+console.log('  ✓ Check 8 PASS: Hardening SQL contains real (non-comment) top-level DB role statements and all required markers');
 
 // 9. Fail-Closed Owner Setup UI & Pure Helper
 assert(clinicUiPolicy.includes('deriveClinicStaffSetupSelectionState'), 'Static Check 9.1 Failed: deriveClinicStaffSetupSelectionState missing in clinicUiPolicy.ts');

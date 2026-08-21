@@ -1,18 +1,15 @@
--- LARİ CLINIC WORKSPACE AUTHORITY HARDENING EXECUTABLE TEST SUITE (R1.2 HARDENED ISOLATED)
+-- LARİ CLINIC WORKSPACE AUTHORITY HARDENING EXECUTABLE TEST SUITE (R1.2 RECOVERED)
 -- File: supabase/tests/clinic_workspace_authority_hardening_tests.sql
 -- Purpose:
---   Executable SQL verification for Migration 63 with DB role contract markers,
---   catalog EXECUTE ACL proof, inactive tenant owner setup denial, exact UUID signatures, and canonical audit verification.
+--   Executable SQL verification for Migration 63 with REAL DB role switching,
+--   catalog EXECUTE ACL proof, inactive tenant owner setup denial, exact UUID signatures,
+--   and canonical audit verification.
+--   All authorization tests fail-closed: no EXCEPTION WHEN OTHERS THEN NULL on proof paths.
 
 BEGIN;
 
-/*
-SET LOCAL ROLE authenticated;
-SET LOCAL ROLE anon;
-*/
-
 -- =========================================================================
--- 1. FIXTURE SETUP (Privileged Session Role)
+-- 1. FIXTURE SETUP (Privileged Session Role — postgres superuser)
 -- =========================================================================
 DO $$
 DECLARE
@@ -35,7 +32,7 @@ DECLARE
     v_cust_id UUID := 'c3888888-8888-4888-8888-888888888801'::UUID;
     v_cust2_id UUID := 'c3888888-8888-4888-8888-888888888802'::UUID;
 BEGIN
-    RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.2) ===';
+    RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.2 RECOVERED) ===';
 
     -- Clean any existing isolated test fixture (child relations first with table checks)
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'audit_events') THEN
@@ -96,7 +93,7 @@ BEGIN
         DELETE FROM public.users_profile WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
     END IF;
 
-    -- Clean auth tables safely with sub-exception handler to prevent FK block
+    -- Clean auth tables safely — narrowly justified fixture cleanup only
     BEGIN
         IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'identities') THEN
             DELETE FROM auth.identities WHERE user_id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
@@ -114,7 +111,10 @@ BEGIN
             DELETE FROM auth.users WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid)
                OR email LIKE '%_hardened_b3@test.invalid';
         END IF;
-    EXCEPTION WHEN OTHERS THEN NULL;
+    EXCEPTION WHEN OTHERS THEN
+        -- Narrowly justified: auth schema FK cleanup may fail in some Supabase versions.
+        -- This is fixture cleanup only, NOT authorization proof.
+        RAISE NOTICE 'AUTH_CLEANUP_SKIPPED: % (non-proof fixture path)', SQLERRM;
     END;
 
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'tenants') THEN
@@ -153,7 +153,9 @@ BEGIN
                            ('a3888888-8888-4888-8888-888888888800'::UUID, 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
                     ON CONFLICT (id) DO NOTHING;
                 $sql$;
-            EXCEPTION WHEN OTHERS THEN NULL;
+            EXCEPTION WHEN OTHERS THEN
+                -- Narrowly justified: auth.users schema may vary. Fixture setup path only.
+                RAISE NOTICE 'AUTH_USERS_INSERT_SKIPPED: % (non-proof fixture path)', SQLERRM;
             END;
         END;
     END IF;
@@ -178,7 +180,7 @@ BEGIN
     INSERT INTO public.clinic_staff_profiles (
         tenant_id, staff_id, practitioner_type, specialty,
         can_manage_patient_profiles, can_view_clinical_records, can_write_clinical_notes
-    ) VALUES 
+    ) VALUES
         (v_tenant_id, v_manage_staff_id, 'nurse', 'Reception', true, false, false),
         (v_tenant_id, v_view_staff_id, 'physician', 'Cardiology', false, true, false),
         (v_tenant_id, v_none_staff_id, 'other', 'Assistant', false, false, false);
@@ -194,30 +196,32 @@ $$;
 
 -- =========================================================================
 -- 2. CATALOG EXECUTE ACL PROOF (AUTHENTICATED vs ANON)
+--    Uses has_function_privilege under privileged postgres session.
+--    Fail-closed: RAISE EXCEPTION on any assertion failure.
 -- =========================================================================
 DO $$
 BEGIN
-    -- Authenticated Role Privileges
-    IF NOT has_function_privilege('authenticated', 'public.clinic_get_patient_profile'::regproc, 'EXECUTE') THEN
-        NULL;
+    -- Authenticated Role Privileges — must have EXECUTE
+    IF NOT has_function_privilege('authenticated', 'public.clinic_get_patient_profile(uuid)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'ACL FAIL: authenticated lacks EXECUTE on clinic_get_patient_profile';
     END IF;
-    IF NOT has_function_privilege('authenticated', 'public.clinic_upsert_patient_profile'::regproc, 'EXECUTE') THEN
-        NULL;
+    IF NOT has_function_privilege('authenticated', 'public.clinic_upsert_patient_profile(uuid,date,text,text,text,text,text,text,text)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'ACL FAIL: authenticated lacks EXECUTE on clinic_upsert_patient_profile';
     END IF;
-    IF NOT has_function_privilege('authenticated', 'public.clinic_get_staff_setup_profiles'::regproc, 'EXECUTE') THEN
-        NULL;
+    IF NOT has_function_privilege('authenticated', 'public.clinic_get_staff_setup_profiles()', 'EXECUTE') THEN
+        RAISE EXCEPTION 'ACL FAIL: authenticated lacks EXECUTE on clinic_get_staff_setup_profiles';
     END IF;
     RAISE NOTICE 'CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN=YES';
 
-    -- Anon Role Revocations
-    IF has_function_privilege('anon', 'public.clinic_get_patient_profile'::regproc, 'EXECUTE') THEN
-        NULL;
+    -- Anon Role Revocations — must NOT have EXECUTE
+    IF has_function_privilege('anon', 'public.clinic_get_patient_profile(uuid)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'ACL FAIL: anon has EXECUTE on clinic_get_patient_profile';
     END IF;
-    IF has_function_privilege('anon', 'public.clinic_upsert_patient_profile'::regproc, 'EXECUTE') THEN
-        NULL;
+    IF has_function_privilege('anon', 'public.clinic_upsert_patient_profile(uuid,date,text,text,text,text,text,text,text)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'ACL FAIL: anon has EXECUTE on clinic_upsert_patient_profile';
     END IF;
-    IF has_function_privilege('anon', 'public.clinic_get_staff_setup_profiles'::regproc, 'EXECUTE') THEN
-        NULL;
+    IF has_function_privilege('anon', 'public.clinic_get_staff_setup_profiles()', 'EXECUTE') THEN
+        RAISE EXCEPTION 'ACL FAIL: anon has EXECUTE on clinic_get_staff_setup_profiles';
     END IF;
     RAISE NOTICE 'CLINIC_ANON_EXECUTE_ACL_DENIED=YES';
     RAISE NOTICE 'CLINIC_HARDENING_SECTION2_ACL_COMPLETE=YES';
@@ -226,10 +230,14 @@ $$;
 
 -- =========================================================================
 -- 3. EXECUTABLE DOMAIN BEHAVIOR (Authenticated Caller Context)
+--    REAL top-level SET LOCAL ROLE authenticated
 -- =========================================================================
+SET LOCAL ROLE authenticated;
+
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888808', true);
 
+-- TEST A, B, C: Manage-capable staff
 DO $$
 DECLARE
     v_cust_id UUID := 'c3888888-8888-4888-8888-888888888801'::UUID;
@@ -237,17 +245,17 @@ DECLARE
     v_err_msg TEXT;
     v_err_state TEXT;
 BEGIN
-    -- Read bounded profile succeeds
+    -- A: Read bounded profile succeeds
     v_res := public.clinic_get_patient_profile(v_cust_id);
     IF (v_res->>'success')::boolean <> true THEN
-        NULL;
+        RAISE EXCEPTION 'TEST A FAILED: clinic_get_patient_profile did not return success=true';
     END IF;
     RAISE NOTICE 'CLINIC_PROFILE_VIEW_WITHOUT_HISTORY_PROVEN=YES';
 
-    -- History denied FORBIDDEN
+    -- B: History denied FORBIDDEN
     BEGIN
         v_res := public.clinic_get_patient_history(v_cust_id);
-        NULL;
+        RAISE EXCEPTION 'TEST B FAILED: clinic_get_patient_history should have raised FORBIDDEN but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
         IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
@@ -255,14 +263,17 @@ BEGIN
         END IF;
     END;
 
-    -- Profile upsert succeeds
+    -- C: Profile upsert succeeds
     v_res := public.clinic_upsert_patient_profile(
         p_customer_id := v_cust_id,
         p_blood_type := 'A Rh+',
         p_allergies := 'Penicillin'
     );
-    IF (v_res->>'success')::boolean <> true OR v_res->>'patient_profile_id' IS NULL THEN
-        NULL;
+    IF (v_res->>'success')::boolean <> true THEN
+        RAISE EXCEPTION 'TEST C FAILED: clinic_upsert_patient_profile did not return success=true';
+    END IF;
+    IF v_res->>'patient_profile_id' IS NULL THEN
+        RAISE EXCEPTION 'TEST C FAILED: clinic_upsert_patient_profile did not return patient_profile_id';
     END IF;
     RAISE NOTICE 'CLINIC_PROFILE_MUTATION_MANAGE_ONLY_PROVEN=YES';
     RAISE NOTICE 'CLINIC_PROFILE_RESPONSE_CONTRACT_PROVEN=YES';
@@ -279,19 +290,22 @@ DECLARE
     v_err_msg TEXT;
     v_err_state TEXT;
 BEGIN
+    -- H: View-only can read profile
     v_res := public.clinic_get_patient_profile(v_cust_id);
     IF (v_res->>'success')::boolean <> true THEN
-        NULL;
+        RAISE EXCEPTION 'TEST H FAILED: view-only staff cannot read patient profile';
     END IF;
 
+    -- I: View-only can read history
     v_res := public.clinic_get_patient_history(v_cust_id);
     IF (v_res->>'success')::boolean <> true THEN
-        NULL;
+        RAISE EXCEPTION 'TEST I FAILED: view-only staff cannot read patient history';
     END IF;
 
+    -- J: View-only CANNOT upsert
     BEGIN
         v_res := public.clinic_upsert_patient_profile(p_customer_id := v_cust_id, p_blood_type := 'O Rh-');
-        NULL;
+        RAISE EXCEPTION 'TEST J FAILED: view-only staff should be denied upsert but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
         IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
@@ -312,9 +326,10 @@ DECLARE
     v_err_msg TEXT;
     v_err_state TEXT;
 BEGIN
+    -- K: No-cap staff denied profile read
     BEGIN
         v_res := public.clinic_get_patient_profile(v_cust_id);
-        NULL;
+        RAISE EXCEPTION 'TEST K FAILED: no-cap staff should be denied profile read but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
         IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
@@ -322,9 +337,10 @@ BEGIN
         END IF;
     END;
 
+    -- L: No-cap staff denied history read
     BEGIN
         v_res := public.clinic_get_patient_history(v_cust_id);
-        NULL;
+        RAISE EXCEPTION 'TEST L FAILED: no-cap staff should be denied history read but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
         IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
@@ -332,9 +348,10 @@ BEGIN
         END IF;
     END;
 
+    -- M: No-cap staff denied upsert
     BEGIN
         v_res := public.clinic_upsert_patient_profile(p_customer_id := v_cust_id, p_blood_type := 'B Rh+');
-        NULL;
+        RAISE EXCEPTION 'TEST M FAILED: no-cap staff should be denied upsert but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
         IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
@@ -355,10 +372,10 @@ DECLARE
     v_err_msg TEXT;
     v_err_state TEXT;
 BEGIN
-    -- Read cross-tenant profile raises NOT_FOUND / fail-closed exception
+    -- N: Read cross-tenant profile raises NOT_FOUND
     BEGIN
         v_res := public.clinic_get_patient_profile(v_cust2_id);
-        NULL;
+        RAISE EXCEPTION 'TEST N FAILED: cross-tenant profile read should be denied but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
         IF v_err_msg NOT LIKE '%NOT_FOUND%' AND v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
@@ -366,10 +383,10 @@ BEGIN
         END IF;
     END;
 
-    -- Upsert cross-tenant profile fails closed with NOT_FOUND
+    -- O: Upsert cross-tenant profile fails closed
     BEGIN
         v_res := public.clinic_upsert_patient_profile(p_customer_id := v_cust2_id, p_blood_type := 'AB Rh+');
-        NULL;
+        RAISE EXCEPTION 'TEST O FAILED: cross-tenant upsert should be denied but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
         IF v_err_msg NOT LIKE '%NOT_FOUND%' AND v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
@@ -389,8 +406,11 @@ DECLARE
     v_res JSONB;
 BEGIN
     v_res := public.clinic_get_staff_setup_profiles();
-    IF (v_res->>'success')::boolean <> true OR jsonb_array_length(v_res->'profiles') < 3 THEN
-        NULL;
+    IF (v_res->>'success')::boolean <> true THEN
+        RAISE EXCEPTION 'TEST S FAILED: clinic_get_staff_setup_profiles did not return success=true';
+    END IF;
+    IF jsonb_array_length(v_res->'profiles') < 3 THEN
+        RAISE EXCEPTION 'TEST T FAILED: Expected at least 3 staff profiles, got %', jsonb_array_length(v_res->'profiles');
     END IF;
     RAISE NOTICE 'CLINIC_OWNER_SETUP_READ_PROVEN=YES';
     RAISE NOTICE 'CLINIC_OWNER_SETUP_CROSS_TENANT_SAFE=YES';
@@ -408,7 +428,7 @@ DECLARE
 BEGIN
     BEGIN
         v_res := public.clinic_get_staff_setup_profiles();
-        NULL;
+        RAISE EXCEPTION 'TEST INACTIVE OWNER FAILED: inactive owner should be denied but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
         IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
@@ -419,28 +439,45 @@ BEGIN
 END;
 $$;
 
--- TEST U, V: Non-Owner / Super Admin Setup RPC Denial
+-- TEST U: Non-Owner (staff) Setup RPC Denial — fail-closed
 SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888808', true);
 DO $$
 DECLARE
     v_res JSONB;
+    v_err_msg TEXT;
+    v_err_state TEXT;
 BEGIN
     BEGIN
         v_res := public.clinic_get_staff_setup_profiles();
-        NULL;
-    EXCEPTION WHEN OTHERS THEN NULL; END;
+        RAISE EXCEPTION 'TEST U FAILED: non-owner staff should be denied setup read but returned normally';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST U FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
+        END IF;
+    END;
+    RAISE NOTICE 'CLINIC_NON_OWNER_SETUP_DENIED=YES';
 END;
 $$;
 
+-- TEST V: Super Admin Setup RPC Denial — fail-closed
 SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888809', true);
 DO $$
 DECLARE
     v_res JSONB;
+    v_err_msg TEXT;
+    v_err_state TEXT;
 BEGIN
     BEGIN
         v_res := public.clinic_get_staff_setup_profiles();
-        NULL;
-    EXCEPTION WHEN OTHERS THEN NULL; END;
+        RAISE EXCEPTION 'TEST V FAILED: super_admin should be denied setup read but returned normally';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST V FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
+        END IF;
+    END;
+    RAISE NOTICE 'CLINIC_SUPERADMIN_SETUP_DENIED=YES';
 END;
 $$;
 
@@ -450,12 +487,17 @@ BEGIN
 END;
 $$;
 
+RESET ROLE;
+
 SELECT set_config('request.jwt.claim.role', '', true);
 SELECT set_config('request.jwt.claim.sub', '', true);
 
 -- =========================================================================
 -- 4. EXECUTABLE ANON DENIAL BEHAVIOR (Anon Caller Context)
+--    REAL top-level SET LOCAL ROLE anon
 -- =========================================================================
+SET LOCAL ROLE anon;
+
 SELECT set_config('request.jwt.claim.role', 'anon', true);
 SELECT set_config('request.jwt.claim.sub', '', true);
 
@@ -466,9 +508,10 @@ DECLARE
     v_err_msg TEXT;
     v_err_state TEXT;
 BEGIN
+    -- P: Anon denied patient profile read
     BEGIN
         v_res := public.clinic_get_patient_profile(v_cust_id);
-        NULL;
+        RAISE EXCEPTION 'TEST P FAILED: anon should be denied profile read but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
         IF v_err_state <> '42501' AND v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_msg NOT LIKE '%FORBIDDEN%' THEN
@@ -476,9 +519,10 @@ BEGIN
         END IF;
     END;
 
+    -- Q: Anon denied patient profile upsert
     BEGIN
         v_res := public.clinic_upsert_patient_profile(p_customer_id := v_cust_id, p_blood_type := 'O Rh+');
-        NULL;
+        RAISE EXCEPTION 'TEST Q FAILED: anon should be denied upsert but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
         IF v_err_state <> '42501' AND v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_msg NOT LIKE '%FORBIDDEN%' THEN
@@ -486,12 +530,13 @@ BEGIN
         END IF;
     END;
 
+    -- R: Anon denied staff setup profiles
     BEGIN
         v_res := public.clinic_get_staff_setup_profiles();
-        NULL;
+        RAISE EXCEPTION 'TEST R FAILED: anon should be denied setup read but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_state <> '42501' AND v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_state <> '42501' THEN
+        IF v_err_state <> '42501' AND v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_msg NOT LIKE '%FORBIDDEN%' THEN
             RAISE EXCEPTION 'TEST R FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
@@ -499,6 +544,8 @@ BEGIN
     RAISE NOTICE 'CLINIC_HARDENING_SECTION4_ANON_COMPLETE=YES';
 END;
 $$;
+
+RESET ROLE;
 
 SELECT set_config('request.jwt.claim.role', '', true);
 SELECT set_config('request.jwt.claim.sub', '', true);
@@ -527,7 +574,7 @@ BEGIN
     END IF;
 
     IF v_audit.actor_role <> 'staff' THEN
-        RAISE EXCEPTION 'CANONICAL AUDIT CHECK FAILED: actor_role must be staff';
+        RAISE EXCEPTION 'CANONICAL AUDIT CHECK FAILED: actor_role must be staff, got %', v_audit.actor_role;
     END IF;
 
     IF v_audit.payload ? 'blood_type' OR v_audit.payload ? 'allergies' THEN
