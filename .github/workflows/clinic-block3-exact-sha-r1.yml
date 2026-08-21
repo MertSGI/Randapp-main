@@ -258,12 +258,21 @@ jobs:
             "CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES"
             "CLINIC_WORKSPACE_AUTHORITY_HARDENING_DB_EXECUTION=PASS"
           )
+          echo "=== VERIFYING MARKERS ==="
+          MISSING=0
           for m in "${MARKERS[@]}"; do
-            if ! grep -F "$m" /tmp/clinic-block3-sql.log; then
-              echo "❌ MISSING MARKER: $m"
-              exit 1
+            if grep -Fq "$m" /tmp/clinic-block3-sql.log; then
+              echo "  [FOUND] $m"
+            else
+              echo "  [MISSING] $m"
+              MISSING=1
             fi
           done
+
+          if [ "$MISSING" = "1" ]; then
+            echo "❌ ONE OR MORE MARKERS MISSING!"
+            exit 1
+          fi
           echo "✅ Clinic Block 3 workspace authority hardening SQL suite passed with all test-generated markers verified."
 
       - name: Run Clinic Application Contracts Executable QA
