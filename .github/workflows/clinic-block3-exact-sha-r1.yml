@@ -229,39 +229,15 @@ jobs:
 
       - name: Run Clinic Block 3 Workspace Authority Hardening Functional SQL Suite & Verify Markers
         run: |
-          echo "Executing clinic_workspace_authority_hardening_tests.sql via node pg..."
-          npx tsx -e "
-            import fs from 'fs';
-            import pg from 'pg';
-            const client = new pg.Client({ connectionString: 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' });
-            let logBuf = '';
-            client.on('notice', msg => {
-              console.log('PG_NOTICE: ' + msg.message);
-              logBuf += msg.message + '\n';
-            });
-            async function main() {
-              await client.connect();
-              const sql = fs.readFileSync('supabase/tests/clinic_workspace_authority_hardening_tests.sql', 'utf8');
-              const statements = sql.split(/;\s*$/m);
-              for (const stmt of statements) {
-                const s = stmt.trim();
-                if (!s) continue;
-                try {
-                  await client.query(s);
-                } catch (err: any) {
-                  console.error('PG_ERROR: ' + err.message);
-                  console.error('STMT HEAD: ' + s.slice(0, 100));
-                  logBuf += 'PG_ERROR: ' + err.message + '\n';
-                  fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
-                  await client.end();
-                  process.exit(1);
-                }
-              }
-              fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
-              await client.end();
-            }
-            main();
-          "
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "Executing clinic_workspace_authority_hardening_tests.sql..."
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql 2>&1 | tee /tmp/clinic-block3-sql.log
+          PSQL_EXIT=${PIPESTATUS[0]}
+
+          if [ "$PSQL_EXIT" -ne 0 ]; then
+            echo "❌ PSQL FAILED WITH EXIT CODE $PSQL_EXIT"
+            exit "$PSQL_EXIT"
+          fi
 
           MARKERS=(
             "CLINIC_HARDENING_SECTION1_SETUP_COMPLETE=YES"
