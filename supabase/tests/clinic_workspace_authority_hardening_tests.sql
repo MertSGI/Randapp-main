@@ -295,11 +295,16 @@ DECLARE
     v_err_msg TEXT;
     v_err_state TEXT;
 BEGIN
-    -- Read cross-tenant profile yields NULL patient_profile safely
-    v_res := public.clinic_get_patient_profile(v_cust2_id);
-    IF (v_res->>'success')::boolean <> true OR (v_res->'patient_profile') IS NOT NULL THEN
-        RAISE EXCEPTION 'TEST N FAILED: Cross-tenant bounded profile read must yield null patient_profile';
-    END IF;
+    -- Read cross-tenant profile raises NOT_FOUND / fail-closed exception
+    BEGIN
+        v_res := public.clinic_get_patient_profile(v_cust2_id);
+        RAISE EXCEPTION 'TEST N FAILED: Cross-tenant profile read must fail closed';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%NOT_FOUND%' AND v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST N FAILED [%: %]', v_err_state, v_err_msg;
+        END IF;
+    END;
 
     -- Upsert cross-tenant profile fails closed with NOT_FOUND
     BEGIN
