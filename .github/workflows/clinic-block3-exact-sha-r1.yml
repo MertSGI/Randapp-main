@@ -276,9 +276,19 @@ jobs:
 
           if [ "$MISSING" = "1" ]; then
             echo "❌ ONE OR MORE MARKERS MISSING!"
+            echo "=== COMPLETE LOG CONTENT ==="
+            cat /tmp/clinic-block3-sql.log
+            echo "============================"
             exit 1
           fi
           echo "✅ Clinic Block 3 workspace authority hardening SQL suite passed with all test-generated markers verified."
+
+      - name: Upload Clinic Block 3 SQL Log Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinic-block3-sql-log
+          path: /tmp/clinic-block3-sql.log
 
       - name: Run Clinic Application Contracts Executable QA
         run: |
