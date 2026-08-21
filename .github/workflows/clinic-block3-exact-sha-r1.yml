@@ -229,9 +229,18 @@ jobs:
 
       - name: Run Clinic Block 3 Workspace Authority Hardening Functional SQL Suite & Verify Markers
         run: |
-          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "Executing clinic_block3_ts_harness.ts..."
-          npx tsx supabase/tests/clinic_block3_ts_harness.ts
+          set +e
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx tsx supabase/tests/clinic_block3_ts_harness.ts 2>&1 | tee /tmp/clinic-block3-sql.log
+          HARNESS_EXIT=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$HARNESS_EXIT" -ne 0 ]; then
+            echo "=== FAILED BLOCK 3 HARNESS LOG OUTPUT ==="
+            cat /tmp/clinic-block3-sql.log
+            exit "$HARNESS_EXIT"
+          fi
 
           MARKERS=(
             "CLINIC_HARDENING_SECTION1_SETUP_COMPLETE=YES"
