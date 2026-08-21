@@ -11,24 +11,24 @@ BEGIN;
 -- =========================================================================
 DO $$
 DECLARE
-    v_tenant_id UUID := 'b3888888-8888-4888-8888-888888888888'::UUID;
-    v_tenant2_id UUID := 'b3888888-8888-4888-8888-888888888889'::UUID;
+    v_tenant_id UUID := 'b3888888-8888-4888-8888-888888888801'::UUID;
+    v_tenant2_id UUID := 'b3888888-8888-4888-8888-888888888802'::UUID;
 
-    v_owner_uid UUID := 'b3888888-8888-4888-8888-888888888881'::UUID;
-    v_owner2_uid UUID := 'b3888888-8888-4888-8888-888888888882'::UUID;
-    v_inactive_owner_uid UUID := 'b3888888-8888-4888-8888-888888888887'::UUID;
-    v_superadmin_uid UUID := 'b3888888-8888-4888-8888-888888888889'::UUID;
+    v_owner_uid UUID := 'a3888888-8888-4888-8888-888888888801'::UUID;
+    v_owner2_uid UUID := 'a3888888-8888-4888-8888-888888888802'::UUID;
+    v_inactive_owner_uid UUID := 'a3888888-8888-4888-8888-888888888807'::UUID;
+    v_superadmin_uid UUID := 'a3888888-8888-4888-8888-888888888809'::UUID;
 
-    v_manage_staff_uid UUID := 'b3888888-8888-4888-8888-888888888888'::UUID;
-    v_view_staff_uid UUID := 'b3888888-8888-4888-8888-888888888883'::UUID;
-    v_none_staff_uid UUID := 'b3888888-8888-4888-8888-888888888880'::UUID;
+    v_manage_staff_uid UUID := 'a3888888-8888-4888-8888-888888888808'::UUID;
+    v_view_staff_uid UUID := 'a3888888-8888-4888-8888-888888888803'::UUID;
+    v_none_staff_uid UUID := 'a3888888-8888-4888-8888-888888888800'::UUID;
 
-    v_manage_staff_id UUID := '33888888-8888-4888-8888-888888888888'::UUID;
-    v_view_staff_id UUID := '33888888-8888-4888-8888-888888888889'::UUID;
-    v_none_staff_id UUID := '33888888-8888-4888-8888-888888888880'::UUID;
+    v_manage_staff_id UUID := '33888888-8888-4888-8888-888888888808'::UUID;
+    v_view_staff_id UUID := '33888888-8888-4888-8888-888888888803'::UUID;
+    v_none_staff_id UUID := '33888888-8888-4888-8888-888888888800'::UUID;
 
-    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888888'::UUID;
-    v_cust2_id UUID := 'c3888888-8888-4888-8888-888888888889'::UUID;
+    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888801'::UUID;
+    v_cust2_id UUID := 'c3888888-8888-4888-8888-888888888802'::UUID;
 BEGIN
     RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.2) ===';
 
@@ -139,11 +139,11 @@ $$;
 -- =========================================================================
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
-SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888888', true);
+SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888808', true);
 
 DO $$
 DECLARE
-    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888888'::UUID;
+    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888801'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -181,11 +181,11 @@ END;
 $$;
 
 -- TEST H, I, J: View-Only Staff
-SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888883', true);
+SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888803', true);
 
 DO $$
 DECLARE
-    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888888'::UUID;
+    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888801'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -214,11 +214,11 @@ END;
 $$;
 
 -- TEST K, L, M: No-Capability Staff
-SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888880', true);
+SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888800', true);
 
 DO $$
 DECLARE
-    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888888'::UUID;
+    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888801'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -257,11 +257,11 @@ END;
 $$;
 
 -- TEST N, O: Cross-Tenant Isolation
-SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888888', true);
+SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888808', true);
 
 DO $$
 DECLARE
-    v_cust2_id UUID := 'c3888888-8888-4888-8888-888888888889'::UUID;
+    v_cust2_id UUID := 'c3888888-8888-4888-8888-888888888802'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -290,7 +290,7 @@ END;
 $$;
 
 -- TEST S, T: Active Tenant Owner Setup RPC Success
-SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888881', true);
+SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888801', true);
 
 DO $$
 DECLARE
@@ -306,7 +306,7 @@ END;
 $$;
 
 -- TEST INACTIVE OWNER SETUP DENIAL (v_inactive_owner_uid: active = false)
-SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888887', true);
+SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888807', true);
 
 DO $$
 DECLARE
@@ -328,7 +328,7 @@ END;
 $$;
 
 -- TEST U, V: Non-Owner / Super Admin Setup RPC Denial
-SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888888', true);
+SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888808', true);
 DO $$
 DECLARE
     v_res JSONB;
@@ -340,7 +340,7 @@ BEGIN
 END;
 $$;
 
-SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888889', true);
+SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888809', true);
 DO $$
 DECLARE
     v_res JSONB;
@@ -365,7 +365,7 @@ SELECT set_config('request.jwt.claim.sub', '', true);
 
 DO $$
 DECLARE
-    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888888'::UUID;
+    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888801'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -412,10 +412,10 @@ SELECT set_config('request.jwt.claim.sub', '', true);
 -- =========================================================================
 DO $$
 DECLARE
-    v_tenant_id UUID := 'b3888888-8888-4888-8888-888888888888'::UUID;
-    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888888'::UUID;
-    v_owner_uid UUID := 'b3888888-8888-4888-8888-888888888881'::UUID;
-    v_manage_staff_uid UUID := 'b3888888-8888-4888-8888-888888888888'::UUID;
+    v_tenant_id UUID := 'b3888888-8888-4888-8888-888888888801'::UUID;
+    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888801'::UUID;
+    v_owner_uid UUID := 'a3888888-8888-4888-8888-888888888801'::UUID;
+    v_manage_staff_uid UUID := 'a3888888-8888-4888-8888-888888888808'::UUID;
     v_audit RECORD;
     v_res JSONB;
 BEGIN
