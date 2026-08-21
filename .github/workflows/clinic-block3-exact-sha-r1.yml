@@ -229,19 +229,42 @@ jobs:
 
       - name: Run Clinic Block 3 Workspace Authority Hardening Functional SQL Suite & Verify Markers
         run: |
-          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          echo "Executing clinic_workspace_authority_hardening_tests.sql..."
+          echo "Executing clinic_workspace_authority_hardening_tests.sql via node pg..."
           set +e
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql 2>&1 | tee /tmp/clinic-block3-sql.log
-          PSQL_EXIT=${PIPESTATUS[0]}
+          npx tsx -e "
+            import fs from 'fs';
+            import pg from 'pg';
+            const client = new pg.Client({ connectionString: 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' });
+            client.on('notice', msg => console.log('NOTICE:', msg.message));
+            async function main() {
+              await client.connect();
+              const sql = fs.readFileSync('supabase/tests/clinic_workspace_authority_hardening_tests.sql', 'utf8');
+              try {
+                await client.query(sql);
+                console.log('SQL EXECUTION SUCCESSFUL');
+                fs.writeFileSync('/tmp/clinic-block3-sql.log', 'ALL_OK');
+              } catch (err: any) {
+                console.error('=== EXECUTION ERROR ===');
+                console.error('MESSAGE:', err.message);
+                console.error('CODE:', err.code);
+                console.error('DETAIL:', err.detail);
+                console.error('HINT:', err.hint);
+                console.error('WHERE:', err.where);
+                console.error('POSITION:', err.position);
+                console.error('STACK:', err.stack);
+                process.exit(1);
+              } finally {
+                await client.end();
+              }
+            }
+            main();
+          " 2>&1 | tee /tmp/clinic-block3-sql.log
+          HARNESS_EXIT=${PIPESTATUS[0]}
           set -e
 
-          if [ "$PSQL_EXIT" -ne 0 ]; then
-            echo "❌ PSQL COMMAND RETURNED FAILURE EXIT CODE: $PSQL_EXIT"
-            echo "=== FAILED SQL LOG ==="
-            cat /tmp/clinic-block3-sql.log
-            echo "======================"
-            exit "$PSQL_EXIT"
+          if [ "$HARNESS_EXIT" -ne 0 ]; then
+            echo "❌ CLINIC BLOCK 3 HARDENING EXECUTION FAILED"
+            exit "$HARNESS_EXIT"
           fi
 
           MARKERS=(
