@@ -254,6 +254,8 @@ jobs:
 
           if [ "$PSQL_EXIT" -ne 0 ]; then
             echo "❌ PSQL FAILED WITH EXIT CODE $PSQL_EXIT"
+            echo "=== PSQL FAILURE LOG OUTPUT ==="
+            cat /tmp/clinic-block3-sql.log
             exit "$PSQL_EXIT"
           fi
 
