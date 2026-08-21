@@ -31,6 +31,10 @@ DECLARE
 
     v_cust_id UUID := 'c3888888-8888-4888-8888-888888888801'::UUID;
     v_cust2_id UUID := 'c3888888-8888-4888-8888-888888888802'::UUID;
+
+    v_elig_check JSONB;
+    v_action_check JSONB;
+    v_quota_check JSONB;
 BEGIN
     RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.2 RECOVERED) ===';
 
@@ -80,6 +84,9 @@ BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'services') THEN
         DELETE FROM public.services WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'tenant_entitlement_overrides') THEN
+        DELETE FROM public.tenant_entitlement_overrides WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'subscriptions') THEN
         DELETE FROM public.subscriptions WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     END IF;
@@ -105,7 +112,7 @@ BEGIN
             DELETE FROM auth.mfa_factors WHERE user_id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
         END IF;
         IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'refresh_tokens') THEN
-            DELETE FROM auth.refresh_tokens WHERE user_id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+            DELETE FROM auth.refresh_tokens WHERE user_id IN (v_owner_uid::text, v_owner2_uid::text, v_inactive_owner_uid::text, v_superadmin_uid::text, v_manage_staff_uid::text, v_view_staff_uid::text, v_none_staff_uid::text);
         END IF;
         IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
             DELETE FROM auth.users WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid)
@@ -125,6 +132,83 @@ BEGIN
     INSERT INTO public.tenants (id, name, slug, status)
     VALUES (v_tenant_id, 'Hardening Clinic Tenant 1', 'hardening-clinic-1', 'active'),
            (v_tenant2_id, 'Hardening Clinic Tenant 2', 'hardening-clinic-2', 'active');
+
+    -- Commercial Fixture Setup: Subscription & Entitlement Overrides
+    INSERT INTO public.subscriptions (
+        tenant_id,
+        plan_id,
+        plan_version_id,
+        status,
+        billing_mode
+    )
+    SELECT
+        v_tenant_id,
+        p.id,
+        pv.id,
+        'manual_active',
+        'manual'
+    FROM public.plans p
+    JOIN public.plan_versions pv
+      ON pv.plan_id = p.id
+    WHERE p.code = 'baslangic'
+    ORDER BY
+        (pv.lifecycle_status = 'published') DESC,
+        pv.created_at DESC
+    LIMIT 1;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'COMMERCIAL FIXTURE FAIL: baslangic plan/version lookup returned no rows';
+    END IF;
+
+    INSERT INTO public.tenant_entitlement_overrides (
+        tenant_id,
+        feature_key,
+        value_type,
+        boolean_value,
+        is_unlimited,
+        reason
+    ) VALUES (
+        v_tenant_id,
+        'staff_management',
+        'boolean',
+        true,
+        false,
+        'LARI Clinic Block 3 disposable authority test fixture'
+    );
+
+    INSERT INTO public.tenant_entitlement_overrides (
+        tenant_id,
+        feature_key,
+        value_type,
+        is_unlimited,
+        integer_value,
+        reason
+    ) VALUES (
+        v_tenant_id,
+        'max_staff',
+        'integer',
+        true,
+        NULL,
+        'LARI Clinic Block 3 disposable authority test fixture'
+    );
+
+    -- Prove Fixture Preconditions before active staff INSERT
+    v_elig_check := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
+    IF (v_elig_check->>'eligible')::boolean <> true THEN
+        RAISE EXCEPTION 'COMMERCIAL FIXTURE PRECONDITION FAILED: resolve_tenant_commercial_eligibility returned eligible=false: %', v_elig_check;
+    END IF;
+
+    v_action_check := public.assert_tenant_commercial_action_allowed(v_tenant_id, 'staff_management', now());
+    IF (v_action_check->>'allowed')::boolean <> true THEN
+        RAISE EXCEPTION 'COMMERCIAL FIXTURE PRECONDITION FAILED: assert_tenant_commercial_action_allowed returned allowed=false: %', v_action_check;
+    END IF;
+
+    v_quota_check := public.resolve_commercial_quota(v_tenant_id, 'max_staff');
+    IF (v_quota_check->>'is_unlimited')::boolean <> true AND COALESCE((v_quota_check->>'limit_value')::bigint, 0) < 3 THEN
+        RAISE EXCEPTION 'COMMERCIAL FIXTURE PRECONDITION FAILED: resolve_commercial_quota max_staff is neither unlimited nor >= 3: %', v_quota_check;
+    END IF;
+
+    RAISE NOTICE 'CLINIC_HARDENING_COMMERCIAL_FIXTURE_READY=YES';
 
     -- Seed Auth Users
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
@@ -149,7 +233,7 @@ BEGIN
            (v_view_staff_uid, v_tenant_id, 'staff', 'View Staff', true),
            (v_none_staff_uid, v_tenant_id, 'staff', 'NoCap Staff', true);
 
-    -- Seed Staff Records
+    -- Seed Staff Records (now valid after commercial fixture precondition proven)
     INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active)
     VALUES (v_manage_staff_id, v_tenant_id, v_manage_staff_uid, 'Manage Staff', true),
            (v_view_staff_id, v_tenant_id, v_view_staff_uid, 'View Staff', true),
@@ -214,6 +298,10 @@ $$;
 DO $$
 BEGIN
     EXECUTE 'SET LOCAL ROLE authenticated';
+    IF current_user <> 'authenticated' THEN
+        RAISE EXCEPTION 'DB ROLE FAIL: current_user is %, expected authenticated', current_user;
+    END IF;
+    RAISE NOTICE 'CLINIC_AUTHENTICATED_DB_ROLE_ACTIVE=YES';
 END;
 $$;
 
@@ -493,6 +581,10 @@ SELECT set_config('request.jwt.claim.sub', '', true);
 DO $$
 BEGIN
     EXECUTE 'SET LOCAL ROLE anon';
+    IF current_user <> 'anon' THEN
+        RAISE EXCEPTION 'DB ROLE FAIL: current_user is %, expected anon', current_user;
+    END IF;
+    RAISE NOTICE 'CLINIC_ANON_DB_ROLE_ACTIVE=YES';
 END;
 $$;
 
