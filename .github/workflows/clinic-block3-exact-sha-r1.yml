@@ -132,7 +132,7 @@ jobs:
             cat /tmp/p2a-failure-summary.txt
           fi
           if [ -f /tmp/clinic-block3-sql.log ]; then
-            echo "--- BLOCK 3 SQL FAILURE LOG ---"
+            echo "--- BLOCK 3 SQL LOG DUMP ---"
             cat /tmp/clinic-block3-sql.log
           fi
 
@@ -236,6 +236,7 @@ jobs:
 
       - name: Run Clinic Block 3 Workspace Authority Hardening Functional SQL Suite & Verify Markers
         run: |
+          set -o pipefail
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "Executing clinic_workspace_authority_hardening_tests.sql..."
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql 2>&1 | tee /tmp/clinic-block3-sql.log
