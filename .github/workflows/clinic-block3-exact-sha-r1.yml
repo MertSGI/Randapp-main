@@ -239,15 +239,16 @@ jobs:
             async function main() {
               let log = '';
               client.on('notice', (msg) => {
-                log += 'NOTICE: ' + msg.message + '\n';
+                log += msg.message + '\n';
               });
               try {
                 await client.connect();
                 const sql = fs.readFileSync('supabase/tests/clinic_workspace_authority_hardening_tests.sql', 'utf8');
+                // Execute whole block
                 await client.query(sql);
                 log += 'EXECUTION_SUCCESS=YES\n';
               } catch (err: any) {
-                log += 'ERROR MESSAGE: ' + err.message + '\nERROR CODE: ' + err.code + '\nERROR DETAIL: ' + (err.detail || 'NONE') + '\nERROR POSITION: ' + err.position + '\nSTACK: ' + err.stack + '\n';
+                log += 'ERROR: ' + err.message + '\nCODE: ' + err.code + '\nDETAIL: ' + (err.detail || '') + '\nHINT: ' + (err.hint || '') + '\nPOSITION: ' + err.position + '\nWHERE: ' + (err.where || '') + '\n';
                 process.exitCode = 1;
               } finally {
                 await client.end();
