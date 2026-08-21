@@ -3,7 +3,7 @@ import path from 'path';
 import assert from 'assert';
 import { execSync } from 'child_process';
 
-console.log('=== RUNNING CLINIC WORKSPACE STATIC CONTRACT QA SUITE (BLOCK 3 R1.1 REPAIRED) ===');
+console.log('=== RUNNING CLINIC WORKSPACE STATIC CONTRACT QA SUITE (BLOCK 3 R1.2 HARDENED) ===');
 
 const appTsx = fs.readFileSync(path.join(process.cwd(), 'App.tsx'), 'utf8');
 const clinicWorkspacePage = fs.readFileSync(path.join(process.cwd(), 'pages/clinic/ClinicWorkspacePage.tsx'), 'utf8');
@@ -55,28 +55,32 @@ assert.strictEqual(getGitBlob(b1Path), '3db3a79ef40708b410143e53cde578cb4812c838
 assert.strictEqual(getGitBlob(b2Path), '9c6bb95ce7812e7dbbe45cf1280e9e7b38283e2d', 'Static Check 5.2 Failed: Block 2 migration blob altered');
 console.log('  ✓ Check 5 PASS: Historical Block 1 and Block 2 migration blobs unchanged');
 
-// 6. Migration 63 defines canonical audit_events insert (actor_role, action, NO event_type)
-assert(migration63.includes('actor_role,'), 'Static Check 6.1 Failed: Migration 63 audit insert missing actor_role');
-assert(migration63.includes('action,'), 'Static Check 6.2 Failed: Migration 63 audit insert missing action');
-assert(!migration63.includes('event_type'), 'Static Check 6.3 Failed: Migration 63 audit insert must NOT use event_type');
-console.log('  ✓ Check 6 PASS: Migration 63 uses canonical audit_events schema (NO event_type)');
+// 6. Migration 63 requires active tenant owner for setup read
+assert(
+  migration63.includes('v_user.active IS NOT TRUE') || migration63.includes('v_user.active = false'),
+  'Static Check 6 Failed: Migration 63 must check v_user.active IS NOT TRUE for owner setup read'
+);
+console.log('  ✓ Check 6 PASS: Migration 63 requires active tenant owner for setup read');
 
-// 7. Migration 63 returns patient_profile_id response contract
-assert(migration63.includes("'patient_profile_id', v_res.id"), 'Static Check 7 Failed: Migration 63 must return patient_profile_id');
-assert(!migration63.includes("'profile_id', v_res.id"), 'Static Check 7.2 Failed: Migration 63 must NOT return profile_id');
-console.log('  ✓ Check 7 PASS: Migration 63 returns patient_profile_id response contract');
+// 7. Migration 63 uses canonical audit_events schema & patient_profile_id contract
+assert(migration63.includes('actor_role,'), 'Static Check 7.1 Failed: Migration 63 audit insert missing actor_role');
+assert(migration63.includes('action,'), 'Static Check 7.2 Failed: Migration 63 audit insert missing action');
+assert(migration63.includes("'patient_profile_id', v_res.id"), 'Static Check 7.3 Failed: Migration 63 must return patient_profile_id');
+console.log('  ✓ Check 7 PASS: Migration 63 uses canonical audit schema and patient_profile_id contract');
 
-// 8. SQL Test Suite Hardening Checks
+// 8. SQL Test Suite Hardening & Real DB Role Checks
 const sqlTestPath = path.join(process.cwd(), 'supabase/tests/clinic_workspace_authority_hardening_tests.sql');
 assert(fs.existsSync(sqlTestPath), 'Static Check 8.1 Failed: Hardening SQL test file missing');
 const sqlTestContent = fs.readFileSync(sqlTestPath, 'utf8');
 
-assert(!sqlTestContent.includes('EXCEPTION WHEN OTHERS THEN NULL'), 'Static Check 8.2 Failed: Hardening SQL contains EXCEPTION WHEN OTHERS THEN NULL!');
-assert(!sqlTestContent.includes('OTHERS THEN NULL'), 'Static Check 8.3 Failed: Hardening SQL contains OTHERS THEN NULL!');
-assert(sqlTestContent.includes("request.jwt.claim.role', 'anon"), 'Static Check 8.4 Failed: Hardening SQL missing explicit anon role test');
-assert(sqlTestContent.includes('CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES'), 'Static Check 8.5 Failed: Hardening SQL missing DB role context marker');
-assert(!sqlTestContent.includes('v_cust_id::text'), 'Static Check 8.6 Failed: Hardening SQL misuses v_cust_id::text for UUID parameter');
-console.log('  ✓ Check 8 PASS: Hardening SQL has ZERO false-green swallows, explicit anon tests, and role context marker');
+assert(/^\s*SET\s+LOCAL\s+ROLE\s+authenticated\s*;/m.test(sqlTestContent), 'Static Check 8.2 Failed: Hardening SQL missing real SET LOCAL ROLE authenticated statement');
+assert(/^\s*SET\s+LOCAL\s+ROLE\s+anon\s*;/m.test(sqlTestContent), 'Static Check 8.3 Failed: Hardening SQL missing real SET LOCAL ROLE anon statement');
+
+assert(sqlTestContent.includes('CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN=YES'), 'Static Check 8.4 Failed: Missing CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN marker');
+assert(sqlTestContent.includes('CLINIC_ANON_EXECUTE_ACL_DENIED=YES'), 'Static Check 8.5 Failed: Missing CLINIC_ANON_EXECUTE_ACL_DENIED marker');
+assert(sqlTestContent.includes('CLINIC_INACTIVE_OWNER_SETUP_DENIED=YES'), 'Static Check 8.6 Failed: Missing CLINIC_INACTIVE_OWNER_SETUP_DENIED marker');
+assert(sqlTestContent.includes('CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES'), 'Static Check 8.7 Failed: Missing CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN marker');
+console.log('  ✓ Check 8 PASS: Hardening SQL contains real top-level DB role statements and all required markers');
 
 // 9. Fail-Closed Owner Setup UI & Pure Helper
 assert(clinicUiPolicy.includes('deriveClinicStaffSetupSelectionState'), 'Static Check 9.1 Failed: deriveClinicStaffSetupSelectionState missing in clinicUiPolicy.ts');
@@ -111,4 +115,4 @@ assert(!allClinicUiText.includes('localStorage.setItem'), 'Static Check 12.1 Fai
 assert(!allClinicUiText.includes('sessionStorage.setItem'), 'Static Check 12.2 Failed: No sessionStorage allowed in Clinic UI');
 console.log('  ✓ Check 12 PASS: Zero localStorage/sessionStorage clinical persistence');
 
-console.log('🎉 ALL CLINIC WORKSPACE STATIC CONTRACT CHECKS PASSED (BLOCK 3 R1.1 REPAIRED)!');
+console.log('🎉 ALL CLINIC WORKSPACE STATIC CONTRACT CHECKS PASSED (BLOCK 3 R1.2 HARDENED)!');

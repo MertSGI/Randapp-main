@@ -251,7 +251,7 @@ BEGIN
     FROM public.users_profile
     WHERE id = v_caller_uid;
 
-    IF v_user.id IS NULL OR v_user.role <> 'tenant_owner' OR v_user.tenant_id IS NULL THEN
+    IF v_user.id IS NULL OR v_user.role <> 'tenant_owner' OR v_user.tenant_id IS NULL OR v_user.active IS NOT TRUE THEN
         RAISE EXCEPTION 'FORBIDDEN: Caller is not an active tenant owner.';
     END IF;
 
