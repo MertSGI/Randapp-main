@@ -231,7 +231,7 @@ jobs:
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "Executing clinic_workspace_authority_hardening_tests.sql..."
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql 2>&1 | tee /tmp/clinic-block3-sql.log || true
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql 2>&1 | tee /tmp/clinic-block3-sql.log
 
           if [ -n "$GITHUB_STEP_SUMMARY" ]; then
             echo "### Clinic Block 3 SQL Test Log Output" >> "$GITHUB_STEP_SUMMARY"
