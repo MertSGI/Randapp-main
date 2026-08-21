@@ -259,14 +259,13 @@ jobs:
                   try {
                     await client.query(b);
                   } catch (bErr: any) {
-                    console.error('FAILED AT BLOCK INDEX', i, 'LENGTH:', b.length);
-                    console.error('BLOCK HEAD:', b.slice(0, 150));
-                    console.error('ERROR MESSAGE:', bErr.message);
-                    console.error('ERROR POSITION:', bErr.position);
-                    console.error('ERROR WHERE:', bErr.where);
-                    console.error('ERROR DETAIL:', bErr.detail);
+                    const errReport = `FAILED AT BLOCK INDEX ${i}\nBLOCK HEAD: ${b.slice(0, 150)}\nERROR: ${bErr.message}\nDETAIL: ${bErr.detail || 'N/A'}\nWHERE: ${bErr.where || 'N/A'}\n`;
+                    console.error(errReport);
                     logBuf += 'BLOCK_' + i + '_ERROR: ' + bErr.message + '\n';
                     fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
+                    if (process.env.GITHUB_STEP_SUMMARY) {
+                      fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '### FAILED SQL BLOCK REPORT\n```\n' + errReport + '\n```\n');
+                    }
                     process.exit(1);
                   }
                 }
