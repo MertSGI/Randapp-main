@@ -32,6 +32,13 @@ DECLARE
 BEGIN
     RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.2) ===';
 
+    -- Grant role membership to postgres session user to allow SET LOCAL ROLE authenticated / anon in PG 14+
+    BEGIN
+        GRANT authenticated TO postgres;
+        GRANT anon TO postgres;
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
     -- Clean any existing isolated test fixture (child relations first with table checks)
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'audit_events') THEN
         DELETE FROM public.audit_events WHERE tenant_id IN (v_tenant_id::text, v_tenant2_id::text);
@@ -220,7 +227,7 @@ END;
 $$;
 
 -- =========================================================================
--- 3. EXECUTABLE DOMAIN BEHAVIOR (Authenticated JWT Context)
+-- 3. EXECUTABLE DOMAIN BEHAVIOR (SET LOCAL ROLE authenticated)
 -- =========================================================================
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
@@ -450,7 +457,7 @@ SELECT set_config('request.jwt.claim.role', '', true);
 SELECT set_config('request.jwt.claim.sub', '', true);
 
 -- =========================================================================
--- 4. EXECUTABLE ANON DENIAL BEHAVIOR (Anon JWT Context)
+-- 4. EXECUTABLE ANON DENIAL BEHAVIOR (SET LOCAL ROLE anon)
 -- =========================================================================
 SET LOCAL ROLE anon;
 SELECT set_config('request.jwt.claim.role', 'anon', true);
