@@ -18,7 +18,7 @@ jobs:
 
       - name: Checkout Product SHA & Verify Exact Binding
         run: |
-          REQUESTED_PRODUCT_SHA="c6a0f7725c6791e16f2686bfc67295c0b9cb306a"
+          REQUESTED_PRODUCT_SHA="24e04aff2b520b52d7488f1f5ccf697777bc18d7"
           git fetch origin feature/lari-clinic-foundation
           git checkout "${REQUESTED_PRODUCT_SHA}"
           ACTUAL_TEST_WORKTREE_SHA=$(git rev-parse HEAD)
