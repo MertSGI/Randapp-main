@@ -234,8 +234,11 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql > /tmp/clinic-block3-sql.log 2>&1 || true
 
           if [ -n "$GITHUB_STEP_SUMMARY" ]; then
-            echo "## Clinic Block 3 SQL Test Log Output" >> "$GITHUB_STEP_SUMMARY"
-            sed 's/^/    /' /tmp/clinic-block3-sql.log >> "$GITHUB_STEP_SUMMARY"
+            node -e "
+              const fs = require('fs');
+              const log = fs.readFileSync('/tmp/clinic-block3-sql.log', 'utf8');
+              fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '### CLINIC LOG SUMMARY\n```\n' + log + '\n```\n');
+            "
           fi
 
           MARKERS=(
