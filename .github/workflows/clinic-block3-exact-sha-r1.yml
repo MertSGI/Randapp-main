@@ -230,14 +230,8 @@ jobs:
       - name: Run Clinic Block 3 Workspace Authority Hardening Functional SQL Suite & Verify Markers
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          echo "Executing clinic_workspace_authority_hardening_tests.sql..."
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql 2>&1 | tee /tmp/clinic-block3-sql.log
-          PSQL_EXIT=${PIPESTATUS[0]}
-
-          if [ "$PSQL_EXIT" -ne 0 ]; then
-            echo "❌ PSQL FAILED WITH EXIT CODE $PSQL_EXIT"
-            exit "$PSQL_EXIT"
-          fi
+          echo "Executing clinic_block3_ts_harness.ts..."
+          npx tsx supabase/tests/clinic_block3_ts_harness.ts
 
           MARKERS=(
             "CLINIC_HARDENING_SECTION1_SETUP_COMPLETE=YES"
