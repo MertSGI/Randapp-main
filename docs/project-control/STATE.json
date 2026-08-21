@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-08-20T15:58:00+03:00",
+  "updated_at": "2026-08-21T10:18:23+03:00",
   "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
@@ -73,6 +73,16 @@
       "branch": "ci/clinic-block1-exact-sha-r2-20260820",
       "sha": "78c3e49a1883aafb74ff2e8f18acd9876e74a01b",
       "status": "CI_RUN_32395034938_SUCCESS"
+    },
+    "clinic_block2_operational_integration": {
+      "branch": "feature/lari-clinic-foundation",
+      "sha": "5e935ed049ffe08a6797643ec9cc2b7d4e6ae637",
+      "status": "CLOSED_PROVEN"
+    },
+    "clinic_block2_ci_evidence": {
+      "branch": "ci/clinic-block2-exact-sha-r3-20260821",
+      "sha": "4432d95b7335689242db61ba5562f0560b2d1585",
+      "status": "CI_RUN_32457917961_SUCCESS"
     }
   },
   "accepted_gates": [
@@ -232,6 +242,17 @@
       ],
       "closed_at": "2026-08-20T19:00:00Z",
       "reopen_condition": "Contradictory clinical RLS, append-only note immutability, server-authoritative RPC, audit privacy, cross-tenant isolation, or exact-SHA regression evidence"
+    },
+    {
+      "gate": "LARİ Clinic Block 2 Operational Integration & Application Service Layer",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "5e935ed049ffe08a6797643ec9cc2b7d4e6ae637",
+      "run_ids": [
+        "32457917961"
+      ],
+      "closed_at": "2026-08-21T10:18:23+03:00",
+      "reopen_condition": "Contradictory operational encounter status guard, atomic completion side-effects, idempotency, patient history projection, cross-tenant boundary, or exact-SHA concurrency regression evidence"
     }
   ],
   "active_workstreams": {
@@ -279,7 +300,7 @@
     "lari_clinic": {
       "status": "IN_PROGRESS",
       "branch": "feature/lari-clinic-foundation",
-      "sha": "2bb2b32d95387e09da06c7442a8617ccd38e4feb",
+      "sha": "5e935ed049ffe08a6797643ec9cc2b7d4e6ae637",
       "blocks": {
         "block1_clinical_domain_server_authority": {
           "status": "CLOSED_PROVEN",
@@ -289,8 +310,15 @@
           "run_id": "32395034938"
         },
         "block2_operational_integration": {
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+          "product_sha": "5e935ed049ffe08a6797643ec9cc2b7d4e6ae637",
+          "evidence_sha": "4432d95b7335689242db61ba5562f0560b2d1585",
+          "run_id": "32457917961"
+        },
+        "block3_workspace_ui": {
           "status": "IN_PROGRESS",
-          "objective": "Build operational integration, application services, atomic encounter+appointment completion, and operational day read model without UI"
+          "objective": "Build authenticated Clinic application workspace on top of accepted Block 1 + Block 2 server authority"
         }
       }
     }
@@ -304,7 +332,7 @@
     "human_participant_uat": "DEFERRED_FIELD_VALIDATION"
   },
   "current_blockers": [],
-  "next_action": "Execute Controller-authorized LARİ Clinic Block 2 Operational Integration & Application Service Layer implementation on feature/lari-clinic-foundation from accepted Block 1 product SHA 2bb2b32d95387e09da06c7442a8617ccd38e4feb.",
+  "next_action": "Execute Controller-authorized LARİ Clinic Block 3 Workspace / UI implementation on feature/lari-clinic-foundation from accepted Block 2 product SHA 5e935ed049ffe08a6797643ec9cc2b7d4e6ae637.",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true

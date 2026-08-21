@@ -5,7 +5,7 @@
 ```
 LARİ CORE [FROZEN / CLOSED_PROVEN]
   └── PACKAGE / CUSTOMER CUSTOMIZATION [CLOSED_PROVEN]
-        └── LARİ CLINIC [IN_PROGRESS - BLOCK 1 CLOSED_PROVEN / BLOCK 2 IN_PROGRESS]
+        └── LARİ CLINIC [IN_PROGRESS - BLOCK 1 & BLOCK 2 CLOSED_PROVEN / BLOCK 3 IN_PROGRESS]
               └── LARİ HEALTH TOURISM
                     └── FINAL DELIVERY
 ```
@@ -39,8 +39,8 @@ LARİ CORE [FROZEN / CLOSED_PROVEN]
 | **2. Package Customization** | Branch Server Authority (Slice 1) | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
 | **2. Package Customization** | Commercial Source-of-Truth Alignment (Slice 2) | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
 | **3. LARİ Clinic** | Clinical Domain Server Authority (Block 1) | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
-| **3. LARİ Clinic** | Operational Integration & Application Services (Block 2) | `IN_PROGRESS` | N/A |
-| **3. LARİ Clinic** | Clinic Workspace UI & E2E Verification (Block 3) | `NOT_STARTED` | N/A |
+| **3. LARİ Clinic** | Operational Integration & Application Services (Block 2) | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
+| **3. LARİ Clinic** | Clinic Workspace UI & E2E Verification (Block 3) | `IN_PROGRESS` | N/A |
 | **4. LARİ Health Tourism** | International Patient & Agency Operations | `NOT_STARTED` | N/A |
 | **5. Final Delivery** | Production Cutover & DNS/Commercial Launch | `NOT_STARTED` | N/A |
 

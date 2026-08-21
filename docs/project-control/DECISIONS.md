@@ -44,3 +44,7 @@
 ## DECISION-010: LARİ Clinic Identity & Core Appointment Model Preservation Policy
 - **Status**: ACCEPTED
 - **Decision**: LARİ Clinic preserves the canonical platform identity-role and Core appointment-status models. Clinical practitioner permissions are represented through clinic_staff_profiles; clinical encounter lifecycle remains separate from Core appointment lifecycle; tenant_owner and super_admin receive no implicit clinical-content bypass.
+
+## DECISION-011: LARİ Clinic Dedicated Application Surface & Clinical Authorization Boundary
+- **Status**: ACCEPTED
+- **Decision**: LARİ Clinic uses a dedicated authenticated application surface separate from the owner Admin and Super Admin routes. tenant_owner and staff may reach the Clinic shell, but clinical-content loading and rendering is authorized by the server-derived clinic_get_my_context contract. super_admin receives no implicit Clinic workspace access. A tenant_owner without an active Clinic staff context is limited to Clinic setup operations and receives no clinical patient content.
