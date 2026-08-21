@@ -32,8 +32,10 @@ DECLARE
 BEGIN
     RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.2) ===';
 
-    -- Clean any existing isolated test fixture (child relations first)
-    DELETE FROM public.audit_events WHERE tenant_id IN (v_tenant_id::text, v_tenant2_id::text);
+    -- Clean any existing isolated test fixture (child relations first with table checks)
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'audit_events') THEN
+        DELETE FROM public.audit_events WHERE tenant_id IN (v_tenant_id::text, v_tenant2_id::text);
+    END IF;
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_notes') THEN
         DELETE FROM public.clinic_notes WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     END IF;
@@ -58,26 +60,43 @@ BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_vital_signs') THEN
         DELETE FROM public.clinic_vital_signs WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     END IF;
-
-    DELETE FROM public.clinic_patient_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
-    DELETE FROM public.clinic_staff_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
-    DELETE FROM public.appointments WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
-    DELETE FROM public.staff WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
-    DELETE FROM public.customers WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
-    DELETE FROM public.services WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_patient_profiles') THEN
+        DELETE FROM public.clinic_patient_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_staff_profiles') THEN
+        DELETE FROM public.clinic_staff_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'appointments') THEN
+        DELETE FROM public.appointments WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'staff') THEN
+        DELETE FROM public.staff WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'customers') THEN
+        DELETE FROM public.customers WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'services') THEN
+        DELETE FROM public.services WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'subscriptions') THEN
         DELETE FROM public.subscriptions WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     END IF;
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'published_sites') THEN
         DELETE FROM public.published_sites WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     END IF;
-    DELETE FROM public.tenant_branding WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
-    DELETE FROM public.users_profile WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'tenant_branding') THEN
+        DELETE FROM public.tenant_branding WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users_profile') THEN
+        DELETE FROM public.users_profile WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+    END IF;
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
         DELETE FROM auth.users WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid)
            OR email LIKE '%_hardened_b3@test.invalid';
     END IF;
-    DELETE FROM public.tenants WHERE id IN (v_tenant_id, v_tenant2_id);
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'tenants') THEN
+        DELETE FROM public.tenants WHERE id IN (v_tenant_id, v_tenant2_id);
+    END IF;
 
     -- Seed Tenants
     INSERT INTO public.tenants (id, name, slug, status)
