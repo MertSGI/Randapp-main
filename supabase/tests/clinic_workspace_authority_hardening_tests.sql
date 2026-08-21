@@ -99,7 +99,7 @@ BEGIN
     IF NOT has_function_privilege('authenticated', 'public.clinic_get_staff_setup_profiles()', 'EXECUTE') THEN
         RAISE EXCEPTION 'ACL CHECK FAILED: authenticated role must have EXECUTE on clinic_get_staff_setup_profiles';
     END IF;
-    RAISE NOTICE '✓ AUTHENTICATED EXECUTE ACL PROVEN';
+    RAISE NOTICE 'CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN=YES';
 
     -- Anon Role Revocations
     IF has_function_privilege('anon', 'public.clinic_get_patient_profile(uuid)', 'EXECUTE') THEN
@@ -111,7 +111,7 @@ BEGIN
     IF has_function_privilege('anon', 'public.clinic_get_staff_setup_profiles()', 'EXECUTE') THEN
         RAISE EXCEPTION 'ACL CHECK FAILED: anon role must NOT have EXECUTE on clinic_get_staff_setup_profiles';
     END IF;
-    RAISE NOTICE '✓ ANON EXECUTE ACL DENIED';
+    RAISE NOTICE 'CLINIC_ANON_EXECUTE_ACL_DENIED=YES';
 END;
 $$;
 
@@ -120,8 +120,6 @@ $$;
 -- =========================================================================
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
-
--- TEST A, B, C, D, E, F, G: Manage-Only Staff
 SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888888', true);
 
 DO $$
@@ -136,6 +134,7 @@ BEGIN
     IF (v_res->>'success')::boolean <> true THEN
         RAISE EXCEPTION 'TEST A FAILED: Manage-only staff should read bounded profile';
     END IF;
+    RAISE NOTICE 'CLINIC_PROFILE_VIEW_WITHOUT_HISTORY_PROVEN=YES';
 
     -- History denied FORBIDDEN
     BEGIN
@@ -157,6 +156,8 @@ BEGIN
     IF (v_res->>'success')::boolean <> true OR v_res->>'patient_profile_id' IS NULL THEN
         RAISE EXCEPTION 'TEST C FAILED: Manage-only profile upsert failed or missing patient_profile_id';
     END IF;
+    RAISE NOTICE 'CLINIC_PROFILE_MUTATION_MANAGE_ONLY_PROVEN=YES';
+    RAISE NOTICE 'CLINIC_PROFILE_RESPONSE_CONTRACT_PROVEN=YES';
 END;
 $$;
 
@@ -189,6 +190,7 @@ BEGIN
             RAISE EXCEPTION 'TEST J FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
+    RAISE NOTICE 'CLINIC_VIEW_ONLY_MUTATION_DENIED=YES';
 END;
 $$;
 
@@ -231,6 +233,7 @@ BEGIN
             RAISE EXCEPTION 'TEST M FAILED [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
+    RAISE NOTICE 'CLINIC_NO_CAPABILITY_DENIAL_PROVEN=YES';
 END;
 $$;
 
@@ -263,6 +266,7 @@ BEGIN
             RAISE EXCEPTION 'TEST O FAILED [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
+    RAISE NOTICE 'CLINIC_PROFILE_CROSS_TENANT_DENIED=YES';
 END;
 $$;
 
@@ -277,6 +281,8 @@ BEGIN
     IF (v_res->>'success')::boolean <> true OR jsonb_array_length(v_res->'profiles') < 3 THEN
         RAISE EXCEPTION 'TEST S, T FAILED: Active tenant owner setup read failed';
     END IF;
+    RAISE NOTICE 'CLINIC_OWNER_SETUP_READ_PROVEN=YES';
+    RAISE NOTICE 'CLINIC_OWNER_SETUP_CROSS_TENANT_SAFE=YES';
 END;
 $$;
 
@@ -298,6 +304,7 @@ BEGIN
             RAISE EXCEPTION 'TEST INACTIVE OWNER FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
+    RAISE NOTICE 'CLINIC_INACTIVE_OWNER_SETUP_DENIED=YES';
 END;
 $$;
 
@@ -369,10 +376,11 @@ BEGIN
         RAISE EXCEPTION 'TEST R FAILED: Anon caller must NOT read setup profiles';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_state <> '42501' AND v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_msg NOT LIKE '%FORBIDDEN%' THEN
+        IF v_err_state <> '42501' AND v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_state <> '42501' THEN
             RAISE EXCEPTION 'TEST R FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
+    RAISE NOTICE 'CLINIC_ANON_PROFILE_ACCESS_DENIED=YES';
 END;
 $$;
 
@@ -410,6 +418,7 @@ BEGIN
     IF v_audit.payload ? 'blood_type' OR v_audit.payload ? 'allergies' THEN
         RAISE EXCEPTION 'CANONICAL AUDIT CHECK FAILED: Payload leaked clinical health content';
     END IF;
+    RAISE NOTICE 'CLINIC_PROFILE_MUTATION_AUDIT_CANONICAL=YES';
 
     -- Zero leak checks
     PERFORM set_config('request.jwt.claim.sub', v_manage_staff_uid::text, true);
@@ -425,21 +434,8 @@ BEGIN
     IF (v_res->'profiles'->0) ? 'allergies' THEN
         RAISE EXCEPTION 'LEAK CHECK FAILED: Setup profiles contain patient health data!';
     END IF;
-
-    RAISE NOTICE 'CLINIC_PROFILE_MUTATION_MANAGE_ONLY_PROVEN=YES';
-    RAISE NOTICE 'CLINIC_PROFILE_MUTATION_AUDIT_CANONICAL=YES';
-    RAISE NOTICE 'CLINIC_PROFILE_RESPONSE_CONTRACT_PROVEN=YES';
-    RAISE NOTICE 'CLINIC_PROFILE_VIEW_WITHOUT_HISTORY_PROVEN=YES';
-    RAISE NOTICE 'CLINIC_VIEW_ONLY_MUTATION_DENIED=YES';
-    RAISE NOTICE 'CLINIC_NO_CAPABILITY_DENIAL_PROVEN=YES';
-    RAISE NOTICE 'CLINIC_PROFILE_CROSS_TENANT_DENIED=YES';
-    RAISE NOTICE 'CLINIC_ANON_PROFILE_ACCESS_DENIED=YES';
-    RAISE NOTICE 'CLINIC_OWNER_SETUP_READ_PROVEN=YES';
-    RAISE NOTICE 'CLINIC_OWNER_SETUP_CROSS_TENANT_SAFE=YES';
     RAISE NOTICE 'CLINIC_BOUNDED_PROFILE_NO_HISTORY_LEAK=YES';
-    RAISE NOTICE 'CLINIC_INACTIVE_OWNER_SETUP_DENIED=YES';
-    RAISE NOTICE 'CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN=YES';
-    RAISE NOTICE 'CLINIC_ANON_EXECUTE_ACL_DENIED=YES';
+
     RAISE NOTICE 'CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES';
     RAISE NOTICE 'CLINIC_WORKSPACE_AUTHORITY_HARDENING_DB_EXECUTION=PASS';
 END;
