@@ -232,37 +232,43 @@ jobs:
 
       - name: Run Clinic Block 3 Workspace Authority Hardening Functional SQL Suite & Verify Markers
         run: |
-          set -o pipefail
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "Executing clinic_workspace_authority_hardening_tests.sql..."
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql 2>&1 | tee /tmp/clinic-block3-sql.log
+          if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql > /tmp/clinic-block3-sql.log 2>&1; then
+            echo "❌ PSQL EXECUTION FAILED!"
+            cat /tmp/clinic-block3-sql.log
+            exit 1
+          fi
+
+          echo "=== PSQL OUTPUT DUMP ==="
+          cat /tmp/clinic-block3-sql.log
 
           echo "Verifying Block 3 test-generated execution markers..."
-          grep -F 'CLINIC_PROFILE_MUTATION_MANAGE_ONLY_PROVEN=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_PROFILE_MUTATION_AUDIT_CANONICAL=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_PROFILE_RESPONSE_CONTRACT_PROVEN=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_PROFILE_VIEW_WITHOUT_HISTORY_PROVEN=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_VIEW_ONLY_MUTATION_DENIED=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_NO_CAPABILITY_DENIAL_PROVEN=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_PROFILE_CROSS_TENANT_DENIED=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_ANON_PROFILE_ACCESS_DENIED=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_OWNER_SETUP_READ_PROVEN=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_OWNER_SETUP_CROSS_TENANT_SAFE=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_BOUNDED_PROFILE_NO_HISTORY_LEAK=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_INACTIVE_OWNER_SETUP_DENIED=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_ANON_EXECUTE_ACL_DENIED=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES' /tmp/clinic-block3-sql.log
-          grep -F 'CLINIC_WORKSPACE_AUTHORITY_HARDENING_DB_EXECUTION=PASS' /tmp/clinic-block3-sql.log
+          MARKERS=(
+            "CLINIC_PROFILE_MUTATION_MANAGE_ONLY_PROVEN=YES"
+            "CLINIC_PROFILE_MUTATION_AUDIT_CANONICAL=YES"
+            "CLINIC_PROFILE_RESPONSE_CONTRACT_PROVEN=YES"
+            "CLINIC_PROFILE_VIEW_WITHOUT_HISTORY_PROVEN=YES"
+            "CLINIC_VIEW_ONLY_MUTATION_DENIED=YES"
+            "CLINIC_NO_CAPABILITY_DENIAL_PROVEN=YES"
+            "CLINIC_PROFILE_CROSS_TENANT_DENIED=YES"
+            "CLINIC_ANON_PROFILE_ACCESS_DENIED=YES"
+            "CLINIC_OWNER_SETUP_READ_PROVEN=YES"
+            "CLINIC_OWNER_SETUP_CROSS_TENANT_SAFE=YES"
+            "CLINIC_BOUNDED_PROFILE_NO_HISTORY_LEAK=YES"
+            "CLINIC_INACTIVE_OWNER_SETUP_DENIED=YES"
+            "CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN=YES"
+            "CLINIC_ANON_EXECUTE_ACL_DENIED=YES"
+            "CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES"
+            "CLINIC_WORKSPACE_AUTHORITY_HARDENING_DB_EXECUTION=PASS"
+          )
+          for m in "${MARKERS[@]}"; do
+            if ! grep -F "$m" /tmp/clinic-block3-sql.log; then
+              echo "❌ MISSING MARKER: $m"
+              exit 1
+            fi
+          done
           echo "✅ Clinic Block 3 workspace authority hardening SQL suite passed with all test-generated markers verified."
-
-      - name: Dump Block 3 SQL Failure Log
-        if: failure()
-        run: |
-          if [ -f /tmp/clinic-block3-sql.log ]; then
-            echo "=== BLOCK 3 SQL FAILURE LOG OUTPUT ==="
-            cat /tmp/clinic-block3-sql.log
-          fi
 
       - name: Run Clinic Application Contracts Executable QA
         run: |
