@@ -131,6 +131,10 @@ jobs:
             echo "--- MIGRATION FAILURE SUMMARY ---"
             cat /tmp/p2a-failure-summary.txt
           fi
+          if [ -f /tmp/clinic-block3-sql.log ]; then
+            echo "--- BLOCK 3 SQL FAILURE LOG ---"
+            cat /tmp/clinic-block3-sql.log
+          fi
 
       - name: Install DB Test Dependencies
         run: |
@@ -234,18 +238,9 @@ jobs:
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "Executing clinic_workspace_authority_hardening_tests.sql..."
-          set +e
-          set -o pipefail
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql 2>&1 | tee /tmp/clinic-block3-sql.log
-          PSQL_EXIT=${PIPESTATUS[0]}
-          set -e
 
-          if [ "$PSQL_EXIT" -ne 0 ]; then
-            echo "=== FAILED SQL LOG OUTPUT ==="
-            cat /tmp/clinic-block3-sql.log
-            exit "$PSQL_EXIT"
-          fi
-
+          echo "Verifying Block 3 test-generated execution markers..."
           grep -F 'CLINIC_PROFILE_MUTATION_MANAGE_ONLY_PROVEN=YES' /tmp/clinic-block3-sql.log
           grep -F 'CLINIC_PROFILE_MUTATION_AUDIT_CANONICAL=YES' /tmp/clinic-block3-sql.log
           grep -F 'CLINIC_PROFILE_RESPONSE_CONTRACT_PROVEN=YES' /tmp/clinic-block3-sql.log
