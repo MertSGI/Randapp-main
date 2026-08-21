@@ -131,10 +131,6 @@ jobs:
             echo "--- MIGRATION FAILURE SUMMARY ---"
             cat /tmp/p2a-failure-summary.txt
           fi
-          if [ -f /tmp/clinic-block3-sql.log ]; then
-            echo "--- BLOCK 3 SQL LOG DUMP ---"
-            cat /tmp/clinic-block3-sql.log
-          fi
 
       - name: Install DB Test Dependencies
         run: |
@@ -259,6 +255,14 @@ jobs:
           grep -F 'CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES' /tmp/clinic-block3-sql.log
           grep -F 'CLINIC_WORKSPACE_AUTHORITY_HARDENING_DB_EXECUTION=PASS' /tmp/clinic-block3-sql.log
           echo "✅ Clinic Block 3 workspace authority hardening SQL suite passed with all test-generated markers verified."
+
+      - name: Dump Block 3 SQL Failure Log
+        if: failure()
+        run: |
+          if [ -f /tmp/clinic-block3-sql.log ]; then
+            echo "=== BLOCK 3 SQL FAILURE LOG OUTPUT ==="
+            cat /tmp/clinic-block3-sql.log
+          fi
 
       - name: Run Clinic Application Contracts Executable QA
         run: |
