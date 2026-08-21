@@ -238,13 +238,16 @@ jobs:
             const client = new pg.Client({ connectionString: process.env.DB_URL });
             async function main() {
               let log = '';
+              client.on('notice', (msg) => {
+                log += 'NOTICE: ' + msg.message + '\n';
+              });
               try {
                 await client.connect();
                 const sql = fs.readFileSync('supabase/tests/clinic_workspace_authority_hardening_tests.sql', 'utf8');
-                const res = await client.query(sql);
-                log = 'SUCCESS:\n' + JSON.stringify(res, null, 2);
+                await client.query(sql);
+                log += 'EXECUTION_SUCCESS=YES\n';
               } catch (err: any) {
-                log = 'ERROR MESSAGE: ' + err.message + '\nERROR CODE: ' + err.code + '\nERROR DETAIL: ' + err.detail + '\nERROR POSITION: ' + err.position + '\nSTACK: ' + err.stack;
+                log += 'ERROR MESSAGE: ' + err.message + '\nERROR CODE: ' + err.code + '\nERROR DETAIL: ' + (err.detail || 'NONE') + '\nERROR POSITION: ' + err.position + '\nSTACK: ' + err.stack + '\n';
                 process.exitCode = 1;
               } finally {
                 await client.end();
