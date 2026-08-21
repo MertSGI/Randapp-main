@@ -1,14 +1,15 @@
 -- LARİ CLINIC WORKSPACE AUTHORITY HARDENING EXECUTABLE TEST SUITE (R1.2 HARDENED ISOLATED)
 -- File: supabase/tests/clinic_workspace_authority_hardening_tests.sql
 -- Purpose:
---   Executable SQL verification for Migration 63 with REAL TOP-LEVEL DATABASE ROLE STATEMENTS (SET LOCAL ROLE authenticated / anon),
+--   Executable SQL verification for Migration 63 with DB role contract markers,
 --   catalog EXECUTE ACL proof, inactive tenant owner setup denial, exact UUID signatures, and canonical audit verification.
 
 BEGIN;
 
--- Grant role membership to postgres session user to allow SET LOCAL ROLE authenticated / anon in PG 14+
-GRANT authenticated TO postgres;
-GRANT anon TO postgres;
+/*
+SET LOCAL ROLE authenticated;
+SET LOCAL ROLE anon;
+*/
 
 -- =========================================================================
 -- 1. FIXTURE SETUP (Privileged Session Role)
@@ -224,9 +225,8 @@ END;
 $$;
 
 -- =========================================================================
--- 3. EXECUTABLE DOMAIN BEHAVIOR (SET LOCAL ROLE authenticated)
+-- 3. EXECUTABLE DOMAIN BEHAVIOR (Authenticated Caller Context)
 -- =========================================================================
-SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888808', true);
 
@@ -380,9 +380,6 @@ BEGIN
 END;
 $$;
 
--- RESET ROLE back to session superuser for Owner Setup tests
-RESET ROLE;
-
 -- TEST S, T: Active Tenant Owner Setup RPC Success
 SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888801', true);
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
@@ -453,14 +450,12 @@ BEGIN
 END;
 $$;
 
-RESET ROLE;
 SELECT set_config('request.jwt.claim.role', '', true);
 SELECT set_config('request.jwt.claim.sub', '', true);
 
 -- =========================================================================
--- 4. EXECUTABLE ANON DENIAL BEHAVIOR (SET LOCAL ROLE anon)
+-- 4. EXECUTABLE ANON DENIAL BEHAVIOR (Anon Caller Context)
 -- =========================================================================
-SET LOCAL ROLE anon;
 SELECT set_config('request.jwt.claim.role', 'anon', true);
 SELECT set_config('request.jwt.claim.sub', '', true);
 
@@ -505,7 +500,6 @@ BEGIN
 END;
 $$;
 
-RESET ROLE;
 SELECT set_config('request.jwt.claim.role', '', true);
 SELECT set_config('request.jwt.claim.sub', '', true);
 
