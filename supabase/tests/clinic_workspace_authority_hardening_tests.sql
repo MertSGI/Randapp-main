@@ -138,7 +138,7 @@ BEGIN
                        ('a3888888-8888-4888-8888-888888888808'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
                        ('a3888888-8888-4888-8888-888888888803'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
                        ('a3888888-8888-4888-8888-888888888800'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
-                ON CONFLICT (id) DO NOTHING;
+                ON CONFLICT DO NOTHING;
             $sql$;
         EXCEPTION WHEN OTHERS THEN
             BEGIN
@@ -151,7 +151,7 @@ BEGIN
                            ('a3888888-8888-4888-8888-888888888808'::UUID, 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
                            ('a3888888-8888-4888-8888-888888888803'::UUID, 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
                            ('a3888888-8888-4888-8888-888888888800'::UUID, 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
-                    ON CONFLICT (id) DO NOTHING;
+                    ON CONFLICT DO NOTHING;
                 $sql$;
             EXCEPTION WHEN OTHERS THEN NULL;
             END;
