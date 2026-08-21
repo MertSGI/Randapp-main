@@ -39,7 +39,9 @@ BEGIN
     DELETE FROM public.staff WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     DELETE FROM public.customers WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     DELETE FROM public.users_profile WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
-    DELETE FROM auth.users WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
+        DELETE FROM auth.users WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+    END IF;
     DELETE FROM public.tenants WHERE id IN (v_tenant_id, v_tenant2_id);
 
     -- Seed Tenants
@@ -48,15 +50,17 @@ BEGIN
            (v_tenant2_id, 'Hardening Clinic Tenant 2', 'hardening-clinic-2', 'active');
 
     -- Seed Auth Users
-    INSERT INTO auth.users (id, email)
-    VALUES (v_owner_uid, 'owner1_h@test.com'),
-           (v_owner2_uid, 'owner2_h@test.com'),
-           (v_inactive_owner_uid, 'owner_in_h@test.com'),
-           (v_superadmin_uid, 'superadmin_h@test.com'),
-           (v_manage_staff_uid, 'manage_staff_h@test.com'),
-           (v_view_staff_uid, 'view_staff_h@test.com'),
-           (v_none_staff_uid, 'none_staff_h@test.com')
-    ON CONFLICT (id) DO NOTHING;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
+        INSERT INTO auth.users (id, email, role, created_at, updated_at)
+        VALUES (v_owner_uid, 'owner1_h@test.com', 'authenticated', now(), now()),
+               (v_owner2_uid, 'owner2_h@test.com', 'authenticated', now(), now()),
+               (v_inactive_owner_uid, 'owner_in_h@test.com', 'authenticated', now(), now()),
+               (v_superadmin_uid, 'superadmin_h@test.com', 'authenticated', now(), now()),
+               (v_manage_staff_uid, 'manage_staff_h@test.com', 'authenticated', now(), now()),
+               (v_view_staff_uid, 'view_staff_h@test.com', 'authenticated', now(), now()),
+               (v_none_staff_uid, 'none_staff_h@test.com', 'authenticated', now(), now())
+        ON CONFLICT (id) DO NOTHING;
+    END IF;
 
     -- Seed Users Profiles (using canonical name column)
     INSERT INTO public.users_profile (id, tenant_id, role, name, active)
@@ -201,7 +205,7 @@ END;
 $$;
 
 -- TEST K, L, M: No-Capability Staff
-SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888880', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-88888888880', true);
 
 DO $$
 DECLARE
