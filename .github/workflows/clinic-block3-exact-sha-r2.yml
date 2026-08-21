@@ -35,6 +35,16 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install npm dependencies
+        run: |
+          set -euo pipefail
+          npm ci
+
+      - name: Install DB Test Dependencies
+        run: |
+          set -euo pipefail
+          npm install pg @types/pg
+
       - name: Preflight Docker & Environment Check
         run: |
           set -euo pipefail
@@ -310,10 +320,6 @@ jobs:
           node --import tsx scripts/test-clinic-workspace-ui.mjs
           node scripts/test-clinic-workspace-static-contracts.mjs
 
-      - name: Install npm dependencies
-        run: |
-          set -euo pipefail
-          npm ci
 
       - name: Run Full Application QA & Commercial Source-of-Truth Suite
         run: |
