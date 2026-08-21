@@ -126,23 +126,34 @@ jobs:
         if: failure()
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          echo "=== DETAILED FAILURE DIAGNOSTIC DUMP ==="
+          echo "=== MIGRATION FAILURE DIAGNOSTIC DUMP ==="
           if [ -f /tmp/p2a-failure-summary.txt ]; then
             echo "--- MIGRATION FAILURE SUMMARY ---"
             cat /tmp/p2a-failure-summary.txt
           fi
 
-      - name: Run Sequential P2A Direct DB SQL & RLS Verification Suite
+      - name: Install DB Test Dependencies
+        run: |
+          npm install pg @types/pg
+
+      - name: Run Static SQL Security & Contract Suite
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          echo "Executing p2a_managed_direct_db_tests.sql..."
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_managed_direct_db_tests.sql
-          echo "✅ P2A managed direct DB SQL suite passed."
+          echo "Executing p2a_tenant_provisioning_static_test.sql..."
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_tenant_provisioning_static_test.sql
+          echo "✅ Static SQL security suite passed."
 
-      - name: Run Real Multi-Session DB Concurrency & Advisory Lock Harness
+      - name: Run Sequential DB Integration & RLS Privacy Matrix Suite
         run: |
-          echo "Executing p2a_managed_concurrency_harness.ts..."
-          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx tsx supabase/tests/p2a_managed_concurrency_harness.ts
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "Executing p2a_tenant_provisioning_integration_tests.sql..."
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_tenant_provisioning_integration_tests.sql
+          echo "✅ Sequential DB integration & RLS matrix suite passed."
+
+      - name: Run Multi-Session Real DB Concurrency Harness
+        run: |
+          echo "Executing p2a_concurrency_harness.ts..."
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx tsx supabase/tests/p2a_concurrency_harness.ts
           echo "✅ Multi-session real DB concurrency harness passed."
 
       - name: Run Sequential Package Branch Server Authority Functional SQL Suite
@@ -157,6 +168,14 @@ jobs:
           echo "Executing package_branch_concurrency_harness.ts..."
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx tsx supabase/tests/package_branch_concurrency_harness.ts
           echo "✅ Package branch real multi-session concurrency & RLS harness passed."
+
+      - name: Run Package Branch Static QA
+        run: |
+          node scripts/test-package-branch-server-authority.mjs
+
+      - name: Run Branch Booking QA
+        run: |
+          node scripts/verify-branch-aware-booking.mjs
 
       - name: Run Clinic Domain Server Authority Functional SQL Suite & Verify Markers
         run: |
