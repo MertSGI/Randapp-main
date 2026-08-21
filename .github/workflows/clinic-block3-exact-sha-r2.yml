@@ -245,6 +245,7 @@ jobs:
           echo "✅ Clinic Block 2 real multi-session concurrency harness passed with all harness-generated markers verified."
 
       - name: Run Clinic Block 3 Workspace Authority Hardening Functional SQL Suite & Verify Markers
+        run: |
           set -e
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== RUNNING BLOCK 3 SQL TEST SUITE ==="
