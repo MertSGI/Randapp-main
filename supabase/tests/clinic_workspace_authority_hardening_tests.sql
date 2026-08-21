@@ -193,7 +193,7 @@ END;
 $$;
 
 -- TEST K, L, M: No-Capability Staff
-SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888880', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-88888888880', true);
 
 DO $$
 DECLARE
@@ -327,6 +327,8 @@ END;
 $$;
 
 RESET ROLE;
+SELECT set_config('request.jwt.claim.role', '', true);
+SELECT set_config('request.jwt.claim.sub', '', true);
 
 -- =========================================================================
 -- 4. EXECUTABLE ANON DENIAL BEHAVIOR (SET LOCAL ROLE anon)
@@ -375,6 +377,8 @@ END;
 $$;
 
 RESET ROLE;
+SELECT set_config('request.jwt.claim.role', '', true);
+SELECT set_config('request.jwt.claim.sub', '', true);
 
 -- =========================================================================
 -- 5. CANONICAL AUDIT & ZERO LEAK POST-CHECKS (Privileged Session Role)
@@ -416,6 +420,7 @@ BEGIN
     END IF;
 
     PERFORM set_config('request.jwt.claim.sub', v_owner_uid::text, true);
+    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
     v_res := public.clinic_get_staff_setup_profiles();
     IF (v_res->'profiles'->0) ? 'allergies' THEN
         RAISE EXCEPTION 'LEAK CHECK FAILED: Setup profiles contain patient health data!';
