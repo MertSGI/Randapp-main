@@ -233,30 +233,15 @@ jobs:
           echo "Executing clinic_workspace_authority_hardening_tests.sql..."
           set +e
           npx tsx -e "
+            import { exec } from 'child_process';
             import fs from 'fs';
-            import pg from 'pg';
-            const client = new pg.Client({ connectionString: process.env.DB_URL });
-            async function main() {
-              let log = '';
-              client.on('notice', (msg) => {
-                log += msg.message + '\n';
-              });
-              try {
-                await client.connect();
-                const sql = fs.readFileSync('supabase/tests/clinic_workspace_authority_hardening_tests.sql', 'utf8');
-                // Execute whole block
-                await client.query(sql);
-                log += 'EXECUTION_SUCCESS=YES\n';
-              } catch (err: any) {
-                log += 'ERROR: ' + err.message + '\nCODE: ' + err.code + '\nDETAIL: ' + (err.detail || '') + '\nHINT: ' + (err.hint || '') + '\nPOSITION: ' + err.position + '\nWHERE: ' + (err.where || '') + '\n';
-                process.exitCode = 1;
-              } finally {
-                await client.end();
-                fs.writeFileSync('/tmp/clinic-block3-sql.log', log);
-                console.log(log);
-              }
-            }
-            main();
+            const cmd = 'psql \"postgresql://postgres:postgres@127.0.0.1:54322/postgres\" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql';
+            exec(cmd, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+              const fullLog = '=== PSQL STDOUT ===\n' + stdout + '\n=== PSQL STDERR ===\n' + stderr + (err ? '\n=== EXIT ERROR ===\n' + err.message : '');
+              fs.writeFileSync('/tmp/clinic-block3-sql.log', fullLog);
+              console.log(fullLog);
+              if (err) process.exit(1);
+            });
           "
           PSQL_EXIT=$?
           set -e
