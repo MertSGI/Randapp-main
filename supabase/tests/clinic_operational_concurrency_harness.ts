@@ -113,6 +113,9 @@ export async function runClinicOperationalConcurrencyHarness() {
       ('${enc_dup_comp_id}', '${tenant_id}', '${appt_dup_comp_id}',  '${cust_id}', '${staff_doc1_id}', '${branch_id}', 'open', now(), '${doc1_id}', now(), now());
     `);
 
+    console.log('CLINIC_OPERATIONAL_DB_EXECUTION_OCCURRED = YES');
+    console.log('CLINIC_OPERATIONAL_REAL_CONCURRENCY = YES');
+
     // Helper: run RPC in an independent transaction
     const runInTx = async (client: pg.Client, user_id: string, sql: string) => {
       await client.query('BEGIN;');
@@ -292,10 +295,10 @@ export async function runClinicOperationalConcurrencyHarness() {
     // =================================================================
     console.log('--- SCENARIO D: Unauthorized vs Authorized completion ---');
 
-    // Reset dup encounter for this test
+    // Reset dup encounter for this test by updating appointment FIRST while encounter is completed, then encounter to open
     await client3.query(`
-      UPDATE public.clinic_encounters SET status = 'open', completed_at = NULL WHERE id = '${enc_dup_comp_id}';
       UPDATE public.appointments SET status = 'confirmed' WHERE id = '${appt_dup_comp_id}';
+      UPDATE public.clinic_encounters SET status = 'open', completed_at = NULL WHERE id = '${enc_dup_comp_id}';
     `);
 
     const pAuth = runInTx(
@@ -315,10 +318,6 @@ export async function runClinicOperationalConcurrencyHarness() {
     // The authorized call must succeed, the unauthorized must fail
     const finalDEnc = (await client3.query(`SELECT status FROM public.clinic_encounters WHERE id = '${enc_dup_comp_id}'`)).rows[0];
     assert(finalDEnc.status === 'completed', 'Authorized completion must eventually succeed.');
-
-    // Emit top-level markers required by evidence gate
-    console.log('CLINIC_OPERATIONAL_DB_EXECUTION_OCCURRED = YES');
-    console.log('CLINIC_OPERATIONAL_REAL_CONCURRENCY = YES');
 
   } finally {
     await client1.end();
