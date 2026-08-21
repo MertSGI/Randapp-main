@@ -47,6 +47,9 @@ export interface ClinicStaffProfileWriteResult {
   can_write_clinical_notes: boolean;
 }
 
+/**
+ * Full ClinicPatientProfile entity (table-level).
+ */
 export interface ClinicPatientProfile {
   id?: string;
   tenant_id: string;
@@ -62,6 +65,23 @@ export interface ClinicPatientProfile {
   created_by?: string | null;
   updated_by?: string | null;
   created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Exact projection of the clinic_get_patient_history RPC's patient_profile output.
+ * Does NOT include tenant_id, customer_id, created_at, created_by, updated_by.
+ */
+export interface ClinicPatientHistoryProfile {
+  id: string;
+  date_of_birth: string | null;
+  sex_at_birth: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  emergency_contact_relationship: string | null;
+  blood_type: string | null;
+  allergies: string | null;
+  chronic_conditions: string | null;
   updated_at: string;
 }
 
@@ -113,7 +133,7 @@ export interface ClinicEncounterCompletionResult {
 }
 
 export interface ClinicPatientHistory {
-  patient_profile: ClinicPatientProfile | null;
+  patient_profile: ClinicPatientHistoryProfile | null;
   encounters: ClinicEncounter[];
 }
 
@@ -146,7 +166,7 @@ export interface ClinicOperationalDay {
   appointments: ClinicOperationalAppointment[];
 }
 
-export interface ClinicServiceResult<T = any> {
+export interface ClinicServiceResult<T = unknown> {
   success: boolean;
   data?: T;
   reason_code?: string;

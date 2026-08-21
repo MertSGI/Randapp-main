@@ -2,14 +2,15 @@
 -- LARİ CLINIC — BLOCK 2 OPERATIONAL INTEGRATION & APPLICATION SERVICES
 -- Migration: 20260906_lari_clinic_operational_integration.sql
 -- Description:
--- 1. Upgrade public.clinic_start_encounter to enforce confirmed-only appointment status requirement
--- 2. Create public.clinic_complete_encounter_and_appointment RPC for atomic completion
--- 3. Create public.clinic_get_my_context RPC for operational identity resolution
--- 4. Create public.clinic_get_operational_day RPC for schedule metadata (no clinical SOAP fields)
+-- 1. Upgrade public.clinic_start_encounter with FOR UPDATE row lock + confirmed-only
+-- 2. Open-encounter appointment status guard trigger
+-- 3. Atomic encounter + appointment completion RPC with FOR UPDATE, audit, outbox
+-- 4. Legacy clinic_complete_encounter wrapper closure
+-- 5. Clinic context and operational day RPCs
 -- =========================================================================
 
 -- =========================================================================
--- 1. UPGRADE PUBLIC.CLINIC_START_ENCOUNTER (CONFIRMED-ONLY RULE)
+-- 1. UPGRADE PUBLIC.CLINIC_START_ENCOUNTER (FOR UPDATE + CONFIRMED-ONLY)
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.clinic_start_encounter(
@@ -55,10 +56,12 @@ BEGIN
         RAISE EXCEPTION 'FORBIDDEN: Practitioner lacks can_write_clinical_notes capability.';
     END IF;
 
-    -- Fetch and validate appointment
+    -- Fetch and validate appointment with row-level lock to serialize against
+    -- concurrent cancellation, completion, no-show, or other Core status mutation
     SELECT * INTO v_appointment
     FROM public.appointments
-    WHERE id = p_appointment_id;
+    WHERE id = p_appointment_id
+    FOR UPDATE;
 
     IF v_appointment.id IS NULL THEN
         RAISE EXCEPTION 'NOT_FOUND: Appointment not found.';
@@ -157,7 +160,40 @@ GRANT EXECUTE ON FUNCTION public.clinic_start_encounter(UUID, TEXT) TO authentic
 
 
 -- =========================================================================
--- 2. ATOMIC ENCOUNTER + APPOINTMENT COMPLETION RPC
+-- 2. OPEN-ENCOUNTER APPOINTMENT STATUS GUARD TRIGGER
+-- =========================================================================
+
+CREATE OR REPLACE FUNCTION public.enforce_clinic_open_encounter_appointment_status()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+    -- Only fire when status is actually changing
+    IF OLD.status IS DISTINCT FROM NEW.status THEN
+        -- Check if an open clinic encounter exists for this appointment
+        IF EXISTS (
+            SELECT 1 FROM public.clinic_encounters
+            WHERE appointment_id = NEW.id
+              AND status = 'open'
+        ) THEN
+            RAISE EXCEPTION 'INVARIANT_VIOLATION: Cannot change appointment status while a clinic encounter is open for this appointment.';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_enforce_clinic_open_encounter_appointment_status ON public.appointments;
+CREATE TRIGGER trg_enforce_clinic_open_encounter_appointment_status
+    BEFORE UPDATE OF status ON public.appointments
+    FOR EACH ROW
+    EXECUTE FUNCTION public.enforce_clinic_open_encounter_appointment_status();
+
+
+-- =========================================================================
+-- 3. ATOMIC ENCOUNTER + APPOINTMENT COMPLETION RPC
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.clinic_complete_encounter_and_appointment(
@@ -175,6 +211,7 @@ DECLARE
     v_encounter RECORD;
     v_appointment RECORD;
     v_now TIMESTAMPTZ := now();
+    v_outbox_exists BOOLEAN;
 BEGIN
     IF v_caller_uid IS NULL THEN
         RAISE EXCEPTION 'UNAUTHENTICATED: Authentication required.';
@@ -225,10 +262,11 @@ BEGIN
         RAISE EXCEPTION 'FORBIDDEN: Only the assigned practitioner can complete the encounter.';
     END IF;
 
-    -- Fetch linked appointment
+    -- Fetch linked appointment with FOR UPDATE to serialize against Core admin mutations
     SELECT * INTO v_appointment
     FROM public.appointments
-    WHERE id = v_encounter.appointment_id;
+    WHERE id = v_encounter.appointment_id
+    FOR UPDATE;
 
     IF v_appointment.id IS NULL THEN
         RAISE EXCEPTION 'NOT_FOUND: Linked appointment not found.';
@@ -236,6 +274,7 @@ BEGIN
 
     -- Idempotency / Terminal state check
     IF v_encounter.status = 'completed' AND v_appointment.status = 'completed' THEN
+        -- NO second outbox, NO duplicate transition audit on idempotent replay
         RETURN jsonb_build_object(
             'success', true,
             'reason_code', 'already_completed',
@@ -259,19 +298,20 @@ BEGIN
         RAISE EXCEPTION 'INVALID_STATE: Linked appointment status is %, expected confirmed.', v_appointment.status;
     END IF;
 
-    -- Atomically update encounter and appointment status in single transaction
+    -- Step 1: Complete encounter FIRST (removes the open encounter, allowing trigger to pass)
     UPDATE public.clinic_encounters
     SET status = 'completed',
         completed_at = v_now,
         updated_at = v_now
     WHERE id = v_encounter.id;
 
+    -- Step 2: Complete appointment (trigger allows because open encounter no longer exists)
     UPDATE public.appointments
     SET status = 'completed',
         updated_at = v_now
     WHERE id = v_appointment.id;
 
-    -- Audit event (Metadata only, NO sensitive SOAP/clinical narrative payload)
+    -- Clinic encounter completion audit event (Metadata only, NO SOAP/clinical narrative)
     INSERT INTO public.audit_events (
         tenant_id,
         actor_id,
@@ -296,6 +336,57 @@ BEGIN
         )
     );
 
+    -- Core appointment transition audit event (no clinical content)
+    INSERT INTO public.audit_events (
+        tenant_id,
+        actor_id,
+        actor_role,
+        action,
+        resource_type,
+        resource_id,
+        payload
+    ) VALUES (
+        v_staff.tenant_id::text,
+        v_caller_uid::text,
+        'staff',
+        'admin_status_completed',
+        'appointment',
+        v_appointment.id::text,
+        jsonb_build_object(
+            'previous_status', 'confirmed',
+            'new_status', 'completed',
+            'reason', 'clinic_atomic_completion',
+            'actor_name', v_staff.name
+        )
+    );
+
+    -- Communication outbox: exactly one queued event on real first completion
+    -- Guard against duplicate outbox from concurrent races
+    SELECT EXISTS (
+        SELECT 1 FROM public.communication_outbox
+        WHERE tenant_id = v_staff.tenant_id::text
+          AND (metadata->>'appointment_id') = v_appointment.id::text
+          AND (metadata->>'event_type') = 'appointment_completed'
+    ) INTO v_outbox_exists;
+
+    IF NOT v_outbox_exists THEN
+        INSERT INTO public.communication_outbox (
+            tenant_id, recipient, channel, message, status, metadata
+        ) VALUES (
+            v_staff.tenant_id::text,
+            COALESCE(v_appointment.phone, v_appointment.user_email, v_appointment.id::text),
+            'whatsapp',
+            'Randevunuz tamamlandı.',
+            'queued',
+            jsonb_build_object(
+                'event_type', 'appointment_completed',
+                'appointment_id', v_appointment.id::text,
+                'previous_status', 'confirmed',
+                'target_status', 'completed'
+            )
+        );
+    END IF;
+
     RETURN jsonb_build_object(
         'success', true,
         'reason_code', 'ok',
@@ -312,7 +403,46 @@ GRANT EXECUTE ON FUNCTION public.clinic_complete_encounter_and_appointment(UUID)
 
 
 -- =========================================================================
--- 3. CLINIC CURRENT USER CONTEXT RPC
+-- 4. LEGACY CLINIC_COMPLETE_ENCOUNTER WRAPPER CLOSURE
+-- =========================================================================
+-- Redefine the Block 1 legacy RPC as a compatibility wrapper that delegates
+-- to the atomic completion path. This closes the bypass where only the
+-- encounter could be completed without completing its linked appointment.
+
+CREATE OR REPLACE FUNCTION public.clinic_complete_encounter(
+    p_encounter_id UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_atomic_result JSONB;
+BEGIN
+    -- Delegate entirely to the atomic completion path
+    v_atomic_result := public.clinic_complete_encounter_and_appointment(p_encounter_id);
+
+    -- Return backward-compatible bounded response
+    IF (v_atomic_result->>'success')::boolean = true THEN
+        RETURN jsonb_build_object(
+            'success', true,
+            'encounter_id', v_atomic_result->>'encounter_id',
+            'status', v_atomic_result->>'encounter_status',
+            'completed_at', v_atomic_result->>'completed_at'
+        );
+    ELSE
+        RETURN v_atomic_result;
+    END IF;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.clinic_complete_encounter(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.clinic_complete_encounter(UUID) TO authenticated;
+
+
+-- =========================================================================
+-- 5. CLINIC CURRENT USER CONTEXT RPC
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.clinic_get_my_context()
@@ -385,7 +515,7 @@ GRANT EXECUTE ON FUNCTION public.clinic_get_my_context() TO authenticated;
 
 
 -- =========================================================================
--- 4. CLINIC OPERATIONAL DAY READ MODEL RPC
+-- 6. CLINIC OPERATIONAL DAY READ MODEL RPC
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.clinic_get_operational_day(
@@ -447,7 +577,7 @@ BEGIN
             'appointment_id', a.id,
             'appointment_date', a.appointment_date,
             'appointment_time', a.appointment_time,
-            'duration_minutes', COALESCE(a.duration_minutes, 30),
+            'duration_minutes', COALESCE(srv.duration, 30),
             'appointment_status', a.status,
             'branch_id', a.branch_id,
             'branch_name', b.name,
