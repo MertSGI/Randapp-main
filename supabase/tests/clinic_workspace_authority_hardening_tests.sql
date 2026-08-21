@@ -96,25 +96,25 @@ $$;
 DO $$
 BEGIN
     -- Authenticated Role Privileges
-    IF NOT has_function_privilege('authenticated', 'public.clinic_get_patient_profile(uuid)', 'EXECUTE') THEN
+    IF NOT has_function_privilege('authenticated', 'public.clinic_get_patient_profile'::regproc, 'EXECUTE') THEN
         RAISE EXCEPTION 'ACL CHECK FAILED: authenticated role must have EXECUTE on clinic_get_patient_profile';
     END IF;
-    IF NOT has_function_privilege('authenticated', 'public.clinic_upsert_patient_profile(uuid, date, text, text, text, text, text, text, text)', 'EXECUTE') THEN
+    IF NOT has_function_privilege('authenticated', 'public.clinic_upsert_patient_profile'::regproc, 'EXECUTE') THEN
         RAISE EXCEPTION 'ACL CHECK FAILED: authenticated role must have EXECUTE on clinic_upsert_patient_profile';
     END IF;
-    IF NOT has_function_privilege('authenticated', 'public.clinic_get_staff_setup_profiles()', 'EXECUTE') THEN
+    IF NOT has_function_privilege('authenticated', 'public.clinic_get_staff_setup_profiles'::regproc, 'EXECUTE') THEN
         RAISE EXCEPTION 'ACL CHECK FAILED: authenticated role must have EXECUTE on clinic_get_staff_setup_profiles';
     END IF;
     RAISE NOTICE 'CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN=YES';
 
     -- Anon Role Revocations
-    IF has_function_privilege('anon', 'public.clinic_get_patient_profile(uuid)', 'EXECUTE') THEN
+    IF has_function_privilege('anon', 'public.clinic_get_patient_profile'::regproc, 'EXECUTE') THEN
         RAISE EXCEPTION 'ACL CHECK FAILED: anon role must NOT have EXECUTE on clinic_get_patient_profile';
     END IF;
-    IF has_function_privilege('anon', 'public.clinic_upsert_patient_profile(uuid, date, text, text, text, text, text, text, text)', 'EXECUTE') THEN
+    IF has_function_privilege('anon', 'public.clinic_upsert_patient_profile'::regproc, 'EXECUTE') THEN
         RAISE EXCEPTION 'ACL CHECK FAILED: anon role must NOT have EXECUTE on clinic_upsert_patient_profile';
     END IF;
-    IF has_function_privilege('anon', 'public.clinic_get_staff_setup_profiles()', 'EXECUTE') THEN
+    IF has_function_privilege('anon', 'public.clinic_get_staff_setup_profiles'::regproc, 'EXECUTE') THEN
         RAISE EXCEPTION 'ACL CHECK FAILED: anon role must NOT have EXECUTE on clinic_get_staff_setup_profiles';
     END IF;
     RAISE NOTICE 'CLINIC_ANON_EXECUTE_ACL_DENIED=YES';
