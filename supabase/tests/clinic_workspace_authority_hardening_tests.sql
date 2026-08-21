@@ -237,7 +237,9 @@ BEGIN
         RAISE EXCEPTION 'TEST B FAILED: clinic_get_patient_history should have raised FORBIDDEN but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+        IF v_err_msg LIKE 'TEST B FAILED%' THEN
+            RAISE;
+        ELSIF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
             RAISE EXCEPTION 'TEST B FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
@@ -287,7 +289,8 @@ BEGIN
         RAISE EXCEPTION 'TEST J FAILED: view-only staff should be denied upsert but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+        IF v_err_msg LIKE 'TEST%' THEN RAISE;
+        ELSIF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
             RAISE EXCEPTION 'TEST J FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
@@ -311,7 +314,8 @@ BEGIN
         RAISE EXCEPTION 'TEST K FAILED: no-cap staff should be denied profile read but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+        IF v_err_msg LIKE 'TEST%' THEN RAISE;
+        ELSIF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
             RAISE EXCEPTION 'TEST K FAILED [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
@@ -322,7 +326,8 @@ BEGIN
         RAISE EXCEPTION 'TEST L FAILED: no-cap staff should be denied history read but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+        IF v_err_msg LIKE 'TEST%' THEN RAISE;
+        ELSIF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
             RAISE EXCEPTION 'TEST L FAILED [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
@@ -333,7 +338,8 @@ BEGIN
         RAISE EXCEPTION 'TEST M FAILED: no-cap staff should be denied upsert but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+        IF v_err_msg LIKE 'TEST%' THEN RAISE;
+        ELSIF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
             RAISE EXCEPTION 'TEST M FAILED [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
@@ -357,7 +363,8 @@ BEGIN
         RAISE EXCEPTION 'TEST N FAILED: cross-tenant profile read should be denied but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_msg NOT LIKE '%NOT_FOUND%' AND v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+        IF v_err_msg LIKE 'TEST%' THEN RAISE;
+        ELSIF v_err_msg NOT LIKE '%NOT_FOUND%' AND v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
             RAISE EXCEPTION 'TEST N FAILED [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
@@ -368,7 +375,8 @@ BEGIN
         RAISE EXCEPTION 'TEST O FAILED: cross-tenant upsert should be denied but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_msg NOT LIKE '%NOT_FOUND%' AND v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+        IF v_err_msg LIKE 'TEST%' THEN RAISE;
+        ELSIF v_err_msg NOT LIKE '%NOT_FOUND%' AND v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
             RAISE EXCEPTION 'TEST O FAILED [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
@@ -410,7 +418,8 @@ BEGIN
         RAISE EXCEPTION 'TEST INACTIVE OWNER FAILED: inactive owner should be denied but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+        IF v_err_msg LIKE 'TEST%' THEN RAISE;
+        ELSIF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
             RAISE EXCEPTION 'TEST INACTIVE OWNER FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
@@ -431,7 +440,8 @@ BEGIN
         RAISE EXCEPTION 'TEST U FAILED: non-owner staff should be denied setup read but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+        IF v_err_msg LIKE 'TEST%' THEN RAISE;
+        ELSIF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
             RAISE EXCEPTION 'TEST U FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
@@ -452,7 +462,8 @@ BEGIN
         RAISE EXCEPTION 'TEST V FAILED: super_admin should be denied setup read but returned normally';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+        IF v_err_msg LIKE 'TEST%' THEN RAISE;
+        ELSIF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
             RAISE EXCEPTION 'TEST V FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
