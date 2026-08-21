@@ -249,6 +249,10 @@ jobs:
                 console.log('PG_ERROR: ' + err.message);
                 console.log('PG_DETAIL: ' + (err.detail || ''));
                 console.log('PG_WHERE: ' + (err.where || ''));
+                logBuf += 'PG_ERROR: ' + err.message + '\n';
+                fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
+                await client.end();
+                process.exit(1);
               } finally {
                 fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
                 await client.end();
