@@ -268,6 +268,9 @@ jobs:
               echo "  [FOUND] $m"
             else
               echo "  [MISSING] $m"
+              if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+                echo "MISSING_MARKER: $m" >> "$GITHUB_STEP_SUMMARY"
+              fi
               MISSING=1
             fi
           done
