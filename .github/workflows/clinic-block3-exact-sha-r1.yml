@@ -249,15 +249,27 @@ jobs:
                 logBuf += 'SQL_EXECUTION_SUCCESSFUL\n';
                 fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
               } catch (err: any) {
-                console.error('=== EXECUTION ERROR ===');
-                console.error('MESSAGE:', err.message);
-                console.error('CODE:', err.code);
-                console.error('DETAIL:', err.detail);
-                console.error('HINT:', err.hint);
-                console.error('WHERE:', err.where);
-                console.error('POSITION:', err.position);
-                console.error('STACK:', err.stack);
-                logBuf += 'EXECUTION_ERROR: ' + err.message + '\n';
+                console.log('=== MULTI-QUERY FAILED, TRYING BLOCK BY BLOCK TO FIND LINE ===');
+                console.log('ERROR ON FULL QUERY:', err.message);
+                // Execute DO blocks and statements
+                const blocks = sql.split(/(?=DO \$\$)/g);
+                for (let i = 0; i < blocks.length; i++) {
+                  const b = blocks[i].trim();
+                  if (!b) continue;
+                  try {
+                    await client.query(b);
+                  } catch (bErr: any) {
+                    console.error('FAILED AT BLOCK INDEX', i, 'LENGTH:', b.length);
+                    console.error('BLOCK HEAD:', b.slice(0, 150));
+                    console.error('ERROR MESSAGE:', bErr.message);
+                    console.error('ERROR POSITION:', bErr.position);
+                    console.error('ERROR WHERE:', bErr.where);
+                    console.error('ERROR DETAIL:', bErr.detail);
+                    logBuf += 'BLOCK_' + i + '_ERROR: ' + bErr.message + '\n';
+                    fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
+                    process.exit(1);
+                  }
+                }
                 fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
                 process.exit(1);
               } finally {
