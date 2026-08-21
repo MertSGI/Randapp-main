@@ -103,17 +103,36 @@ BEGIN
     VALUES (v_tenant_id, 'Hardening Clinic Tenant 1', 'hardening-clinic-1', 'active'),
            (v_tenant2_id, 'Hardening Clinic Tenant 2', 'hardening-clinic-2', 'active');
 
-    -- Seed Auth Users (compile-safe canonical schema)
+    -- Seed Auth Users (compile-safe dynamic schema for full Supabase auth.users compatibility)
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
-        INSERT INTO auth.users (id, email, role, created_at, updated_at)
-        VALUES (v_owner_uid, 'owner1_hardened_b3@test.invalid', 'authenticated', now(), now()),
-               (v_owner2_uid, 'owner2_hardened_b3@test.invalid', 'authenticated', now(), now()),
-               (v_inactive_owner_uid, 'owner_in_hardened_b3@test.invalid', 'authenticated', now(), now()),
-               (v_superadmin_uid, 'superadmin_hardened_b3@test.invalid', 'authenticated', now(), now()),
-               (v_manage_staff_uid, 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
-               (v_view_staff_uid, 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
-               (v_none_staff_uid, 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
-        ON CONFLICT (id) DO NOTHING;
+        BEGIN
+            EXECUTE $sql$
+                INSERT INTO auth.users (id, instance_id, aud, email, role, created_at, updated_at)
+                VALUES ('a3888888-8888-4888-8888-888888888801'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'owner1_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                       ('a3888888-8888-4888-8888-888888888802'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'owner2_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                       ('a3888888-8888-4888-8888-888888888807'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'owner_in_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                       ('a3888888-8888-4888-8888-888888888809'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'superadmin_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                       ('a3888888-8888-4888-8888-888888888808'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                       ('a3888888-8888-4888-8888-888888888803'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                       ('a3888888-8888-4888-8888-888888888800'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
+                ON CONFLICT (id) DO NOTHING;
+            $sql$;
+        EXCEPTION WHEN OTHERS THEN
+            BEGIN
+                EXECUTE $sql$
+                    INSERT INTO auth.users (id, email, role, created_at, updated_at)
+                    VALUES ('a3888888-8888-4888-8888-888888888801'::UUID, 'owner1_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                           ('a3888888-8888-4888-8888-888888888802'::UUID, 'owner2_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                           ('a3888888-8888-4888-8888-888888888807'::UUID, 'owner_in_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                           ('a3888888-8888-4888-8888-888888888809'::UUID, 'superadmin_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                           ('a3888888-8888-4888-8888-888888888808'::UUID, 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                           ('a3888888-8888-4888-8888-888888888803'::UUID, 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                           ('a3888888-8888-4888-8888-888888888800'::UUID, 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
+                    ON CONFLICT (id) DO NOTHING;
+                $sql$;
+            EXCEPTION WHEN OTHERS THEN NULL;
+            END;
+        END;
     END IF;
 
     -- Seed Users Profiles (using canonical name column)
