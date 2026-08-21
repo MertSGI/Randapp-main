@@ -236,17 +236,11 @@ jobs:
           PSQL_EXIT=${PIPESTATUS[0]}
           set -e
 
-          if [ -n "$GITHUB_STEP_SUMMARY" ]; then
-            node -e "
-              const fs = require('fs');
-              let log = fs.readFileSync('/tmp/clinic-block3-sql.log', 'utf8');
-              log = log.replace(/[^\x00-\x7F]/g, '');
-              fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '### CLINIC LOG SUMMARY\n\`\`\`\n' + log + '\n\`\`\`\n');
-            "
-          fi
-
           if [ "$PSQL_EXIT" -ne 0 ]; then
             echo "❌ PSQL COMMAND RETURNED FAILURE EXIT CODE: $PSQL_EXIT"
+            echo "=== FAILED SQL LOG ==="
+            cat /tmp/clinic-block3-sql.log
+            echo "======================"
             exit "$PSQL_EXIT"
           fi
 
