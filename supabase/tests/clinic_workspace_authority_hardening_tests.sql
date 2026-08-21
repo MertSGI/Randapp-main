@@ -32,8 +32,10 @@ DECLARE
 BEGIN
     RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.2) ===';
 
-    -- Clean any existing isolated test fixture (child relations first)
-    DELETE FROM public.audit_events WHERE tenant_id IN (v_tenant_id::text, v_tenant2_id::text);
+    -- Clean any existing isolated test fixture (child relations first with table checks)
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'audit_events') THEN
+        DELETE FROM public.audit_events WHERE tenant_id IN (v_tenant_id::text, v_tenant2_id::text);
+    END IF;
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_notes') THEN
         DELETE FROM public.clinic_notes WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     END IF;
@@ -58,43 +60,79 @@ BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_vital_signs') THEN
         DELETE FROM public.clinic_vital_signs WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     END IF;
-
-    DELETE FROM public.clinic_patient_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
-    DELETE FROM public.clinic_staff_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
-    DELETE FROM public.appointments WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
-    DELETE FROM public.staff WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
-    DELETE FROM public.customers WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
-    DELETE FROM public.services WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_patient_profiles') THEN
+        DELETE FROM public.clinic_patient_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinic_staff_profiles') THEN
+        DELETE FROM public.clinic_staff_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'appointments') THEN
+        DELETE FROM public.appointments WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'staff') THEN
+        DELETE FROM public.staff WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'customers') THEN
+        DELETE FROM public.customers WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'services') THEN
+        DELETE FROM public.services WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'subscriptions') THEN
         DELETE FROM public.subscriptions WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     END IF;
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'published_sites') THEN
         DELETE FROM public.published_sites WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     END IF;
-    DELETE FROM public.tenant_branding WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
-    DELETE FROM public.users_profile WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'tenant_branding') THEN
+        DELETE FROM public.tenant_branding WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users_profile') THEN
+        DELETE FROM public.users_profile WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+    END IF;
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
         DELETE FROM auth.users WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid)
            OR email LIKE '%_hardened_b3@test.invalid';
     END IF;
-    DELETE FROM public.tenants WHERE id IN (v_tenant_id, v_tenant2_id);
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'tenants') THEN
+        DELETE FROM public.tenants WHERE id IN (v_tenant_id, v_tenant2_id);
+    END IF;
 
     -- Seed Tenants
     INSERT INTO public.tenants (id, name, slug, status)
     VALUES (v_tenant_id, 'Hardening Clinic Tenant 1', 'hardening-clinic-1', 'active'),
            (v_tenant2_id, 'Hardening Clinic Tenant 2', 'hardening-clinic-2', 'active');
 
-    -- Seed Auth Users (compile-safe canonical schema)
+    -- Seed Auth Users (compile-safe dynamic schema for full Supabase auth.users compatibility)
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
-        INSERT INTO auth.users (id, email, role, created_at, updated_at)
-        VALUES (v_owner_uid, 'owner1_hardened_b3@test.invalid', 'authenticated', now(), now()),
-               (v_owner2_uid, 'owner2_hardened_b3@test.invalid', 'authenticated', now(), now()),
-               (v_inactive_owner_uid, 'owner_in_hardened_b3@test.invalid', 'authenticated', now(), now()),
-               (v_superadmin_uid, 'superadmin_hardened_b3@test.invalid', 'authenticated', now(), now()),
-               (v_manage_staff_uid, 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
-               (v_view_staff_uid, 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
-               (v_none_staff_uid, 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
-        ON CONFLICT (id) DO NOTHING;
+        BEGIN
+            EXECUTE $sql$
+                INSERT INTO auth.users (id, instance_id, aud, email, role, created_at, updated_at)
+                VALUES ('a3888888-8888-4888-8888-888888888801'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'owner1_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                       ('a3888888-8888-4888-8888-888888888802'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'owner2_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                       ('a3888888-8888-4888-8888-888888888807'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'owner_in_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                       ('a3888888-8888-4888-8888-888888888809'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'superadmin_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                       ('a3888888-8888-4888-8888-888888888808'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                       ('a3888888-8888-4888-8888-888888888803'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                       ('a3888888-8888-4888-8888-888888888800'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
+                ON CONFLICT (id) DO NOTHING;
+            $sql$;
+        EXCEPTION WHEN OTHERS THEN
+            BEGIN
+                EXECUTE $sql$
+                    INSERT INTO auth.users (id, email, role, created_at, updated_at)
+                    VALUES ('a3888888-8888-4888-8888-888888888801'::UUID, 'owner1_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                           ('a3888888-8888-4888-8888-888888888802'::UUID, 'owner2_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                           ('a3888888-8888-4888-8888-888888888807'::UUID, 'owner_in_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                           ('a3888888-8888-4888-8888-888888888809'::UUID, 'superadmin_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                           ('a3888888-8888-4888-8888-888888888808'::UUID, 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                           ('a3888888-8888-4888-8888-888888888803'::UUID, 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
+                           ('a3888888-8888-4888-8888-888888888800'::UUID, 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
+                    ON CONFLICT (id) DO NOTHING;
+                $sql$;
+            EXCEPTION WHEN OTHERS THEN NULL;
+            END;
+        END;
     END IF;
 
     -- Seed Users Profiles (using canonical name column)
@@ -295,9 +333,10 @@ DECLARE
     v_err_msg TEXT;
     v_err_state TEXT;
 BEGIN
+    -- Read cross-tenant profile raises NOT_FOUND / fail-closed exception
     BEGIN
         v_res := public.clinic_get_patient_profile(v_cust2_id);
-        RAISE EXCEPTION 'TEST N FAILED';
+        RAISE EXCEPTION 'TEST N FAILED: Cross-tenant profile read must fail closed';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
         IF v_err_msg NOT LIKE '%NOT_FOUND%' AND v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
@@ -305,9 +344,10 @@ BEGIN
         END IF;
     END;
 
+    -- Upsert cross-tenant profile fails closed with NOT_FOUND
     BEGIN
         v_res := public.clinic_upsert_patient_profile(p_customer_id := v_cust2_id, p_blood_type := 'AB Rh+');
-        RAISE EXCEPTION 'TEST O FAILED';
+        RAISE EXCEPTION 'TEST O FAILED: Cross-tenant profile upsert must fail closed';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
         IF v_err_msg NOT LIKE '%NOT_FOUND%' AND v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
