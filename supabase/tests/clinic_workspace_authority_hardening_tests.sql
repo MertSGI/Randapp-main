@@ -11,24 +11,24 @@ BEGIN;
 -- =========================================================================
 DO $$
 DECLARE
-    v_tenant_id UUID := '88888888-8888-4888-8888-888888888888'::UUID;
-    v_tenant2_id UUID := '88888888-8888-4888-8888-888888888889'::UUID;
+    v_tenant_id UUID := 'b3888888-8888-4888-8888-888888888888'::UUID;
+    v_tenant2_id UUID := 'b3888888-8888-4888-8888-888888888889'::UUID;
 
-    v_owner_uid UUID := 'a8888888-8888-4888-8888-888888888881'::UUID;
-    v_owner2_uid UUID := 'a8888888-8888-4888-8888-888888888882'::UUID;
-    v_inactive_owner_uid UUID := 'a8888888-8888-4888-8888-888888888887'::UUID;
-    v_superadmin_uid UUID := 'a8888888-8888-4888-8888-888888888889'::UUID;
+    v_owner_uid UUID := 'b3888888-8888-4888-8888-888888888881'::UUID;
+    v_owner2_uid UUID := 'b3888888-8888-4888-8888-888888888882'::UUID;
+    v_inactive_owner_uid UUID := 'b3888888-8888-4888-8888-888888888887'::UUID;
+    v_superadmin_uid UUID := 'b3888888-8888-4888-8888-888888888889'::UUID;
 
-    v_manage_staff_uid UUID := 'a8888888-8888-4888-8888-888888888888'::UUID;
-    v_view_staff_uid UUID := 'a8888888-8888-4888-8888-888888888883'::UUID;
-    v_none_staff_uid UUID := 'a8888888-8888-4888-8888-888888888880'::UUID;
+    v_manage_staff_uid UUID := 'b3888888-8888-4888-8888-888888888888'::UUID;
+    v_view_staff_uid UUID := 'b3888888-8888-4888-8888-888888888883'::UUID;
+    v_none_staff_uid UUID := 'b3888888-8888-4888-8888-888888888880'::UUID;
 
-    v_manage_staff_id UUID := '38888888-8888-4888-8888-888888888888'::UUID;
-    v_view_staff_id UUID := '38888888-8888-4888-8888-888888888889'::UUID;
-    v_none_staff_id UUID := '38888888-8888-4888-8888-888888888880'::UUID;
+    v_manage_staff_id UUID := '33888888-8888-4888-8888-888888888888'::UUID;
+    v_view_staff_id UUID := '33888888-8888-4888-8888-888888888889'::UUID;
+    v_none_staff_id UUID := '33888888-8888-4888-8888-888888888880'::UUID;
 
-    v_cust_id UUID := 'c8888888-8888-4888-8888-888888888888'::UUID;
-    v_cust2_id UUID := 'c8888888-8888-4888-8888-888888888889'::UUID;
+    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888888'::UUID;
+    v_cust2_id UUID := 'c3888888-8888-4888-8888-888888888889'::UUID;
 BEGIN
     RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.2) ===';
 
@@ -36,8 +36,17 @@ BEGIN
     DELETE FROM public.audit_events WHERE tenant_id IN (v_tenant_id::text, v_tenant2_id::text);
     DELETE FROM public.clinic_patient_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     DELETE FROM public.clinic_staff_profiles WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    DELETE FROM public.appointments WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     DELETE FROM public.staff WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     DELETE FROM public.customers WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    DELETE FROM public.services WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'subscriptions') THEN
+        DELETE FROM public.subscriptions WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'published_sites') THEN
+        DELETE FROM public.published_sites WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
+    END IF;
+    DELETE FROM public.tenant_branding WHERE tenant_id IN (v_tenant_id, v_tenant2_id);
     DELETE FROM public.users_profile WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
         DELETE FROM auth.users WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
@@ -130,11 +139,11 @@ $$;
 -- =========================================================================
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
-SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888888', true);
+SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888888', true);
 
 DO $$
 DECLARE
-    v_cust_id UUID := 'c8888888-8888-4888-8888-888888888888'::UUID;
+    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888888'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -172,11 +181,11 @@ END;
 $$;
 
 -- TEST H, I, J: View-Only Staff
-SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888883', true);
+SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888883', true);
 
 DO $$
 DECLARE
-    v_cust_id UUID := 'c8888888-8888-4888-8888-888888888888'::UUID;
+    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888888'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -205,11 +214,11 @@ END;
 $$;
 
 -- TEST K, L, M: No-Capability Staff
-SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-88888888880', true);
+SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888880', true);
 
 DO $$
 DECLARE
-    v_cust_id UUID := 'c8888888-8888-4888-8888-888888888888'::UUID;
+    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888888'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -248,11 +257,11 @@ END;
 $$;
 
 -- TEST N, O: Cross-Tenant Isolation
-SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888888', true);
+SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888888', true);
 
 DO $$
 DECLARE
-    v_cust2_id UUID := 'c8888888-8888-4888-8888-888888888889'::UUID;
+    v_cust2_id UUID := 'c3888888-8888-4888-8888-888888888889'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -281,7 +290,7 @@ END;
 $$;
 
 -- TEST S, T: Active Tenant Owner Setup RPC Success
-SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888881', true);
+SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888881', true);
 
 DO $$
 DECLARE
@@ -297,7 +306,7 @@ END;
 $$;
 
 -- TEST INACTIVE OWNER SETUP DENIAL (v_inactive_owner_uid: active = false)
-SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888887', true);
+SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888887', true);
 
 DO $$
 DECLARE
@@ -319,7 +328,7 @@ END;
 $$;
 
 -- TEST U, V: Non-Owner / Super Admin Setup RPC Denial
-SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888888', true);
+SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888888', true);
 DO $$
 DECLARE
     v_res JSONB;
@@ -331,7 +340,7 @@ BEGIN
 END;
 $$;
 
-SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888889', true);
+SELECT set_config('request.jwt.claim.sub', 'b3888888-8888-4888-8888-888888888889', true);
 DO $$
 DECLARE
     v_res JSONB;
@@ -356,7 +365,7 @@ SELECT set_config('request.jwt.claim.sub', '', true);
 
 DO $$
 DECLARE
-    v_cust_id UUID := 'c8888888-8888-4888-8888-888888888888'::UUID;
+    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888888'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -403,10 +412,10 @@ SELECT set_config('request.jwt.claim.sub', '', true);
 -- =========================================================================
 DO $$
 DECLARE
-    v_tenant_id UUID := '88888888-8888-4888-8888-888888888888'::UUID;
-    v_cust_id UUID := 'c8888888-8888-4888-8888-888888888888'::UUID;
-    v_owner_uid UUID := 'a8888888-8888-4888-8888-888888888881'::UUID;
-    v_manage_staff_uid UUID := 'a8888888-8888-4888-8888-888888888888'::UUID;
+    v_tenant_id UUID := 'b3888888-8888-4888-8888-888888888888'::UUID;
+    v_cust_id UUID := 'c3888888-8888-4888-8888-888888888888'::UUID;
+    v_owner_uid UUID := 'b3888888-8888-4888-8888-888888888881'::UUID;
+    v_manage_staff_uid UUID := 'b3888888-8888-4888-8888-888888888888'::UUID;
     v_audit RECORD;
     v_res JSONB;
 BEGIN
