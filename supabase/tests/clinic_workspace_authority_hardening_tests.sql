@@ -126,38 +126,17 @@ BEGIN
     VALUES (v_tenant_id, 'Hardening Clinic Tenant 1', 'hardening-clinic-1', 'active'),
            (v_tenant2_id, 'Hardening Clinic Tenant 2', 'hardening-clinic-2', 'active');
 
-    -- Seed Auth Users (compile-safe dynamic schema for full Supabase auth.users compatibility)
+    -- Seed Auth Users
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
-        BEGIN
-            EXECUTE $sql$
-                INSERT INTO auth.users (id, instance_id, aud, email, role, created_at, updated_at)
-                VALUES ('a3888888-8888-4888-8888-888888888801'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'owner1_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                       ('a3888888-8888-4888-8888-888888888802'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'owner2_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                       ('a3888888-8888-4888-8888-888888888807'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'owner_in_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                       ('a3888888-8888-4888-8888-888888888809'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'superadmin_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                       ('a3888888-8888-4888-8888-888888888808'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                       ('a3888888-8888-4888-8888-888888888803'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                       ('a3888888-8888-4888-8888-888888888800'::UUID, '00000000-0000-0000-0000-000000000000'::UUID, 'authenticated', 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
-                ON CONFLICT (id) DO NOTHING;
-            $sql$;
-        EXCEPTION WHEN OTHERS THEN
-            BEGIN
-                EXECUTE $sql$
-                    INSERT INTO auth.users (id, email, role, created_at, updated_at)
-                    VALUES ('a3888888-8888-4888-8888-888888888801'::UUID, 'owner1_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                           ('a3888888-8888-4888-8888-888888888802'::UUID, 'owner2_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                           ('a3888888-8888-4888-8888-888888888807'::UUID, 'owner_in_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                           ('a3888888-8888-4888-8888-888888888809'::UUID, 'superadmin_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                           ('a3888888-8888-4888-8888-888888888808'::UUID, 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                           ('a3888888-8888-4888-8888-888888888803'::UUID, 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
-                           ('a3888888-8888-4888-8888-888888888800'::UUID, 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
-                    ON CONFLICT (id) DO NOTHING;
-                $sql$;
-            EXCEPTION WHEN OTHERS THEN
-                -- Narrowly justified: auth.users schema may vary. Fixture setup path only.
-                RAISE NOTICE 'AUTH_USERS_INSERT_SKIPPED: % (non-proof fixture path)', SQLERRM;
-            END;
-        END;
+        INSERT INTO auth.users (id, email, role, created_at, updated_at)
+        VALUES ('a3888888-8888-4888-8888-888888888801'::UUID, 'owner1_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               ('a3888888-8888-4888-8888-888888888802'::UUID, 'owner2_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               ('a3888888-8888-4888-8888-888888888807'::UUID, 'owner_in_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               ('a3888888-8888-4888-8888-888888888809'::UUID, 'superadmin_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               ('a3888888-8888-4888-8888-888888888808'::UUID, 'manage_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               ('a3888888-8888-4888-8888-888888888803'::UUID, 'view_staff_hardened_b3@test.invalid', 'authenticated', now(), now()),
+               ('a3888888-8888-4888-8888-888888888800'::UUID, 'none_staff_hardened_b3@test.invalid', 'authenticated', now(), now())
+        ON CONFLICT (id) DO NOTHING;
     END IF;
 
     -- Seed Users Profiles (using canonical name column)
