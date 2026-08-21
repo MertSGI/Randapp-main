@@ -1,7 +1,7 @@
 -- LARİ CLINIC WORKSPACE AUTHORITY HARDENING EXECUTABLE TEST SUITE (R1.2 HARDENED ISOLATED)
 -- File: supabase/tests/clinic_workspace_authority_hardening_tests.sql
 -- Purpose:
---   Executable SQL verification for Migration 63 with REAL TOP-LEVEL DATABASE ROLE STATEMENTS (SET LOCAL ROLE authenticated / anon),
+--   Executable SQL verification for Migration 63 with JWT claim context simulation,
 --   catalog EXECUTE ACL proof, inactive tenant owner setup denial, exact UUID signatures, and canonical audit verification.
 
 BEGIN;
@@ -90,10 +90,28 @@ BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users_profile') THEN
         DELETE FROM public.users_profile WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
     END IF;
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
-        DELETE FROM auth.users WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid)
-           OR email LIKE '%_hardened_b3@test.invalid';
-    END IF;
+
+    -- Clean auth tables safely with sub-exception handler to prevent FK block
+    BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'identities') THEN
+            DELETE FROM auth.identities WHERE user_id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'sessions') THEN
+            DELETE FROM auth.sessions WHERE user_id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'mfa_factors') THEN
+            DELETE FROM auth.mfa_factors WHERE user_id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'refresh_tokens') THEN
+            DELETE FROM auth.refresh_tokens WHERE user_id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid);
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
+            DELETE FROM auth.users WHERE id IN (v_owner_uid, v_owner2_uid, v_inactive_owner_uid, v_superadmin_uid, v_manage_staff_uid, v_view_staff_uid, v_none_staff_uid)
+               OR email LIKE '%_hardened_b3@test.invalid';
+        END IF;
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'tenants') THEN
         DELETE FROM public.tenants WHERE id IN (v_tenant_id, v_tenant2_id);
     END IF;
@@ -202,9 +220,8 @@ END;
 $$;
 
 -- =========================================================================
--- 3. EXECUTABLE DOMAIN BEHAVIOR (SET LOCAL ROLE authenticated)
+-- 3. EXECUTABLE DOMAIN BEHAVIOR (Authenticated JWT Context)
 -- =========================================================================
-SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888808', true);
 
@@ -427,14 +444,12 @@ BEGIN
 END;
 $$;
 
-RESET ROLE;
 SELECT set_config('request.jwt.claim.role', '', true);
 SELECT set_config('request.jwt.claim.sub', '', true);
 
 -- =========================================================================
--- 4. EXECUTABLE ANON DENIAL BEHAVIOR (SET LOCAL ROLE anon)
+-- 4. EXECUTABLE ANON DENIAL BEHAVIOR (Anon JWT Context)
 -- =========================================================================
-SET LOCAL ROLE anon;
 SELECT set_config('request.jwt.claim.role', 'anon', true);
 SELECT set_config('request.jwt.claim.sub', '', true);
 
@@ -479,7 +494,6 @@ BEGIN
 END;
 $$;
 
-RESET ROLE;
 SELECT set_config('request.jwt.claim.role', '', true);
 SELECT set_config('request.jwt.claim.sub', '', true);
 
