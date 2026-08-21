@@ -380,9 +380,6 @@ BEGIN
 END;
 $$;
 
--- RESET ROLE back to session superuser for Owner Setup tests
-RESET ROLE;
-
 -- TEST S, T: Active Tenant Owner Setup RPC Success
 SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888801', true);
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
@@ -453,17 +450,12 @@ BEGIN
 END;
 $$;
 
-RESET ROLE;
 SELECT set_config('request.jwt.claim.role', '', true);
 SELECT set_config('request.jwt.claim.sub', '', true);
 
 -- =========================================================================
 -- 4. EXECUTABLE ANON DENIAL BEHAVIOR (SET LOCAL ROLE anon)
 -- =========================================================================
-SET LOCAL ROLE anon;
-SELECT set_config('request.jwt.claim.role', 'anon', true);
-SELECT set_config('request.jwt.claim.sub', '', true);
-
 DO $$
 DECLARE
     v_cust_id UUID := 'c3888888-8888-4888-8888-888888888801'::UUID;
@@ -471,6 +463,10 @@ DECLARE
     v_err_msg TEXT;
     v_err_state TEXT;
 BEGIN
+    SET LOCAL ROLE anon;
+    PERFORM set_config('request.jwt.claim.role', 'anon', true);
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+
     BEGIN
         v_res := public.clinic_get_patient_profile(v_cust_id);
         RAISE EXCEPTION 'TEST P FAILED: Anon caller must NOT read bounded profile';
@@ -505,7 +501,6 @@ BEGIN
 END;
 $$;
 
-RESET ROLE;
 SELECT set_config('request.jwt.claim.role', '', true);
 SELECT set_config('request.jwt.claim.sub', '', true);
 
