@@ -236,6 +236,11 @@ jobs:
           PSQL_EXIT=${PIPESTATUS[0]}
           set -e
 
+          echo "B64LOG_BEGIN"
+          base64 -w 0 /tmp/clinic-block3-sql.log
+          echo ""
+          echo "B64LOG_END"
+
           if [ "$PSQL_EXIT" -ne 0 ]; then
             echo "❌ PSQL COMMAND RETURNED FAILURE EXIT CODE: $PSQL_EXIT"
             exit "$PSQL_EXIT"
