@@ -6,6 +6,10 @@
 
 BEGIN;
 
+-- Grant role membership to postgres session user to allow SET LOCAL ROLE authenticated / anon in PG 14+
+GRANT authenticated TO postgres;
+GRANT anon TO postgres;
+
 -- =========================================================================
 -- 1. FIXTURE SETUP (Privileged Session Role)
 -- =========================================================================
@@ -31,13 +35,6 @@ DECLARE
     v_cust2_id UUID := 'c3888888-8888-4888-8888-888888888802'::UUID;
 BEGIN
     RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.2) ===';
-
-    -- Grant role membership to postgres session user to allow SET LOCAL ROLE authenticated / anon in PG 14+
-    BEGIN
-        GRANT authenticated TO postgres;
-        GRANT anon TO postgres;
-    EXCEPTION WHEN OTHERS THEN NULL;
-    END;
 
     -- Clean any existing isolated test fixture (child relations first with table checks)
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'audit_events') THEN
@@ -383,8 +380,12 @@ BEGIN
 END;
 $$;
 
+-- RESET ROLE back to session superuser for Owner Setup tests
+RESET ROLE;
+
 -- TEST S, T: Active Tenant Owner Setup RPC Success
 SELECT set_config('request.jwt.claim.sub', 'a3888888-8888-4888-8888-888888888801', true);
+SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 
 DO $$
 DECLARE
