@@ -229,61 +229,10 @@ jobs:
 
       - name: Run Clinic Block 3 Workspace Authority Hardening Functional SQL Suite & Verify Markers
         run: |
-          echo "Executing clinic_workspace_authority_hardening_tests.sql via node pg..."
-          set +e
-          npx tsx -e "
-            import fs from 'fs';
-            import pg from 'pg';
-            const client = new pg.Client({ connectionString: 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' });
-            let logBuf = '';
-            client.on('notice', msg => {
-              console.log('NOTICE:', msg.message);
-              logBuf += msg.message + '\n';
-            });
-            async function main() {
-              await client.connect();
-              const sql = fs.readFileSync('supabase/tests/clinic_workspace_authority_hardening_tests.sql', 'utf8');
-              try {
-                await client.query(sql);
-                console.log('SQL EXECUTION SUCCESSFUL');
-                logBuf += 'SQL_EXECUTION_SUCCESSFUL\n';
-                fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
-              } catch (err: any) {
-                console.log('=== MULTI-QUERY FAILED, TRYING BLOCK BY BLOCK TO FIND LINE ===');
-                console.log('ERROR ON FULL QUERY:', err.message);
-                // Execute DO blocks and statements
-                const blocks = sql.split(/(?=DO \$\$)/g);
-                for (let i = 0; i < blocks.length; i++) {
-                  const b = blocks[i].trim();
-                  if (!b) continue;
-                  try {
-                    await client.query(b);
-                  } catch (bErr: any) {
-                    const errReport = `FAILED AT BLOCK INDEX ${i}\nBLOCK HEAD: ${b.slice(0, 150)}\nERROR: ${bErr.message}\nDETAIL: ${bErr.detail || 'N/A'}\nWHERE: ${bErr.where || 'N/A'}\n`;
-                    console.error(errReport);
-                    logBuf += 'BLOCK_' + i + '_ERROR: ' + bErr.message + '\n';
-                    fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
-                    if (process.env.GITHUB_STEP_SUMMARY) {
-                      fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '### FAILED SQL BLOCK REPORT\n```\n' + errReport + '\n```\n');
-                    }
-                    process.exit(1);
-                  }
-                }
-                fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
-                process.exit(1);
-              } finally {
-                await client.end();
-              }
-            }
-            main();
-          " 2>&1 | tee /tmp/clinic-block3-sql.log
-          HARNESS_EXIT=${PIPESTATUS[0]}
-          set -e
-
-          if [ "$HARNESS_EXIT" -ne 0 ]; then
-            echo "❌ CLINIC BLOCK 3 HARDENING EXECUTION FAILED"
-            exit "$HARNESS_EXIT"
-          fi
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "Executing clinic_workspace_authority_hardening_tests.sql..."
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql > /tmp/clinic-block3-sql.log 2>&1
+          cat /tmp/clinic-block3-sql.log
 
           MARKERS=(
             "CLINIC_HARDENING_SECTION1_SETUP_COMPLETE=YES"
