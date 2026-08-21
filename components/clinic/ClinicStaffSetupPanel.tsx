@@ -4,7 +4,8 @@ import { PractitionerType, ClinicStaffSetupProfile } from '../../types/clinic';
 import { getStaffList } from '../../services/staffService';
 import { clinicService } from '../../services/clinicService';
 import { useTenant } from '../../contexts/TenantContext';
-import { Shield, CheckCircle2, AlertCircle, Save, UserCheck, AlertTriangle } from 'lucide-react';
+import { deriveClinicStaffSetupSelectionState, ClinicStaffSetupSelectionState } from '../../services/clinicUiPolicy';
+import { Shield, CheckCircle2, AlertCircle, Save, UserCheck, AlertTriangle, Lock } from 'lucide-react';
 
 interface StaffProfileForm {
   staff_id: string;
@@ -19,7 +20,9 @@ interface StaffProfileForm {
 export const ClinicStaffSetupPanel: React.FC = () => {
   const { tenant } = useTenant();
   const [staffList, setStaffList] = useState<Staff[]>([]);
-  const [setupProfilesMap, setSetupProfilesMap] = useState<Record<string, ClinicStaffSetupProfile>>({});
+  const [setupProfilesMap, setSetupProfilesMap] = useState<Record<string, ClinicStaffSetupProfile> | null>(null);
+  const [setupReadSuccess, setSetupReadSuccess] = useState<boolean>(false);
+
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -45,6 +48,9 @@ export const ClinicStaffSetupPanel: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     setError(null);
+    setSetupReadSuccess(false);
+    setSetupProfilesMap(null);
+
     try {
       if (tenant?.id) {
         // Fetch active tenant staff directory
@@ -53,31 +59,46 @@ export const ClinicStaffSetupPanel: React.FC = () => {
 
         // Fetch existing Clinic setup profiles for owner tenant
         const res = await clinicService.getClinicStaffSetupProfiles();
-        const profileMap: Record<string, ClinicStaffSetupProfile> = {};
         if (res.success && res.data) {
+          const profileMap: Record<string, ClinicStaffSetupProfile> = {};
           res.data.profiles.forEach(p => {
             profileMap[p.staff_id] = p;
           });
-        }
-        setSetupProfilesMap(profileMap);
+          setSetupProfilesMap(profileMap);
+          setSetupReadSuccess(true);
 
-        // Select first staff and pre-fill form from server truth
-        const initialStaffId = selectedStaffId || (list.length > 0 ? list[0].id : '');
-        if (initialStaffId) {
-          setSelectedStaffId(initialStaffId);
-          applyServerProfileToForm(initialStaffId, profileMap);
+          // Select initial staff
+          const initialStaffId = selectedStaffId || (list.length > 0 ? list[0].id : '');
+          if (initialStaffId) {
+            setSelectedStaffId(initialStaffId);
+            applyServerProfileToForm(initialStaffId, true, profileMap);
+          }
+        } else {
+          setSetupReadSuccess(false);
+          setError(res.error?.message || 'Klinik personel yetki profilleri sunucudan okunamadı (Setup read failed).');
         }
       }
     } catch {
+      setSetupReadSuccess(false);
       setError('Personel ve yetki bilgileri yüklenirken hata oluştu.');
     } finally {
       setLoading(false);
     }
   };
 
-  const applyServerProfileToForm = (staffId: string, map: Record<string, ClinicStaffSetupProfile>) => {
-    const existing = map[staffId];
-    if (existing && existing.clinic_profile_exists) {
+  const applyServerProfileToForm = (
+    staffId: string,
+    isReadSuccess: boolean,
+    map: Record<string, ClinicStaffSetupProfile> | null
+  ) => {
+    const selectionState: ClinicStaffSetupSelectionState = deriveClinicStaffSetupSelectionState(
+      staffId,
+      isReadSuccess,
+      map
+    );
+
+    if (selectionState === 'existing_profile' && map && map[staffId]) {
+      const existing = map[staffId];
       setForm({
         staff_id: staffId,
         practitioner_type: existing.practitioner_type || 'physician',
@@ -87,7 +108,7 @@ export const ClinicStaffSetupPanel: React.FC = () => {
         can_view_clinical_records: !!existing.can_view_clinical_records,
         can_write_clinical_notes: !!existing.can_write_clinical_notes
       });
-    } else {
+    } else if (selectionState === 'confirmed_unconfigured') {
       setForm({
         staff_id: staffId,
         practitioner_type: 'physician',
@@ -104,11 +125,10 @@ export const ClinicStaffSetupPanel: React.FC = () => {
     setSelectedStaffId(staffId);
     setSuccessMsg(null);
     setError(null);
-    applyServerProfileToForm(staffId, setupProfilesMap);
+    applyServerProfileToForm(staffId, setupReadSuccess, setupProfilesMap);
   };
 
   const handleWriteNotesToggle = (checked: boolean) => {
-    // UI Invariant: can_write_clinical_notes => can_view_clinical_records
     setForm(prev => ({
       ...prev,
       can_write_clinical_notes: checked,
@@ -116,9 +136,17 @@ export const ClinicStaffSetupPanel: React.FC = () => {
     }));
   };
 
+  const selectionState: ClinicStaffSetupSelectionState = deriveClinicStaffSetupSelectionState(
+    selectedStaffId,
+    setupReadSuccess,
+    setupProfilesMap
+  );
+
+  const canSave = setupReadSuccess && (selectionState === 'existing_profile' || selectionState === 'confirmed_unconfigured');
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.staff_id) return;
+    if (!form.staff_id || !canSave) return;
     setSaving(true);
     setError(null);
     setSuccessMsg(null);
@@ -136,7 +164,6 @@ export const ClinicStaffSetupPanel: React.FC = () => {
 
       if (res.success) {
         setSuccessMsg('Klinik personel yetki profili başarıyla kaydedildi.');
-        // Re-fetch setup profiles from server to synchronize authoritative state
         await loadData();
       } else {
         setError(res.error?.message || 'Yetki profili kaydedilemedi.');
@@ -147,8 +174,6 @@ export const ClinicStaffSetupPanel: React.FC = () => {
       setSaving(false);
     }
   };
-
-  const currentProfileState = setupProfilesMap[selectedStaffId];
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
@@ -184,6 +209,14 @@ export const ClinicStaffSetupPanel: React.FC = () => {
         <div className="py-8 text-center text-sm text-slate-500">
           İşletmenizde henüz kayıtlı personel bulunmuyor. Önce İşletme Yönetimi alanından personel ekleyin.
         </div>
+      ) : !setupReadSuccess ? (
+        <div className="p-6 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-2xl text-center space-y-3">
+          <Lock className="h-6 w-6 text-red-600 mx-auto" />
+          <h3 className="text-sm font-bold text-red-800 dark:text-red-300">Sunucu Yetki Okuma Başarısız (Setup Read Failed)</h3>
+          <p className="text-xs text-red-600 dark:text-red-400">
+            Mevcut klinik personel profilleri sunucudan okunamadığı için körü körüne ezme yapılmasını önlemek amacıyla form kilitlenmiştir (Fail Closed).
+          </p>
+        </div>
       ) : (
         <form onSubmit={handleSave} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -197,7 +230,8 @@ export const ClinicStaffSetupPanel: React.FC = () => {
                 className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
               >
                 {staffList.map((s) => {
-                  const hasProf = setupProfilesMap[s.id]?.clinic_profile_exists;
+                  const st = setupProfilesMap ? deriveClinicStaffSetupSelectionState(s.id, setupReadSuccess, setupProfilesMap) : 'setup_read_failed';
+                  const hasProf = st === 'existing_profile';
                   return (
                     <option key={s.id} value={s.id}>
                       {s.name} {s.isOwner ? '(İşletme Sahibi)' : ''} {hasProf ? '✓ [Klinik Tanımlı]' : '[Henüz Tanımlanmadı]'}
@@ -208,13 +242,17 @@ export const ClinicStaffSetupPanel: React.FC = () => {
 
               {/* Server Profile Status Badge */}
               <div className="mt-1.5 flex items-center space-x-2 text-xs">
-                {currentProfileState?.clinic_profile_exists ? (
+                {selectionState === 'existing_profile' ? (
                   <span className="inline-flex items-center px-2 py-0.5 rounded-md font-semibold bg-emerald-100 text-emerald-800 text-[11px]">
                     <UserCheck className="h-3 w-3 mr-1" /> Mevcut Sunucu Konfigürasyonu Yüklendi
                   </span>
-                ) : (
+                ) : selectionState === 'confirmed_unconfigured' ? (
                   <span className="inline-flex items-center px-2 py-0.5 rounded-md font-semibold bg-amber-100 text-amber-800 text-[11px]">
                     <AlertTriangle className="h-3 w-3 mr-1" /> Henüz Klinik Profili Tanımlanmadı (Varsayılanlar Gösteriliyor)
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md font-semibold bg-red-100 text-red-800 text-[11px]">
+                    <AlertCircle className="h-3 w-3 mr-1" /> Sunucu Yetki Okuma Hatası (Kayıt Engellendi)
                   </span>
                 )}
               </div>
@@ -312,7 +350,7 @@ export const ClinicStaffSetupPanel: React.FC = () => {
           <div className="flex justify-end">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || !canSave}
               className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl font-semibold text-sm text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 transition-colors shadow-sm"
             >
               <Save className="h-4 w-4" />

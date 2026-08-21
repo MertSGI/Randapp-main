@@ -200,6 +200,15 @@ export function mapClinicOperationalDayResponse(data: Record<string, unknown>): 
   };
 }
 
+export function mapClinicPatientProfileWriteResponse(data: Record<string, unknown>): { patient_profile_id: string } {
+  if (!data || typeof data.patient_profile_id !== 'string') {
+    throw new Error('Malformed clinic_upsert_patient_profile response: missing patient_profile_id');
+  }
+  return {
+    patient_profile_id: data.patient_profile_id as string
+  };
+}
+
 export function mapClinicPatientProfileReadResponse(data: Record<string, unknown>): ClinicPatientProfileReadResult {
   if (!data || typeof data.customer_id !== 'string') {
     throw new Error('Malformed clinic_get_patient_profile response: missing customer_id');
@@ -384,7 +393,7 @@ export class SupabaseClinicRepository {
       const data = await res.json();
       return {
         success: true,
-        data: { patient_profile_id: data.patient_profile_id }
+        data: mapClinicPatientProfileWriteResponse(data)
       };
     } catch {
       return {

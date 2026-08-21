@@ -2,6 +2,7 @@ import assert from 'assert';
 import {
   deriveClinicWorkspaceMode,
   resolveClinicContextState,
+  deriveClinicStaffSetupSelectionState,
   canLoadClinicPatientHistory,
   canManageClinicPatientProfile,
   canStartClinicEncounter,
@@ -9,7 +10,7 @@ import {
   canCompleteClinicEncounter
 } from '../services/clinicUiPolicy.ts';
 
-console.log('=== RUNNING EXECUTABLE CLINIC WORKSPACE UI POLICY SUITE (BLOCK 3 R1 HARDENED) ===');
+console.log('=== RUNNING EXECUTABLE CLINIC WORKSPACE UI POLICY SUITE (BLOCK 3 R1.1 HARDENED) ===');
 
 // Fixtures
 const mockStaffContext = {
@@ -146,8 +147,6 @@ const mode15 = deriveClinicWorkspaceMode('super_admin', mockStaffContext);
 assert.strictEqual(mode15, 'unauthorized', 'Case 15 Failed: UI policy cannot grant any Clinic surface to super_admin');
 console.log('  ✓ Case 15 PASS: UI policy cannot grant any Clinic surface to super_admin');
 
-// --- NEW HARDENED CASES (16 - 27) ---
-
 // 16. assignedStaffId = null => Start false (Defect A Fail Closed)
 const start16 = canStartClinicEncounter(mockStaffContext, 'confirmed', null, null);
 assert.strictEqual(start16, false, 'Case 16 Failed: null assignedStaffId MUST return false for Start Encounter');
@@ -227,4 +226,14 @@ assert.strictEqual(loadHist27, false, 'Case 27.1 Failed: No-cap history MUST be 
 assert.strictEqual(manageProf27, false, 'Case 27.2 Failed: No-cap manage profile MUST be false');
 console.log('  ✓ Case 27 PASS: no manage / no view => history NO, profile edit NO');
 
-console.log('🎉 ALL 27 EXECUTABLE CLINIC WORKSPACE UI POLICY TESTS PASSED (BLOCK 3 R1 HARDENED)!');
+// 28. deriveClinicStaffSetupSelectionState: setup_read_failed MUST return setup_read_failed (fail closed)
+const setupState28 = deriveClinicStaffSetupSelectionState('staff_1', false, null);
+assert.strictEqual(setupState28, 'setup_read_failed', 'Case 28 Failed: setup read failure MUST fail closed');
+console.log('  ✓ Case 28 PASS: deriveClinicStaffSetupSelectionState setup read failure => setup_read_failed (fail closed)');
+
+// 29. deriveClinicStaffSetupSelectionState: staff missing from result => staff_missing_from_authority_result
+const setupState29 = deriveClinicStaffSetupSelectionState('staff_99', true, { staff_1: { staff_id: 'staff_1', staff_name: 'Dr A', staff_active: true, practitioner_type: 'physician', specialty: '', medical_license_number: '', can_manage_patient_profiles: true, can_view_clinical_records: true, can_write_clinical_notes: true, clinic_profile_exists: true } });
+assert.strictEqual(setupState29, 'staff_missing_from_authority_result', 'Case 29 Failed: staff missing from setup map MUST fail closed');
+console.log('  ✓ Case 29 PASS: deriveClinicStaffSetupSelectionState staff missing => staff_missing_from_authority_result');
+
+console.log('🎉 ALL 29 EXECUTABLE CLINIC WORKSPACE UI POLICY TESTS PASSED (BLOCK 3 R1.1 HARDENED)!');

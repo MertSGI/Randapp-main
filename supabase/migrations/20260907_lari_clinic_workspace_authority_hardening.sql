@@ -1,9 +1,11 @@
--- LARİ CLINIC MIGRATION 63: WORKSPACE AUTHORITY HARDENING
+-- LARİ CLINIC MIGRATION 63: WORKSPACE AUTHORITY HARDENING (R1.1 REPAIRED)
 -- File: supabase/migrations/20260907_lari_clinic_workspace_authority_hardening.sql
 -- Purpose:
 --   1. Harden clinic_upsert_patient_profile authorization: enforce can_manage_patient_profiles = true ONLY.
---   2. Add public.clinic_get_patient_profile(p_customer_id UUID) for bounded profile reads (gated by manage OR view).
---   3. Add public.clinic_get_staff_setup_profiles() for owner setup prefill & current non-patient configuration read.
+--   2. Fix canonical audit_events schema insert (actor_role = 'staff', action = 'clinic_patient_profile_changed', without non-existent column).
+--   3. Restore upsert response contract (returns patient_profile_id).
+--   4. Add public.clinic_get_patient_profile(p_customer_id UUID) for bounded profile reads (gated by manage OR view).
+--   5. Add public.clinic_get_staff_setup_profiles() for owner setup prefill & current non-patient configuration read.
 
 -- =========================================================================
 -- 1. HARDEN clinic_upsert_patient_profile (CAN_MANAGE_PATIENT_PROFILES ONLY)
@@ -107,38 +109,35 @@ BEGIN
         updated_at = now()
     RETURNING * INTO v_res;
 
-    -- Log audit event (metadata only, zero clinical narrative leak)
+    -- Log audit event using CANONICAL audit_events schema (actor_role, action, resource_type, resource_id, payload)
     INSERT INTO public.audit_events (
         tenant_id,
         actor_id,
-        event_type,
+        actor_role,
+        action,
         resource_type,
         resource_id,
         payload
     ) VALUES (
-        v_staff.tenant_id,
-        v_caller_uid,
-        'clinic_patient_profile_upserted',
-        'clinic_patient_profile',
+        v_staff.tenant_id::text,
+        v_caller_uid::text,
+        'staff',
+        'clinic_patient_profile_changed',
+        'clinic_patient_profiles',
         v_res.id::text,
         jsonb_build_object(
             'customer_id', p_customer_id,
-            'staff_id', v_staff.id,
-            'updated_fields_count', (
-                (CASE WHEN p_date_of_birth IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN p_sex_at_birth IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN p_emergency_contact_name IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN p_blood_type IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN p_allergies IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN p_chronic_conditions IS NOT NULL THEN 1 ELSE 0 END)
-            )
+            'patient_profile_id', v_res.id,
+            'staff_id', v_staff.id
         )
     );
 
+    -- Return canonical patient_profile_id response contract
     RETURN jsonb_build_object(
         'success', true,
-        'profile_id', v_res.id,
+        'patient_profile_id', v_res.id,
         'customer_id', p_customer_id,
+        'tenant_id', v_staff.tenant_id,
         'updated_at', v_res.updated_at
     );
 END;

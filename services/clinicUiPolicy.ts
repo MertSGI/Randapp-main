@@ -1,4 +1,4 @@
-import { ClinicStaffContext, EncounterStatus, ClinicServiceResult } from '../types/clinic';
+import { ClinicStaffContext, EncounterStatus, ClinicServiceResult, ClinicStaffSetupProfile } from '../types/clinic';
 import { Role } from '../types';
 
 export type ClinicWorkspaceMode = 'workspace' | 'setup_only' | 'access_not_configured' | 'unauthorized';
@@ -12,6 +12,37 @@ export type ClinicContextResolutionState =
   | 'unauthenticated'
   | 'forbidden'
   | 'error';
+
+export type ClinicStaffSetupSelectionState =
+  | 'existing_profile'
+  | 'confirmed_unconfigured'
+  | 'setup_read_failed'
+  | 'staff_missing_from_authority_result';
+
+/**
+ * Pure policy helper: derives explicit fail-closed selection state for owner staff setup.
+ * Prevents setup read failures from defaulting to editable new profiles.
+ */
+export function deriveClinicStaffSetupSelectionState(
+  staffId: string,
+  setupReadSuccess: boolean,
+  setupProfilesMap: Record<string, ClinicStaffSetupProfile> | null
+): ClinicStaffSetupSelectionState {
+  if (!setupReadSuccess || !setupProfilesMap) {
+    return 'setup_read_failed';
+  }
+
+  const profile = setupProfilesMap[staffId];
+  if (!profile) {
+    return 'staff_missing_from_authority_result';
+  }
+
+  if (profile.clinic_profile_exists) {
+    return 'existing_profile';
+  }
+
+  return 'confirmed_unconfigured';
+}
 
 /**
  * Pure state resolver function for Clinic surface context result.

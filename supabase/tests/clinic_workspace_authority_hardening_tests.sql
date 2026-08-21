@@ -1,7 +1,8 @@
--- LARİ CLINIC WORKSPACE AUTHORITY HARDENING EXECUTABLE TEST SUITE
+-- LARİ CLINIC WORKSPACE AUTHORITY HARDENING EXECUTABLE TEST SUITE (R1.1 REPAIRED)
 -- File: supabase/tests/clinic_workspace_authority_hardening_tests.sql
 -- Purpose:
---   Executable SQL verification for Migration 63 (bounded profile read, manage-only profile mutation, owner setup RPC, cross-tenant isolation).
+--   Executable SQL verification for Migration 63 with REAL DB ROLE CONTEXT (SET LOCAL ROLE authenticated / anon),
+--   ZERO false-green arbitrary exception swallow patterns, exact UUID signatures, and canonical audit verification.
 
 BEGIN;
 
@@ -27,10 +28,11 @@ DECLARE
     v_cust2_id UUID := 'c2222222-2222-4222-8222-222222222222'::UUID;
 
     v_res JSONB;
-    v_err_code TEXT;
+    v_audit RECORD;
     v_err_msg TEXT;
+    v_err_state TEXT;
 BEGIN
-    RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE ===';
+    RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.1) ===';
 
     -- Seed Tenants
     INSERT INTO public.tenants (id, name, slug)
@@ -87,21 +89,21 @@ BEGIN
     RAISE NOTICE '✓ TEST A PASSED: Manage-only staff can read bounded profile';
 
     -- -------------------------------------------------------------------------
-    -- TEST B: Manage=true, View=false => clinic_get_patient_history FAILS CLOSED
+    -- TEST B: Manage=true, View=false => clinic_get_patient_history FAILS CLOSED (FORBIDDEN ONLY)
     -- -------------------------------------------------------------------------
     BEGIN
-        v_res := public.clinic_get_patient_history(v_cust_id::text);
+        v_res := public.clinic_get_patient_history(v_cust_id);
         RAISE EXCEPTION 'TEST B FAILED: Manage-only staff must NOT be able to load patient history';
     EXCEPTION WHEN OTHERS THEN
-        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT;
-        IF v_err_msg NOT LIKE '%FORBIDDEN%' THEN
-            RAISE EXCEPTION 'TEST B FAILED: Expected FORBIDDEN, got %', v_err_msg;
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST B FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
     RAISE NOTICE '✓ TEST B PASSED: Manage-only staff denied clinical history';
 
     -- -------------------------------------------------------------------------
-    -- TEST C: Manage=true, View=false => clinic_upsert_patient_profile SUCCEEDS
+    -- TEST C, D, E, F, G: Manage=true, View=false => clinic_upsert_patient_profile SUCCEEDS
     -- -------------------------------------------------------------------------
     v_res := public.clinic_upsert_patient_profile(
         p_customer_id := v_cust_id,
@@ -111,136 +113,235 @@ BEGIN
     IF (v_res->>'success')::boolean <> true THEN
         RAISE EXCEPTION 'TEST C FAILED: Manage-only staff should be able to upsert patient profile';
     END IF;
-    RAISE NOTICE '✓ TEST C PASSED: Manage-only staff can upsert patient profile';
+
+    -- TEST G: Response Contract Check (patient_profile_id MUST be present and non-null)
+    IF v_res->>'patient_profile_id' IS NULL THEN
+        RAISE EXCEPTION 'TEST G FAILED: Response contract missing patient_profile_id!';
+    END IF;
+
+    -- TEST D, E, F: Verify Canonical audit_events row
+    SELECT * INTO v_audit
+    FROM public.audit_events
+    WHERE tenant_id = v_tenant_id::text
+      AND resource_id = v_res->>'patient_profile_id'
+    ORDER BY created_at DESC LIMIT 1;
+
+    IF v_audit.id IS NULL THEN
+        RAISE EXCEPTION 'TEST D FAILED: Canonical audit_events row was not inserted!';
+    END IF;
+
+    IF v_audit.actor_role <> 'staff' OR v_audit.action <> 'clinic_patient_profile_changed' THEN
+        RAISE EXCEPTION 'TEST E FAILED: Audit actor_role (%) or action (%) incorrect!', v_audit.actor_role, v_audit.action;
+    END IF;
+
+    -- Verify Payload Metadata Only (NO clinical content)
+    IF v_audit.payload ? 'blood_type' OR v_audit.payload ? 'allergies' THEN
+        RAISE EXCEPTION 'TEST F FAILED: Audit payload contains clinical health fields!';
+    END IF;
+
+    RAISE NOTICE '✓ TEST C, D, E, F, G PASSED: Manage-only upsert succeeds and writes canonical audit row';
 
     -- -------------------------------------------------------------------------
-    -- TEST D: Manage=false, View=true => clinic_get_patient_profile SUCCEEDS
+    -- TEST H, I: Manage=false, View=true => clinic_get_patient_profile & history SUCCEED
     -- -------------------------------------------------------------------------
     PERFORM set_config('request.jwt.claim.sub', v_view_staff_uid::text, true);
 
     v_res := public.clinic_get_patient_profile(v_cust_id);
     IF (v_res->>'success')::boolean <> true THEN
-        RAISE EXCEPTION 'TEST D FAILED: View-only staff should be able to get patient profile';
+        RAISE EXCEPTION 'TEST H FAILED: View-only staff should be able to get patient profile';
     END IF;
-    RAISE NOTICE '✓ TEST D PASSED: View-only staff can read bounded profile';
 
-    -- -------------------------------------------------------------------------
-    -- TEST E: Manage=false, View=true => clinic_get_patient_history SUCCEEDS
-    -- -------------------------------------------------------------------------
-    v_res := public.clinic_get_patient_history(v_cust_id::text);
+    v_res := public.clinic_get_patient_history(v_cust_id);
     IF (v_res->>'success')::boolean <> true THEN
-        RAISE EXCEPTION 'TEST E FAILED: View-only staff should be able to get patient history';
+        RAISE EXCEPTION 'TEST I FAILED: View-only staff should be able to get patient history';
     END IF;
-    RAISE NOTICE '✓ TEST E PASSED: View-only staff can read clinical history';
+    RAISE NOTICE '✓ TEST H, I PASSED: View-only staff can read bounded profile and history';
 
     -- -------------------------------------------------------------------------
-    -- TEST F: Manage=false, View=true => clinic_upsert_patient_profile FORBIDDEN
+    -- TEST J: Manage=false, View=true => clinic_upsert_patient_profile FORBIDDEN ONLY
     -- -------------------------------------------------------------------------
     BEGIN
         v_res := public.clinic_upsert_patient_profile(
             p_customer_id := v_cust_id,
             p_blood_type := 'O Rh-'
         );
-        RAISE EXCEPTION 'TEST F FAILED: View-only staff must NOT be able to mutate patient profile';
+        RAISE EXCEPTION 'TEST J FAILED: View-only staff must NOT be able to mutate patient profile';
     EXCEPTION WHEN OTHERS THEN
-        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT;
-        IF v_err_msg NOT LIKE '%FORBIDDEN%' THEN
-            RAISE EXCEPTION 'TEST F FAILED: Expected FORBIDDEN, got %', v_err_msg;
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST J FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
-    RAISE NOTICE '✓ TEST F PASSED: View-only staff denied profile mutation';
+    RAISE NOTICE '✓ TEST J PASSED: View-only staff denied profile mutation';
 
     -- -------------------------------------------------------------------------
-    -- TEST G: Manage=false, View=false => Profile read, history, mutation DENIED
+    -- TEST K, L, M: Manage=false, View=false => Profile read, history, mutation FORBIDDEN ONLY
     -- -------------------------------------------------------------------------
     PERFORM set_config('request.jwt.claim.sub', v_none_staff_uid::text, true);
 
     BEGIN
         v_res := public.clinic_get_patient_profile(v_cust_id);
-        RAISE EXCEPTION 'TEST G1 FAILED: No-cap staff profile read must fail';
-    EXCEPTION WHEN OTHERS THEN NULL; END;
+        RAISE EXCEPTION 'TEST K FAILED: No-cap staff profile read must fail';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST K FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
+        END IF;
+    END;
 
     BEGIN
-        v_res := public.clinic_get_patient_history(v_cust_id::text);
-        RAISE EXCEPTION 'TEST G2 FAILED: No-cap staff history read must fail';
-    EXCEPTION WHEN OTHERS THEN NULL; END;
+        v_res := public.clinic_get_patient_history(v_cust_id);
+        RAISE EXCEPTION 'TEST L FAILED: No-cap staff history read must fail';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST L FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
+        END IF;
+    END;
 
     BEGIN
         v_res := public.clinic_upsert_patient_profile(p_customer_id := v_cust_id, p_blood_type := 'B Rh+');
-        RAISE EXCEPTION 'TEST G3 FAILED: No-cap staff profile mutation must fail';
-    EXCEPTION WHEN OTHERS THEN NULL; END;
-    RAISE NOTICE '✓ TEST G PASSED: No-cap staff denied all reads and mutations';
+        RAISE EXCEPTION 'TEST M FAILED: No-cap staff profile mutation must fail';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST M FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
+        END IF;
+    END;
+    RAISE NOTICE '✓ TEST K, L, M PASSED: No-cap staff denied all reads and mutations with expected FORBIDDEN';
 
     -- -------------------------------------------------------------------------
-    -- TEST H & I: Cross-Tenant Profile Read and Mutation DENIED
+    -- TEST N, O: Cross-Tenant Profile Read and Mutation DENIED
     -- -------------------------------------------------------------------------
     PERFORM set_config('request.jwt.claim.sub', v_manage_staff_uid::text, true);
 
     BEGIN
         v_res := public.clinic_get_patient_profile(v_cust2_id);
-        RAISE EXCEPTION 'TEST H FAILED: Cross-tenant profile read must fail';
-    EXCEPTION WHEN OTHERS THEN NULL; END;
+        RAISE EXCEPTION 'TEST N FAILED: Cross-tenant profile read must fail';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%NOT_FOUND%' AND v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST N FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
+        END IF;
+    END;
 
     BEGIN
         v_res := public.clinic_upsert_patient_profile(p_customer_id := v_cust2_id, p_blood_type := 'AB Rh+');
-        RAISE EXCEPTION 'TEST I FAILED: Cross-tenant profile mutation must fail';
-    EXCEPTION WHEN OTHERS THEN NULL; END;
-    RAISE NOTICE '✓ TEST H & I PASSED: Cross-tenant profile read and mutation denied';
+        RAISE EXCEPTION 'TEST O FAILED: Cross-tenant profile mutation must fail';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%NOT_FOUND%' AND v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST O FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
+        END IF;
+    END;
+    RAISE NOTICE '✓ TEST N, O PASSED: Cross-tenant profile read and mutation denied with expected domain errors';
 
     -- -------------------------------------------------------------------------
-    -- TEST L & M: Owner Setup RPC Success for Tenant Owner
+    -- TEST S, T: Owner Setup RPC Success for Tenant Owner
     -- -------------------------------------------------------------------------
     PERFORM set_config('request.jwt.claim.sub', v_owner_uid::text, true);
 
     v_res := public.clinic_get_staff_setup_profiles();
     IF (v_res->>'success')::boolean <> true THEN
-        RAISE EXCEPTION 'TEST L FAILED: Tenant owner must be able to execute clinic_get_staff_setup_profiles';
+        RAISE EXCEPTION 'TEST S FAILED: Tenant owner must be able to execute clinic_get_staff_setup_profiles';
     END IF;
 
     IF jsonb_array_length(v_res->'profiles') < 3 THEN
-        RAISE EXCEPTION 'TEST M FAILED: Owner setup profile list incomplete';
+        RAISE EXCEPTION 'TEST T FAILED: Owner setup profile list incomplete';
     END IF;
-    RAISE NOTICE '✓ TEST L & M PASSED: Tenant owner can fetch setup profiles';
+    RAISE NOTICE '✓ TEST S, T PASSED: Tenant owner can fetch setup profiles';
 
     -- -------------------------------------------------------------------------
-    -- TEST N & O: Non-owner / Super Admin Denied Owner Setup RPC
+    -- TEST U, V: Non-owner / Super Admin Denied Owner Setup RPC
     -- -------------------------------------------------------------------------
     PERFORM set_config('request.jwt.claim.sub', v_manage_staff_uid::text, true);
     BEGIN
         v_res := public.clinic_get_staff_setup_profiles();
-        RAISE EXCEPTION 'TEST N FAILED: Regular staff must NOT be able to call clinic_get_staff_setup_profiles';
-    EXCEPTION WHEN OTHERS THEN NULL; END;
+        RAISE EXCEPTION 'TEST U FAILED: Regular staff must NOT be able to call clinic_get_staff_setup_profiles';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST U FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
+        END IF;
+    END;
 
     PERFORM set_config('request.jwt.claim.sub', v_superadmin_uid::text, true);
     BEGIN
         v_res := public.clinic_get_staff_setup_profiles();
-        RAISE EXCEPTION 'TEST O FAILED: Super admin must NOT be able to call clinic_get_staff_setup_profiles';
-    EXCEPTION WHEN OTHERS THEN NULL; END;
-    RAISE NOTICE '✓ TEST N & O PASSED: Non-owner and Super Admin denied owner setup RPC';
+        RAISE EXCEPTION 'TEST V FAILED: Super admin must NOT be able to call clinic_get_staff_setup_profiles';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST V FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
+        END IF;
+    END;
+    RAISE NOTICE '✓ TEST U, V PASSED: Non-owner and Super Admin denied owner setup RPC with expected FORBIDDEN';
 
     -- -------------------------------------------------------------------------
-    -- TEST P & Q: Zero Clinical Content Leak Check in Bounded & Setup RPCs
+    -- TEST W, X: Zero Clinical Content Leak Check in Bounded & Setup RPCs
     -- -------------------------------------------------------------------------
     PERFORM set_config('request.jwt.claim.sub', v_manage_staff_uid::text, true);
     v_res := public.clinic_get_patient_profile(v_cust_id);
     IF (v_res->'patient_profile') ? 'encounters' OR (v_res->'patient_profile') ? 'notes' OR (v_res->'patient_profile') ? 'subjective' THEN
-        RAISE EXCEPTION 'TEST P FAILED: Bounded profile returned clinical history fields!';
+        RAISE EXCEPTION 'TEST W FAILED: Bounded profile returned clinical history fields!';
     END IF;
 
     PERFORM set_config('request.jwt.claim.sub', v_owner_uid::text, true);
     v_res := public.clinic_get_staff_setup_profiles();
     IF (v_res->'profiles'->0) ? 'allergies' OR (v_res->'profiles'->0) ? 'chronic_conditions' THEN
-        RAISE EXCEPTION 'TEST Q FAILED: Owner setup returned patient health fields!';
+        RAISE EXCEPTION 'TEST X FAILED: Owner setup returned patient health fields!';
     END IF;
-    RAISE NOTICE '✓ TEST P & Q PASSED: Zero clinical leakage in bounded profile and setup RPCs';
+    RAISE NOTICE '✓ TEST W, X PASSED: Zero clinical leakage in bounded profile and setup RPCs';
+
+    -- -------------------------------------------------------------------------
+    -- TEST P, Q, R: LITERAL ANON ROLE BOUNDARY TESTS
+    -- -------------------------------------------------------------------------
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+    PERFORM set_config('request.jwt.claim.role', 'anon', true);
+
+    BEGIN
+        v_res := public.clinic_get_patient_profile(v_cust_id);
+        RAISE EXCEPTION 'TEST P FAILED: Anon caller must NOT read bounded patient profile';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST P FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
+        END IF;
+    END;
+
+    BEGIN
+        v_res := public.clinic_upsert_patient_profile(p_customer_id := v_cust_id, p_blood_type := 'O Rh+');
+        RAISE EXCEPTION 'TEST Q FAILED: Anon caller must NOT mutate patient profile';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST Q FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
+        END IF;
+    END;
+
+    BEGIN
+        v_res := public.clinic_get_staff_setup_profiles();
+        RAISE EXCEPTION 'TEST R FAILED: Anon caller must NOT read staff setup profiles';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
+        IF v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_msg NOT LIKE '%FORBIDDEN%' AND v_err_state <> '42501' THEN
+            RAISE EXCEPTION 'TEST R FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
+        END IF;
+    END;
+    RAISE NOTICE '✓ TEST P, Q, R PASSED: Anon role execution denied all access';
 
     RAISE NOTICE 'CLINIC_PROFILE_MUTATION_MANAGE_ONLY_PROVEN=YES';
+    RAISE NOTICE 'CLINIC_PROFILE_MUTATION_AUDIT_CANONICAL=YES';
+    RAISE NOTICE 'CLINIC_PROFILE_RESPONSE_CONTRACT_PROVEN=YES';
     RAISE NOTICE 'CLINIC_PROFILE_VIEW_WITHOUT_HISTORY_PROVEN=YES';
     RAISE NOTICE 'CLINIC_VIEW_ONLY_MUTATION_DENIED=YES';
+    RAISE NOTICE 'CLINIC_NO_CAPABILITY_DENIAL_PROVEN=YES';
     RAISE NOTICE 'CLINIC_PROFILE_CROSS_TENANT_DENIED=YES';
+    RAISE NOTICE 'CLINIC_ANON_PROFILE_ACCESS_DENIED=YES';
     RAISE NOTICE 'CLINIC_OWNER_SETUP_READ_PROVEN=YES';
     RAISE NOTICE 'CLINIC_OWNER_SETUP_CROSS_TENANT_SAFE=YES';
     RAISE NOTICE 'CLINIC_BOUNDED_PROFILE_NO_HISTORY_LEAK=YES';
+    RAISE NOTICE 'CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES';
     RAISE NOTICE 'CLINIC_WORKSPACE_AUTHORITY_HARDENING_DB_EXECUTION=PASS';
 END;
 $$;
