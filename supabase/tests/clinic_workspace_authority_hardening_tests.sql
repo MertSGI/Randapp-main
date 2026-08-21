@@ -101,6 +101,8 @@ BEGIN
     INSERT INTO public.customers (id, tenant_id, name, phone)
     VALUES (v_cust_id, v_tenant_id, 'Patient One', '5550001'),
            (v_cust2_id, v_tenant2_id, 'Tenant2 Patient', '5550002');
+
+    RAISE NOTICE 'CLINIC_HARDENING_SECTION1_SETUP_COMPLETE=YES';
 END;
 $$;
 
@@ -132,6 +134,7 @@ BEGIN
         RAISE EXCEPTION 'ACL CHECK FAILED: anon role must NOT have EXECUTE on clinic_get_staff_setup_profiles';
     END IF;
     RAISE NOTICE 'CLINIC_ANON_EXECUTE_ACL_DENIED=YES';
+    RAISE NOTICE 'CLINIC_HARDENING_SECTION2_ACL_COMPLETE=YES';
 END;
 $$;
 
@@ -353,6 +356,12 @@ BEGIN
 END;
 $$;
 
+DO $$
+BEGIN
+    RAISE NOTICE 'CLINIC_HARDENING_SECTION3_DOMAIN_COMPLETE=YES';
+END;
+$$;
+
 RESET ROLE;
 SELECT set_config('request.jwt.claim.role', '', true);
 SELECT set_config('request.jwt.claim.sub', '', true);
@@ -386,7 +395,7 @@ BEGIN
         RAISE EXCEPTION 'TEST Q FAILED: Anon caller must NOT mutate profile';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_err_msg = MESSAGE_TEXT, v_err_state = RETURNED_SQLSTATE;
-        IF v_err_state <> '42501' AND v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_state NOT LIKE '%FORBIDDEN%' THEN
+        IF v_err_state <> '42501' AND v_err_msg NOT LIKE '%UNAUTHENTICATED%' AND v_err_msg NOT LIKE '%FORBIDDEN%' THEN
             RAISE EXCEPTION 'TEST Q FAILED with UNEXPECTED ERROR [%: %]', v_err_state, v_err_msg;
         END IF;
     END;
@@ -401,6 +410,7 @@ BEGIN
         END IF;
     END;
     RAISE NOTICE 'CLINIC_ANON_PROFILE_ACCESS_DENIED=YES';
+    RAISE NOTICE 'CLINIC_HARDENING_SECTION4_ANON_COMPLETE=YES';
 END;
 $$;
 
@@ -458,6 +468,7 @@ BEGIN
 
     RAISE NOTICE 'CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES';
     RAISE NOTICE 'CLINIC_WORKSPACE_AUTHORITY_HARDENING_DB_EXECUTION=PASS';
+    RAISE NOTICE 'CLINIC_HARDENING_SECTION5_AUDIT_COMPLETE=YES';
 END;
 $$;
 
