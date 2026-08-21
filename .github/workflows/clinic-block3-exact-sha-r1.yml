@@ -229,42 +229,24 @@ jobs:
 
       - name: Run Clinic Block 3 Workspace Authority Hardening Functional SQL Suite & Verify Markers
         run: |
-          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          echo "Executing clinic_workspace_authority_hardening_tests.sql..."
+          echo "Executing clinic_block3_ts_harness.ts..."
           set +e
-          npx tsx -e "
-            import { execSync } from 'child_process';
-            import fs from 'fs';
-            const cmd = 'psql \"postgresql://postgres:postgres@127.0.0.1:54322/postgres\" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql';
-            let fullLog = '';
-            try {
-              const out = execSync(cmd, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
-              fullLog = '=== PSQL STDOUT ===\n' + out;
-            } catch (err: any) {
-              fullLog = '=== PSQL STDOUT ===\n' + (err.stdout || '') + '\n=== PSQL STDERR ===\n' + (err.stderr || '') + '\n=== EXIT ERROR ===\n' + err.message;
-              process.exitCode = 1;
-            }
-            fs.writeFileSync('/tmp/clinic-block3-sql.log', fullLog);
-            console.log(fullLog);
-          "
-          PSQL_EXIT=$?
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx tsx supabase/tests/clinic_block3_ts_harness.ts 2>&1 | tee /tmp/clinic-block3-sql.log
+          HARNESS_EXIT=${PIPESTATUS[0]}
           set -e
 
-          LOG_CONTENT=$(cat /tmp/clinic-block3-sql.log)
           if [ -n "$GITHUB_STEP_SUMMARY" ]; then
             echo "### Clinic Block 3 SQL Test Log Output" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            echo "$LOG_CONTENT" >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/clinic-block3-sql.log >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
 
-          echo "=== PSQL COMPLETE LOG DUMP ==="
-          echo "$LOG_CONTENT"
-          echo "=============================="
-
-          if [ "$PSQL_EXIT" -ne 0 ]; then
-            echo "❌ PSQL EXECUTION FAILED WITH EXIT CODE $PSQL_EXIT"
-            exit "$PSQL_EXIT"
+          if [ "$HARNESS_EXIT" -ne 0 ]; then
+            echo "=== FAILED BLOCK 3 TS HARNESS LOG OUTPUT ==="
+            cat /tmp/clinic-block3-sql.log
+            exit "$HARNESS_EXIT"
           fi
 
           MARKERS=(
