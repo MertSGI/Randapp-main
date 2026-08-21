@@ -242,21 +242,23 @@ jobs:
             async function main() {
               await client.connect();
               const sql = fs.readFileSync('supabase/tests/clinic_workspace_authority_hardening_tests.sql', 'utf8');
-              try {
-                await client.query(sql);
-                console.log('SQL_SUCCESS');
-              } catch (err: any) {
-                console.log('PG_ERROR: ' + err.message);
-                console.log('PG_DETAIL: ' + (err.detail || ''));
-                console.log('PG_WHERE: ' + (err.where || ''));
-                logBuf += 'PG_ERROR: ' + err.message + '\n';
-                fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
-                await client.end();
-                process.exit(1);
-              } finally {
-                fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
-                await client.end();
+              const statements = sql.split(/;\s*$/m);
+              for (const stmt of statements) {
+                const s = stmt.trim();
+                if (!s) continue;
+                try {
+                  await client.query(s);
+                } catch (err: any) {
+                  console.error('PG_ERROR: ' + err.message);
+                  console.error('STMT HEAD: ' + s.slice(0, 100));
+                  logBuf += 'PG_ERROR: ' + err.message + '\n';
+                  fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
+                  await client.end();
+                  process.exit(1);
+                }
               }
+              fs.writeFileSync('/tmp/clinic-block3-sql.log', logBuf);
+              await client.end();
             }
             main();
           "
