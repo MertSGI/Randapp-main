@@ -24,16 +24,15 @@ async function runHarness() {
             .map(b => b.trim())
             .filter(b => b.length > 0 && !b.startsWith('--'));
 
-        for (const block of blocks) {
-            try {
-                await client.query(block);
-            } catch (err: any) {
-                const errLog = '=== STATEMENT ERROR ===\nBLOCK SNIPPET: ' + block.slice(0, 120) + '\nMESSAGE: ' + err.message + '\nDETAIL: ' + (err.detail || '') + '\nHINT: ' + (err.hint || '') + '\nWHERE: ' + (err.where || '') + '\n=======================\n';
-                fullLog += errLog;
-                console.error(errLog);
-                fs.writeFileSync('/tmp/clinic-block3-sql.log', fullLog);
-                process.exit(1);
-            }
+        try {
+            await client.query(rawSql);
+            console.log('SQL_QUERY_EXECUTED_SUCCESSFULLY');
+        } catch (err: any) {
+            const errLog = '=== STATEMENT ERROR ===\nMESSAGE: ' + err.message + '\nDETAIL: ' + (err.detail || '') + '\nHINT: ' + (err.hint || '') + '\nWHERE: ' + (err.where || '') + '\n=======================\n';
+            fullLog += errLog;
+            console.error(errLog);
+            fs.writeFileSync('/tmp/clinic-block3-sql.log', fullLog);
+            process.exit(1);
         }
         fullLog += 'CLINIC_BLOCK3_TS_HARNESS_COMPLETED=YES\n';
         fs.writeFileSync('/tmp/clinic-block3-sql.log', fullLog);
