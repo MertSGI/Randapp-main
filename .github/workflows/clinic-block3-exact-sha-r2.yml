@@ -245,15 +245,18 @@ jobs:
           echo "✅ Clinic Block 2 real multi-session concurrency harness passed with all harness-generated markers verified."
 
       - name: Run Clinic Block 3 Workspace Authority Hardening Functional SQL Suite & Verify Markers
-        run: |
-          set -o pipefail
+          set -e
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql > /tmp/clinic-block3-sql.log 2>&1
-          PSQL_EXIT=$?
-          cat /tmp/clinic-block3-sql.log
-
+          echo "=== RUNNING BLOCK 3 SQL TEST SUITE ==="
+          
+          # Run via psql and tee directly to stdout without buffering
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql 2>&1 | tee /tmp/clinic-block3-sql.log
+          PSQL_EXIT=${PIPESTATUS[0]}
+          
           if [ $PSQL_EXIT -ne 0 ]; then
-            echo "❌ PSQL FAILED WITH EXIT CODE $PSQL_EXIT"
+            echo "❌ PSQL RUN FAILED WITH EXIT CODE $PSQL_EXIT"
+            echo "=== FAILED LOG SUMMARY ==="
+            tail -n 50 /tmp/clinic-block3-sql.log
             exit $PSQL_EXIT
           fi
 
