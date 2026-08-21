@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Staff } from '../../types';
-import { PractitionerType } from '../../types/clinic';
+import { PractitionerType, ClinicStaffSetupProfile } from '../../types/clinic';
 import { getStaffList } from '../../services/staffService';
 import { clinicService } from '../../services/clinicService';
 import { useTenant } from '../../contexts/TenantContext';
-import { UserCheck, Shield, CheckCircle2, AlertCircle, Save, Stethoscope } from 'lucide-react';
+import { Shield, CheckCircle2, AlertCircle, Save, UserCheck, AlertTriangle } from 'lucide-react';
 
 interface StaffProfileForm {
   staff_id: string;
@@ -19,6 +19,7 @@ interface StaffProfileForm {
 export const ClinicStaffSetupPanel: React.FC = () => {
   const { tenant } = useTenant();
   const [staffList, setStaffList] = useState<Staff[]>([]);
+  const [setupProfilesMap, setSetupProfilesMap] = useState<Record<string, ClinicStaffSetupProfile>>({});
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -37,34 +38,73 @@ export const ClinicStaffSetupPanel: React.FC = () => {
 
   useEffect(() => {
     if (tenant?.id) {
-      loadStaff();
+      loadData();
     }
   }, [tenant?.id]);
 
-  const loadStaff = async () => {
+  const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
       if (tenant?.id) {
+        // Fetch active tenant staff directory
         const list = await getStaffList(tenant.id, { activeOnly: true });
         setStaffList(list);
-        if (list.length > 0 && !selectedStaffId) {
-          setSelectedStaffId(list[0].id);
-          setForm(prev => ({ ...prev, staff_id: list[0].id }));
+
+        // Fetch existing Clinic setup profiles for owner tenant
+        const res = await clinicService.getClinicStaffSetupProfiles();
+        const profileMap: Record<string, ClinicStaffSetupProfile> = {};
+        if (res.success && res.data) {
+          res.data.profiles.forEach(p => {
+            profileMap[p.staff_id] = p;
+          });
+        }
+        setSetupProfilesMap(profileMap);
+
+        // Select first staff and pre-fill form from server truth
+        const initialStaffId = selectedStaffId || (list.length > 0 ? list[0].id : '');
+        if (initialStaffId) {
+          setSelectedStaffId(initialStaffId);
+          applyServerProfileToForm(initialStaffId, profileMap);
         }
       }
-    } catch (err) {
-      setError('Personel listesi yüklenirken hata oluştu.');
+    } catch {
+      setError('Personel ve yetki bilgileri yüklenirken hata oluştu.');
     } finally {
       setLoading(false);
     }
   };
 
+  const applyServerProfileToForm = (staffId: string, map: Record<string, ClinicStaffSetupProfile>) => {
+    const existing = map[staffId];
+    if (existing && existing.clinic_profile_exists) {
+      setForm({
+        staff_id: staffId,
+        practitioner_type: existing.practitioner_type || 'physician',
+        specialty: existing.specialty || '',
+        medical_license_number: existing.medical_license_number || '',
+        can_manage_patient_profiles: !!existing.can_manage_patient_profiles,
+        can_view_clinical_records: !!existing.can_view_clinical_records,
+        can_write_clinical_notes: !!existing.can_write_clinical_notes
+      });
+    } else {
+      setForm({
+        staff_id: staffId,
+        practitioner_type: 'physician',
+        specialty: '',
+        medical_license_number: '',
+        can_manage_patient_profiles: true,
+        can_view_clinical_records: false,
+        can_write_clinical_notes: false
+      });
+    }
+  };
+
   const handleStaffSelect = (staffId: string) => {
     setSelectedStaffId(staffId);
-    setForm(prev => ({ ...prev, staff_id: staffId }));
     setSuccessMsg(null);
     setError(null);
+    applyServerProfileToForm(staffId, setupProfilesMap);
   };
 
   const handleWriteNotesToggle = (checked: boolean) => {
@@ -96,15 +136,19 @@ export const ClinicStaffSetupPanel: React.FC = () => {
 
       if (res.success) {
         setSuccessMsg('Klinik personel yetki profili başarıyla kaydedildi.');
+        // Re-fetch setup profiles from server to synchronize authoritative state
+        await loadData();
       } else {
         setError(res.error?.message || 'Yetki profili kaydedilemedi.');
       }
-    } catch (err) {
+    } catch {
       setError('İşlem sırasında sunucu hatası oluştu.');
     } finally {
       setSaving(false);
     }
   };
+
+  const currentProfileState = setupProfilesMap[selectedStaffId];
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
@@ -135,7 +179,7 @@ export const ClinicStaffSetupPanel: React.FC = () => {
       )}
 
       {loading ? (
-        <div className="py-8 text-center text-sm text-slate-500">Personel bilgileri yükleniyor...</div>
+        <div className="py-8 text-center text-sm text-slate-500">Personel ve yetki bilgileri yükleniyor...</div>
       ) : staffList.length === 0 ? (
         <div className="py-8 text-center text-sm text-slate-500">
           İşletmenizde henüz kayıtlı personel bulunmuyor. Önce İşletme Yönetimi alanından personel ekleyin.
@@ -152,12 +196,28 @@ export const ClinicStaffSetupPanel: React.FC = () => {
                 onChange={(e) => handleStaffSelect(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
               >
-                {staffList.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} {s.isOwner ? '(İşletme Sahibi)' : ''}
-                  </option>
-                ))}
+                {staffList.map((s) => {
+                  const hasProf = setupProfilesMap[s.id]?.clinic_profile_exists;
+                  return (
+                    <option key={s.id} value={s.id}>
+                      {s.name} {s.isOwner ? '(İşletme Sahibi)' : ''} {hasProf ? '✓ [Klinik Tanımlı]' : '[Henüz Tanımlanmadı]'}
+                    </option>
+                  );
+                })}
               </select>
+
+              {/* Server Profile Status Badge */}
+              <div className="mt-1.5 flex items-center space-x-2 text-xs">
+                {currentProfileState?.clinic_profile_exists ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md font-semibold bg-emerald-100 text-emerald-800 text-[11px]">
+                    <UserCheck className="h-3 w-3 mr-1" /> Mevcut Sunucu Konfigürasyonu Yüklendi
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md font-semibold bg-amber-100 text-amber-800 text-[11px]">
+                    <AlertTriangle className="h-3 w-3 mr-1" /> Henüz Klinik Profili Tanımlanmadı (Varsayılanlar Gösteriliyor)
+                  </span>
+                )}
+              </div>
             </div>
 
             <div>

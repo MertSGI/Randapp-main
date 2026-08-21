@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { ClinicStaffContext, ClinicPatientHistory, ClinicOperationalAppointment } from '../../types/clinic';
+import { ClinicStaffContext, ClinicPatientHistory, ClinicOperationalAppointment, ClinicPatientHistoryProfile } from '../../types/clinic';
 import { clinicService } from '../../services/clinicService';
 import { canLoadClinicPatientHistory, canManageClinicPatientProfile } from '../../services/clinicUiPolicy';
-import { User, Phone, Heart, AlertTriangle, Activity, Edit3, Save, X, Clock, FileText, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { User, Phone, Edit3, Clock, AlertCircle, ShieldAlert } from 'lucide-react';
 
 interface ClinicPatientPanelProps {
   context: ClinicStaffContext;
@@ -15,6 +15,13 @@ export const ClinicPatientPanel: React.FC<ClinicPatientPanelProps> = ({
   selectedAppointment,
   onRefreshOperationalDay
 }) => {
+  // Bounded Profile State (available for manage OR view capabilities)
+  const [boundedProfile, setBoundedProfile] = useState<ClinicPatientHistoryProfile | null>(null);
+  const [loadingProfile, setLoadingProfile] = useState<boolean>(false);
+  const [profileFetchFailed, setProfileFetchFailed] = useState<boolean>(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+
+  // Clinical History State (ONLY available when can_view_clinical_records = true)
   const [history, setHistory] = useState<ClinicPatientHistory | null>(null);
   const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -36,27 +43,39 @@ export const ClinicPatientPanel: React.FC<ClinicPatientPanelProps> = ({
 
   const canViewHistory = canLoadClinicPatientHistory(context);
   const canManageProfile = canManageClinicPatientProfile(context);
+  const canReadBoundedProfile = canManageProfile || canViewHistory;
 
   useEffect(() => {
     setIsEditingProfile(false);
     setProfileMsg(null);
-    if (selectedAppointment?.customer_id && canViewHistory) {
-      loadHistory(selectedAppointment.customer_id);
+    setProfileError(null);
+    setProfileFetchFailed(false);
+
+    if (selectedAppointment?.customer_id) {
+      if (canReadBoundedProfile) {
+        loadBoundedProfile(selectedAppointment.customer_id);
+      }
+      if (canViewHistory) {
+        loadHistory(selectedAppointment.customer_id);
+      } else {
+        setHistory(null);
+      }
     } else {
+      setBoundedProfile(null);
       setHistory(null);
     }
-  }, [selectedAppointment?.customer_id, canViewHistory]);
+  }, [selectedAppointment?.customer_id, canReadBoundedProfile, canViewHistory]);
 
-  const loadHistory = async (customerId: string) => {
-    setLoadingHistory(true);
-    setHistoryError(null);
+  const loadBoundedProfile = async (customerId: string) => {
+    setLoadingProfile(true);
+    setProfileError(null);
+    setProfileFetchFailed(false);
     try {
-      const res = await clinicService.getClinicPatientHistory(customerId);
+      const res = await clinicService.getClinicPatientProfile(customerId);
       if (res.success && res.data) {
-        setHistory(res.data);
-        // Pre-fill profile form from history profile if present
-        if (res.data.patient_profile) {
-          const p = res.data.patient_profile;
+        const p = res.data.patient_profile;
+        setBoundedProfile(p);
+        if (p) {
           setProfileForm({
             date_of_birth: p.date_of_birth || '',
             sex_at_birth: p.sex_at_birth || 'male',
@@ -67,11 +86,41 @@ export const ClinicPatientPanel: React.FC<ClinicPatientPanelProps> = ({
             emergency_contact_phone: p.emergency_contact_phone || '',
             emergency_contact_relationship: p.emergency_contact_relationship || ''
           });
+        } else {
+          setProfileForm({
+            date_of_birth: '',
+            sex_at_birth: 'male',
+            blood_type: '',
+            allergies: '',
+            chronic_conditions: '',
+            emergency_contact_name: '',
+            emergency_contact_phone: '',
+            emergency_contact_relationship: ''
+          });
         }
+      } else {
+        setProfileFetchFailed(true);
+        setProfileError(res.error?.message || 'Hasta demografik profili yüklenemedi.');
+      }
+    } catch {
+      setProfileFetchFailed(true);
+      setProfileError('Sunucu erişim hatası.');
+    } finally {
+      setLoadingProfile(false);
+    }
+  };
+
+  const loadHistory = async (customerId: string) => {
+    setLoadingHistory(true);
+    setHistoryError(null);
+    try {
+      const res = await clinicService.getClinicPatientHistory(customerId);
+      if (res.success && res.data) {
+        setHistory(res.data);
       } else {
         setHistoryError(res.error?.message || 'Hasta klinik geçmişi yüklenemedi.');
       }
-    } catch (err) {
+    } catch {
       setHistoryError('Sunucu erişim hatası.');
     } finally {
       setLoadingHistory(false);
@@ -80,7 +129,7 @@ export const ClinicPatientPanel: React.FC<ClinicPatientPanelProps> = ({
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedAppointment?.customer_id) return;
+    if (!selectedAppointment?.customer_id || !canManageProfile || profileFetchFailed) return;
     setSavingProfile(true);
     setProfileMsg(null);
 
@@ -100,13 +149,15 @@ export const ClinicPatientPanel: React.FC<ClinicPatientPanelProps> = ({
       if (res.success) {
         setProfileMsg({ type: 'success', text: 'Hasta demografik ve sağlık profili güncellendi.' });
         setIsEditingProfile(false);
+        // Re-fetch authoritative server state
+        await loadBoundedProfile(selectedAppointment.customer_id);
         if (canViewHistory) {
           loadHistory(selectedAppointment.customer_id);
         }
       } else {
         setProfileMsg({ type: 'error', text: res.error?.message || 'Profil güncellenemedi.' });
       }
-    } catch (err) {
+    } catch {
       setProfileMsg({ type: 'error', text: 'Sunucu hatası oluştu.' });
     } finally {
       setSavingProfile(false);
@@ -120,8 +171,6 @@ export const ClinicPatientPanel: React.FC<ClinicPatientPanelProps> = ({
       </div>
     );
   }
-
-  const profile = history?.patient_profile;
 
   return (
     <div className="space-y-4">
@@ -148,7 +197,7 @@ export const ClinicPatientPanel: React.FC<ClinicPatientPanelProps> = ({
             </div>
           </div>
 
-          {canManageProfile && !isEditingProfile && (
+          {canManageProfile && !isEditingProfile && !profileFetchFailed && (
             <button
               onClick={() => setIsEditingProfile(true)}
               className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-xl text-xs font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-800/60 hover:bg-indigo-100 transition-colors"
@@ -167,8 +216,17 @@ export const ClinicPatientPanel: React.FC<ClinicPatientPanelProps> = ({
           </div>
         )}
 
+        {profileError && (
+          <div className="mt-3 p-2.5 bg-red-50 dark:bg-red-950/30 border border-red-200 text-xs text-red-600 dark:text-red-400 rounded-xl flex items-center space-x-2">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{profileError}</span>
+          </div>
+        )}
+
         {/* Profile Details or Edit Form */}
-        {isEditingProfile ? (
+        {loadingProfile ? (
+          <div className="py-6 text-center text-xs text-slate-400">Demografik profil yükleniyor...</div>
+        ) : isEditingProfile ? (
           <form onSubmit={handleSaveProfile} className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 space-y-3">
             <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
               Sınırlı Hasta Profil Düzenleme
@@ -256,20 +314,20 @@ export const ClinicPatientPanel: React.FC<ClinicPatientPanelProps> = ({
           <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
             <div className="bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700/50">
               <div className="text-slate-400 text-[10px] font-medium">Kan Grubu</div>
-              <div className="font-bold text-slate-800 dark:text-white mt-0.5">{profile?.blood_type || 'Belirtilmedi'}</div>
+              <div className="font-bold text-slate-800 dark:text-white mt-0.5">{boundedProfile?.blood_type || 'Belirtilmedi'}</div>
             </div>
             <div className="bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700/50">
               <div className="text-slate-400 text-[10px] font-medium">Alerjiler</div>
-              <div className="font-bold text-rose-600 dark:text-rose-400 mt-0.5">{profile?.allergies || 'Yok / Belirtilmedi'}</div>
+              <div className="font-bold text-rose-600 dark:text-rose-400 mt-0.5">{boundedProfile?.allergies || 'Yok / Belirtilmedi'}</div>
             </div>
             <div className="bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700/50">
               <div className="text-slate-400 text-[10px] font-medium">Kronik Durumlar</div>
-              <div className="font-bold text-amber-600 dark:text-amber-400 mt-0.5">{profile?.chronic_conditions || 'Yok / Belirtilmedi'}</div>
+              <div className="font-bold text-amber-600 dark:text-amber-400 mt-0.5">{boundedProfile?.chronic_conditions || 'Yok / Belirtilmedi'}</div>
             </div>
             <div className="bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700/50">
               <div className="text-slate-400 text-[10px] font-medium">Acil İletişim</div>
               <div className="font-semibold text-slate-800 dark:text-white mt-0.5">
-                {profile?.emergency_contact_name ? `${profile.emergency_contact_name} (${profile.emergency_contact_phone || ''})` : 'Kayıt Yok'}
+                {boundedProfile?.emergency_contact_name ? `${boundedProfile.emergency_contact_name} (${boundedProfile.emergency_contact_phone || ''})` : 'Kayıt Yok'}
               </div>
             </div>
           </div>

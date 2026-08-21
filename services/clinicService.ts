@@ -6,6 +6,8 @@ import {
   ClinicEncounterCompletionResult,
   ClinicPatientHistory,
   ClinicOperationalDay,
+  ClinicPatientProfileReadResult,
+  ClinicStaffSetupProfilesResult,
   ClinicServiceResult,
   NoteStatus
 } from '../types/clinic';
@@ -104,6 +106,20 @@ export const clinicService = {
       return supabaseClinicRepository.getPatientHistory(customer_id);
     }
     return createClinicUnavailableResult<ClinicPatientHistory>();
+  },
+
+  async getClinicPatientProfile(customer_id: string): Promise<ClinicServiceResult<ClinicPatientProfileReadResult>> {
+    if (getDataSourceMode() === 'supabase') {
+      return supabaseClinicRepository.getPatientProfile(customer_id);
+    }
+    return createClinicUnavailableResult<ClinicPatientProfileReadResult>();
+  },
+
+  async getClinicStaffSetupProfiles(): Promise<ClinicServiceResult<ClinicStaffSetupProfilesResult>> {
+    if (getDataSourceMode() === 'supabase') {
+      return supabaseClinicRepository.getStaffSetupProfiles();
+    }
+    return createClinicUnavailableResult<ClinicStaffSetupProfilesResult>();
   },
 
   async getClinicOperationalDay(date: string, branch_id?: string): Promise<ClinicServiceResult<ClinicOperationalDay>> {

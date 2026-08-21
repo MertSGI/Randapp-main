@@ -166,6 +166,29 @@ export interface ClinicOperationalDay {
   appointments: ClinicOperationalAppointment[];
 }
 
+export interface ClinicPatientProfileReadResult {
+  customer_id: string;
+  patient_profile: ClinicPatientHistoryProfile | null;
+}
+
+export interface ClinicStaffSetupProfile {
+  staff_id: string;
+  staff_name: string;
+  staff_active: boolean;
+  practitioner_type: PractitionerType | null;
+  specialty: string | null;
+  medical_license_number: string | null;
+  can_manage_patient_profiles: boolean;
+  can_view_clinical_records: boolean;
+  can_write_clinical_notes: boolean;
+  clinic_profile_exists: boolean;
+}
+
+export interface ClinicStaffSetupProfilesResult {
+  tenant_id: string;
+  profiles: ClinicStaffSetupProfile[];
+}
+
 export interface ClinicServiceResult<T = unknown> {
   success: boolean;
   data?: T;

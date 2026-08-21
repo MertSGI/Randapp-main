@@ -1,7 +1,54 @@
-import { ClinicStaffContext, EncounterStatus } from '../types/clinic';
+import { ClinicStaffContext, EncounterStatus, ClinicServiceResult } from '../types/clinic';
 import { Role } from '../types';
 
 export type ClinicWorkspaceMode = 'workspace' | 'setup_only' | 'access_not_configured' | 'unauthorized';
+
+export type ClinicContextResolutionState =
+  | 'loading'
+  | 'ready'
+  | 'not_configured'
+  | 'setup_only'
+  | 'unavailable'
+  | 'unauthenticated'
+  | 'forbidden'
+  | 'error';
+
+/**
+ * Pure state resolver function for Clinic surface context result.
+ * Prevents non-Supabase UNAVAILABLE or unknown errors from defaulting to setup_only or not_configured.
+ */
+export function resolveClinicContextState(
+  authRole: Role | undefined,
+  res: ClinicServiceResult<ClinicStaffContext> | null
+): ClinicContextResolutionState {
+  if (!res) return 'loading';
+
+  if (!res.success) {
+    if (res.error?.code === 'UNAVAILABLE') {
+      return 'unavailable';
+    }
+    if (res.error?.code === 'UNAUTHENTICATED') {
+      return 'unauthenticated';
+    }
+    if (res.reason_code === 'no_clinic_profile' || res.reason_code === 'not_clinic_staff') {
+      if (authRole === 'tenant_owner') return 'setup_only';
+      if (authRole === 'staff') return 'not_configured';
+    }
+    if (res.error?.code === 'FORBIDDEN') {
+      return 'forbidden';
+    }
+    return 'error';
+  }
+
+  if (res.data && res.data.staff_id) {
+    if (authRole === 'super_admin') return 'forbidden';
+    return 'ready';
+  }
+
+  if (authRole === 'tenant_owner') return 'setup_only';
+  if (authRole === 'staff') return 'not_configured';
+  return 'forbidden';
+}
 
 /**
  * Pure policy decision function for determining Clinic surface workspace mode.
@@ -49,23 +96,25 @@ export function canManageClinicPatientProfile(context: ClinicStaffContext | null
 
 /**
  * Pure policy function: Can practitioner start a new encounter?
+ * Requires non-null assignedStaffId matching context.staff_id and NO existing encounter.
  */
 export function canStartClinicEncounter(
   context: ClinicStaffContext | null,
   apptStatus: string,
-  assignedStaffId: string | null,
-  openEncounterId?: string | null
+  assignedStaffId: string | null | undefined,
+  existingEncounterId?: string | null
 ): boolean {
   if (!context) return false;
   if (!context.can_write_clinical_notes) return false;
   if (apptStatus !== 'confirmed') return false;
-  if (openEncounterId) return false;
-  if (assignedStaffId && assignedStaffId !== context.staff_id) return false;
+  if (existingEncounterId) return false;
+  if (!assignedStaffId || assignedStaffId !== context.staff_id) return false;
   return true;
 }
 
 /**
  * Pure policy function: Can practitioner write/save encounter notes?
+ * Requires non-null practitionerStaffId matching context.staff_id and status === 'open'.
  */
 export function canWriteClinicEncounterNote(
   context: ClinicStaffContext | null,
@@ -74,13 +123,14 @@ export function canWriteClinicEncounterNote(
 ): boolean {
   if (!context) return false;
   if (!context.can_write_clinical_notes) return false;
-  if (encounterStatus && encounterStatus !== 'open') return false;
-  if (practitionerStaffId && practitionerStaffId !== context.staff_id) return false;
+  if (!encounterStatus || encounterStatus !== 'open') return false;
+  if (!practitionerStaffId || practitionerStaffId !== context.staff_id) return false;
   return true;
 }
 
 /**
  * Pure policy function: Can practitioner complete encounter?
+ * Requires non-null practitionerStaffId matching context.staff_id and status === 'open'.
  */
 export function canCompleteClinicEncounter(
   context: ClinicStaffContext | null,
@@ -89,7 +139,7 @@ export function canCompleteClinicEncounter(
 ): boolean {
   if (!context) return false;
   if (!context.can_write_clinical_notes) return false;
-  if (encounterStatus !== 'open') return false;
-  if (practitionerStaffId && practitionerStaffId !== context.staff_id) return false;
+  if (!encounterStatus || encounterStatus !== 'open') return false;
+  if (!practitionerStaffId || practitionerStaffId !== context.staff_id) return false;
   return true;
 }

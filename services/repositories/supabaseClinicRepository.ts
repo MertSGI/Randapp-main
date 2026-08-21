@@ -14,7 +14,10 @@ import {
   ClinicServiceErrorCode,
   NoteStatus,
   EncounterStatus,
-  PractitionerType
+  PractitionerType,
+  ClinicPatientProfileReadResult,
+  ClinicStaffSetupProfile,
+  ClinicStaffSetupProfilesResult
 } from '../../types/clinic';
 import { fetchSupabase } from './supabaseClient';
 
@@ -194,6 +197,54 @@ export function mapClinicOperationalDayResponse(data: Record<string, unknown>): 
     date: data.date as string,
     branch_id: (data.branch_id as string | null) ?? null,
     appointments
+  };
+}
+
+export function mapClinicPatientProfileReadResponse(data: Record<string, unknown>): ClinicPatientProfileReadResult {
+  if (!data || typeof data.customer_id !== 'string') {
+    throw new Error('Malformed clinic_get_patient_profile response: missing customer_id');
+  }
+  let patient_profile: ClinicPatientHistoryProfile | null = null;
+  if (data.patient_profile && typeof data.patient_profile === 'object') {
+    const p = data.patient_profile as Record<string, unknown>;
+    patient_profile = {
+      id: p.id as string,
+      date_of_birth: (p.date_of_birth as string | null) ?? null,
+      sex_at_birth: (p.sex_at_birth as string | null) ?? null,
+      emergency_contact_name: (p.emergency_contact_name as string | null) ?? null,
+      emergency_contact_phone: (p.emergency_contact_phone as string | null) ?? null,
+      emergency_contact_relationship: (p.emergency_contact_relationship as string | null) ?? null,
+      blood_type: (p.blood_type as string | null) ?? null,
+      allergies: (p.allergies as string | null) ?? null,
+      chronic_conditions: (p.chronic_conditions as string | null) ?? null,
+      updated_at: p.updated_at as string
+    };
+  }
+  return {
+    customer_id: data.customer_id as string,
+    patient_profile
+  };
+}
+
+export function mapClinicStaffSetupProfilesResponse(data: Record<string, unknown>): ClinicStaffSetupProfilesResult {
+  if (!data || !Array.isArray(data['profiles'])) {
+    throw new Error('Malformed clinic_get_staff_setup_profiles response: missing profiles array');
+  }
+  const profiles: ClinicStaffSetupProfile[] = (data['profiles'] as Record<string, unknown>[]).map(p => ({
+    staff_id: p.staff_id as string,
+    staff_name: p.staff_name as string,
+    staff_active: !!p.staff_active,
+    practitioner_type: (p.practitioner_type as PractitionerType | null) ?? null,
+    specialty: (p.specialty as string | null) ?? null,
+    medical_license_number: (p.medical_license_number as string | null) ?? null,
+    can_manage_patient_profiles: !!p.can_manage_patient_profiles,
+    can_view_clinical_records: !!p.can_view_clinical_records,
+    can_write_clinical_notes: !!p.can_write_clinical_notes,
+    clinic_profile_exists: !!p.clinic_profile_exists
+  }));
+  return {
+    tenant_id: (data.tenant_id as string) ?? '',
+    profiles
   };
 }
 
@@ -507,6 +558,64 @@ export class SupabaseClinicRepository {
       return {
         success: true,
         data: mapClinicOperationalDayResponse(data)
+      };
+    } catch {
+      return {
+        success: false,
+        error: { code: 'UNKNOWN', message: 'Network error communicating with clinic service.' }
+      };
+    }
+  }
+
+  async getPatientProfile(customer_id: string): Promise<ClinicServiceResult<ClinicPatientProfileReadResult>> {
+    try {
+      const res = await fetchSupabase('/rest/v1/rpc/clinic_get_patient_profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_customer_id: customer_id })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        return {
+          success: false,
+          error: normalizeClinicError(res.status, errText)
+        };
+      }
+
+      const data = await res.json();
+      return {
+        success: true,
+        data: mapClinicPatientProfileReadResponse(data)
+      };
+    } catch {
+      return {
+        success: false,
+        error: { code: 'UNKNOWN', message: 'Network error communicating with clinic service.' }
+      };
+    }
+  }
+
+  async getStaffSetupProfiles(): Promise<ClinicServiceResult<ClinicStaffSetupProfilesResult>> {
+    try {
+      const res = await fetchSupabase('/rest/v1/rpc/clinic_get_staff_setup_profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        return {
+          success: false,
+          error: normalizeClinicError(res.status, errText)
+        };
+      }
+
+      const data = await res.json();
+      return {
+        success: true,
+        data: mapClinicStaffSetupProfilesResponse(data)
       };
     } catch {
       return {

@@ -41,10 +41,9 @@ export const ClinicEncounterPanel: React.FC<ClinicEncounterPanelProps> = ({
 
   const apptStatus = selectedAppointment.appointment_status;
   const encStatus = selectedAppointment.encounter_status;
-  const openEncId = encStatus === 'open' ? selectedAppointment.encounter_id : null;
   const assignedStaffId = selectedAppointment.staff_id;
 
-  const canStart = canStartClinicEncounter(context, apptStatus, assignedStaffId, openEncId);
+  const canStart = canStartClinicEncounter(context, apptStatus, assignedStaffId, selectedAppointment.encounter_id);
   const canWriteNote = canWriteClinicEncounterNote(context, encStatus, assignedStaffId);
   const canComplete = canCompleteClinicEncounter(context, encStatus, assignedStaffId);
 
