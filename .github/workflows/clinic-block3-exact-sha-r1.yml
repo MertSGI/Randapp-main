@@ -233,6 +233,10 @@ jobs:
           echo "Executing clinic_workspace_authority_hardening_tests.sql..."
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql 2>&1 | tee /tmp/clinic-block3-sql.log || true
 
+          echo "=== CLINIC BLOCK 3 SQL LOG OUTPUT START ==="
+          cat /tmp/clinic-block3-sql.log
+          echo "=== CLINIC BLOCK 3 SQL LOG OUTPUT END ==="
+
           echo "=== PSQL COMPLETE LOG DUMP ==="
           cat /tmp/clinic-block3-sql.log
           echo "=============================="
