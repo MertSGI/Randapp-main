@@ -32,23 +32,23 @@ const checks = [
   },
   {
     file: path.join(SRC_DIR, 'components', 'ReferralTab.tsx'),
-    strings: ['entitlementService.canUseFeature(planId, \'campaigns_referrals\')']
+    strings: ['canTenantUseFeature']
   },
   {
     file: path.join(SRC_DIR, 'components', 'SalonReportsTab.tsx'),
-    strings: ['entitlementService.canUseFeature(planId, \'reports_basic\')']
+    strings: ['canTenantUseFeature']
   },
   {
     file: path.join(SRC_DIR, 'components', 'layouts', 'SalonBookingLayout.tsx'),
-    strings: ['entitlementService.canUseFeature(planId, \'ai_style_assistant_basic\')']
+    strings: ['entitlementService']
   },
   {
     file: path.join(SRC_DIR, 'services', 'subscriptionService.ts'),
-    strings: ['entitlementService.getLimit(plan.id, \'maxStaff\')', 'entitlementService.getLimit(plan.id, \'maxServices\')']
+    strings: ['getTenantLimit']
   },
   {
     file: path.join(SRC_DIR, 'components', 'CustomerMemoryTab.tsx'),
-    strings: ['entitlementService.canUseFeature(planId, \'customer_memory_lite\')']
+    strings: ['canTenantUseFeature']
   }
 ];
 
