@@ -19,16 +19,16 @@ DECLARE
     v_inactive_owner_uid UUID := 'a7777777-7777-4777-8777-777777777777'::UUID;
     v_superadmin_uid UUID := 'a9999999-9999-4999-8999-999999999999'::UUID;
 
-    v_manage_staff_uid UUID := 'a3333333-3333-4333-8333-333333333333'::UUID;
-    v_view_staff_uid UUID := 'a4444444-4444-4444-8444-444444444444'::UUID;
-    v_none_staff_uid UUID := 'a5555555-5555-4555-8555-555555555555'::UUID;
+    v_manage_staff_uid UUID := 'a8888888-8888-4888-8888-888888888888'::UUID;
+    v_view_staff_uid UUID := 'a8888888-8888-4888-8888-888888888889'::UUID;
+    v_none_staff_uid UUID := 'a8888888-8888-4888-8888-888888888880'::UUID;
 
-    v_manage_staff_id UUID := '33333333-3333-4333-8333-333333333333'::UUID;
-    v_view_staff_id UUID := '34444444-4444-4444-8444-444444444444'::UUID;
-    v_none_staff_id UUID := '35555555-5555-4555-8555-555555555555'::UUID;
+    v_manage_staff_id UUID := '38888888-8888-4888-8888-888888888888'::UUID;
+    v_view_staff_id UUID := '38888888-8888-4888-8888-888888888889'::UUID;
+    v_none_staff_id UUID := '38888888-8888-4888-8888-888888888880'::UUID;
 
-    v_cust_id UUID := 'c1111111-1111-4111-8111-111111111111'::UUID;
-    v_cust2_id UUID := 'c2222222-2222-4222-8222-222222222222'::UUID;
+    v_cust_id UUID := 'c8888888-8888-4888-8888-888888888888'::UUID;
+    v_cust2_id UUID := 'c8888888-8888-4888-8888-888888888889'::UUID;
 BEGIN
     RAISE NOTICE '=== STARTING CLINIC WORKSPACE AUTHORITY HARDENING SQL TEST SUITE (R1.2) ===';
 
@@ -47,14 +47,20 @@ BEGIN
            (v_manage_staff_uid, v_tenant_id, 'staff', 'Manage', 'Staff', true),
            (v_view_staff_uid, v_tenant_id, 'staff', 'View', 'Staff', true),
            (v_none_staff_uid, v_tenant_id, 'staff', 'NoCap', 'Staff', true)
-    ON CONFLICT (id) DO NOTHING;
+    ON CONFLICT (id) DO UPDATE SET
+        tenant_id = EXCLUDED.tenant_id,
+        role = EXCLUDED.role,
+        active = EXCLUDED.active;
 
     -- Seed Staff Records
     INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active)
     VALUES (v_manage_staff_id, v_tenant_id, v_manage_staff_uid, 'Manage Staff', true),
            (v_view_staff_id, v_tenant_id, v_view_staff_uid, 'View Staff', true),
            (v_none_staff_id, v_tenant_id, v_none_staff_uid, 'None Staff', true)
-    ON CONFLICT (id) DO NOTHING;
+    ON CONFLICT (id) DO UPDATE SET
+        tenant_id = EXCLUDED.tenant_id,
+        user_profile_id = EXCLUDED.user_profile_id,
+        active = EXCLUDED.active;
 
     -- Seed Clinic Staff Profiles with specific capabilities
     INSERT INTO public.clinic_staff_profiles (
@@ -73,7 +79,8 @@ BEGIN
     INSERT INTO public.customers (id, tenant_id, first_name, last_name, phone)
     VALUES (v_cust_id, v_tenant_id, 'Patient', 'One', '5550001'),
            (v_cust2_id, v_tenant2_id, 'Tenant2', 'Patient', '5550002')
-    ON CONFLICT (id) DO NOTHING;
+    ON CONFLICT (id) DO UPDATE SET
+        tenant_id = EXCLUDED.tenant_id;
 END;
 $$;
 
@@ -115,11 +122,11 @@ SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 
 -- TEST A, B, C, D, E, F, G: Manage-Only Staff
-SELECT set_config('request.jwt.claim.sub', 'a3333333-3333-4333-8333-333333333333', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888888', true);
 
 DO $$
 DECLARE
-    v_cust_id UUID := 'c1111111-1111-4111-8111-111111111111'::UUID;
+    v_cust_id UUID := 'c8888888-8888-4888-8888-888888888888'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -154,11 +161,11 @@ END;
 $$;
 
 -- TEST H, I, J: View-Only Staff
-SELECT set_config('request.jwt.claim.sub', 'a4444444-4444-4444-8444-444444444444', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888889', true);
 
 DO $$
 DECLARE
-    v_cust_id UUID := 'c1111111-1111-4111-8111-111111111111'::UUID;
+    v_cust_id UUID := 'c8888888-8888-4888-8888-888888888888'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -186,11 +193,11 @@ END;
 $$;
 
 -- TEST K, L, M: No-Capability Staff
-SELECT set_config('request.jwt.claim.sub', 'a5555555-5555-4555-8555-555555555555', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888880', true);
 
 DO $$
 DECLARE
-    v_cust_id UUID := 'c1111111-1111-4111-8111-111111111111'::UUID;
+    v_cust_id UUID := 'c8888888-8888-4888-8888-888888888888'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -228,11 +235,11 @@ END;
 $$;
 
 -- TEST N, O: Cross-Tenant Isolation
-SELECT set_config('request.jwt.claim.sub', 'a3333333-3333-4333-8333-333333333333', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888888', true);
 
 DO $$
 DECLARE
-    v_cust2_id UUID := 'c2222222-2222-4222-8222-222222222222'::UUID;
+    v_cust2_id UUID := 'c8888888-8888-4888-8888-888888888889'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -295,7 +302,7 @@ END;
 $$;
 
 -- TEST U, V: Non-Owner / Super Admin Setup RPC Denial
-SELECT set_config('request.jwt.claim.sub', 'a3333333-3333-4333-8333-333333333333', true);
+SELECT set_config('request.jwt.claim.sub', 'a8888888-8888-4888-8888-888888888888', true);
 DO $$
 DECLARE
     v_res JSONB;
@@ -330,7 +337,7 @@ SELECT set_config('request.jwt.claim.sub', '', true);
 
 DO $$
 DECLARE
-    v_cust_id UUID := 'c1111111-1111-4111-8111-111111111111'::UUID;
+    v_cust_id UUID := 'c8888888-8888-4888-8888-888888888888'::UUID;
     v_res JSONB;
     v_err_msg TEXT;
     v_err_state TEXT;
@@ -375,9 +382,9 @@ RESET ROLE;
 DO $$
 DECLARE
     v_tenant_id UUID := '11111111-1111-4111-8111-111111111111'::UUID;
-    v_cust_id UUID := 'c1111111-1111-4111-8111-111111111111'::UUID;
+    v_cust_id UUID := 'c8888888-8888-4888-8888-888888888888'::UUID;
     v_owner_uid UUID := 'a1111111-1111-4111-8111-111111111111'::UUID;
-    v_manage_staff_uid UUID := 'a3333333-3333-4333-8333-333333333333'::UUID;
+    v_manage_staff_uid UUID := 'a8888888-8888-4888-8888-888888888888'::UUID;
     v_audit RECORD;
     v_res JSONB;
 BEGIN
