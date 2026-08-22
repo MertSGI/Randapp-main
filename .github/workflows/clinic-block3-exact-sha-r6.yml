@@ -1,0 +1,475 @@
+name: LARI Clinic Block 3 Executable Exact-SHA R6 Evidence Gate
+
+on:
+  push:
+    branches:
+      - 'ci/clinic-block3-exact-sha-r6-20260822'
+
+jobs:
+  clinic-block3-exact-sha-r6-gate:
+    name: Disposable Direct Supabase Postgres QA & Clinic Block 3 Executable Proof R6
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout Product SHA & Verify Exact Binding
+        run: |
+          set -euo pipefail
+          EXPECTED_PRODUCT_SHA="ac1c018ffa1facecc80faca0d72360ea92ecb6c7"
+          git fetch origin feature/lari-clinic-foundation
+          git checkout "${EXPECTED_PRODUCT_SHA}"
+          ACTUAL_PRODUCT_SHA=$(git rev-parse HEAD)
+          echo "EXPECTED_PRODUCT_SHA = ${EXPECTED_PRODUCT_SHA}"
+          echo "ACTUAL_PRODUCT_SHA   = ${ACTUAL_PRODUCT_SHA}"
+          if [ "${ACTUAL_PRODUCT_SHA}" != "${EXPECTED_PRODUCT_SHA}" ]; then
+            echo "❌ Worktree SHA mismatch! Expected ${EXPECTED_PRODUCT_SHA}, got ${ACTUAL_PRODUCT_SHA}."
+            exit 1
+          fi
+          echo "EXACT_SHA_BINDING_RESULT=PASS"
+          echo "✅ Bound to exact requested product SHA: ${ACTUAL_PRODUCT_SHA}"
+
+      - name: Verify Evidence Inputs Exist
+        run: |
+          set -euo pipefail
+          test -f supabase/tests/p2a_tenant_provisioning_static_test.sql
+          test -f supabase/tests/p2a_tenant_provisioning_integration_tests.sql
+          test -f supabase/tests/p2a_concurrency_harness.ts
+
+          test -f supabase/tests/package_branch_server_authority_tests.sql
+          test -f supabase/tests/package_branch_concurrency_harness.ts
+
+          test -f scripts/test-package-branch-server-authority.mjs
+          test -f scripts/verify-branch-aware-booking.mjs
+
+          test -f supabase/tests/clinic_domain_server_authority_tests.sql
+          test -f supabase/tests/clinic_domain_concurrency_harness.ts
+
+          test -f supabase/tests/clinic_operational_integration_tests.sql
+          test -f supabase/tests/clinic_operational_concurrency_harness.ts
+
+          test -f scripts/test-clinic-domain-server-authority.mjs
+          test -f scripts/test-clinic-operational-integration.mjs
+
+          test -f supabase/tests/commercial_lifecycle_eligibility_alignment_tests.sql
+          test -f supabase/tests/clinic_workspace_authority_hardening_tests.sql
+
+          echo "EVIDENCE_INPUT_PATHS_VERIFIED=YES"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install npm dependencies
+        run: |
+          set -euo pipefail
+          npm ci
+
+      - name: Install DB Test Dependencies & Verify Resolutions
+        run: |
+          set -euo pipefail
+          npm install --no-save --package-lock=false pg @types/pg
+          node -e "require.resolve('pg'); console.log('PG_RESOLUTION=PASS')"
+          node -e "require.resolve('tsx'); console.log('TSX_RESOLUTION=PASS')"
+
+      - name: Preflight Docker & Environment Check
+        run: |
+          set -euo pipefail
+          echo "Checking docker availability..."
+          docker --version
+          docker info >/dev/null 2>&1 || (echo "❌ Docker daemon not running!" && exit 1)
+          echo "✅ Docker daemon available."
+
+      - name: Start Pinned Supabase Postgres Container Directly
+        run: |
+          set -euo pipefail
+          PINNED_IMAGE="supabase/postgres:15.1.0.147"
+          echo "Pulling pinned Supabase Postgres container: ${PINNED_IMAGE}"
+          docker pull "${PINNED_IMAGE}"
+          docker run -d \
+            --name lari-p2a-postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=postgres \
+            -p 54322:5432 \
+            "${PINNED_IMAGE}"
+
+      - name: Direct Postgres Custom Readiness Check
+        run: |
+          set -euo pipefail
+          echo "Waiting for direct Postgres port 54322 readiness..."
+          READY=0
+          for i in {1..30}; do
+            if docker exec lari-p2a-postgres pg_isready -U postgres >/dev/null 2>&1; then
+              echo "✅ Direct Postgres ready on attempt ${i}!"
+              READY=1
+              break
+            fi
+            echo "Attempt ${i}: Postgres not ready yet..."
+            sleep 1
+          done
+          if [ "$READY" -ne 1 ]; then
+            echo "❌ Postgres failed to become ready!"
+            exit 1
+          fi
+          docker exec lari-p2a-postgres pg_isready -U postgres
+
+      - name: Install PostgreSQL Client
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client
+
+      - name: Execute Disposable Test Compatibility Bootstrap Fixture
+        run: |
+          set -euo pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== EXECUTING TEST COMPATIBILITY BOOTSTRAP FIXTURE ==="
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/fixtures/p2a_managed_runtime_bootstrap.sql
+          echo "Compatibility bootstrap completed."
+
+      - name: Build Migration Manifest & Apply Full SQL Migration Chain
+        id: apply_migrations
+        run: |
+          set -euo pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== BUILDING ORDERED MIGRATION MANIFEST ==="
+          mapfile -t MIGRATIONS < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)
+          echo "Migration file count: ${#MIGRATIONS[@]}"
+          echo "First migration: ${MIGRATIONS[0]}"
+          echo "Last migration: ${MIGRATIONS[-1]}"
+          MIGRATION_COUNT=${#MIGRATIONS[@]}
+          echo "CI_MIGRATION_REPLAY_COUNT=${MIGRATION_COUNT}"
+          if [ "${MIGRATION_COUNT}" -ne 64 ]; then
+            echo "❌ Unexpected migration count! Expected 64, got ${MIGRATION_COUNT}."
+            exit 1
+          fi
+
+          APPLIED_COUNT=0
+          ORDINAL=1
+          rm -f /tmp/p2a-applied-migrations.txt /tmp/p2a-failure-summary.txt /tmp/p2a-migration-*.log
+          for migration in "${MIGRATIONS[@]}"; do
+            if [ "${migration}" = "20260813_h1c_commercial_eligibility_and_quota_enforcement.sql" ]; then
+              echo "=== HISTORICAL REPLAY COMPATIBILITY BRIDGE ==="
+              psql "$DB_URL" -v ON_ERROR_STOP=1 -f "supabase/tests/fixtures/p2a_historical_replay_bridge_before_migration_38.sql"
+            fi
+            echo "=== APPLYING [${ORDINAL}/${MIGRATION_COUNT}] ${migration} ==="
+            if ! psql "$DB_URL" \
+              -v ON_ERROR_STOP=1 \
+              -f "supabase/migrations/${migration}" \
+              2>&1 | tee "/tmp/p2a-migration-${ORDINAL}.log"; then
+
+              echo "FAILED_MIGRATION_ORDINAL=${ORDINAL}" \
+                | tee /tmp/p2a-failure-summary.txt
+              echo "FAILED_MIGRATION_FILENAME=${migration}" \
+                | tee -a /tmp/p2a-failure-summary.txt
+              echo "SUCCESSFULLY_APPLIED_COUNT_BEFORE_FAILURE=${APPLIED_COUNT}" \
+                | tee -a /tmp/p2a-failure-summary.txt
+
+              exit 1
+            fi
+            echo "ordinal=${ORDINAL} filename=${migration}" >> /tmp/p2a-applied-migrations.txt
+            APPLIED_COUNT=$((APPLIED_COUNT + 1))
+            ORDINAL=$((ORDINAL + 1))
+          done
+          echo "Successfully applied ${APPLIED_COUNT} migration files."
+
+      - name: Run P2A Static SQL Test
+        run: |
+          set -euo pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "Executing p2a_tenant_provisioning_static_test.sql..."
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_tenant_provisioning_static_test.sql
+          echo "✅ P2A static SQL test passed."
+
+      - name: Run P2A Sequential Integration & RLS Matrix Test
+        run: |
+          set -euo pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "Executing p2a_tenant_provisioning_integration_tests.sql..."
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/p2a_tenant_provisioning_integration_tests.sql
+          echo "✅ P2A sequential integration test passed."
+
+      - name: Run P2A Real Multi-Session Concurrency & RLS Harness
+        run: |
+          set -euo pipefail
+          echo "Executing p2a_concurrency_harness.ts..."
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx --no-install tsx supabase/tests/p2a_concurrency_harness.ts
+          echo "✅ P2A real multi-session concurrency & RLS harness passed."
+
+      - name: Run Sequential Package Branch Server Authority Functional SQL Suite
+        run: |
+          set -euo pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "Executing package_branch_server_authority_tests.sql..."
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/package_branch_server_authority_tests.sql
+          echo "✅ Package branch server authority functional SQL suite passed."
+
+      - name: Run Package Branch Real Multi-Session Concurrency & RLS Harness
+        run: |
+          set -euo pipefail
+          echo "Executing package_branch_concurrency_harness.ts..."
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx --no-install tsx supabase/tests/package_branch_concurrency_harness.ts
+          echo "✅ Package branch real multi-session concurrency & RLS harness passed."
+
+      - name: Run Package Branch Static QA
+        run: |
+          set -euo pipefail
+          npm run qa:package-branch-server-authority
+
+      - name: Run Branch Booking QA
+        run: |
+          set -euo pipefail
+          node scripts/verify-branch-aware-booking.mjs
+
+      - name: Run Clinic Domain Server Authority Functional SQL Suite & Verify Markers
+        run: |
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "Executing clinic_domain_server_authority_tests.sql..."
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_domain_server_authority_tests.sql 2>&1 | tee /tmp/clinic-block1-sql.log
+          PSQL_EXIT=${PIPESTATUS[0]}
+
+          if [ "$PSQL_EXIT" -ne 0 ]; then
+            cat /tmp/clinic-block1-sql.log
+            exit "$PSQL_EXIT"
+          fi
+
+          echo "Verifying test-generated execution markers from SQL output..."
+          grep -F 'ANON_PROTECTED_ROWS_PREEXIST=YES' /tmp/clinic-block1-sql.log
+          grep -F 'ANON_CLINICAL_VISIBILITY_ZERO=YES' /tmp/clinic-block1-sql.log
+          grep -F 'OWNER_DIRECT_DML_DENIED=YES' /tmp/clinic-block1-sql.log
+          grep -F 'AUTHORIZED_CROSS_TENANT_BOUNDARY_PROVEN=YES' /tmp/clinic-block1-sql.log
+          grep -F 'CLINICAL_NOTE_APPEND_ONLY_PROVEN=YES' /tmp/clinic-block1-sql.log
+          grep -F 'AUDIT_CLINICAL_CONTENT_LEAK=NO' /tmp/clinic-block1-sql.log
+          grep -F 'PUBLIC_SELF_SERVICE_CLINICAL_ISOLATION=PASS' /tmp/clinic-block1-sql.log
+          grep -F 'CLINIC_SQL_DB_EXECUTION=PASS' /tmp/clinic-block1-sql.log
+          echo "✅ Clinic domain server authority SQL contract suite passed with all test-generated markers verified."
+
+      - name: Run Clinic Domain Real Multi-Session Concurrency Harness & Verify Markers
+        run: |
+          set -o pipefail
+          echo "Executing clinic_domain_concurrency_harness.ts..."
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx --no-install tsx supabase/tests/clinic_domain_concurrency_harness.ts 2>&1 | tee /tmp/clinic-block1-concurrency.log
+          HARNESS_EXIT=${PIPESTATUS[0]}
+
+          if [ "$HARNESS_EXIT" -ne 0 ]; then
+            cat /tmp/clinic-block1-concurrency.log
+            exit "$HARNESS_EXIT"
+          fi
+
+          grep -F 'HARNESS_AUTH_CONTEXT_PROVEN = YES' /tmp/clinic-block1-concurrency.log
+          grep -F 'HARNESS_DB_EXECUTION_OCCURRED = YES' /tmp/clinic-block1-concurrency.log
+          grep -F 'HARNESS_REAL_MULTI_SESSION_CONCURRENCY = YES' /tmp/clinic-block1-concurrency.log
+          echo "✅ Clinic domain real multi-session concurrency harness passed with all harness-generated markers verified."
+
+      - name: Run Clinic Domain Static QA
+        run: |
+          set -euo pipefail
+          node scripts/test-clinic-domain-server-authority.mjs
+          echo "✅ Clinic domain server authority static QA passed."
+
+      - name: Run Clinic Block 2 Operational Integration Functional SQL Suite & Verify Markers
+        run: |
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "Executing clinic_operational_integration_tests.sql..."
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_operational_integration_tests.sql 2>&1 | tee /tmp/clinic-block2-sql.log
+          PSQL_EXIT=${PIPESTATUS[0]}
+
+          if [ "$PSQL_EXIT" -ne 0 ]; then
+            echo "=== FAILED SQL LOG OUTPUT ==="
+            cat /tmp/clinic-block2-sql.log
+            exit "$PSQL_EXIT"
+          fi
+
+          echo "Verifying Block 2 test-generated execution markers from SQL output..."
+          grep -F 'CLINIC_BLOCK2_SQL_DB_EXECUTION=PASS' /tmp/clinic-block2-sql.log
+          grep -F 'CLINIC_CONFIRMED_ONLY_START_PROVEN=YES' /tmp/clinic-block2-sql.log
+          grep -F 'CLINIC_OPEN_ENCOUNTER_STATUS_GUARD_PROVEN=YES' /tmp/clinic-block2-sql.log
+          grep -F 'CLINIC_LEGACY_COMPLETION_BYPASS_CLOSED=YES' /tmp/clinic-block2-sql.log
+          grep -F 'CLINIC_ATOMIC_COMPLETION_PROVEN=YES' /tmp/clinic-block2-sql.log
+          grep -F 'CLINIC_CORE_COMPLETION_SIDE_EFFECTS_PROVEN=YES' /tmp/clinic-block2-sql.log
+          grep -F 'CLINIC_IDEMPOTENT_COMPLETION_PROVEN=YES' /tmp/clinic-block2-sql.log
+          grep -F 'CLINIC_PATIENT_HISTORY_CONTRACT_PROVEN=YES' /tmp/clinic-block2-sql.log
+          grep -F 'CLINIC_CROSS_TENANT_BOUNDARY_PROVEN=YES' /tmp/clinic-block2-sql.log
+          echo "✅ Clinic Block 2 operational integration SQL suite passed with all test-generated markers verified."
+
+      - name: Run Clinic Block 2 Real Multi-Session Concurrency Harness & Verify Markers
+        run: |
+          set -o pipefail
+          echo "Executing clinic_operational_concurrency_harness.ts..."
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" npx --no-install tsx supabase/tests/clinic_operational_concurrency_harness.ts 2>&1 | tee /tmp/clinic-block2-concurrency.log
+          HARNESS_EXIT=${PIPESTATUS[0]}
+
+          if [ "$HARNESS_EXIT" -ne 0 ]; then
+            echo "=== FAILED CONCURRENCY HARNESS LOG OUTPUT ==="
+            cat /tmp/clinic-block2-concurrency.log
+            exit "$HARNESS_EXIT"
+          fi
+
+          grep -F 'CLINIC_OPERATIONAL_DB_EXECUTION_OCCURRED = YES' /tmp/clinic-block2-concurrency.log
+          grep -F 'CLINIC_OPERATIONAL_REAL_CONCURRENCY = YES' /tmp/clinic-block2-concurrency.log
+          grep -F 'CORE_OWNER_STATUS_RPC_CONTROL = PASS' /tmp/clinic-block2-concurrency.log
+          grep -F 'CLINIC_START_CANCEL_RACE_INVARIANT_PROVEN = YES' /tmp/clinic-block2-concurrency.log
+          grep -F 'CLINIC_COMPLETION_CANCEL_RACE_INVARIANT_PROVEN = YES' /tmp/clinic-block2-concurrency.log
+          grep -F 'CLINIC_OPERATIONAL_ATOMIC_COMPLETION_PROVEN = YES' /tmp/clinic-block2-concurrency.log
+          grep -F 'CLINIC_COMPLETION_OUTBOX_EXACTLY_ONCE_PROVEN = YES' /tmp/clinic-block2-concurrency.log
+          echo "✅ Clinic Block 2 real multi-session concurrency harness passed with all harness-generated markers verified."
+
+      - name: Run Clinic Operational Static QA
+        run: |
+          set -euo pipefail
+          node scripts/test-clinic-operational-integration.mjs
+          echo "✅ Clinic operational integration static QA passed."
+
+      - name: Run Commercial Lifecycle Eligibility Alignment Functional SQL Suite & Verify Markers
+        run: |
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== RUNNING COMMERCIAL LIFECYCLE ALIGNMENT SQL TEST SUITE ==="
+          
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/commercial_lifecycle_eligibility_alignment_tests.sql 2>&1 | tee /tmp/commercial-lifecycle-sql.log
+          PSQL_EXIT=${PIPESTATUS[0]}
+
+          if [ "$PSQL_EXIT" -ne 0 ]; then
+            echo "❌ COMMERCIAL LIFECYCLE SQL RUN FAILED WITH EXIT CODE $PSQL_EXIT"
+            cat /tmp/commercial-lifecycle-sql.log
+            exit "$PSQL_EXIT"
+          fi
+
+          MARKERS=(
+            "COMMERCIAL_ACTIVE_ELIGIBILITY_PROVEN=YES"
+            "COMMERCIAL_MANUAL_ACTIVE_ELIGIBILITY_PROVEN=YES"
+            "COMMERCIAL_COMPED_ELIGIBILITY_PROVEN=YES"
+            "COMMERCIAL_TRIAL_VALIDITY_PROVEN=YES"
+            "COMMERCIAL_PAST_DUE_GRACE_PROVEN=YES"
+            "COMMERCIAL_BLOCKED_STATUS_DENIAL_PROVEN=YES"
+            "COMMERCIAL_MANUAL_ACTIVE_PLAN_ENTITLEMENTS_PROVEN=YES"
+            "COMMERCIAL_COMPED_PLAN_ENTITLEMENTS_PROVEN=YES"
+            "COMMERCIAL_PAST_DUE_PLAN_ENTITLEMENTS_PROVEN=YES"
+            "COMMERCIAL_EXPIRED_GRACE_ENTITLEMENTS_DENIED=YES"
+            "COMMERCIAL_P2A_PUBLISH_STATUS_ALIGNMENT_PROVEN=YES"
+            "COMMERCIAL_LIFECYCLE_ALIGNMENT_DB_EXECUTION=PASS"
+            "COMMERCIAL_PAST_DUE_EXPIRED_PERIOD_VALID_GRACE_ENTITLEMENTS_PROVEN=YES"
+            "COMMERCIAL_PAST_DUE_EXPIRED_GRACE_DENIAL_PROVEN=YES"
+            "COMMERCIAL_TEMPORAL_CONTRACT_ALIGNMENT_PROVEN=YES"
+          )
+          echo "=== VERIFYING COMMERCIAL LIFECYCLE MARKERS ==="
+          MISSING=0
+          for m in "${MARKERS[@]}"; do
+            if grep -Fq "$m" /tmp/commercial-lifecycle-sql.log; then
+              echo "  [FOUND] $m"
+            else
+              echo "  [MISSING] $m"
+              MISSING=1
+            fi
+          done
+
+          if [ "$MISSING" = "1" ]; then
+            echo "❌ ONE OR MORE COMMERCIAL LIFECYCLE MARKERS MISSING!"
+            exit 1
+          fi
+          echo "✅ Commercial lifecycle eligibility alignment SQL suite passed with all markers verified."
+
+      - name: Run Clinic Block 3 Workspace Authority Hardening Functional SQL Suite & Verify Markers
+        run: |
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== RUNNING BLOCK 3 SQL TEST SUITE ==="
+          
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_workspace_authority_hardening_tests.sql 2>&1 | tee /tmp/clinic-block3-sql.log
+          PSQL_EXIT=${PIPESTATUS[0]}
+          
+          if [ $PSQL_EXIT -ne 0 ]; then
+            echo "❌ PSQL RUN FAILED WITH EXIT CODE $PSQL_EXIT"
+            echo "=== FAILED LOG SUMMARY ==="
+            tail -n 50 /tmp/clinic-block3-sql.log
+            exit $PSQL_EXIT
+          fi
+
+          MARKERS=(
+            "CLINIC_HARDENING_SECTION1_SETUP_COMPLETE=YES"
+            "CLINIC_HARDENING_SECTION2_ACL_COMPLETE=YES"
+            "CLINIC_HARDENING_SECTION3_DOMAIN_COMPLETE=YES"
+            "CLINIC_HARDENING_SECTION4_ANON_COMPLETE=YES"
+            "CLINIC_HARDENING_SECTION5_AUDIT_COMPLETE=YES"
+            "CLINIC_HARDENING_COMMERCIAL_FIXTURE_READY=YES"
+            "CLINIC_AUTHENTICATED_DB_ROLE_ACTIVE=YES"
+            "CLINIC_ANON_DB_ROLE_ACTIVE=YES"
+            "CLINIC_PROFILE_MUTATION_MANAGE_ONLY_PROVEN=YES"
+            "CLINIC_PROFILE_MUTATION_AUDIT_CANONICAL=YES"
+            "CLINIC_PROFILE_RESPONSE_CONTRACT_PROVEN=YES"
+            "CLINIC_PROFILE_VIEW_WITHOUT_HISTORY_PROVEN=YES"
+            "CLINIC_VIEW_ONLY_MUTATION_DENIED=YES"
+            "CLINIC_NO_CAPABILITY_DENIAL_PROVEN=YES"
+            "CLINIC_PROFILE_CROSS_TENANT_DENIED=YES"
+            "CLINIC_ANON_PROFILE_ACCESS_DENIED=YES"
+            "CLINIC_OWNER_SETUP_READ_PROVEN=YES"
+            "CLINIC_OWNER_SETUP_CROSS_TENANT_SAFE=YES"
+            "CLINIC_BOUNDED_PROFILE_NO_HISTORY_LEAK=YES"
+            "CLINIC_INACTIVE_OWNER_SETUP_DENIED=YES"
+            "CLINIC_AUTHENTICATED_EXECUTE_ACL_PROVEN=YES"
+            "CLINIC_ANON_EXECUTE_ACL_DENIED=YES"
+            "CLINIC_WORKSPACE_DB_ROLE_CONTEXT_PROVEN=YES"
+            "CLINIC_WORKSPACE_AUTHORITY_HARDENING_DB_EXECUTION=PASS"
+          )
+          echo "=== VERIFYING MARKERS ==="
+          MISSING=0
+          for m in "${MARKERS[@]}"; do
+            if grep -Fq "$m" /tmp/clinic-block3-sql.log; then
+              echo "  [FOUND] $m"
+            else
+              echo "  [MISSING] $m"
+              MISSING=1
+            fi
+          done
+
+          if [ "$MISSING" = "1" ]; then
+            echo "❌ ONE OR MORE MARKERS MISSING!"
+            echo "=== PSQL LOG HEAD 20 ==="
+            head -n 20 /tmp/clinic-block3-sql.log
+            echo "=== PSQL LOG TAIL 30 ==="
+            tail -n 30 /tmp/clinic-block3-sql.log
+            echo "========================"
+            exit 1
+          fi
+          echo "✅ Clinic Block 3 workspace authority hardening SQL suite passed with all test-generated markers verified."
+
+      - name: Upload Clinic Block 3 SQL Log Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinic-block3-sql-log
+          path: /tmp/clinic-block3-sql.log
+
+      - name: Run Full Application QA & Commercial Source-of-Truth Suite
+        run: |
+          set -euo pipefail
+          echo "=== RUNNING FULL APPLICATION QA & COMMERCIAL SOURCE OF TRUTH SUITE ==="
+          npm run lint
+          npm run build
+          npm run check:secrets
+          npm run qa:data-mode-regression
+          npm run qa:commercial-read-contracts
+          npm run qa:commercial-legacy-compatibility
+          npm run qa:commercial-eligibility-enforcement
+          npm run qa:commercial-packaging
+          npm run qa:entitlements
+          npm run qa:package-branch-server-authority
+          node scripts/test-clinic-domain-server-authority.mjs
+          node scripts/test-clinic-operational-integration.mjs
+
+      - name: Run Git Diff & Whitespace Check
+        run: |
+          set -euo pipefail
+          git diff --check
+
+      - name: Cleanup Disposable Container
+        if: always()
+        run: |
+          echo "Cleaning up disposable postgres container..."
+          docker rm -f lari-p2a-postgres || true
