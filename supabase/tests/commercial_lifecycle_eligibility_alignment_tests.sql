@@ -13,7 +13,6 @@ BEGIN;
 DO $$
 DECLARE
     v_tenant_id UUID := 'e3888888-8888-4888-8888-888888888801'::UUID;
-    v_plan_id UUID;
     v_plan_version_id UUID;
     v_res JSONB;
     v_ent RECORD;
@@ -33,16 +32,16 @@ BEGIN
         DELETE FROM public.tenants WHERE id = v_tenant_id;
     END IF;
 
-    -- Lookup canonical published plan and plan_version
-    SELECT p.id, pv.id INTO v_plan_id, v_plan_version_id
+    -- Lookup canonical published plan_version for baslangic
+    SELECT pv.id INTO v_plan_version_id
     FROM public.plans p
     JOIN public.plan_versions pv ON pv.plan_id = p.id
-    WHERE p.code = 'baslangic' AND pv.lifecycle_status = 'published'
-    ORDER BY pv.created_at DESC
+    WHERE p.code = 'baslangic'
+    ORDER BY (pv.lifecycle_status = 'published') DESC, pv.created_at DESC
     LIMIT 1;
 
-    IF v_plan_id IS NULL OR v_plan_version_id IS NULL THEN
-        RAISE EXCEPTION 'TEST SETUP FAIL: Published baslangic plan/version missing';
+    IF v_plan_version_id IS NULL THEN
+        RAISE EXCEPTION 'TEST SETUP FAIL: baslangic plan version missing';
     END IF;
 
     -- Seed test tenant
@@ -54,7 +53,7 @@ BEGIN
     -- -------------------------------------------------------------------------
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
-    VALUES (v_tenant_id, v_plan_id, v_plan_version_id, 'active', 'automated');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'active', 'automated');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> true OR v_res->>'reason_code' <> 'commercial_allowed' THEN
@@ -67,7 +66,7 @@ BEGIN
     -- -------------------------------------------------------------------------
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
-    VALUES (v_tenant_id, v_plan_id, v_plan_version_id, 'manual_active', 'manual');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'manual_active', 'manual');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> true OR v_res->>'reason_code' <> 'commercial_allowed' THEN
@@ -80,7 +79,7 @@ BEGIN
     -- -------------------------------------------------------------------------
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
-    VALUES (v_tenant_id, v_plan_id, v_plan_version_id, 'comped', 'manual');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'comped', 'manual');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> true OR v_res->>'reason_code' <> 'commercial_allowed' THEN
@@ -94,7 +93,7 @@ BEGIN
     -- Future trial_end
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, trial_end)
-    VALUES (v_tenant_id, v_plan_id, v_plan_version_id, 'trialing', 'automated', now() + interval '7 days');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'trialing', 'automated', now() + interval '7 days');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> true THEN
@@ -104,7 +103,7 @@ BEGIN
     -- Expired trial_end
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, trial_end)
-    VALUES (v_tenant_id, v_plan_id, v_plan_version_id, 'trialing', 'automated', now() - interval '1 hour');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'trialing', 'automated', now() - interval '1 hour');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> false OR v_res->>'reason_code' <> 'commercial_trial_expired' THEN
@@ -118,7 +117,7 @@ BEGIN
     -- Future grace_until
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, grace_until)
-    VALUES (v_tenant_id, v_plan_id, v_plan_version_id, 'past_due', 'automated', now() + interval '3 days');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'automated', now() + interval '3 days');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> true THEN
@@ -128,7 +127,7 @@ BEGIN
     -- Expired grace_until
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, grace_until)
-    VALUES (v_tenant_id, v_plan_id, v_plan_version_id, 'past_due', 'automated', now() - interval '1 hour');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'automated', now() - interval '1 hour');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> false OR v_res->>'reason_code' <> 'commercial_grace_expired' THEN
@@ -142,7 +141,7 @@ BEGIN
     FOREACH v_status IN ARRAY v_statuses_denied LOOP
         DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
         INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
-        VALUES (v_tenant_id, v_plan_id, v_plan_version_id, v_status, 'manual');
+        VALUES (v_tenant_id, 'baslangic', v_plan_version_id, v_status, 'manual');
 
         v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
         IF (v_res->>'eligible')::boolean <> false OR v_res->>'reason_code' <> 'commercial_status_not_eligible' THEN
@@ -157,7 +156,7 @@ BEGIN
     -- A: manual_active plan entitlements
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
-    VALUES (v_tenant_id, v_plan_id, v_plan_version_id, 'manual_active', 'manual');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'manual_active', 'manual');
 
     SELECT * INTO v_ent
     FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now())
@@ -171,7 +170,7 @@ BEGIN
     -- B: comped plan entitlements
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
-    VALUES (v_tenant_id, v_plan_id, v_plan_version_id, 'comped', 'manual');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'comped', 'manual');
 
     SELECT * INTO v_ent
     FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now())
@@ -185,7 +184,7 @@ BEGIN
     -- C: valid-grace past_due plan entitlements
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, grace_until)
-    VALUES (v_tenant_id, v_plan_id, v_plan_version_id, 'past_due', 'automated', now() + interval '3 days');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'automated', now() + interval '3 days');
 
     SELECT * INTO v_ent
     FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now())
@@ -199,7 +198,7 @@ BEGIN
     -- D: expired-grace past_due entitlement denial
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, grace_until)
-    VALUES (v_tenant_id, v_plan_id, v_plan_version_id, 'past_due', 'automated', now() - interval '1 hour');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'automated', now() - interval '1 hour');
 
     SELECT * INTO v_ent
     FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now())
