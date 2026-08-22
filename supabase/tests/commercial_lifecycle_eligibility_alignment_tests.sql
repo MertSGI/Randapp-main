@@ -26,10 +26,10 @@ BEGIN
 
     -- Cleanup isolated test fixture
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'subscriptions') THEN
-        DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
+        DELETE FROM public.subscriptions WHERE tenant_id IN (SELECT id FROM public.tenants WHERE id = v_tenant_id OR slug = 'lifecycle-test-tenant');
     END IF;
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'tenants') THEN
-        DELETE FROM public.tenants WHERE id = v_tenant_id;
+        DELETE FROM public.tenants WHERE id = v_tenant_id OR slug = 'lifecycle-test-tenant';
     END IF;
 
     -- Lookup canonical published plan_version for baslangic
@@ -53,7 +53,7 @@ BEGIN
     -- -------------------------------------------------------------------------
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
-    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'active', 'automated');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'active', 'manual');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> true OR v_res->>'reason_code' <> 'commercial_allowed' THEN
@@ -79,7 +79,7 @@ BEGIN
     -- -------------------------------------------------------------------------
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
-    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'comped', 'manual');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'comped', 'comped');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> true OR v_res->>'reason_code' <> 'commercial_allowed' THEN
@@ -93,7 +93,7 @@ BEGIN
     -- Future trial_end
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, trial_end)
-    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'trialing', 'automated', now() + interval '7 days');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'trialing', 'manual', now() + interval '7 days');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> true THEN
@@ -103,7 +103,7 @@ BEGIN
     -- Expired trial_end
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, trial_end)
-    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'trialing', 'automated', now() - interval '1 hour');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'trialing', 'manual', now() - interval '1 hour');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> false OR v_res->>'reason_code' <> 'commercial_trial_expired' THEN
@@ -117,7 +117,7 @@ BEGIN
     -- Future grace_until
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, grace_until)
-    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'automated', now() + interval '3 days');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'manual', now() + interval '3 days');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> true THEN
@@ -127,7 +127,7 @@ BEGIN
     -- Expired grace_until
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, grace_until)
-    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'automated', now() - interval '1 hour');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'manual', now() - interval '1 hour');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> false OR v_res->>'reason_code' <> 'commercial_grace_expired' THEN
@@ -170,7 +170,7 @@ BEGIN
     -- B: comped plan entitlements
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
-    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'comped', 'manual');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'comped', 'comped');
 
     SELECT * INTO v_ent
     FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now())
@@ -184,7 +184,7 @@ BEGIN
     -- C: valid-grace past_due plan entitlements
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, grace_until)
-    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'automated', now() + interval '3 days');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'manual', now() + interval '3 days');
 
     SELECT * INTO v_ent
     FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now())
@@ -198,7 +198,7 @@ BEGIN
     -- D: expired-grace past_due entitlement denial
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, grace_until)
-    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'automated', now() - interval '1 hour');
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'manual', now() - interval '1 hour');
 
     SELECT * INTO v_ent
     FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now())
@@ -212,11 +212,21 @@ BEGIN
     -- -------------------------------------------------------------------------
     -- 8. P2A PUBLISH STATUS ALIGNMENT PROOF
     -- -------------------------------------------------------------------------
-    IF EXISTS (
-        SELECT 1 FROM information_schema.routines
-        WHERE routine_schema = 'public' AND routine_name = 'approve_and_publish_tenant'
-    ) THEN
-        RAISE NOTICE 'P2A publish routine present: verifying manual_active status contract alignment';
+    DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
+    INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'manual_active', 'manual');
+
+    v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
+    IF (v_res->>'eligible')::boolean <> true OR v_res->>'status' <> 'manual_active' THEN
+        RAISE EXCEPTION 'P2A PUBLISH PROOF FAIL: manual_active status contract broken in eligibility, got %', v_res;
+    END IF;
+
+    SELECT * INTO v_ent
+    FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now())
+    WHERE feature_key = 'core_booking';
+
+    IF v_ent.source <> 'plan_default' OR v_ent.boolean_value <> true THEN
+        RAISE EXCEPTION 'P2A PUBLISH PROOF FAIL: manual_active status lost plan entitlements, got %', v_ent;
     END IF;
 
     RAISE NOTICE 'COMMERCIAL_P2A_PUBLISH_STATUS_ALIGNMENT_PROVEN=YES';
