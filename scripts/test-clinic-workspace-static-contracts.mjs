@@ -3,7 +3,7 @@ import path from 'path';
 import assert from 'assert';
 import { execSync } from 'child_process';
 
-console.log('=== RUNNING CLINIC WORKSPACE STATIC CONTRACT QA SUITE (BLOCK 3 R1.2 HARDENED) ===');
+console.log('=== RUNNING CLINIC WORKSPACE STATIC CONTRACT QA SUITE (BLOCK 3 HARDENED) ===');
 
 const appTsx = fs.readFileSync(path.join(process.cwd(), 'App.tsx'), 'utf8');
 const clinicWorkspacePage = fs.readFileSync(path.join(process.cwd(), 'pages/clinic/ClinicWorkspacePage.tsx'), 'utf8');
@@ -35,15 +35,18 @@ assert(
 assert(!appTsx.includes("allowedRoles={['tenant_owner', 'staff', 'super_admin']}><ClinicLayout />"), 'Static Check 3.2 Failed: /clinic must NOT include super_admin');
 console.log('  ✓ Check 3 PASS: /clinic route allowedRoles = [tenant_owner, staff], excludes super_admin');
 
-// 4. Migration 63 exists & total migration count = 63
+// 4. Migration 63 and 64 exist & total migration count = 64
 const migrationsDir = path.join(process.cwd(), 'supabase/migrations');
 const migrationFiles = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql'));
-assert.strictEqual(migrationFiles.length, 63, `Static Check 4 Failed: Expected 63 migration files, got ${migrationFiles.length}`);
+assert.strictEqual(migrationFiles.length, 64, `Static Check 4 Failed: Expected 64 migration files, got ${migrationFiles.length}`);
 
 const migration63Path = path.join(migrationsDir, '20260907_lari_clinic_workspace_authority_hardening.sql');
 assert(fs.existsSync(migration63Path), 'Static Check 4.2 Failed: Migration 63 file missing');
 const migration63 = fs.readFileSync(migration63Path, 'utf8');
-console.log('  ✓ Check 4 PASS: Migration 63 exists and total migration count = 63');
+
+const migration64Path = path.join(migrationsDir, '20260908_commercial_lifecycle_eligibility_alignment.sql');
+assert(fs.existsSync(migration64Path), 'Static Check 4.3 Failed: Migration 64 file missing');
+console.log('  ✓ Check 4 PASS: Migration 63 and 64 exist and total migration count = 64');
 
 // 5. Historical Migration Blobs Unchanged
 const b1Path = path.join(migrationsDir, '20260905_lari_clinic_domain_server_authority.sql');
@@ -120,4 +123,4 @@ assert(!allClinicUiText.includes('localStorage.setItem'), 'Static Check 12.1 Fai
 assert(!allClinicUiText.includes('sessionStorage.setItem'), 'Static Check 12.2 Failed: No sessionStorage allowed in Clinic UI');
 console.log('  ✓ Check 12 PASS: Zero localStorage/sessionStorage clinical persistence');
 
-console.log('🎉 ALL CLINIC WORKSPACE STATIC CONTRACT CHECKS PASSED (BLOCK 3 R1.2 HARDENED)!');
+console.log('🎉 ALL CLINIC WORKSPACE STATIC CONTRACT CHECKS PASSED (BLOCK 3 HARDENED)!');
