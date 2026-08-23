@@ -295,13 +295,18 @@ $$;
 -- 3. EXECUTABLE DOMAIN BEHAVIOR (Authenticated Caller Context)
 --    REAL top-level SET LOCAL ROLE authenticated
 -- =========================================================================
+SET LOCAL ROLE authenticated;
+
 DO $$
 BEGIN
-    EXECUTE 'SET LOCAL ROLE authenticated';
     IF current_user <> 'authenticated' THEN
-        RAISE EXCEPTION 'DB ROLE FAIL: current_user is %, expected authenticated', current_user;
+        RAISE EXCEPTION
+          'DB ROLE FAIL: current_user is %, expected authenticated',
+          current_user;
     END IF;
-    RAISE NOTICE 'CLINIC_AUTHENTICATED_DB_ROLE_ACTIVE=YES';
+
+    RAISE NOTICE
+      'CLINIC_AUTHENTICATED_DB_ROLE_ACTIVE=YES';
 END;
 $$;
 
@@ -578,13 +583,18 @@ SELECT set_config('request.jwt.claim.sub', '', true);
 -- 4. EXECUTABLE ANON DENIAL BEHAVIOR (Anon Caller Context)
 --    REAL top-level SET LOCAL ROLE anon
 -- =========================================================================
+SET LOCAL ROLE anon;
+
 DO $$
 BEGIN
-    EXECUTE 'SET LOCAL ROLE anon';
     IF current_user <> 'anon' THEN
-        RAISE EXCEPTION 'DB ROLE FAIL: current_user is %, expected anon', current_user;
+        RAISE EXCEPTION
+          'DB ROLE FAIL: current_user is %, expected anon',
+          current_user;
     END IF;
-    RAISE NOTICE 'CLINIC_ANON_DB_ROLE_ACTIVE=YES';
+
+    RAISE NOTICE
+      'CLINIC_ANON_DB_ROLE_ACTIVE=YES';
 END;
 $$;
 
