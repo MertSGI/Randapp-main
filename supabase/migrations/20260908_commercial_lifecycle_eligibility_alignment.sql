@@ -3,9 +3,9 @@
 -- Migration: 20260908_commercial_lifecycle_eligibility_alignment.sql
 -- Description:
 --   Forward-redefines resolve_tenant_commercial_eligibility and
---   resolve_effective_tenant_entitlements to establish consistent
---   commercial lifecycle semantics across manual_active, comped, trialing,
---   and past_due with valid grace (incorporating status-specific temporal authority).
+--   resolve_effective_tenant_entitlements to establish canonical
+--   commercial lifecycle semantics across active, manual_active, comped,
+--   trialing (trial_end authority), and past_due (grace_until authority).
 -- =========================================================================
 
 -- 1. Redefine resolve_tenant_commercial_eligibility
@@ -119,12 +119,12 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Resolve active subscription's plan_version_id for this tenant using status-specific temporal authority
+    -- Resolve active subscription's plan_version_id for this tenant using canonical status/temporal authority
     SELECT sub.plan_version_id INTO v_sub_plan_version_id
     FROM public.subscriptions sub
     WHERE sub.tenant_id = p_tenant_id
       AND (
-          (sub.status IN ('active', 'manual_active', 'comped') AND (sub.current_period_end IS NULL OR sub.current_period_end > p_at))
+          sub.status IN ('active', 'manual_active', 'comped')
           OR (sub.status = 'trialing' AND (sub.trial_end IS NULL OR sub.trial_end > p_at))
           OR (sub.status = 'past_due' AND (sub.grace_until IS NULL OR sub.grace_until > p_at))
       )

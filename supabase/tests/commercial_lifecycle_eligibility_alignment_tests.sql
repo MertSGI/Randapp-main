@@ -5,7 +5,7 @@
 --   Verifies commercial eligibility and entitlement resolution across all
 --   canonical subscription lifecycle statuses (active, manual_active, comped,
 --   trialing, past_due, paused, suspended, cancelled, expired, pending_onboarding,
---   pending_checkout).
+--   pending_checkout), including status/temporal authority cross-checks.
 -- =========================================================================
 
 BEGIN;
@@ -49,7 +49,7 @@ BEGIN
     VALUES (v_tenant_id, 'Lifecycle Test Tenant', 'lifecycle-test-tenant', 'active');
 
     -- -------------------------------------------------------------------------
-    -- 1. PROVE ACTIVE STATUS ELIGIBILITY
+    -- 1. PROVE ACTIVE STATUS ELIGIBILITY & EXPIRED PERIOD STATUS AUTHORITY
     -- -------------------------------------------------------------------------
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
@@ -61,8 +61,20 @@ BEGIN
     END IF;
     RAISE NOTICE 'COMMERCIAL_ACTIVE_ELIGIBILITY_PROVEN=YES';
 
+    -- Active status cross-check with expired current_period_end
+    DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
+    INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_end)
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'active', 'manual', now() - interval '1 day');
+
+    v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
+    SELECT * INTO v_ent FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now()) WHERE feature_key = 'core_booking';
+    IF (v_res->>'eligible')::boolean <> true OR v_ent.source <> 'plan_default' OR v_ent.boolean_value <> true OR (v_ent.plan_version_id IS DISTINCT FROM v_plan_version_id) THEN
+        RAISE EXCEPTION 'TEST FAIL: active with past current_period_end failed status authority, res=%, ent=%', v_res, v_ent;
+    END IF;
+    RAISE NOTICE 'COMMERCIAL_ACTIVE_EXPIRED_PERIOD_STATUS_AUTHORITY_PROVEN=YES';
+
     -- -------------------------------------------------------------------------
-    -- 2. PROVE MANUAL_ACTIVE STATUS ELIGIBILITY
+    -- 2. PROVE MANUAL_ACTIVE STATUS ELIGIBILITY & EXPIRED PERIOD STATUS AUTHORITY
     -- -------------------------------------------------------------------------
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
@@ -74,8 +86,20 @@ BEGIN
     END IF;
     RAISE NOTICE 'COMMERCIAL_MANUAL_ACTIVE_ELIGIBILITY_PROVEN=YES';
 
+    -- Manual active status cross-check with expired current_period_end
+    DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
+    INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_end)
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'manual_active', 'manual', now() - interval '1 day');
+
+    v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
+    SELECT * INTO v_ent FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now()) WHERE feature_key = 'core_booking';
+    IF (v_res->>'eligible')::boolean <> true OR v_ent.source <> 'plan_default' OR v_ent.boolean_value <> true THEN
+        RAISE EXCEPTION 'TEST FAIL: manual_active with past current_period_end failed status authority, res=%, ent=%', v_res, v_ent;
+    END IF;
+    RAISE NOTICE 'COMMERCIAL_MANUAL_ACTIVE_EXPIRED_PERIOD_STATUS_AUTHORITY_PROVEN=YES';
+
     -- -------------------------------------------------------------------------
-    -- 3. PROVE COMPED STATUS ELIGIBILITY
+    -- 3. PROVE COMPED STATUS ELIGIBILITY & EXPIRED PERIOD STATUS AUTHORITY
     -- -------------------------------------------------------------------------
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
@@ -87,18 +111,32 @@ BEGIN
     END IF;
     RAISE NOTICE 'COMMERCIAL_COMPED_ELIGIBILITY_PROVEN=YES';
 
-    -- -------------------------------------------------------------------------
-    -- 4. PROVE TRIALING VALIDITY (FUTURE VS EXPIRED)
-    -- -------------------------------------------------------------------------
-    -- Future trial_end
+    -- Comped status cross-check with expired current_period_end
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
-    INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, trial_end)
-    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'trialing', 'manual', now() + interval '7 days');
+    INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_end)
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'comped', 'comped', now() - interval '1 day');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
-    IF (v_res->>'eligible')::boolean <> true THEN
-        RAISE EXCEPTION 'TEST FAIL: valid trialing status should be eligible=true, got %', v_res;
+    SELECT * INTO v_ent FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now()) WHERE feature_key = 'core_booking';
+    IF (v_res->>'eligible')::boolean <> true OR v_ent.source <> 'plan_default' OR v_ent.boolean_value <> true THEN
+        RAISE EXCEPTION 'TEST FAIL: comped with past current_period_end failed status authority, res=%, ent=%', v_res, v_ent;
     END IF;
+    RAISE NOTICE 'COMMERCIAL_COMPED_EXPIRED_PERIOD_STATUS_AUTHORITY_PROVEN=YES';
+
+    -- -------------------------------------------------------------------------
+    -- 4. PROVE TRIALING TEMPORAL AUTHORITY
+    -- -------------------------------------------------------------------------
+    -- Future trial_end with expired current_period_end
+    DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
+    INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, trial_end, current_period_end)
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'trialing', 'manual', now() + interval '7 days', now() - interval '1 day');
+
+    v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
+    SELECT * INTO v_ent FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now()) WHERE feature_key = 'core_booking';
+    IF (v_res->>'eligible')::boolean <> true OR v_ent.source <> 'plan_default' OR v_ent.boolean_value <> true THEN
+        RAISE EXCEPTION 'TEST FAIL: trialing with valid trial_end but past current_period_end failed, res=%, ent=%', v_res, v_ent;
+    END IF;
+    RAISE NOTICE 'COMMERCIAL_TRIAL_END_AUTHORITY_PROVEN=YES';
 
     -- Expired trial_end
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
@@ -112,28 +150,41 @@ BEGIN
     RAISE NOTICE 'COMMERCIAL_TRIAL_VALIDITY_PROVEN=YES';
 
     -- -------------------------------------------------------------------------
-    -- 5. PROVE PAST_DUE GRACE (FUTURE VS EXPIRED)
+    -- 5. PROVE PAST_DUE GRACE (REALISTIC FIXTURE & EXPIRED GRACE CONTROL)
     -- -------------------------------------------------------------------------
-    -- Future grace_until
+    -- Realistic fixture: status=past_due, current_period_end=now()-1 day, grace_until=now()+3 days
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
-    INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, grace_until)
-    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'manual', now() + interval '3 days');
+    INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_end, grace_until)
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'manual', now() - interval '1 day', now() + interval '3 days');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> true THEN
         RAISE EXCEPTION 'TEST FAIL: past_due with valid grace should be eligible=true, got %', v_res;
     END IF;
 
-    -- Expired grace_until
+    SELECT * INTO v_ent FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now()) WHERE feature_key = 'core_booking';
+    IF v_ent.source <> 'plan_default' OR v_ent.boolean_value <> true OR (v_ent.plan_version_id IS DISTINCT FROM v_plan_version_id) THEN
+        RAISE EXCEPTION 'TEST FAIL: past_due with valid grace failed entitlement resolution, got %', v_ent;
+    END IF;
+    RAISE NOTICE 'COMMERCIAL_PAST_DUE_EXPIRED_PERIOD_VALID_GRACE_ENTITLEMENTS_PROVEN=YES';
+    RAISE NOTICE 'COMMERCIAL_PAST_DUE_GRACE_PROVEN=YES';
+
+    -- Expired grace_until: status=past_due, current_period_end=now()-1 day, grace_until=now()-1 hour
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
-    INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, grace_until)
-    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'manual', now() - interval '1 hour');
+    INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_end, grace_until)
+    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'manual', now() - interval '1 day', now() - interval '1 hour');
 
     v_res := public.resolve_tenant_commercial_eligibility(v_tenant_id, now());
     IF (v_res->>'eligible')::boolean <> false OR v_res->>'reason_code' <> 'commercial_grace_expired' THEN
         RAISE EXCEPTION 'TEST FAIL: past_due with expired grace should return commercial_grace_expired, got %', v_res;
     END IF;
-    RAISE NOTICE 'COMMERCIAL_PAST_DUE_GRACE_PROVEN=YES';
+
+    SELECT * INTO v_ent FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now()) WHERE feature_key = 'core_booking';
+    IF v_ent.source = 'plan_default' OR v_ent.plan_version_id IS NOT NULL THEN
+        RAISE EXCEPTION 'TEST FAIL: past_due with expired grace should deny entitlements, got %', v_ent;
+    END IF;
+    RAISE NOTICE 'COMMERCIAL_PAST_DUE_EXPIRED_GRACE_DENIAL_PROVEN=YES';
+    RAISE NOTICE 'COMMERCIAL_EXPIRED_GRACE_ENTITLEMENTS_DENIED=YES';
 
     -- -------------------------------------------------------------------------
     -- 6. PROVE BLOCKED STATUSES DENIAL
@@ -158,11 +209,8 @@ BEGIN
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
     VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'manual_active', 'manual');
 
-    SELECT * INTO v_ent
-    FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now())
-    WHERE feature_key = 'core_booking';
-
-    IF v_ent.source <> 'plan_default' OR v_ent.boolean_value <> true OR v_ent.plan_version_id <> v_plan_version_id THEN
+    SELECT * INTO v_ent FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now()) WHERE feature_key = 'core_booking';
+    IF v_ent.source <> 'plan_default' OR v_ent.boolean_value <> true OR (v_ent.plan_version_id IS DISTINCT FROM v_plan_version_id) THEN
         RAISE EXCEPTION 'ENTITLEMENT FAIL: manual_active did not expose plan entitlement core_booking, got %', v_ent;
     END IF;
     RAISE NOTICE 'COMMERCIAL_MANUAL_ACTIVE_PLAN_ENTITLEMENTS_PROVEN=YES';
@@ -172,10 +220,7 @@ BEGIN
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
     VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'comped', 'comped');
 
-    SELECT * INTO v_ent
-    FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now())
-    WHERE feature_key = 'core_booking';
-
+    SELECT * INTO v_ent FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now()) WHERE feature_key = 'core_booking';
     IF v_ent.source <> 'plan_default' OR v_ent.boolean_value <> true THEN
         RAISE EXCEPTION 'ENTITLEMENT FAIL: comped did not expose plan entitlement core_booking, got %', v_ent;
     END IF;
@@ -186,31 +231,14 @@ BEGIN
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, grace_until)
     VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'manual', now() + interval '3 days');
 
-    SELECT * INTO v_ent
-    FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now())
-    WHERE feature_key = 'core_booking';
-
+    SELECT * INTO v_ent FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now()) WHERE feature_key = 'core_booking';
     IF v_ent.source <> 'plan_default' OR v_ent.boolean_value <> true THEN
         RAISE EXCEPTION 'ENTITLEMENT FAIL: valid-grace past_due did not expose plan entitlement core_booking, got %', v_ent;
     END IF;
     RAISE NOTICE 'COMMERCIAL_PAST_DUE_PLAN_ENTITLEMENTS_PROVEN=YES';
 
-    -- D: expired-grace past_due entitlement denial
-    DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
-    INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, grace_until)
-    VALUES (v_tenant_id, 'baslangic', v_plan_version_id, 'past_due', 'manual', now() - interval '1 hour');
-
-    SELECT * INTO v_ent
-    FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now())
-    WHERE feature_key = 'core_booking';
-
-    IF v_ent.source <> 'default_deny' OR v_ent.plan_version_id IS NOT NULL THEN
-        RAISE EXCEPTION 'ENTITLEMENT FAIL: expired-grace past_due should be default_deny, got %', v_ent;
-    END IF;
-    RAISE NOTICE 'COMMERCIAL_EXPIRED_GRACE_ENTITLEMENTS_DENIED=YES';
-
     -- -------------------------------------------------------------------------
-    -- 8. P2A PUBLISH STATUS ALIGNMENT PROOF
+    -- 8. P2A PUBLISH STATUS ALIGNMENT PROOF & GLOBAL TEMPORAL ALIGNMENT
     -- -------------------------------------------------------------------------
     DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
@@ -221,15 +249,13 @@ BEGIN
         RAISE EXCEPTION 'P2A PUBLISH PROOF FAIL: manual_active status contract broken in eligibility, got %', v_res;
     END IF;
 
-    SELECT * INTO v_ent
-    FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now())
-    WHERE feature_key = 'core_booking';
-
+    SELECT * INTO v_ent FROM public.resolve_effective_tenant_entitlements(v_tenant_id, now()) WHERE feature_key = 'core_booking';
     IF v_ent.source <> 'plan_default' OR v_ent.boolean_value <> true THEN
         RAISE EXCEPTION 'P2A PUBLISH PROOF FAIL: manual_active status lost plan entitlements, got %', v_ent;
     END IF;
 
     RAISE NOTICE 'COMMERCIAL_P2A_PUBLISH_STATUS_ALIGNMENT_PROVEN=YES';
+    RAISE NOTICE 'COMMERCIAL_TEMPORAL_CONTRACT_ALIGNMENT_PROVEN=YES';
     RAISE NOTICE 'COMMERCIAL_LIFECYCLE_ALIGNMENT_DB_EXECUTION=PASS';
 END;
 $$;
