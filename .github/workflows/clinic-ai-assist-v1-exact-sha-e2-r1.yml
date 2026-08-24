@@ -243,6 +243,10 @@ jobs:
           if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_ai_assist_commercial_authority_tests.sql 2>&1 | tee /tmp/e2-logs/clinic-ai-commercial-sql.log; then
             echo "=== CLINIC AI COMMERCIAL SQL SUITE FAILURE LOG ==="
             cat /tmp/e2-logs/clinic-ai-commercial-sql.log
+            echo "### CLINIC AI COMMERCIAL SQL SUITE FAILURE LOG" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat /tmp/e2-logs/clinic-ai-commercial-sql.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
