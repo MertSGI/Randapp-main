@@ -84,6 +84,7 @@ jobs:
           PINNED_IMAGE="supabase/postgres:15.1.0.147"
           echo "Pulling pinned Supabase Postgres image: ${PINNED_IMAGE}"
           docker pull "${PINNED_IMAGE}"
+          docker rm -f lari-clinic-ai-postgres || true
           docker run -d \
             --name lari-clinic-ai-postgres \
             -e POSTGRES_PASSWORD=postgres \
@@ -354,6 +355,7 @@ jobs:
       - name: Build E2 Summary Text
         if: always()
         run: |
+          mkdir -p /tmp/e2-logs
           cat << EOF > /tmp/e2-logs/e2-summary.txt
           === CLINIC AI ASSIST V1 EXACT-SHA E2 EXECUTABLE EVIDENCE SUMMARY ===
           EXPECTED_PRODUCT_SHA=${EXPECTED_PRODUCT_SHA}
