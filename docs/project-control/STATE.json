@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-08-21T10:18:23+03:00",
+  "updated_at": "2026-08-24T13:45:00+03:00",
   "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
@@ -16,8 +16,8 @@
     "LARİ Health Tourism",
     "Final Delivery"
   ],
-  "current_milestone": "LARİ Clinic",
-  "current_status": "CORE_SOFTWARE_RC_CLOSED_PROVEN",
+  "current_milestone": "LARİ Health Tourism",
+  "current_status": "CLINIC_CORE_CLOSED_PROVEN",
   "canonical_refs": {
     "main_pilot": {
       "branch": "staging/supabase-staging-consistency",
@@ -83,6 +83,22 @@
       "branch": "ci/clinic-block2-exact-sha-r3-20260821",
       "sha": "4432d95b7335689242db61ba5562f0560b2d1585",
       "status": "CI_RUN_32457917961_SUCCESS"
+    },
+    "clinic_block3_workspace_ui": {
+      "branch": "feature/lari-clinic-foundation",
+      "sha": "008ebac4496d592d271d612713c437d316c416f0",
+      "status": "CLOSED_PROVEN"
+    },
+    "clinic_block3_ci_evidence": {
+      "branch": "ci/clinic-block3-exact-sha-r9-20260823",
+      "sha": "c5ecd0c507621bb6d22126691e12deb4d5826dee",
+      "status": "CI_RUN_32624729632_SUCCESS"
+    },
+    "clinic_block3_e3_isolated_runtime": {
+      "branch": "feature/lari-clinic-foundation",
+      "sha": "008ebac4496d592d271d612713c437d316c416f0",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "status": "CLOSED_PROVEN"
     }
   },
   "accepted_gates": [
@@ -253,6 +269,25 @@
       ],
       "closed_at": "2026-08-21T10:18:23+03:00",
       "reopen_condition": "Contradictory operational encounter status guard, atomic completion side-effects, idempotency, patient history projection, cross-tenant boundary, or exact-SHA concurrency regression evidence"
+    },
+    {
+      "gate": "LARİ Clinic Block 3 Workspace UI & Isolated Real-Browser Acceptance",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+      "tested_sha": "008ebac4496d592d271d612713c437d316c416f0",
+      "e2_evidence_sha": "c5ecd0c507621bb6d22126691e12deb4d5826dee",
+      "e2_run_id": "32624729632",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "closed_at": "2026-08-24T13:45:00+03:00",
+      "reopen_condition": "Contradictory isolated runtime evidence or failed regression"
+    },
+    {
+      "gate": "LARİ Clinic Core Milestone",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+      "tested_sha": "008ebac4496d592d271d612713c437d316c416f0",
+      "closed_at": "2026-08-24T13:45:00+03:00",
+      "reopen_condition": "Contradictory clinical RLS, note immutability, RPC authority, cross-tenant boundary, or isolated runtime evidence"
     }
   ],
   "active_workstreams": {
@@ -298,9 +333,9 @@
       }
     },
     "lari_clinic": {
-      "status": "IN_PROGRESS",
+      "status": "CLOSED_PROVEN",
       "branch": "feature/lari-clinic-foundation",
-      "sha": "5e935ed049ffe08a6797643ec9cc2b7d4e6ae637",
+      "sha": "008ebac4496d592d271d612713c437d316c416f0",
       "blocks": {
         "block1_clinical_domain_server_authority": {
           "status": "CLOSED_PROVEN",
@@ -317,10 +352,25 @@
           "run_id": "32457917961"
         },
         "block3_workspace_ui": {
-          "status": "IN_PROGRESS",
-          "objective": "Build authenticated Clinic application workspace on top of accepted Block 1 + Block 2 server authority"
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+          "product_sha": "008ebac4496d592d271d612713c437d316c416f0",
+          "e2_evidence_sha": "c5ecd0c507621bb6d22126691e12deb4d5826dee",
+          "e2_run_id": "32624729632",
+          "isolated_project": "miuecvkkmyvaciticwtm"
+        }
+      },
+      "extensions": {
+        "clinic_ai_assist_speech_to_text": {
+          "status": "DEFERRED_CARRY_FORWARD",
+          "classification": "NON_BLOCKING_EXTENSION_AFTER_CLINIC_CORE_CLOSURE",
+          "target_slice": "CLINIC_AI_ASSIST_V1"
         }
       }
+    },
+    "lari_health_tourism": {
+      "status": "IN_PROGRESS",
+      "objective": "Multilingual public/intake experience, Web AI Lead Agent, source attribution, lead capture & scoring, coordinator workflow, and Clinic integration"
     }
   },
   "external_dependencies": {
@@ -332,7 +382,7 @@
     "human_participant_uat": "DEFERRED_FIELD_VALIDATION"
   },
   "current_blockers": [],
-  "next_action": "Execute Controller-authorized LARİ Clinic Block 3 Workspace / UI implementation on feature/lari-clinic-foundation from accepted Block 2 product SHA 5e935ed049ffe08a6797643ec9cc2b7d4e6ae637.",
+  "next_action": "Proceed to CLINIC_AI_ASSIST_V1 carry-forward slice and HEALTH_TOURISM_FOUNDATION implementation.",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true

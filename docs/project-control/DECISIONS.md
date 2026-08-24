@@ -48,3 +48,15 @@
 ## DECISION-011: LARİ Clinic Dedicated Application Surface & Clinical Authorization Boundary
 - **Status**: ACCEPTED
 - **Decision**: LARİ Clinic uses a dedicated authenticated application surface separate from the owner Admin and Super Admin routes. tenant_owner and staff may reach the Clinic shell, but clinical-content loading and rendering is authorized by the server-derived clinic_get_my_context contract. super_admin receives no implicit Clinic workspace access. A tenant_owner without an active Clinic staff context is limited to Clinic setup operations and receives no clinical patient content.
+
+## DECISION-012: LARİ Clinic Core Milestone Formal Control-Plane Closure
+- **Status**: ACCEPTED
+- **Decision**: Milestone LARİ Clinic Core is formally closed as proven (`CLINIC_CORE_MILESTONE = CLOSED_PROVEN`, `CLINIC_BLOCK3_E3 = ACCEPTED_CLOSED_PROVEN`). Product SHA `008ebac4496d592d271d612713c437d316c416f0`, isolated Supabase acceptance project `miuecvkkmyvaciticwtm`, remote migrations 64 (`20260908`). All Clinic Blocks 1, 2, and 3 are closed and proven (`E2_EXECUTABLE_EXACT_SHA_CI` Run `32624729632` and `E3_ISOLATED_RUNTIME_E2E` read-only recapture `7E2954A3...`).
+
+## DECISION-013: Clinic AI Assist Speech-to-Text Carry-Forward & Human-in-the-Loop Architecture
+- **Status**: ACCEPTED
+- **Decision**: Speech-to-text assistive dictation is deferred (`CLINIC_AI_ASSIST_SPEECH_TO_TEXT = DEFERRED_CARRY_FORWARD`) as a non-blocking extension into the immediate next product slice `CLINIC_AI_ASSIST_V1`. Architecture hard safety rule: AI/transcription must NEVER directly persist a clinical note without explicit clinician approval (`audio -> transcription -> editable draft -> explicit approve/reject -> canonical clinic_save_encounter_note`). Clinician remains final author; no autonomous diagnosis, treatment, prescribing, or hidden clinical narrative in audit logs.
+
+## DECISION-014: Master Delivery Train Advancement to LARİ Health Tourism
+- **Status**: ACCEPTED
+- **Decision**: Main product delivery train advances to `LARİ Health Tourism` (`HEALTH_TOURISM_FOUNDATION`). Scope includes multilingual public/intake experience, source/agency attribution, Web AI Lead Agent, lead capture & scoring, conversation summary, coordinator workflow, and Clinic integration. AI remains assistive (not a doctor). No autonomous medical diagnosis, e-prescriptions, DICOM/PACS, or split payments unless separately authorized.
