@@ -238,7 +238,11 @@ jobs:
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== EXECUTING CLINIC AI COMMERCIAL AUTHORITY SQL SUITE ==="
 
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_ai_assist_commercial_authority_tests.sql 2>&1 | tee /tmp/e2-logs/clinic-ai-commercial-sql.log
+          if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_ai_assist_commercial_authority_tests.sql 2>&1 | tee /tmp/e2-logs/clinic-ai-commercial-sql.log; then
+            echo "=== CLINIC AI COMMERCIAL SQL SUITE FAILURE LOG ==="
+            cat /tmp/e2-logs/clinic-ai-commercial-sql.log
+            exit 1
+          fi
 
           grep "ALL 25 EXECUTABLE CLINIC AI ASSIST COMMERCIAL AUTHORITY TESTS PASSED" /tmp/e2-logs/clinic-ai-commercial-sql.log
           grep "CASE 25 PASS" /tmp/e2-logs/clinic-ai-commercial-sql.log
