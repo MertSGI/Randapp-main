@@ -382,7 +382,7 @@ check('14. No frontend provider secret — no VITE_*KEY for AI', () => {
 // ADDITIONAL STRUCTURAL CHECKS
 // ===========================================================================
 
-check('15. Migration count is exactly 65 including Migration 65 commercial authority', () => {
+check('15. Migration 65 defines 0-argument RPC, consumes canonical "eligible" boolean & drops parameterized legacy RPC', () => {
   assert.strictEqual(
     migrationFiles.length,
     65,
@@ -391,17 +391,35 @@ check('15. Migration count is exactly 65 including Migration 65 commercial autho
   const migration65Path = path.join(migrationsDir, '20260909_clinic_ai_assist_commercial_authority.sql');
   assert(fs.existsSync(migration65Path), 'Migration 65 file missing');
   const m65Content = fs.readFileSync(migration65Path, 'utf8');
+
+  // Finding 2: Zero-argument signature
   assert(
-    m65Content.includes('clinic_check_and_consume_ai_allowance'),
-    'Migration 65 must define clinic_check_and_consume_ai_allowance RPC'
+    m65Content.includes('CREATE OR REPLACE FUNCTION public.clinic_check_and_consume_ai_allowance()'),
+    'Migration 65 must define zero-argument clinic_check_and_consume_ai_allowance()'
   );
+  assert(
+    m65Content.includes('DROP FUNCTION IF EXISTS public.clinic_check_and_consume_ai_allowance(UUID, INT);'),
+    'Migration 65 must drop parameterized legacy signature'
+  );
+
+  // Finding 1: Canonical 'eligible' field
+  assert(
+    m65Content.includes("(v_eligible_res->>'eligible')::boolean"),
+    'Migration 65 must consume canonical "eligible" field from resolve_tenant_commercial_eligibility'
+  );
+
+  // Concurrency & Server-side derivation
   assert(
     m65Content.includes('pg_advisory_xact_lock'),
     'Migration 65 must use pg_advisory_xact_lock for concurrency safety'
   );
+  assert(
+    m65Content.includes('can_write_clinical_notes'),
+    'Migration 65 must verify can_write_clinical_notes server-side'
+  );
 });
 
-check('16. Edge functions check can_write_clinical_notes & atomic commercial quota RPC', () => {
+check('16. Edge functions call 0-argument quota RPC AFTER provider validation (Finding 2 & 3)', () => {
   assert(
     clinicAiTranscribeEdge.includes('clinic_get_my_context'),
     'Transcribe edge function must call clinic_get_my_context RPC'
@@ -410,13 +428,32 @@ check('16. Edge functions check can_write_clinical_notes & atomic commercial quo
     clinicAiDraftEdge.includes('clinic_get_my_context'),
     'Draft edge function must call clinic_get_my_context RPC'
   );
+
+  // Finding 2: 0-argument RPC call without caller-supplied parameters
   assert(
-    clinicAiTranscribeEdge.includes('clinic_check_and_consume_ai_allowance'),
-    'Transcribe edge function must check clinic_check_and_consume_ai_allowance'
+    clinicAiTranscribeEdge.includes('"clinic_check_and_consume_ai_allowance"') &&
+    !clinicAiTranscribeEdge.includes('p_tenant_id'),
+    'Transcribe edge function must invoke 0-argument quota RPC without tenant_id/delta parameters'
   );
   assert(
-    clinicAiDraftEdge.includes('clinic_check_and_consume_ai_allowance'),
-    'Draft edge function must check clinic_check_and_consume_ai_allowance'
+    clinicAiDraftEdge.includes('"clinic_check_and_consume_ai_allowance"') &&
+    !clinicAiDraftEdge.includes('p_tenant_id'),
+    'Draft edge function must invoke 0-argument quota RPC without tenant_id/delta parameters'
+  );
+
+  // Finding 3: Provider factory creation BEFORE quota RPC
+  const transcribeProviderIdx = clinicAiTranscribeEdge.indexOf('createTranscriptionProvider()');
+  const transcribeQuotaIdx = clinicAiTranscribeEdge.indexOf('clinic_check_and_consume_ai_allowance');
+  assert(
+    transcribeProviderIdx > 0 && transcribeQuotaIdx > transcribeProviderIdx,
+    'Transcribe edge function must validate provider factory BEFORE invoking commercial quota RPC'
+  );
+
+  const draftProviderIdx = clinicAiDraftEdge.indexOf('createSoapDraftProvider()');
+  const draftQuotaIdx = clinicAiDraftEdge.indexOf('clinic_check_and_consume_ai_allowance');
+  assert(
+    draftProviderIdx > 0 && draftQuotaIdx > draftProviderIdx,
+    'Draft edge function must validate provider factory BEFORE invoking commercial quota RPC'
   );
 });
 

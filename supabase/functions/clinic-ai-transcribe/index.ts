@@ -122,11 +122,17 @@ serve(async (req: Request) => {
     }
 
     // -----------------------------------------------------------------------
-    // 4. Commercial Authority & Atomic Quota Reservation
+    // 4. Provider Factory Validation BEFORE Commercial Quota Reservation (Finding 3)
+    //    If provider is not configured or invalid, throw/return before consuming quota (delta 0).
+    // -----------------------------------------------------------------------
+    const provider = createTranscriptionProvider();
+
+    // -----------------------------------------------------------------------
+    // 5. Commercial Authority & Atomic Quota Reservation
+    //    Uses zero-argument server-authoritative RPC (Finding 2)
     // -----------------------------------------------------------------------
     const { data: quotaData, error: quotaError } = await supabase.rpc(
-      "clinic_check_and_consume_ai_allowance",
-      { p_tenant_id: clinicContext.tenant_id, p_delta: 1 }
+      "clinic_check_and_consume_ai_allowance"
     );
 
     if (quotaError) {
@@ -141,10 +147,8 @@ serve(async (req: Request) => {
     }
 
     // -----------------------------------------------------------------------
-    // 5. Invoke transcription provider (fail-closed if not configured)
+    // 6. Invoke transcription provider — 1 unit consumed upon invocation attempt
     // -----------------------------------------------------------------------
-    const provider = createTranscriptionProvider();
-
     const result = await provider.transcribe({
       audio: audioBytes,
       mimeType: effectiveMime,
@@ -156,7 +160,7 @@ serve(async (req: Request) => {
     });
 
     // -----------------------------------------------------------------------
-    // 6. Return normalized result — ZERO persistence
+    // 7. Return normalized result — ZERO persistence
     // -----------------------------------------------------------------------
     return new Response(
       JSON.stringify({
