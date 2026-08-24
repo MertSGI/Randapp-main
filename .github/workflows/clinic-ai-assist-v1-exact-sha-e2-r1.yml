@@ -116,6 +116,18 @@ jobs:
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== EXECUTING TEST COMPATIBILITY BOOTSTRAP FIXTURE ==="
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/fixtures/p2a_managed_runtime_bootstrap.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -c "
+            INSERT INTO auth.users (id, email) VALUES
+              ('a9999999-9999-4999-9999-999999999901', 'practitioner_a@test.com'),
+              ('a9999999-9999-4999-9999-999999999902', 'practitioner_b@test.com'),
+              ('a9999999-9999-4999-9999-999999999903', 'noprofile@test.com'),
+              ('a9999999-9999-4999-9999-999999999904', 'reception@test.com'),
+              ('a9999999-9999-4999-9999-999999999905', 'owner@test.com'),
+              ('a9999999-9999-4999-9999-999999999906', 'superadmin@test.com'),
+              ('a7777777-7777-4777-7777-777777777701', 'concurrency@test.com')
+            ON CONFLICT (id) DO NOTHING;
+          "
+          echo "Compatibility bootstrap completed."
 
       - name: Full Migration Replay (65 Migrations)
         id: migration_replay
