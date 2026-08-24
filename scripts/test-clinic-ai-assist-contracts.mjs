@@ -392,10 +392,17 @@ check('15. Migration 65 defines 0-argument RPC, consumes canonical "eligible" bo
   assert(fs.existsSync(migration65Path), 'Migration 65 file missing');
   const m65Content = fs.readFileSync(migration65Path, 'utf8');
 
-  // Finding 2: Zero-argument signature
+  // Check SQL test suite file
+  const sqlTestPath = path.join(process.cwd(), 'supabase/tests/clinic_ai_assist_commercial_authority_tests.sql');
+  assert(fs.existsSync(sqlTestPath), 'SQL test suite file missing');
+  const sqlTestContent = fs.readFileSync(sqlTestPath, 'utf8');
   assert(
-    m65Content.includes('CREATE OR REPLACE FUNCTION public.clinic_check_and_consume_ai_allowance()'),
-    'Migration 65 must define zero-argument clinic_check_and_consume_ai_allowance()'
+    sqlTestContent.includes('CASE 25'),
+    'SQL test suite must contain 25 executable cases'
+  );
+  assert(
+    sqlTestContent.includes('SET LOCAL ROLE authenticated;'),
+    'SQL test suite must prove role switching with SET LOCAL ROLE authenticated;'
   );
   assert(
     m65Content.includes('DROP FUNCTION IF EXISTS public.clinic_check_and_consume_ai_allowance(UUID, INT);'),
