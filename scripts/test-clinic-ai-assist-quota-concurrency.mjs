@@ -1,5 +1,5 @@
 // ============================================================================
-// CLINIC AI ASSIST QUOTA CONCURRENCY RUNNER (SLICE R2.3 HARDENED)
+// CLINIC AI ASSIST QUOTA CONCURRENCY RUNNER (SLICE R2.4 HARDENED)
 // File: scripts/test-clinic-ai-assist-quota-concurrency.mjs
 // Purpose:
 //   Genuine two-connection PostgreSQL concurrency test runner racing independent database
@@ -38,7 +38,7 @@ async function runConcurrencyTest() {
   if (!isDbAvailable) {
     console.log('CLINIC_AI_QUOTA_CONCURRENCY=NOT_EXECUTED_NO_LOCAL_DB');
     console.log('Info: Local PostgreSQL database connection unavailable. Skipping real-time concurrent socket race.');
-    process.exit(0);
+    return;
   }
 
   console.log('Local PostgreSQL connection detected. Executing real 2-transaction concurrency race...');
@@ -49,11 +49,16 @@ async function runConcurrencyTest() {
   const cStaffId = '37777777-7777-4777-7777-777777777701';
   const quotaLimit = 5;
 
-  const adminClient = new Client(dbConfig);
-  const client1 = new Client(dbConfig);
-  const client2 = new Client(dbConfig);
+  let adminClient = null;
+  let client1 = null;
+  let client2 = null;
+  let executionFailed = false;
 
   try {
+    adminClient = new Client(dbConfig);
+    client1 = new Client(dbConfig);
+    client2 = new Client(dbConfig);
+
     await adminClient.connect();
 
     // 1. Privileged Setup
@@ -72,7 +77,7 @@ async function runConcurrencyTest() {
     const planVerId = planVerRes.rows[0].id;
     const planCode = planVerRes.rows[0].code;
 
-    // Cleanup previous concurrency fixture if any
+    // Cleanup previous concurrency fixture if any across ALL 7 entity classes
     await adminClient.query(`DELETE FROM public.usage_counters WHERE tenant_id = $1`, [cTenantId]);
     await adminClient.query(`DELETE FROM public.tenant_entitlement_overrides WHERE tenant_id = $1`, [cTenantId]);
     await adminClient.query(`DELETE FROM public.clinic_staff_profiles WHERE tenant_id = $1`, [cTenantId]);
@@ -99,27 +104,52 @@ async function runConcurrencyTest() {
       VALUES ($1, 'ai_allowance', $2::timestamptz, ($2::timestamptz + interval '1 month'), $3, 4, 4)
     `, [cTenantId, pStart, periodKey]);
 
-    // 2. Connect Client 1 & Client 2
+    // 2. Connect Client 1 & Client 2 and start explicit transactions
     await client1.connect();
     await client2.connect();
 
-    // Authenticate both clients as the same practitioner
-    await client1.query(`SET ROLE authenticated; SELECT set_config('request.jwt.claim.role', 'authenticated', true); SELECT set_config('request.jwt.claim.sub', $1, true);`, [cPractitionerUid]);
-    await client2.query(`SET ROLE authenticated; SELECT set_config('request.jwt.claim.role', 'authenticated', true); SELECT set_config('request.jwt.claim.sub', $1, true);`, [cPractitionerUid]);
+    // Client 1 transaction + JWT claims
+    await client1.query('BEGIN');
+    await client1.query('SET LOCAL ROLE authenticated');
+    await client1.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+    await client1.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [cPractitionerUid]);
 
-    // 3. Race Invocation: Execute simultaneous RPC calls across both sockets
+    // Client 2 transaction + JWT claims
+    await client2.query('BEGIN');
+    await client2.query('SET LOCAL ROLE authenticated');
+    await client2.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+    await client2.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [cPractitionerUid]);
+
+    // Verify auth.uid() on both client connections before racing
+    const authUidRes1 = await client1.query('SELECT auth.uid() AS uid');
+    const authUidRes2 = await client2.query('SELECT auth.uid() AS uid');
+    const authUid1 = authUidRes1.rows[0]?.uid;
+    const authUid2 = authUidRes2.rows[0]?.uid;
+
+    console.log(`AUTH_UID_CLIENT_1=${authUid1}`);
+    console.log(`AUTH_UID_CLIENT_2=${authUid2}`);
+
+    if (authUid1 !== cPractitionerUid || authUid2 !== cPractitionerUid) {
+      throw new Error(`AUTH UID VERIFICATION FAILED: client1=${authUid1}, client2=${authUid2}, expected=${cPractitionerUid}`);
+    }
+
+    // 3. Race Invocation: Execute simultaneous RPC calls across both sockets while transactions remain open
     const [res1, res2] = await Promise.all([
       client1.query(`SELECT public.clinic_check_and_consume_ai_allowance() AS result`),
       client2.query(`SELECT public.clinic_check_and_consume_ai_allowance() AS result`),
     ]);
+
+    // Commit both transactions
+    await client1.query('COMMIT');
+    await client2.query('COMMIT');
 
     const json1 = res1.rows[0].result;
     const json2 = res2.rows[0].result;
 
     // 4. Derive actual counts from response arrays
     const results = [json1, json2];
-    const successCount = results.filter(r => r.success === true && r.reason_code === 'COMMERCIAL_ALLOWED').length;
-    const exhaustedCount = results.filter(r => r.success === false && r.reason_code === 'AI_QUOTA_EXHAUSTED').length;
+    const successCount = results.filter(r => r && r.success === true && r.reason_code === 'COMMERCIAL_ALLOWED').length;
+    const exhaustedCount = results.filter(r => r && r.success === false && r.reason_code === 'AI_QUOTA_EXHAUSTED').length;
 
     // 5. Query actual final usage count from DB
     const finalUsageRes = await adminClient.query(`SELECT usage_count FROM public.usage_counters WHERE tenant_id = $1 AND feature_key = 'ai_allowance' AND period_key = $2`, [cTenantId, periodKey]);
@@ -137,9 +167,10 @@ async function runConcurrencyTest() {
     console.log('\n=== REAL CONCURRENCY RACE COMPLETED & VERIFIED ===');
   } catch (err) {
     console.error('Concurrency execution failed:', err);
-    process.exit(1);
+    executionFailed = true;
+    process.exitCode = 1;
   } finally {
-    // Cleanup concurrency fixtures
+    // Cleanup concurrency fixtures across ALL 7 entity classes
     try {
       if (adminClient) {
         await adminClient.query(`DELETE FROM public.usage_counters WHERE tenant_id = $1`, [cTenantId]);
@@ -150,21 +181,42 @@ async function runConcurrencyTest() {
         await adminClient.query(`DELETE FROM public.users_profile WHERE id = $1`, [cPractitionerUid]);
         await adminClient.query(`DELETE FROM public.tenants WHERE id = $1`, [cTenantId]);
 
-        const residueRes = await adminClient.query(`SELECT COUNT(*) FROM public.tenants WHERE id = $1`, [cTenantId]);
-        const residueCount = parseInt(residueRes.rows[0].count, 10);
+        // Residue verification across ALL 7 entity classes
+        const residueTenants = await adminClient.query(`SELECT COUNT(*) FROM public.tenants WHERE id = $1`, [cTenantId]);
+        const residueUsers = await adminClient.query(`SELECT COUNT(*) FROM public.users_profile WHERE id = $1`, [cPractitionerUid]);
+        const residueStaff = await adminClient.query(`SELECT COUNT(*) FROM public.staff WHERE tenant_id = $1`, [cTenantId]);
+        const residueClinicStaff = await adminClient.query(`SELECT COUNT(*) FROM public.clinic_staff_profiles WHERE tenant_id = $1`, [cTenantId]);
+        const residueSubs = await adminClient.query(`SELECT COUNT(*) FROM public.subscriptions WHERE tenant_id = $1`, [cTenantId]);
+        const residueOverrides = await adminClient.query(`SELECT COUNT(*) FROM public.tenant_entitlement_overrides WHERE tenant_id = $1`, [cTenantId]);
+        const residueCounters = await adminClient.query(`SELECT COUNT(*) FROM public.usage_counters WHERE tenant_id = $1`, [cTenantId]);
+
+        const residueCount =
+          parseInt(residueTenants.rows[0].count, 10) +
+          parseInt(residueUsers.rows[0].count, 10) +
+          parseInt(residueStaff.rows[0].count, 10) +
+          parseInt(residueClinicStaff.rows[0].count, 10) +
+          parseInt(residueSubs.rows[0].count, 10) +
+          parseInt(residueOverrides.rows[0].count, 10) +
+          parseInt(residueCounters.rows[0].count, 10);
+
         console.log(`CONCURRENCY_FIXTURE_RESIDUE_COUNT=${residueCount}`);
         if (residueCount !== 0) {
-          console.error('CONCURRENCY CLEANUP FAIL: Fixture residue remains');
-          process.exit(1);
+          console.error('CONCURRENCY CLEANUP FAIL: Fixture residue remains across entity classes');
+          process.exitCode = 1;
         }
       }
     } catch (cleanupErr) {
       console.error('Cleanup error:', cleanupErr);
+      process.exitCode = 1;
     }
 
-    await adminClient.end().catch(() => {});
-    await client1.end().catch(() => {});
-    await client2.end().catch(() => {});
+    if (adminClient) await adminClient.end().catch(() => {});
+    if (client1) await client1.end().catch(() => {});
+    if (client2) await client2.end().catch(() => {});
+
+    if (executionFailed) {
+      process.exitCode = 1;
+    }
   }
 }
 

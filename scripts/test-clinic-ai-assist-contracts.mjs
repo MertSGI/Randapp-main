@@ -618,6 +618,76 @@ check('26. Transcribe edge function does NOT log audio bytes or transcript text'
 });
 
 // ===========================================================================
+// CHECK 27: R2.4 Concurrency Harness Integrity Guards
+// ===========================================================================
+
+check('27. Concurrency runner R2.4 integrity guards enforced', () => {
+  // Guard 1: pg is explicit devDependency in package.json
+  assert(
+    packageJson.devDependencies && packageJson.devDependencies['pg'],
+    'package.json must specify pg as an explicit devDependency'
+  );
+
+  const concurrencyRunnerPath = path.join(process.cwd(), 'scripts/test-clinic-ai-assist-quota-concurrency.mjs');
+  assert(fs.existsSync(concurrencyRunnerPath), 'Concurrency runner file missing');
+  const concurrencyContent = fs.readFileSync(concurrencyRunnerPath, 'utf8');
+
+  // Guard 2: Each racing client begins an explicit transaction
+  assert(
+    concurrencyContent.includes("client1.query('BEGIN')") &&
+    concurrencyContent.includes("client2.query('BEGIN')"),
+    'Concurrency runner must begin explicit transactions for both racing clients'
+  );
+
+  // Guard 3: auth.uid() is verified on both race connections
+  assert(
+    concurrencyContent.includes("client1.query('SELECT auth.uid() AS uid')") &&
+    concurrencyContent.includes("client2.query('SELECT auth.uid() AS uid')") &&
+    concurrencyContent.includes('AUTH_UID_CLIENT_1') &&
+    concurrencyContent.includes('AUTH_UID_CLIENT_2'),
+    'Concurrency runner must verify auth.uid() on both client connections before racing'
+  );
+
+  // Guard 4: Cleanup checks all 7 fixture entity classes
+  const requiredEntities = [
+    'tenants',
+    'users_profile',
+    'staff',
+    'clinic_staff_profiles',
+    'subscriptions',
+    'tenant_entitlement_overrides',
+    'usage_counters'
+  ];
+  for (const entity of requiredEntities) {
+    assert(
+      concurrencyContent.includes(`public.${entity}`),
+      `Concurrency runner cleanup must check residue for entity class public.${entity}`
+    );
+  }
+  assert(
+    concurrencyContent.includes('CONCURRENCY_FIXTURE_RESIDUE_COUNT'),
+    'Concurrency runner must compute and log CONCURRENCY_FIXTURE_RESIDUE_COUNT'
+  );
+
+  // Guard 5: No process.exit in catch before cleanup completion
+  assert(
+    !concurrencyContent.includes('catch (err) {\n    console.error(\'Concurrency execution failed:\', err);\n    process.exit(1);'),
+    'Concurrency runner must NOT call process.exit(1) before async cleanup finishes'
+  );
+  assert(
+    concurrencyContent.includes('process.exitCode = 1'),
+    'Concurrency runner must use process.exitCode = 1 for execution and cleanup failures'
+  );
+
+  // Guard 6: No hardcoded PASS result values in NOT_EXECUTED path or concurrency runner
+  assert(
+    !concurrencyContent.includes('console.log(`SUCCESS_COUNT=1`)') &&
+    !concurrencyContent.includes('console.log(`AI_QUOTA_EXHAUSTED_COUNT=1`)'),
+    'Concurrency runner must NOT contain hardcoded success or exhausted count log statements'
+  );
+});
+
+// ===========================================================================
 // SUMMARY
 // ===========================================================================
 
@@ -630,3 +700,4 @@ if (failed > 0) {
 
 console.log('');
 console.log('ALL CHECKS PASSED.');
+
