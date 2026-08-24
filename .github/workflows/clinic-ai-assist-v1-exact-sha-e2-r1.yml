@@ -179,6 +179,7 @@ jobs:
 
           # Legacy signature check
           LEGACY_COUNT=$(psql "$DB_URL" -t -A -c "SELECT COUNT(*) FROM pg_proc WHERE proname = 'clinic_check_and_consume_ai_allowance' AND pronargs > 0;")
+          echo "LEGACY_COUNT=${LEGACY_COUNT}"
           if [ "${LEGACY_COUNT}" = "0" ]; then
             echo "MIGRATION65_LEGACY_SIGNATURE_ABSENT_RESULT=PASS"
           else
@@ -187,8 +188,9 @@ jobs:
           fi
 
           # Anon EXECUTE check
-          ANON_EXEC=$(psql "$DB_URL" -t -A -c "SELECT has_function_privilege('anon', 'clinic_check_and_consume_ai_allowance()', 'EXECUTE');")
-          if [ "${ANON_EXEC}" = "false" ]; then
+          ANON_EXEC=$(psql "$DB_URL" -t -A -c "SELECT (has_function_privilege('anon', 'clinic_check_and_consume_ai_allowance()', 'EXECUTE'))::text;")
+          echo "ANON_EXEC=${ANON_EXEC}"
+          if [ "${ANON_EXEC}" = "false" ] || [ "${ANON_EXEC}" = "f" ]; then
             echo "MIGRATION65_ANON_EXECUTE_RESULT=PASS"
           else
             echo "MIGRATION65_ANON_EXECUTE_RESULT=FAIL"
@@ -196,8 +198,9 @@ jobs:
           fi
 
           # Authenticated EXECUTE check
-          AUTH_EXEC=$(psql "$DB_URL" -t -A -c "SELECT has_function_privilege('authenticated', 'clinic_check_and_consume_ai_allowance()', 'EXECUTE');")
-          if [ "${AUTH_EXEC}" = "true" ]; then
+          AUTH_EXEC=$(psql "$DB_URL" -t -A -c "SELECT (has_function_privilege('authenticated', 'clinic_check_and_consume_ai_allowance()', 'EXECUTE'))::text;")
+          echo "AUTH_EXEC=${AUTH_EXEC}"
+          if [ "${AUTH_EXEC}" = "true" ] || [ "${AUTH_EXEC}" = "t" ]; then
             echo "MIGRATION65_AUTHENTICATED_EXECUTE_RESULT=PASS"
           else
             echo "MIGRATION65_AUTHENTICATED_EXECUTE_RESULT=FAIL"
