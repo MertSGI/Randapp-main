@@ -1,11 +1,12 @@
 -- ============================================================================
--- LARİ CLINIC AI ASSIST COMMERCIAL AUTHORITY EXECUTABLE SQL TEST SUITE (SLICE R2.2)
+-- LARİ CLINIC AI ASSIST COMMERCIAL AUTHORITY EXECUTABLE SQL TEST SUITE (SLICE R2.3)
 -- File: supabase/tests/clinic_ai_assist_commercial_authority_tests.sql
 -- Purpose:
 --   Executable SQL verification for Migration 65 (Clinic AI Quota Authority)
 --   with REAL DB role switching, synthetic collision-resistant UUID fixtures,
 --   exact catalog ACL inspection, strict 25-case PL/pgSQL assertions,
---   cross-tenant quota isolation, quota limit boundaries, and response non-disclosure.
+--   cross-tenant quota isolation, quota limit boundaries, response non-disclosure,
+--   and POST-ROLLBACK fixture residue verification (CASE 25).
 -- ============================================================================
 
 BEGIN;
@@ -31,8 +32,9 @@ DECLARE
     v_reception_staff_id UUID := '39999999-9999-4999-9999-999999999904'::UUID;
 
     v_plan_version_id UUID;
+    v_plan_code TEXT;
 BEGIN
-    RAISE NOTICE '=== STARTING CLINIC AI ASSIST COMMERCIAL AUTHORITY EXECUTABLE SQL SUITE (R2.2) ===';
+    RAISE NOTICE '=== STARTING CLINIC AI ASSIST COMMERCIAL AUTHORITY EXECUTABLE SQL SUITE (R2.3) ===';
 
     -- Cleanup synthetic test fixtures if present
     DELETE FROM public.usage_counters WHERE tenant_id IN (v_tenant_a_id, v_tenant_b_id);
@@ -51,8 +53,8 @@ BEGIN
     VALUES (v_tenant_a_id, 'AI Quota Test Clinic A', 'ai-quota-test-a', 'active'),
            (v_tenant_b_id, 'AI Quota Test Clinic B', 'ai-quota-test-b', 'active');
 
-    -- Resolve published plan_version_id for subscriptions
-    SELECT pv.id INTO v_plan_version_id
+    -- Resolve published plan_version_id and textual plan_code for subscriptions (Finding 2)
+    SELECT pv.id, p.code INTO v_plan_version_id, v_plan_code
     FROM public.plans p
     JOIN public.plan_versions pv ON pv.plan_id = p.id
     WHERE p.code = 'baslangic' AND pv.lifecycle_status = 'published'
@@ -63,29 +65,29 @@ BEGIN
         RAISE EXCEPTION 'FIXTURE SETUP FAIL: Published baslangic plan version not found.';
     END IF;
 
-    -- Seed Subscription for Tenant A (active lifecycle default)
+    -- Seed Subscription for Tenant A (active lifecycle default, textual plan_id = 'baslangic', billing_mode = 'manual')
     INSERT INTO public.subscriptions (
         tenant_id, plan_id, plan_version_id, status, billing_mode
     ) VALUES (
         v_tenant_a_id,
-        (SELECT plan_id FROM public.plan_versions WHERE id = v_plan_version_id),
+        v_plan_code,
         v_plan_version_id,
         'active',
-        'stripe'
+        'manual'
     );
 
-    -- Seed Subscription for Tenant B (manual_active lifecycle)
+    -- Seed Subscription for Tenant B (manual_active lifecycle, textual plan_id = 'baslangic', billing_mode = 'manual')
     INSERT INTO public.subscriptions (
         tenant_id, plan_id, plan_version_id, status, billing_mode
     ) VALUES (
         v_tenant_b_id,
-        (SELECT plan_id FROM public.plan_versions WHERE id = v_plan_version_id),
+        v_plan_code,
         v_plan_version_id,
         'manual_active',
         'manual'
     );
 
-    -- Seed User Profiles
+    -- Seed User Profiles (Audit Finding 1: exact v_owner_uid = 'a9999999-9999-4999-9999-999999999905')
     INSERT INTO public.users_profile (id, tenant_id, role, name, active)
     VALUES (v_practitioner_a_uid, v_tenant_a_id, 'staff', 'Dr. Practitioner A', true),
            (v_practitioner_b_uid, v_tenant_b_id, 'staff', 'Dr. Practitioner B', true),
@@ -131,7 +133,7 @@ $$;
 
 
 -- ============================================================================
--- SECTION 2: EXECUTABLE MANDATORY CASES (25 Explicit Executable PL/pgSQL Checks)
+-- SECTION 2: EXECUTABLE MANDATORY CASES (Cases 01 - 24 inside Transaction)
 -- ============================================================================
 DO $$
 DECLARE
@@ -142,7 +144,7 @@ DECLARE
     v_practitioner_b_uid UUID := 'a9999999-9999-4999-9999-999999999902'::UUID;
     v_no_profile_staff_uid UUID := 'a9999999-9999-4999-9999-999999999903'::UUID;
     v_reception_staff_uid UUID := 'a9999999-9999-4999-9999-999999999904'::UUID;
-    v_owner_uid UUID := 'a9999999-9999-4999-9999-99999999905'::UUID;
+    v_owner_uid UUID := 'a9999999-9999-4999-9999-999999999905'::UUID;
     v_superadmin_uid UUID := 'a9999999-9999-4999-9999-999999999906'::UUID;
 
     v_sub_id UUID;
@@ -270,18 +272,34 @@ $$;
 -- SECTION 3: ROLE & PERMISSION CONTEXT PROOF (SET LOCAL ROLE authenticated / anon)
 -- ============================================================================
 
--- CASE 11: Anon / Unauthenticated execution
+-- CASE 11: Anon ACL Proof (Finding 4 — Catalog REVOKE & Exception Block 42501)
 SET LOCAL ROLE anon;
 
 DO $$
 DECLARE
-    v_res JSONB;
+    v_has_exec BOOLEAN;
+    v_executed BOOLEAN := false;
 BEGIN
-    v_res := public.clinic_check_and_consume_ai_allowance();
-    IF (v_res->>'success')::boolean <> false OR (v_res->>'reason_code') <> 'UNAUTHENTICATED' THEN
-        RAISE EXCEPTION 'CASE 11 FAIL: Anon caller returned: %', v_res;
+    -- Proof A: Catalog has_function_privilege MUST be false for anon
+    v_has_exec := has_function_privilege('anon', 'public.clinic_check_and_consume_ai_allowance()', 'EXECUTE');
+    IF v_has_exec THEN
+        RAISE EXCEPTION 'CASE 11 FAIL: anon has EXECUTE privilege on clinic_check_and_consume_ai_allowance catalog!';
     END IF;
-    RAISE NOTICE '✓ CASE 11 PASS: Anon / unauthenticated caller rejected with UNAUTHENTICATED';
+
+    -- Proof B: Direct invocation MUST raise SQLSTATE 42501 (insufficient_privilege)
+    BEGIN
+        PERFORM public.clinic_check_and_consume_ai_allowance();
+        v_executed := true;
+    EXCEPTION
+        WHEN insufficient_privilege THEN
+            RAISE NOTICE '✓ CASE 11 PASS: Direct RPC invocation by anon rejected with SQLSTATE 42501 (permission denied)';
+        WHEN OTHERS THEN
+            RAISE EXCEPTION 'CASE 11 FAIL: Direct RPC invocation by anon raised unexpected error: % (SQLSTATE %)', SQLERRM, SQLSTATE;
+    END;
+
+    IF v_executed THEN
+        RAISE EXCEPTION 'CASE 11 FAIL: Direct RPC invocation by anon succeeded without raising 42501!';
+    END IF;
 END;
 $$;
 
@@ -291,7 +309,7 @@ SET LOCAL ROLE authenticated;
 
 -- CASE 12: Authenticated user with no active staff record => FORBIDDEN
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
-SELECT set_config('request.jwt.claim.sub', 'a9999999-9999-4999-9999-999999999905', true); -- Owner UID (no staff record)
+SELECT set_config('request.jwt.claim.sub', 'a9999999-9999-4999-9999-999999999905', true); -- Owner UID (exact UUID matching fixture setup)
 
 DO $$
 DECLARE
@@ -430,7 +448,7 @@ DECLARE
 BEGIN
     -- Set Tenant A integer_value = 0 (not entitled)
     UPDATE public.tenant_entitlement_overrides
-    SET integer_value = 0
+    SET integer_value = 0, is_unlimited = false
     WHERE tenant_id = v_tenant_a_id AND feature_key = 'ai_allowance';
 
     SELECT usage_count INTO v_usage_before
@@ -499,7 +517,7 @@ END;
 $$;
 
 
--- CASE 22: Unlimited entitlement path
+-- CASE 22: Unlimited entitlement path (Audit Finding 3: is_unlimited = true, integer_value = NULL)
 DO $$
 DECLARE
     v_tenant_a_id UUID := 'b9999999-9999-4999-9999-999999999901'::UUID;
@@ -509,9 +527,9 @@ DECLARE
     v_usage_before BIGINT;
     v_usage_after BIGINT;
 BEGIN
-    -- Set Tenant A is_unlimited = true
+    -- Set Tenant A is_unlimited = true, integer_value = NULL (matching DB check constraint)
     UPDATE public.tenant_entitlement_overrides
-    SET is_unlimited = true
+    SET is_unlimited = true, integer_value = NULL
     WHERE tenant_id = v_tenant_a_id AND feature_key = 'ai_allowance';
 
     SELECT usage_count INTO v_usage_before
@@ -562,15 +580,68 @@ BEGIN
 END;
 $$;
 
--- Switch back to privileged session role before final rollback check
+-- Switch back to privileged session role
 RESET ROLE;
 
--- CASE 25: Transaction rollback leaves no synthetic fixture residue
+-- Rollback transaction containing Cases 01 - 24
+ROLLBACK;
+
+
+-- ============================================================================
+-- SECTION 4: CASE 25 — REAL POST-ROLLBACK FIXTURE RESIDUE PROOF (Finding 5)
+--            Executed outside the transaction in autocommit context.
+-- ============================================================================
 DO $$
+DECLARE
+    v_tenant_a_id UUID := 'b9999999-9999-4999-9999-999999999901'::UUID;
+    v_tenant_b_id UUID := 'b9999999-9999-4999-9999-999999999902'::UUID;
+
+    v_practitioner_a_uid UUID := 'a9999999-9999-4999-9999-999999999901'::UUID;
+    v_practitioner_b_uid UUID := 'a9999999-9999-4999-9999-999999999902'::UUID;
+    v_no_profile_staff_uid UUID := 'a9999999-9999-4999-9999-999999999903'::UUID;
+    v_reception_staff_uid UUID := 'a9999999-9999-4999-9999-999999999904'::UUID;
+    v_owner_uid UUID := 'a9999999-9999-4999-9999-999999999905'::UUID;
+    v_superadmin_uid UUID := 'a9999999-9999-4999-9999-999999999906'::UUID;
+
+    v_residue_count INT := 0;
+    v_table_residue INT := 0;
 BEGIN
-    RAISE NOTICE '✓ CASE 25 PASS: Transaction ROLLBACK will automatically purge all synthetic fixture residue';
-    RAISE NOTICE '=== ALL 25 EXECUTABLE CLINIC AI ASSIST COMMERCIAL AUTHORITY TESTS PASSED ===';
+    -- Query tenants residue
+    SELECT COUNT(*) INTO v_table_residue FROM public.tenants WHERE id IN (v_tenant_a_id, v_tenant_b_id);
+    v_residue_count := v_residue_count + v_table_residue;
+
+    -- Query users_profile residue
+    SELECT COUNT(*) INTO v_table_residue FROM public.users_profile WHERE id IN (
+        v_practitioner_a_uid, v_practitioner_b_uid, v_no_profile_staff_uid,
+        v_reception_staff_uid, v_owner_uid, v_superadmin_uid
+    );
+    v_residue_count := v_residue_count + v_table_residue;
+
+    -- Query staff residue
+    SELECT COUNT(*) INTO v_table_residue FROM public.staff WHERE tenant_id IN (v_tenant_a_id, v_tenant_b_id);
+    v_residue_count := v_residue_count + v_table_residue;
+
+    -- Query clinic_staff_profiles residue
+    SELECT COUNT(*) INTO v_table_residue FROM public.clinic_staff_profiles WHERE tenant_id IN (v_tenant_a_id, v_tenant_b_id);
+    v_residue_count := v_residue_count + v_table_residue;
+
+    -- Query subscriptions residue
+    SELECT COUNT(*) INTO v_table_residue FROM public.subscriptions WHERE tenant_id IN (v_tenant_a_id, v_tenant_b_id);
+    v_residue_count := v_residue_count + v_table_residue;
+
+    -- Query tenant_entitlement_overrides residue
+    SELECT COUNT(*) INTO v_table_residue FROM public.tenant_entitlement_overrides WHERE tenant_id IN (v_tenant_a_id, v_tenant_b_id);
+    v_residue_count := v_residue_count + v_table_residue;
+
+    -- Query usage_counters residue
+    SELECT COUNT(*) INTO v_table_residue FROM public.usage_counters WHERE tenant_id IN (v_tenant_a_id, v_tenant_b_id);
+    v_residue_count := v_residue_count + v_table_residue;
+
+    IF v_residue_count > 0 THEN
+        RAISE EXCEPTION 'CASE 25 FAIL: Post-rollback query found % residue rows in database!', v_residue_count;
+    END IF;
+
+    RAISE NOTICE '✓ CASE 25 PASS: Post-rollback residue query confirmed exactly 0 synthetic fixture rows remaining in database';
+    RAISE NOTICE '=== ALL 25 EXECUTABLE CLINIC AI ASSIST COMMERCIAL AUTHORITY TESTS PASSED (R2.3 HARDENED) ===';
 END;
 $$;
-
-ROLLBACK;

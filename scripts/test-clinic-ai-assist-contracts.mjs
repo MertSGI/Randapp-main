@@ -392,17 +392,57 @@ check('15. Migration 65 defines 0-argument RPC, consumes canonical "eligible" bo
   assert(fs.existsSync(migration65Path), 'Migration 65 file missing');
   const m65Content = fs.readFileSync(migration65Path, 'utf8');
 
-  // Check SQL test suite file
+  // Check SQL test suite file & static hygiene guards
   const sqlTestPath = path.join(process.cwd(), 'supabase/tests/clinic_ai_assist_commercial_authority_tests.sql');
   assert(fs.existsSync(sqlTestPath), 'SQL test suite file missing');
   const sqlTestContent = fs.readFileSync(sqlTestPath, 'utf8');
+
+  // Static Hygiene Guard 1: Malformed synthetic UUID check
   assert(
-    sqlTestContent.includes('CASE 25'),
-    'SQL test suite must contain 25 executable cases'
+    !sqlTestContent.includes('a9999999-9999-4999-9999-99999999905'),
+    'SQL test suite must NOT contain malformed UUID literal "a9999999-9999-4999-9999-99999999905"'
   );
   assert(
-    sqlTestContent.includes('SET LOCAL ROLE authenticated;'),
-    'SQL test suite must prove role switching with SET LOCAL ROLE authenticated;'
+    sqlTestContent.includes('a9999999-9999-4999-9999-999999999905'),
+    'SQL test suite must contain exact 36-char UUID literal "a9999999-9999-4999-9999-999999999905"'
+  );
+
+  // Static Hygiene Guard 2: Subscription fixture contract
+  assert(
+    !sqlTestContent.includes("billing_mode\n    ) VALUES (\n        v_tenant_a_id,\n        (SELECT plan_id"),
+    'SQL test suite must NOT insert UUID into subscriptions.plan_id'
+  );
+  assert(
+    sqlTestContent.includes("billing_mode = 'manual'") || sqlTestContent.includes("'manual'"),
+    'SQL test suite must use canonical billing_mode'
+  );
+
+  // Static Hygiene Guard 3: Unlimited override shape
+  assert(
+    sqlTestContent.includes('is_unlimited = true, integer_value = NULL'),
+    'SQL test suite must set is_unlimited = true AND integer_value = NULL atomically'
+  );
+
+  // Static Hygiene Guard 4: Anon ACL 42501 contract
+  assert(
+    sqlTestContent.includes('insufficient_privilege') && sqlTestContent.includes("has_function_privilege('anon'"),
+    'SQL test suite must check catalog REVOKE and catch insufficient_privilege for anon'
+  );
+
+  // Static Hygiene Guard 5: Post-rollback residue query (CASE 25)
+  assert(
+    sqlTestContent.includes('SELECT COUNT(*) INTO v_table_residue FROM public.tenants') &&
+    sqlTestContent.includes('ROLLBACK;\n\n\n-- ============================================================================\n-- SECTION 4: CASE 25'),
+    'SQL test suite must execute post-rollback query checks for residue outside the transaction'
+  );
+
+  // Static Hygiene Guard 6: Concurrency runner stub prevention
+  const concurrencyRunnerPath = path.join(process.cwd(), 'scripts/test-clinic-ai-assist-quota-concurrency.mjs');
+  assert(fs.existsSync(concurrencyRunnerPath), 'Concurrency runner missing');
+  const concurrencyContent = fs.readFileSync(concurrencyRunnerPath, 'utf8');
+  assert(
+    !concurrencyContent.includes('// ... execution path for real DB test ...'),
+    'Concurrency runner must NOT contain placeholder execution path comments'
   );
   assert(
     m65Content.includes('DROP FUNCTION IF EXISTS public.clinic_check_and_consume_ai_allowance(UUID, INT);'),
