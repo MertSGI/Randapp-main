@@ -1,9 +1,10 @@
 // ============================================================================
-// CLINIC AI ASSIST QUOTA CONCURRENCY RUNNER (SLICE R2.4 HARDENED)
+// CLINIC AI ASSIST QUOTA CONCURRENCY RUNNER (SLICE R2.5 HARDENED)
 // File: scripts/test-clinic-ai-assist-quota-concurrency.mjs
 // Purpose:
 //   Genuine two-connection PostgreSQL concurrency test runner racing independent database
 //   sockets against the final available quota slot of clinic_check_and_consume_ai_allowance().
+//   Each racing client commits immediately after its RPC completes to release pg_advisory_xact_lock.
 //   ALL output values are derived dynamically from actual query responses (ZERO stubs/constants).
 // ============================================================================
 
@@ -29,6 +30,36 @@ async function testConnection() {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function executeQuotaRaceClient(client, practitionerUid, clientLabel) {
+  await client.query('BEGIN');
+  try {
+    await client.query("SET LOCAL statement_timeout = '5000ms'");
+    await client.query('SET LOCAL ROLE authenticated');
+    await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+    await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [practitionerUid]);
+
+    const authResult = await client.query('SELECT auth.uid() AS uid');
+    const authUid = authResult.rows[0]?.uid;
+
+    console.log(`AUTH_UID_${clientLabel}=${authUid}`);
+    if (authUid !== practitionerUid) {
+      throw new Error(`AUTH UID VERIFICATION FAILED FOR ${clientLabel}: got ${authUid}, expected ${practitionerUid}`);
+    }
+
+    const rpcResult = await client.query(
+      `SELECT public.clinic_check_and_consume_ai_allowance() AS result`
+    );
+
+    // Commit immediately after RPC completes to release transaction-scoped advisory lock
+    await client.query('COMMIT');
+
+    return rpcResult.rows[0].result;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
   }
 }
 
@@ -104,47 +135,15 @@ async function runConcurrencyTest() {
       VALUES ($1, 'ai_allowance', $2::timestamptz, ($2::timestamptz + interval '1 month'), $3, 4, 4)
     `, [cTenantId, pStart, periodKey]);
 
-    // 2. Connect Client 1 & Client 2 and start explicit transactions
+    // 2. Connect Client 1 & Client 2
     await client1.connect();
     await client2.connect();
 
-    // Client 1 transaction + JWT claims
-    await client1.query('BEGIN');
-    await client1.query('SET LOCAL ROLE authenticated');
-    await client1.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
-    await client1.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [cPractitionerUid]);
-
-    // Client 2 transaction + JWT claims
-    await client2.query('BEGIN');
-    await client2.query('SET LOCAL ROLE authenticated');
-    await client2.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
-    await client2.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [cPractitionerUid]);
-
-    // Verify auth.uid() on both client connections before racing
-    const authUidRes1 = await client1.query('SELECT auth.uid() AS uid');
-    const authUidRes2 = await client2.query('SELECT auth.uid() AS uid');
-    const authUid1 = authUidRes1.rows[0]?.uid;
-    const authUid2 = authUidRes2.rows[0]?.uid;
-
-    console.log(`AUTH_UID_CLIENT_1=${authUid1}`);
-    console.log(`AUTH_UID_CLIENT_2=${authUid2}`);
-
-    if (authUid1 !== cPractitionerUid || authUid2 !== cPractitionerUid) {
-      throw new Error(`AUTH UID VERIFICATION FAILED: client1=${authUid1}, client2=${authUid2}, expected=${cPractitionerUid}`);
-    }
-
-    // 3. Race Invocation: Execute simultaneous RPC calls across both sockets while transactions remain open
-    const [res1, res2] = await Promise.all([
-      client1.query(`SELECT public.clinic_check_and_consume_ai_allowance() AS result`),
-      client2.query(`SELECT public.clinic_check_and_consume_ai_allowance() AS result`),
+    // 3. Race Invocation: Execute simultaneous per-client workers
+    const [json1, json2] = await Promise.all([
+      executeQuotaRaceClient(client1, cPractitionerUid, 'CLIENT_1'),
+      executeQuotaRaceClient(client2, cPractitionerUid, 'CLIENT_2')
     ]);
-
-    // Commit both transactions
-    await client1.query('COMMIT');
-    await client2.query('COMMIT');
-
-    const json1 = res1.rows[0].result;
-    const json2 = res2.rows[0].result;
 
     // 4. Derive actual counts from response arrays
     const results = [json1, json2];

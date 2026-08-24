@@ -618,10 +618,10 @@ check('26. Transcribe edge function does NOT log audio bytes or transcript text'
 });
 
 // ===========================================================================
-// CHECK 27: R2.4 Concurrency Harness Integrity Guards
+// CHECK 27: R2.5 Concurrency Harness Lock-Lifetime & Integrity Guards
 // ===========================================================================
 
-check('27. Concurrency runner R2.4 integrity guards enforced', () => {
+check('27. Concurrency runner R2.5 lock-lifetime and integrity guards enforced', () => {
   // Guard 1: pg is explicit devDependency in package.json
   assert(
     packageJson.devDependencies && packageJson.devDependencies['pg'],
@@ -632,23 +632,42 @@ check('27. Concurrency runner R2.4 integrity guards enforced', () => {
   assert(fs.existsSync(concurrencyRunnerPath), 'Concurrency runner file missing');
   const concurrencyContent = fs.readFileSync(concurrencyRunnerPath, 'utf8');
 
-  // Guard 2: Each racing client begins an explicit transaction
+  // Guard 2: Per-client worker executeQuotaRaceClient exists and commits immediately after RPC
   assert(
-    concurrencyContent.includes("client1.query('BEGIN')") &&
-    concurrencyContent.includes("client2.query('BEGIN')"),
-    'Concurrency runner must begin explicit transactions for both racing clients'
+    concurrencyContent.includes('async function executeQuotaRaceClient('),
+    'Concurrency runner must define per-client worker executeQuotaRaceClient'
+  );
+  assert(
+    concurrencyContent.includes("await client.query('COMMIT')") &&
+    concurrencyContent.includes("await client.query('ROLLBACK')"),
+    'Worker executeQuotaRaceClient must commit transaction immediately after RPC execution to release advisory lock'
   );
 
-  // Guard 3: auth.uid() is verified on both race connections
+  // Guard 3: Outer post-Promise.all COMMIT count is zero
+  const postPromiseSection = concurrencyContent.split('Promise.all([')[1] || '';
+  const postPromiseOuterCommits = (postPromiseSection.match(/client[12]\.query\(['"]COMMIT['"]\)/g) || []).length;
+  assert.strictEqual(
+    postPromiseOuterCommits,
+    0,
+    'Concurrency runner must have 0 outer post-Promise.all COMMIT statements (commits must occur per-client inside executeQuotaRaceClient)'
+  );
+
+  // Guard 4: Statement timeout safety
   assert(
-    concurrencyContent.includes("client1.query('SELECT auth.uid() AS uid')") &&
-    concurrencyContent.includes("client2.query('SELECT auth.uid() AS uid')") &&
-    concurrencyContent.includes('AUTH_UID_CLIENT_1') &&
-    concurrencyContent.includes('AUTH_UID_CLIENT_2'),
+    concurrencyContent.includes('statement_timeout'),
+    'Concurrency runner must set statement_timeout for race transactions'
+  );
+
+  // Guard 5: auth.uid() is verified on both race connections inside worker
+  assert(
+    concurrencyContent.includes('SELECT auth.uid() AS uid') &&
+    concurrencyContent.includes('AUTH_UID_') &&
+    concurrencyContent.includes('CLIENT_1') &&
+    concurrencyContent.includes('CLIENT_2'),
     'Concurrency runner must verify auth.uid() on both client connections before racing'
   );
 
-  // Guard 4: Cleanup checks all 7 fixture entity classes
+  // Guard 6: Cleanup checks all 7 fixture entity classes
   const requiredEntities = [
     'tenants',
     'users_profile',
@@ -669,7 +688,7 @@ check('27. Concurrency runner R2.4 integrity guards enforced', () => {
     'Concurrency runner must compute and log CONCURRENCY_FIXTURE_RESIDUE_COUNT'
   );
 
-  // Guard 5: No process.exit in catch before cleanup completion
+  // Guard 7: No process.exit in catch before cleanup completion
   assert(
     !concurrencyContent.includes('catch (err) {\n    console.error(\'Concurrency execution failed:\', err);\n    process.exit(1);'),
     'Concurrency runner must NOT call process.exit(1) before async cleanup finishes'
@@ -679,7 +698,7 @@ check('27. Concurrency runner R2.4 integrity guards enforced', () => {
     'Concurrency runner must use process.exitCode = 1 for execution and cleanup failures'
   );
 
-  // Guard 6: No hardcoded PASS result values in NOT_EXECUTED path or concurrency runner
+  // Guard 8: No hardcoded PASS result values in NOT_EXECUTED path or concurrency runner
   assert(
     !concurrencyContent.includes('console.log(`SUCCESS_COUNT=1`)') &&
     !concurrencyContent.includes('console.log(`AI_QUOTA_EXHAUSTED_COUNT=1`)'),
@@ -700,4 +719,5 @@ if (failed > 0) {
 
 console.log('');
 console.log('ALL CHECKS PASSED.');
+
 
