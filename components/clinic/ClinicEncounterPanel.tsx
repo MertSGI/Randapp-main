@@ -4,8 +4,10 @@ import { clinicService } from '../../services/clinicService';
 import {
   canStartClinicEncounter,
   canWriteClinicEncounterNote,
-  canCompleteClinicEncounter
+  canCompleteClinicEncounter,
+  canUseClinicAiAssist
 } from '../../services/clinicUiPolicy';
+import { ClinicAiAssistPanel } from './ClinicAiAssistPanel';
 import { Play, Save, CheckCircle2, AlertCircle, FileText, Lock, ShieldAlert } from 'lucide-react';
 
 interface ClinicEncounterPanelProps {
@@ -46,6 +48,19 @@ export const ClinicEncounterPanel: React.FC<ClinicEncounterPanelProps> = ({
   const canStart = canStartClinicEncounter(context, apptStatus, assignedStaffId, selectedAppointment.encounter_id);
   const canWriteNote = canWriteClinicEncounterNote(context, encStatus, assignedStaffId);
   const canComplete = canCompleteClinicEncounter(context, encStatus, assignedStaffId);
+  const canAiAssist = canUseClinicAiAssist(context, encStatus, assignedStaffId);
+
+  // AI Assist "Use Draft" callback — populates existing SOAP form ONLY.
+  // ZERO save calls. Existing Save Note button remains the ONLY persistence trigger.
+  const handleUseDraft = (draft: { subjective: string; objective: string; assessment: string; plan: string }) => {
+    setSoapForm(prev => ({
+      ...prev,
+      subjective: draft.subjective,
+      objective: draft.objective,
+      assessment: draft.assessment,
+      plan: draft.plan,
+    }));
+  };
 
   // Start Encounter Handler
   const handleStartEncounter = async (e: React.FormEvent) => {
@@ -213,6 +228,17 @@ export const ClinicEncounterPanel: React.FC<ClinicEncounterPanelProps> = ({
               </button>
             )}
           </div>
+
+          {/* AI Assist Panel — shown only when practitioner has clinical note authority */}
+          {canAiAssist && (
+            <ClinicAiAssistPanel
+              context={context}
+              encounterStatus={encStatus}
+              assignedStaffId={assignedStaffId}
+              encounterReason={selectedAppointment.appointment_status === 'confirmed' ? undefined : undefined}
+              onUseDraft={handleUseDraft}
+            />
+          )}
 
           {canWriteNote ? (
             <form onSubmit={handleSaveNote} className="space-y-3">

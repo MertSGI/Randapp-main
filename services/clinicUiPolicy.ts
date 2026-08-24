@@ -174,3 +174,25 @@ export function canCompleteClinicEncounter(
   if (!practitionerStaffId || practitionerStaffId !== context.staff_id) return false;
   return true;
 }
+
+/**
+ * Pure policy function: Can practitioner use AI Assist (dictation + SOAP draft)?
+ * Requires the same authority as writing clinical notes:
+ * - can_write_clinical_notes === true
+ * - encounter must be open
+ * - practitioner must be the assigned staff
+ *
+ * Denied for: super_admin, receptionist without note authority,
+ * owner setup-only context, no-profile staff.
+ */
+export function canUseClinicAiAssist(
+  context: ClinicStaffContext | null,
+  encounterStatus?: EncounterStatus | null,
+  practitionerStaffId?: string | null
+): boolean {
+  if (!context) return false;
+  if (!context.can_write_clinical_notes) return false;
+  if (!encounterStatus || encounterStatus !== 'open') return false;
+  if (!practitionerStaffId || practitionerStaffId !== context.staff_id) return false;
+  return true;
+}

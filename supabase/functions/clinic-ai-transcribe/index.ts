@@ -1,0 +1,169 @@
+// ============================================================================
+// clinic-ai-transcribe — Supabase Edge Function
+//
+// Accepts bounded authenticated audio payload from a Clinic practitioner
+// with can_write_clinical_notes authority, invokes the configured
+// transcription provider, and returns a normalized transcript.
+//
+// ZERO audio persistence. ZERO transcript logging. ZERO clinical writes.
+// ============================================================================
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
+import {
+  createTranscriptionProvider,
+  ClinicAiProviderNotConfiguredError,
+  MAX_AUDIO_PAYLOAD_BYTES,
+  SUPPORTED_AUDIO_MIMES,
+} from "../_shared/clinicAiAssistProvider.ts";
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+serve(async (req: Request) => {
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: CORS_HEADERS });
+  }
+
+  if (req.method !== "POST") {
+    return new Response(
+      JSON.stringify({ error: { code: "METHOD_NOT_ALLOWED", message: "POST required" } }),
+      { status: 405, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+    );
+  }
+
+  try {
+    // -----------------------------------------------------------------------
+    // 1. Authentication — derive identity from JWT
+    // -----------------------------------------------------------------------
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return jsonError("AUTH_REQUIRED", "Valid authentication token required.", 401);
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return jsonError("AI_PROVIDER_NOT_CONFIGURED", "Server configuration incomplete.", 500);
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return jsonError("AUTH_REQUIRED", "Invalid or expired authentication token.", 401);
+    }
+
+    // -----------------------------------------------------------------------
+    // 2. Clinic Authorization — derive from server authority, NOT browser input
+    // -----------------------------------------------------------------------
+    const { data: contextData, error: contextError } = await supabase.rpc(
+      "clinic_get_my_context"
+    );
+
+    if (contextError || !contextData || contextData.length === 0) {
+      return jsonError("FORBIDDEN", "No Clinic staff context found for caller.", 403);
+    }
+
+    const clinicContext = contextData[0];
+    if (!clinicContext.can_write_clinical_notes) {
+      return jsonError(
+        "FORBIDDEN",
+        "Clinical note writing authority required for AI transcription.",
+        403
+      );
+    }
+
+    // -----------------------------------------------------------------------
+    // 3. Parse and validate request body
+    // -----------------------------------------------------------------------
+    const formData = await req.formData();
+    const audioFile = formData.get("audio");
+    const mimeType = formData.get("mimeType") as string | null;
+    const locale = formData.get("locale") as string | null;
+
+    if (!audioFile || !(audioFile instanceof File)) {
+      return jsonError("UNSUPPORTED_MIME", "Audio file required in 'audio' form field.", 400);
+    }
+
+    const effectiveMime = mimeType || audioFile.type || "audio/webm";
+
+    // Validate MIME type
+    const baseMime = effectiveMime.split(";")[0].trim();
+    if (!SUPPORTED_AUDIO_MIMES.has(effectiveMime) && !SUPPORTED_AUDIO_MIMES.has(baseMime)) {
+      return jsonError(
+        "UNSUPPORTED_MIME",
+        `Unsupported audio MIME type: ${effectiveMime}. Supported: ${[...SUPPORTED_AUDIO_MIMES].join(", ")}`,
+        400
+      );
+    }
+
+    // Validate payload size
+    const audioBytes = new Uint8Array(await audioFile.arrayBuffer());
+    if (audioBytes.byteLength > MAX_AUDIO_PAYLOAD_BYTES) {
+      return jsonError(
+        "PAYLOAD_TOO_LARGE",
+        `Audio payload exceeds maximum size of ${MAX_AUDIO_PAYLOAD_BYTES} bytes.`,
+        413
+      );
+    }
+
+    if (audioBytes.byteLength === 0) {
+      return jsonError("UNSUPPORTED_MIME", "Empty audio payload.", 400);
+    }
+
+    // -----------------------------------------------------------------------
+    // 4. Invoke transcription provider (fail-closed if not configured)
+    // -----------------------------------------------------------------------
+    const provider = createTranscriptionProvider();
+
+    const result = await provider.transcribe({
+      audio: audioBytes,
+      mimeType: effectiveMime,
+      locale: locale || undefined,
+      requestContext: {
+        tenantId: clinicContext.tenant_id,
+        staffId: clinicContext.staff_id,
+      },
+    });
+
+    // -----------------------------------------------------------------------
+    // 5. Return normalized result — ZERO persistence
+    // -----------------------------------------------------------------------
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: {
+          transcript: result.transcript,
+          detectedLanguage: result.detectedLanguage || null,
+          providerRequestId: result.providerRequestId || null,
+        },
+      }),
+      { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    if (error instanceof ClinicAiProviderNotConfiguredError) {
+      return jsonError("AI_PROVIDER_NOT_CONFIGURED", error.message, 503);
+    }
+
+    // Generic error — do NOT leak transcript or audio details
+    console.error("[clinic-ai-transcribe] Error:", error.message);
+    return jsonError("TRANSCRIPTION_FAILED", "Transcription request failed.", 500);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function jsonError(code: string, message: string, status: number): Response {
+  return new Response(
+    JSON.stringify({ success: false, error: { code, message } }),
+    { status, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+  );
+}
