@@ -48,6 +48,7 @@ jobs:
           fi
 
           echo "EXACT_SHA_BINDING_RESULT=PASS"
+          mkdir -p /tmp/e2-logs
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
@@ -235,6 +236,7 @@ jobs:
       - name: Execute Clinic AI Commercial Authority SQL Suite
         run: |
           set -o pipefail
+          mkdir -p /tmp/e2-logs
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== EXECUTING CLINIC AI COMMERCIAL AUTHORITY SQL SUITE ==="
 
