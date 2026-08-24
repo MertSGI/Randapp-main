@@ -2,8 +2,8 @@
 // clinic-ai-draft — Supabase Edge Function
 //
 // Accepts a transcript from an authenticated Clinic practitioner with
-// can_write_clinical_notes authority, invokes the configured SOAP draft
-// provider, and returns a structured draft for clinician review.
+// can_write_clinical_notes authority, checks atomic commercial quota,
+// invokes the configured SOAP draft provider, and returns a structured draft for clinician review.
 //
 // ZERO clinical writes. ZERO persistence. ZERO autonomous actions.
 // ============================================================================
@@ -13,6 +13,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import {
   createSoapDraftProvider,
   ClinicAiProviderNotConfiguredError,
+  ClinicAiSchemaValidationError,
+  ClinicAiProviderApiError,
 } from "../_shared/clinicAiAssistProvider.ts";
 
 const CORS_HEADERS = {
@@ -22,6 +24,9 @@ const CORS_HEADERS = {
 
 /** Maximum transcript length in characters (50,000 ~ 10,000 words). */
 const MAX_TRANSCRIPT_LENGTH = 50_000;
+
+/** Maximum encounter reason length in characters (1,000 chars). */
+const MAX_REASON_LENGTH = 1_000;
 
 serve(async (req: Request) => {
   // Handle CORS preflight
@@ -46,11 +51,12 @@ serve(async (req: Request) => {
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
     if (!supabaseUrl || !supabaseAnonKey) {
       return jsonError("AI_PROVIDER_NOT_CONFIGURED", "Server configuration incomplete.", 500);
     }
 
+    // Security Repair 1: Pure user-context client using caller JWT only. No service role fallback.
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -100,14 +106,41 @@ serve(async (req: Request) => {
       );
     }
 
+    if (encounterReason && typeof encounterReason === "string" && encounterReason.length > MAX_REASON_LENGTH) {
+      return jsonError(
+        "PAYLOAD_TOO_LARGE",
+        `Encounter reason exceeds maximum length of ${MAX_REASON_LENGTH} characters.`,
+        413
+      );
+    }
+
     // -----------------------------------------------------------------------
-    // 4. Invoke SOAP draft provider (fail-closed if not configured)
+    // 4. Commercial Authority & Atomic Quota Reservation
+    // -----------------------------------------------------------------------
+    const { data: quotaData, error: quotaError } = await supabase.rpc(
+      "clinic_check_and_consume_ai_allowance",
+      { p_tenant_id: clinicContext.tenant_id, p_delta: 1 }
+    );
+
+    if (quotaError) {
+      return jsonError("COMMERCIAL_NOT_ELIGIBLE", "Commercial entitlement check failed.", 403);
+    }
+
+    if (!quotaData || !quotaData.success) {
+      const reasonCode = quotaData?.reason_code || "AI_NOT_ENTITLED";
+      const message = quotaData?.message || "AI operation not allowed under commercial policy.";
+      const status = reasonCode === "AI_QUOTA_EXHAUSTED" ? 429 : 403;
+      return jsonError(reasonCode, message, status);
+    }
+
+    // -----------------------------------------------------------------------
+    // 5. Invoke SOAP draft provider (fail-closed if not configured)
     // -----------------------------------------------------------------------
     const provider = createSoapDraftProvider();
 
     const result = await provider.generateDraft({
       transcript: transcript.trim(),
-      encounterReason: encounterReason?.trim() || undefined,
+      encounterReason: encounterReason && typeof encounterReason === "string" ? encounterReason.trim() : undefined,
       requestContext: {
         tenantId: clinicContext.tenant_id,
         staffId: clinicContext.staff_id,
@@ -115,7 +148,7 @@ serve(async (req: Request) => {
     });
 
     // -----------------------------------------------------------------------
-    // 5. Return structured SOAP draft — ZERO persistence, ZERO clinical writes
+    // 6. Return structured SOAP draft — ZERO persistence, ZERO clinical writes
     // -----------------------------------------------------------------------
     return new Response(
       JSON.stringify({
@@ -134,9 +167,16 @@ serve(async (req: Request) => {
     if (error instanceof ClinicAiProviderNotConfiguredError) {
       return jsonError("AI_PROVIDER_NOT_CONFIGURED", error.message, 503);
     }
+    if (error instanceof ClinicAiSchemaValidationError) {
+      return jsonError("DRAFT_GENERATION_FAILED", error.message, 502);
+    }
+    if (error instanceof ClinicAiProviderApiError) {
+      return jsonError("DRAFT_GENERATION_FAILED", "External draft provider error.", 502);
+    }
 
-    // Generic error — do NOT leak transcript details
-    console.error("[clinic-ai-draft] Error:", error.message);
+    // Security Repair 2: Safe error logging without raw details
+    const safeCode = (error && typeof error === "object" && "code" in error) ? (error as { code: string }).code : "UNKNOWN_ERROR";
+    console.error(`[clinic-ai-draft] Safe Error Log: function=clinic-ai-draft, code=${safeCode}`);
     return jsonError("DRAFT_GENERATION_FAILED", "SOAP draft generation failed.", 500);
   }
 });

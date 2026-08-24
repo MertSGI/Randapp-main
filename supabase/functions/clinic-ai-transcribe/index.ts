@@ -2,8 +2,8 @@
 // clinic-ai-transcribe — Supabase Edge Function
 //
 // Accepts bounded authenticated audio payload from a Clinic practitioner
-// with can_write_clinical_notes authority, invokes the configured
-// transcription provider, and returns a normalized transcript.
+// with can_write_clinical_notes authority, checks atomic commercial quota,
+// invokes the configured transcription provider, and returns a normalized transcript.
 //
 // ZERO audio persistence. ZERO transcript logging. ZERO clinical writes.
 // ============================================================================
@@ -13,6 +13,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import {
   createTranscriptionProvider,
   ClinicAiProviderNotConfiguredError,
+  ClinicAiSchemaValidationError,
+  ClinicAiProviderApiError,
   MAX_AUDIO_PAYLOAD_BYTES,
   SUPPORTED_AUDIO_MIMES,
 } from "../_shared/clinicAiAssistProvider.ts";
@@ -45,11 +47,12 @@ serve(async (req: Request) => {
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
     if (!supabaseUrl || !supabaseAnonKey) {
       return jsonError("AI_PROVIDER_NOT_CONFIGURED", "Server configuration incomplete.", 500);
     }
 
+    // Security Repair 1: Pure user-context client using caller JWT only. No service role fallback.
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -80,7 +83,7 @@ serve(async (req: Request) => {
     }
 
     // -----------------------------------------------------------------------
-    // 3. Parse and validate request body
+    // 3. Security Repair 3: Pre-buffer payload size & MIME check
     // -----------------------------------------------------------------------
     const formData = await req.formData();
     const audioFile = formData.get("audio");
@@ -89,6 +92,15 @@ serve(async (req: Request) => {
 
     if (!audioFile || !(audioFile instanceof File)) {
       return jsonError("UNSUPPORTED_MIME", "Audio file required in 'audio' form field.", 400);
+    }
+
+    // Inspect file size BEFORE buffer allocation
+    if (audioFile.size > MAX_AUDIO_PAYLOAD_BYTES) {
+      return jsonError(
+        "PAYLOAD_TOO_LARGE",
+        `Audio payload size (${audioFile.size} bytes) exceeds maximum limit of ${MAX_AUDIO_PAYLOAD_BYTES} bytes.`,
+        413
+      );
     }
 
     const effectiveMime = mimeType || audioFile.type || "audio/webm";
@@ -103,22 +115,33 @@ serve(async (req: Request) => {
       );
     }
 
-    // Validate payload size
+    // Post-buffer safety check
     const audioBytes = new Uint8Array(await audioFile.arrayBuffer());
-    if (audioBytes.byteLength > MAX_AUDIO_PAYLOAD_BYTES) {
-      return jsonError(
-        "PAYLOAD_TOO_LARGE",
-        `Audio payload exceeds maximum size of ${MAX_AUDIO_PAYLOAD_BYTES} bytes.`,
-        413
-      );
-    }
-
     if (audioBytes.byteLength === 0) {
       return jsonError("UNSUPPORTED_MIME", "Empty audio payload.", 400);
     }
 
     // -----------------------------------------------------------------------
-    // 4. Invoke transcription provider (fail-closed if not configured)
+    // 4. Commercial Authority & Atomic Quota Reservation
+    // -----------------------------------------------------------------------
+    const { data: quotaData, error: quotaError } = await supabase.rpc(
+      "clinic_check_and_consume_ai_allowance",
+      { p_tenant_id: clinicContext.tenant_id, p_delta: 1 }
+    );
+
+    if (quotaError) {
+      return jsonError("COMMERCIAL_NOT_ELIGIBLE", "Commercial entitlement check failed.", 403);
+    }
+
+    if (!quotaData || !quotaData.success) {
+      const reasonCode = quotaData?.reason_code || "AI_NOT_ENTITLED";
+      const message = quotaData?.message || "AI operation not allowed under commercial policy.";
+      const status = reasonCode === "AI_QUOTA_EXHAUSTED" ? 429 : 403;
+      return jsonError(reasonCode, message, status);
+    }
+
+    // -----------------------------------------------------------------------
+    // 5. Invoke transcription provider (fail-closed if not configured)
     // -----------------------------------------------------------------------
     const provider = createTranscriptionProvider();
 
@@ -133,7 +156,7 @@ serve(async (req: Request) => {
     });
 
     // -----------------------------------------------------------------------
-    // 5. Return normalized result — ZERO persistence
+    // 6. Return normalized result — ZERO persistence
     // -----------------------------------------------------------------------
     return new Response(
       JSON.stringify({
@@ -150,9 +173,16 @@ serve(async (req: Request) => {
     if (error instanceof ClinicAiProviderNotConfiguredError) {
       return jsonError("AI_PROVIDER_NOT_CONFIGURED", error.message, 503);
     }
+    if (error instanceof ClinicAiSchemaValidationError) {
+      return jsonError("TRANSCRIPTION_FAILED", error.message, 502);
+    }
+    if (error instanceof ClinicAiProviderApiError) {
+      return jsonError("TRANSCRIPTION_FAILED", "External transcription provider error.", 502);
+    }
 
-    // Generic error — do NOT leak transcript or audio details
-    console.error("[clinic-ai-transcribe] Error:", error.message);
+    // Security Repair 2: Safe error logging without raw details
+    const safeCode = (error && typeof error === "object" && "code" in error) ? (error as { code: string }).code : "UNKNOWN_ERROR";
+    console.error(`[clinic-ai-transcribe] Safe Error Log: function=clinic-ai-transcribe, code=${safeCode}`);
     return jsonError("TRANSCRIPTION_FAILED", "Transcription request failed.", 500);
   }
 });

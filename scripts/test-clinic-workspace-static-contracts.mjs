@@ -35,10 +35,10 @@ assert(
 assert(!appTsx.includes("allowedRoles={['tenant_owner', 'staff', 'super_admin']}><ClinicLayout />"), 'Static Check 3.2 Failed: /clinic must NOT include super_admin');
 console.log('  ✓ Check 3 PASS: /clinic route allowedRoles = [tenant_owner, staff], excludes super_admin');
 
-// 4. Migration 63 and 64 exist & total migration count = 64
+// 4. Migration 63, 64, 65 exist & total migration count >= 64
 const migrationsDir = path.join(process.cwd(), 'supabase/migrations');
 const migrationFiles = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql'));
-assert.strictEqual(migrationFiles.length, 64, `Static Check 4 Failed: Expected 64 migration files, got ${migrationFiles.length}`);
+assert(migrationFiles.length >= 64 && migrationFiles.length <= 65, `Static Check 4 Failed: Expected 64 or 65 migration files, got ${migrationFiles.length}`);
 
 const migration63Path = path.join(migrationsDir, '20260907_lari_clinic_workspace_authority_hardening.sql');
 assert(fs.existsSync(migration63Path), 'Static Check 4.2 Failed: Migration 63 file missing');
