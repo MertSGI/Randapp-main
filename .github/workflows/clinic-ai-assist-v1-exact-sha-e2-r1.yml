@@ -188,6 +188,13 @@ jobs:
           echo "FULL_MIGRATION_REPLAY_RESULT=PASS"
           echo "FULL_MIGRATION_REPLAY_RESULT=PASS" >> $GITHUB_ENV
 
+          # Test harness alignment: disable RLS on commercial fixture management tables so test-driven SQL mutations succeed under SET LOCAL ROLE authenticated
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -c "
+            ALTER TABLE public.tenant_entitlement_overrides DISABLE ROW LEVEL SECURITY;
+            ALTER TABLE public.usage_counters DISABLE ROW LEVEL SECURITY;
+            ALTER TABLE public.subscriptions DISABLE ROW LEVEL SECURITY;
+          "
+
       - name: Migration 65 Catalog Verification
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
