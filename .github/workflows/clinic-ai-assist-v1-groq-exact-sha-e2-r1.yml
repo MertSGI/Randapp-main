@@ -66,6 +66,7 @@ jobs:
           set -o pipefail
           mkdir -p /tmp/e2-logs
           echo "=== EXECUTING DENO CHECK FOR TRANSCRIBE EDGE FUNCTION ==="
+          git checkout "${EVIDENCE_SHA}" -- supabase/functions/
           deno check supabase/functions/clinic-ai-transcribe/index.ts 2>&1 | tee /tmp/e2-logs/deno-edge-transcribe.log
           echo "DENO_CHECK_TRANSCRIBE=PASS" >> $GITHUB_ENV
 
