@@ -144,7 +144,11 @@ serve(async (req: Request) => {
       reserveQuota: async () => {
         const { data, error } = await supabase.rpc("clinic_check_and_consume_ai_allowance");
         if (error) {
-          throw new Error("COMMERCIAL_NOT_ELIGIBLE");
+          return {
+            success: false,
+            reason_code: "COMMERCIAL_NOT_ELIGIBLE",
+            message: "Commercial entitlement check failed.",
+          };
         }
         return data;
       },
@@ -183,7 +187,7 @@ serve(async (req: Request) => {
       return jsonError("DRAFT_GENERATION_FAILED", "External draft provider error.", 502);
     }
 
-    if (attemptedCount === 0) {
+    if (chainOutcome.attemptedCount === 0) {
       return jsonError("AI_PROVIDER_NOT_CONFIGURED", "No valid SOAP draft provider configured.", 503);
     }
 

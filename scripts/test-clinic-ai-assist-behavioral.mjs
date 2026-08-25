@@ -2,10 +2,10 @@
 // test-clinic-ai-assist-behavioral.mjs — Comprehensive Provider Behavioral Suite
 //
 // Executable unit/orchestration tests for:
-// - Groq STT & SOAP adapters (full multipart & strict schema contracts)
+// - Groq STT & SOAP adapters (full multipart & strict schema contracts, timeout normalization)
 // - OpenAI STT & SOAP adapters (legacy/fallback contracts)
 // - Candidate chain resolution (default models, reverse models, unknown fallback fail-closed)
-// - Shared metered provider chain orchestration (Cases A - N)
+// - Shared metered provider chain orchestration (Cases A - O)
 // ============================================================================
 
 import assert from 'assert';
@@ -102,7 +102,7 @@ function withEnv(envVars, fn) {
 }
 
 // ============================================================================
-// SECTION 1: ADAPTER CONTRACT TESTS
+// SECTION 1: ADAPTER CONTRACT & TIMEOUT NORMALIZATION TESTS
 // ============================================================================
 
 await checkAsync('Groq Transcription — full multipart contract & x_groq.id normalization', 'ADAPTER_GROQ_STT', async () => {
@@ -198,6 +198,30 @@ await checkAsync('Groq SOAP Draft — strict JSON schema & safety prompt contrac
   assert.strictEqual(body.response_format.json_schema.schema.additionalProperties, false);
 });
 
+await checkAsync('Groq STT Adapter Timeout Normalization — AbortError -> 408 Retryable Error', 'GROQ_STT_TIMEOUT_NORM', async () => {
+  const mockFetch = async () => {
+    const abortErr = new Error('The operation was aborted');
+    abortErr.name = 'AbortError';
+    throw abortErr;
+  };
+
+  const provider = new GroqTranscriptionProvider('gsk_test_123', 'whisper-large-v3-turbo', mockFetch);
+
+  try {
+    await provider.transcribe({
+      audio: new Uint8Array([1, 2, 3]),
+      mimeType: 'audio/webm',
+      requestContext: { tenantId: 't1', staffId: 's1' },
+    });
+    assert.fail('Should have thrown ClinicAiProviderApiError');
+  } catch (err) {
+    assert(err instanceof ClinicAiProviderApiError);
+    assert.strictEqual(err.providerName, 'groq');
+    assert.strictEqual(err.statusCode, 408);
+    assert.strictEqual(err.isRetryable, true);
+  }
+});
+
 await checkAsync('OpenAI Transcription Regression Adapter', 'ADAPTER_OPENAI_STT', async () => {
   const { mockFetch, getCalls } = createMockFetch([
     {
@@ -244,48 +268,80 @@ await checkAsync('OpenAI SOAP Draft Regression Adapter', 'ADAPTER_OPENAI_SOAP', 
 });
 
 // ============================================================================
-// SECTION 2: RESOLVER HARDENING TESTS
+// SECTION 2: RESOLVER HARDENING & STRENGTHENED REVERSE DEFAULTS TESTS
 // ============================================================================
 
-check('Reverse Resolution — OpenAI primary -> Groq STT fallback uses whisper-large-v3-turbo default', () => {
-  withEnv({
+await checkAsync('Strengthened Reverse Resolution — OpenAI primary -> Groq STT fallback uses whisper-large-v3-turbo model', 'REVERSE_GROQ_STT_DEFAULT_MODEL', async () => {
+  await withEnv({
     OPENAI_API_KEY: 'sk-test',
     GROQ_API_KEY: 'gsk-test',
     CLINIC_AI_TRANSCRIPTION_PROVIDER: 'openai',
     CLINIC_AI_TRANSCRIPTION_FALLBACK_PROVIDER: 'groq',
     CLINIC_AI_TRANSCRIPTION_FALLBACK_MODEL: undefined,
     CLINIC_AI_FALLBACK_ENABLED: 'true',
-  }, () => {
-    const candidates = resolveTranscriptionCandidates();
+  }, async () => {
+    const { mockFetch, getCalls } = createMockFetch([
+      { ok: true, status: 200, json: { text: 'Transcribed by Groq fallback' } },
+    ]);
+
+    const candidates = resolveTranscriptionCandidates(mockFetch);
     assert.strictEqual(candidates.length, 2);
     assert.strictEqual(candidates[0].providerName, 'openai');
     assert.strictEqual(candidates[1].providerName, 'groq');
 
-    const fallbackInstance = candidates[1].createProvider();
-    assert.strictEqual(fallbackInstance.providerName, 'groq');
+    const fallbackProvider = candidates[1].createProvider();
+    assert.strictEqual(fallbackProvider.providerName, 'groq');
+
+    await fallbackProvider.transcribe({
+      audio: new Uint8Array([1, 2]),
+      mimeType: 'audio/webm',
+      requestContext: { tenantId: 't1', staffId: 's1' },
+    });
+
+    const calls = getCalls();
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].url, 'https://api.groq.com/openai/v1/audio/transcriptions');
+    const formData = calls[0].options.body;
+    assert.strictEqual(formData.get('model'), 'whisper-large-v3-turbo');
   });
 });
 
-check('Reverse Resolution — OpenAI primary -> Groq SOAP fallback uses openai/gpt-oss-120b default', () => {
-  withEnv({
+await checkAsync('Strengthened Reverse Resolution — OpenAI primary -> Groq SOAP fallback uses openai/gpt-oss-120b model', 'REVERSE_GROQ_DRAFT_DEFAULT_MODEL', async () => {
+  await withEnv({
     OPENAI_API_KEY: 'sk-test',
     GROQ_API_KEY: 'gsk-test',
     CLINIC_AI_DRAFT_PROVIDER: 'openai',
     CLINIC_AI_DRAFT_FALLBACK_PROVIDER: 'groq',
     CLINIC_AI_DRAFT_FALLBACK_MODEL: undefined,
     CLINIC_AI_FALLBACK_ENABLED: 'true',
-  }, () => {
-    const candidates = resolveSoapDraftCandidates();
+  }, async () => {
+    const expectedSoap = { subjective: 'S', objective: 'O', assessment: 'A', plan: 'P', warnings: [] };
+    const { mockFetch, getCalls } = createMockFetch([
+      { ok: true, status: 200, json: { choices: [{ message: { content: JSON.stringify(expectedSoap) } }] } },
+    ]);
+
+    const candidates = resolveSoapDraftCandidates(mockFetch);
     assert.strictEqual(candidates.length, 2);
     assert.strictEqual(candidates[0].providerName, 'openai');
     assert.strictEqual(candidates[1].providerName, 'groq');
 
-    const fallbackInstance = candidates[1].createProvider();
-    assert.strictEqual(fallbackInstance.providerName, 'groq');
+    const fallbackProvider = candidates[1].createProvider();
+    assert.strictEqual(fallbackProvider.providerName, 'groq');
+
+    await fallbackProvider.generateDraft({
+      transcript: 'Testing Groq fallback model',
+      requestContext: { tenantId: 't1', staffId: 's1' },
+    });
+
+    const calls = getCalls();
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].url, 'https://api.groq.com/openai/v1/chat/completions');
+    const body = JSON.parse(calls[0].options.body);
+    assert.strictEqual(body.model, 'openai/gpt-oss-120b');
   });
 });
 
-check('Unknown Fallback Provider Fails Closed', () => {
+check('Unknown Transcription Fallback Provider Fails Closed', () => {
   withEnv({
     GROQ_API_KEY: 'gsk-test',
     CLINIC_AI_TRANSCRIPTION_PROVIDER: 'groq',
@@ -298,8 +354,34 @@ check('Unknown Fallback Provider Fails Closed', () => {
   });
 });
 
+check('Unknown Draft Fallback Provider Fails Closed', () => {
+  withEnv({
+    GROQ_API_KEY: 'gsk-test',
+    CLINIC_AI_DRAFT_PROVIDER: 'groq',
+    CLINIC_AI_DRAFT_FALLBACK_PROVIDER: 'invalid_provider',
+    CLINIC_AI_FALLBACK_ENABLED: 'true',
+  }, () => {
+    assert.throws(() => {
+      resolveSoapDraftCandidates();
+    }, ClinicAiProviderNotConfiguredError);
+  });
+});
+
+check('Disabled Fallback Ignores Fallback Typo Provider', () => {
+  withEnv({
+    GROQ_API_KEY: 'gsk-test',
+    CLINIC_AI_TRANSCRIPTION_PROVIDER: 'groq',
+    CLINIC_AI_TRANSCRIPTION_FALLBACK_PROVIDER: 'typo_provider',
+    CLINIC_AI_FALLBACK_ENABLED: 'false',
+  }, () => {
+    const candidates = resolveTranscriptionCandidates();
+    assert.strictEqual(candidates.length, 1);
+    assert.strictEqual(candidates[0].providerName, 'groq');
+  });
+});
+
 // ============================================================================
-// SECTION 3: EXECUTABLE METERED ROUTING MATRIX (CASES A - N)
+// SECTION 3: EXECUTABLE METERED ROUTING MATRIX (CASES A - O)
 // ============================================================================
 
 await checkAsync('Groq Primary Succeeds', 'A', async () => {
@@ -805,6 +887,54 @@ await checkAsync('Fallback Disabled + Retryable Primary Failure', 'N', async () 
   assert.strictEqual(outcome.quotaConsumedCount, 1);
   assert.strictEqual(quotaCalls, 1);
   assert.strictEqual(primaryCalls, 1);
+});
+
+await checkAsync('Commercial Authority / RPC Technical Error Before Primary Invocation', 'O', async () => {
+  let quotaCalls = 0;
+  let primaryCalls = 0;
+  let fallbackCalls = 0;
+
+  const candidates = [
+    {
+      providerName: 'groq',
+      createProvider: () => ({
+        providerName: 'groq',
+        invoke: async () => { primaryCalls++; return 'OK'; },
+      }),
+    },
+    {
+      providerName: 'openai',
+      createProvider: () => ({
+        providerName: 'openai',
+        invoke: async () => { fallbackCalls++; return 'FALLBACK'; },
+      }),
+    },
+  ];
+
+  const outcome = await executeMeteredProviderChain({
+    candidates,
+    createProvider: (c) => c.createProvider(),
+    reserveQuota: async () => {
+      quotaCalls++;
+      // Simulating Edge Function reserveQuota callback when Supabase RPC returns error
+      return {
+        success: false,
+        reason_code: 'COMMERCIAL_NOT_ELIGIBLE',
+        message: 'Commercial entitlement check failed.',
+      };
+    },
+  });
+
+  assert.strictEqual(outcome.result, undefined);
+  assert.strictEqual(outcome.stoppedByQuota, true);
+  assert.strictEqual(outcome.quotaStopReason?.reason_code, 'COMMERCIAL_NOT_ELIGIBLE');
+  assert.strictEqual(outcome.quotaStopReason?.status, 403);
+  assert.strictEqual(outcome.quotaStopReason?.message, 'Commercial entitlement check failed.');
+  assert.strictEqual(outcome.attemptedCount, 0);
+  assert.strictEqual(outcome.quotaConsumedCount, 0);
+  assert.strictEqual(quotaCalls, 1);
+  assert.strictEqual(primaryCalls, 0);
+  assert.strictEqual(fallbackCalls, 0);
 });
 
 // ============================================================================

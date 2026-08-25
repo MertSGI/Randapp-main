@@ -512,6 +512,16 @@ check('16. Edge functions call 0-argument quota RPC via shared metered provider 
     draftProviderIdx > 0 && draftQuotaIdx > draftProviderIdx,
     'Draft edge function must validate provider candidate resolution BEFORE invoking metered chain'
   );
+
+  // Static guard against bare attemptedCount reference
+  assert(
+    !/\bif\s*\(\s*attemptedCount\b/.test(clinicAiTranscribeEdge),
+    'Transcribe edge function must not use bare attemptedCount reference'
+  );
+  assert(
+    !/\bif\s*\(\s*attemptedCount\b/.test(clinicAiDraftEdge),
+    'Draft edge function must not use bare attemptedCount reference'
+  );
 });
 
 check('17. Provider abstraction exists with OpenAI adapters and fail-closed factory', () => {
