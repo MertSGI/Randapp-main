@@ -12,6 +12,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import {
   resolveTranscriptionCandidates,
+  executeMeteredProviderChain,
   ClinicAiProviderNotConfiguredError,
   ClinicAiSchemaValidationError,
   ClinicAiProviderApiError,
@@ -131,79 +132,47 @@ serve(async (req: Request) => {
     }
 
     // -----------------------------------------------------------------------
-    // 5. Sequential Candidate Execution with Per-Attempt Quota Accounting
+    // 5. Sequential Candidate Execution with Shared Metered Helper
     // -----------------------------------------------------------------------
-    let lastError: unknown = null;
-    let successfulResult: ClinicTranscriptionProviderResult | null = null;
-    let attemptedCount = 0;
-
-    for (const candidate of candidates) {
-      // Create provider instance for this candidate.
-      // If missing key/unconfigured, skip candidate gracefully without consuming quota.
-      let providerInstance;
-      try {
-        providerInstance = candidate.createProvider();
-      } catch (err) {
-        if (err instanceof ClinicAiProviderNotConfiguredError) {
-          lastError = err;
-          continue;
+    const chainOutcome = await executeMeteredProviderChain({
+      candidates,
+      createProvider: (candidate) => {
+        const instance = candidate.createProvider();
+        return {
+          providerName: instance.providerName,
+          invoke: () => instance.transcribe({
+            audio: audioBytes,
+            mimeType: effectiveMime,
+            locale: locale || undefined,
+            requestContext: {
+              tenantId: clinicContext.tenant_id,
+              staffId: clinicContext.staff_id,
+            },
+          }),
+        };
+      },
+      reserveQuota: async () => {
+        const { data, error } = await supabase.rpc("clinic_check_and_consume_ai_allowance");
+        if (error) {
+          throw new Error("COMMERCIAL_NOT_ELIGIBLE");
         }
-        throw err;
-      }
+        return data;
+      },
+    });
 
-      // Atomically check & consume 1 ai_allowance unit BEFORE external call
-      const { data: quotaData, error: quotaError } = await supabase.rpc(
-        "clinic_check_and_consume_ai_allowance"
-      );
-
-      if (quotaError) {
-        return jsonError("COMMERCIAL_NOT_ELIGIBLE", "Commercial entitlement check failed.", 403);
-      }
-
-      if (!quotaData || !quotaData.success) {
-        const reasonCode = quotaData?.reason_code || "AI_NOT_ENTITLED";
-        const message = quotaData?.message || "AI operation not allowed under commercial policy.";
-        const status = reasonCode === "AI_QUOTA_EXHAUSTED" ? 429 : 403;
-        return jsonError(reasonCode, message, status);
-      }
-
-      attemptedCount++;
-
-      // Execute external provider invocation
-      try {
-        successfulResult = await providerInstance.transcribe({
-          audio: audioBytes,
-          mimeType: effectiveMime,
-          locale: locale || undefined,
-          requestContext: {
-            tenantId: clinicContext.tenant_id,
-            staffId: clinicContext.staff_id,
-          },
-        });
-
-        // Provider invocation succeeded! Break loop.
-        break;
-      } catch (err) {
-        lastError = err;
-
-        if (err instanceof ClinicAiProviderApiError && err.isRetryable) {
-          console.warn(`[clinic-ai-transcribe] Retryable provider error from ${err.providerName} (status=${err.statusCode || 'network'}). Proceeding to fallback if available.`);
-          continue; // Try next candidate in chain
-        }
-
-        // Non-retryable error (e.g. 400, 401, 403, schema validation failure). Do NOT fallback.
-        break;
-      }
+    if (chainOutcome.stoppedByQuota && chainOutcome.quotaStopReason) {
+      const { reason_code, message, status } = chainOutcome.quotaStopReason;
+      return jsonError(reason_code, message, status);
     }
 
-    if (successfulResult) {
+    if (chainOutcome.result) {
       return new Response(
         JSON.stringify({
           success: true,
           data: {
-            transcript: successfulResult.transcript,
-            detectedLanguage: successfulResult.detectedLanguage || null,
-            providerRequestId: successfulResult.providerRequestId || null,
+            transcript: chainOutcome.result.transcript,
+            detectedLanguage: chainOutcome.result.detectedLanguage || null,
+            providerRequestId: chainOutcome.result.providerRequestId || null,
           },
         }),
         { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
@@ -211,6 +180,7 @@ serve(async (req: Request) => {
     }
 
     // Process final error if all candidates failed or non-retryable error occurred
+    const lastError = chainOutcome.lastError;
     if (lastError instanceof ClinicAiProviderNotConfiguredError) {
       return jsonError("AI_PROVIDER_NOT_CONFIGURED", lastError.message, 503);
     }

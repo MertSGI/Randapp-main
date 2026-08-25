@@ -230,10 +230,12 @@ export class GroqTranscriptionProvider implements ClinicTranscriptionProvider {
         throw new ClinicAiSchemaValidationError('Malformed response from Groq transcription API.');
       }
 
+      const xGroqId = data?.x_groq?.id || res.headers.get('x-groq-id') || res.headers.get('x-request-id') || undefined;
+
       return {
         transcript: data.text.trim(),
         detectedLanguage: data.language || undefined,
-        providerRequestId: res.headers.get('x-groq-id') || res.headers.get('x-request-id') || undefined,
+        providerRequestId: xGroqId,
       };
     } catch (err: unknown) {
       if (err instanceof ClinicAiProviderApiError || err instanceof ClinicAiSchemaValidationError) {
@@ -658,11 +660,16 @@ export function resolveTranscriptionCandidates(
 
   const fallbackEnabled = (getEnvVar('CLINIC_AI_FALLBACK_ENABLED') ?? 'true') === 'true';
   const fallbackProviderName = getEnvVar('CLINIC_AI_TRANSCRIPTION_FALLBACK_PROVIDER');
-  const fallbackModel = getEnvVar('CLINIC_AI_TRANSCRIPTION_FALLBACK_MODEL') || 'whisper-1';
+  const configuredFallbackModel = getEnvVar('CLINIC_AI_TRANSCRIPTION_FALLBACK_MODEL');
 
   // Validation: Check for invalid primary provider name (Fail Closed)
   if (primaryProviderName !== 'groq' && primaryProviderName !== 'openai' && primaryProviderName !== 'none') {
     throw new ClinicAiProviderNotConfiguredError(`Unknown transcription provider: ${primaryProviderName}. No provider implementation available.`);
+  }
+
+  // Validation: Check for invalid fallback provider name if fallback is enabled (Fail Closed)
+  if (fallbackEnabled && fallbackProviderName && fallbackProviderName !== 'groq' && fallbackProviderName !== 'openai' && fallbackProviderName !== 'none') {
+    throw new ClinicAiProviderNotConfiguredError(`Unknown fallback transcription provider: ${fallbackProviderName}. No provider implementation available.`);
   }
 
   const candidates: TranscriptionCandidate[] = [];
@@ -683,7 +690,8 @@ export function resolveTranscriptionCandidates(
   }
 
   // Fallback Candidate (if enabled and valid)
-  if (fallbackEnabled && fallbackProviderName && fallbackProviderName !== primaryProviderName) {
+  if (fallbackEnabled && fallbackProviderName && fallbackProviderName !== primaryProviderName && fallbackProviderName !== 'none') {
+    const fallbackModel = configuredFallbackModel || (fallbackProviderName === 'openai' ? 'whisper-1' : 'whisper-large-v3-turbo');
     if (fallbackProviderName === 'openai') {
       const openAiKey = getEnvVar('OPENAI_API_KEY') || getEnvVar('CLINIC_AI_TRANSCRIPTION_API_KEY');
       candidates.push({
@@ -710,11 +718,16 @@ export function resolveSoapDraftCandidates(
 
   const fallbackEnabled = (getEnvVar('CLINIC_AI_FALLBACK_ENABLED') ?? 'true') === 'true';
   const fallbackProviderName = getEnvVar('CLINIC_AI_DRAFT_FALLBACK_PROVIDER');
-  const fallbackModel = getEnvVar('CLINIC_AI_DRAFT_FALLBACK_MODEL') || 'gpt-4o-mini';
+  const configuredFallbackModel = getEnvVar('CLINIC_AI_DRAFT_FALLBACK_MODEL');
 
   // Validation: Check for invalid primary provider name (Fail Closed)
   if (primaryProviderName !== 'groq' && primaryProviderName !== 'openai' && primaryProviderName !== 'none') {
     throw new ClinicAiProviderNotConfiguredError(`Unknown SOAP draft provider: ${primaryProviderName}. No provider implementation available.`);
+  }
+
+  // Validation: Check for invalid fallback provider name if fallback is enabled (Fail Closed)
+  if (fallbackEnabled && fallbackProviderName && fallbackProviderName !== 'groq' && fallbackProviderName !== 'openai' && fallbackProviderName !== 'none') {
+    throw new ClinicAiProviderNotConfiguredError(`Unknown fallback SOAP draft provider: ${fallbackProviderName}. No provider implementation available.`);
   }
 
   const candidates: SoapDraftCandidate[] = [];
@@ -735,7 +748,8 @@ export function resolveSoapDraftCandidates(
   }
 
   // Fallback Candidate (if enabled and valid)
-  if (fallbackEnabled && fallbackProviderName && fallbackProviderName !== primaryProviderName) {
+  if (fallbackEnabled && fallbackProviderName && fallbackProviderName !== primaryProviderName && fallbackProviderName !== 'none') {
+    const fallbackModel = configuredFallbackModel || (fallbackProviderName === 'openai' ? 'gpt-4o-mini' : 'openai/gpt-oss-120b');
     if (fallbackProviderName === 'openai') {
       const openAiKey = getEnvVar('OPENAI_API_KEY') || getEnvVar('CLINIC_AI_DRAFT_API_KEY');
       candidates.push({
@@ -752,6 +766,83 @@ export function resolveSoapDraftCandidates(
   }
 
   return candidates;
+}
+
+// ---------------------------------------------------------------------------
+// Shared Metered Provider Chain Orchestration Helper
+// ---------------------------------------------------------------------------
+
+export interface MeteredChainOptions<TCandidate, TResult> {
+  candidates: TCandidate[];
+  createProvider(candidate: TCandidate): { providerName: string; invoke(): Promise<TResult> };
+  reserveQuota(): Promise<{ success: boolean; reason_code?: string; message?: string }>;
+}
+
+export interface MeteredChainResult<TResult> {
+  result?: TResult;
+  lastError?: unknown;
+  attemptedCount: number;
+  quotaConsumedCount: number;
+  stoppedByQuota?: boolean;
+  quotaStopReason?: { reason_code: string; message: string; status: number };
+}
+
+export async function executeMeteredProviderChain<TCandidate, TResult>(
+  options: MeteredChainOptions<TCandidate, TResult>
+): Promise<MeteredChainResult<TResult>> {
+  let lastError: unknown = null;
+  let successfulResult: TResult | undefined = undefined;
+  let attemptedCount = 0;
+  let quotaConsumedCount = 0;
+
+  for (const candidate of options.candidates) {
+    let providerEntry;
+    try {
+      providerEntry = options.createProvider(candidate);
+    } catch (err) {
+      if (err instanceof ClinicAiProviderNotConfiguredError) {
+        lastError = err;
+        continue;
+      }
+      throw err;
+    }
+
+    const quotaRes = await options.reserveQuota();
+    if (!quotaRes || !quotaRes.success) {
+      const reason_code = quotaRes?.reason_code || 'AI_NOT_ENTITLED';
+      const message = quotaRes?.message || 'AI operation not allowed under commercial policy.';
+      const status = reason_code === 'AI_QUOTA_EXHAUSTED' ? 429 : 403;
+      return {
+        result: undefined,
+        lastError,
+        attemptedCount,
+        quotaConsumedCount,
+        stoppedByQuota: true,
+        quotaStopReason: { reason_code, message, status },
+      };
+    }
+
+    quotaConsumedCount++;
+    attemptedCount++;
+
+    try {
+      successfulResult = await providerEntry.invoke();
+      break;
+    } catch (err) {
+      lastError = err;
+      if (err instanceof ClinicAiProviderApiError && err.isRetryable) {
+        continue;
+      }
+      break;
+    }
+  }
+
+  return {
+    result: successfulResult,
+    lastError,
+    attemptedCount,
+    quotaConsumedCount,
+  };
 }
 
 // ---------------------------------------------------------------------------

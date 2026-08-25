@@ -466,7 +466,7 @@ check('15. Migration 65 defines 0-argument RPC, consumes canonical "eligible" bo
   );
 });
 
-check('16. Edge functions call 0-argument quota RPC AFTER provider validation (Finding 2 & 3)', () => {
+check('16. Edge functions call 0-argument quota RPC via shared metered provider chain (Finding 2 & 3)', () => {
   assert(
     clinicAiTranscribeEdge.includes('clinic_get_my_context'),
     'Transcribe edge function must call clinic_get_my_context RPC'
@@ -474,6 +474,16 @@ check('16. Edge functions call 0-argument quota RPC AFTER provider validation (F
   assert(
     clinicAiDraftEdge.includes('clinic_get_my_context'),
     'Draft edge function must call clinic_get_my_context RPC'
+  );
+
+  // Shared metered provider chain helper check
+  assert(
+    clinicAiTranscribeEdge.includes('executeMeteredProviderChain'),
+    'Transcribe edge function must call executeMeteredProviderChain'
+  );
+  assert(
+    clinicAiDraftEdge.includes('executeMeteredProviderChain'),
+    'Draft edge function must call executeMeteredProviderChain'
   );
 
   // Finding 2: 0-argument RPC call without caller-supplied parameters
@@ -489,18 +499,18 @@ check('16. Edge functions call 0-argument quota RPC AFTER provider validation (F
   );
 
   // Finding 3: Provider candidate resolution BEFORE quota RPC
-  const transcribeProviderIdx = clinicAiTranscribeEdge.indexOf('resolveTranscriptionCandidates()');
-  const transcribeQuotaIdx = clinicAiTranscribeEdge.indexOf('clinic_check_and_consume_ai_allowance');
+  const transcribeProviderIdx = clinicAiTranscribeEdge.indexOf('resolveTranscriptionCandidates');
+  const transcribeQuotaIdx = clinicAiTranscribeEdge.indexOf('executeMeteredProviderChain');
   assert(
     transcribeProviderIdx > 0 && transcribeQuotaIdx > transcribeProviderIdx,
-    'Transcribe edge function must validate provider factory BEFORE invoking commercial quota RPC'
+    'Transcribe edge function must validate provider candidate resolution BEFORE invoking metered chain'
   );
 
-  const draftProviderIdx = clinicAiDraftEdge.indexOf('resolveSoapDraftCandidates()');
-  const draftQuotaIdx = clinicAiDraftEdge.indexOf('clinic_check_and_consume_ai_allowance');
+  const draftProviderIdx = clinicAiDraftEdge.indexOf('resolveSoapDraftCandidates');
+  const draftQuotaIdx = clinicAiDraftEdge.indexOf('executeMeteredProviderChain');
   assert(
     draftProviderIdx > 0 && draftQuotaIdx > draftProviderIdx,
-    'Draft edge function must validate provider factory BEFORE invoking commercial quota RPC'
+    'Draft edge function must validate provider candidate resolution BEFORE invoking metered chain'
   );
 });
 
