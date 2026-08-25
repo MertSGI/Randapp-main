@@ -48,6 +48,7 @@ jobs:
           fi
 
           echo "EXACT_SHA_BINDING_RESULT=PASS"
+          echo "EXACT_SHA_BINDING_RESULT=PASS" >> $GITHUB_ENV
           mkdir -p /tmp/e2-logs
 
       - name: Setup Node.js 20
@@ -214,6 +215,7 @@ jobs:
           echo "PRONARGS=${PRONARGS}"
           if [ "${PRONARGS}" = "0" ]; then
             echo "MIGRATION65_ZERO_ARG_RPC_RESULT=PASS"
+            echo "MIGRATION65_ZERO_ARG_RPC_RESULT=PASS" >> $GITHUB_ENV
           else
             echo "MIGRATION65_ZERO_ARG_RPC_RESULT=FAIL"
             exit 1
@@ -224,6 +226,7 @@ jobs:
           echo "LEGACY_COUNT=${LEGACY_COUNT}"
           if [ "${LEGACY_COUNT}" = "0" ]; then
             echo "MIGRATION65_LEGACY_SIGNATURE_ABSENT_RESULT=PASS"
+            echo "MIGRATION65_LEGACY_SIGNATURE_ABSENT_RESULT=PASS" >> $GITHUB_ENV
           else
             echo "MIGRATION65_LEGACY_SIGNATURE_ABSENT_RESULT=FAIL"
             exit 1
@@ -234,6 +237,7 @@ jobs:
           echo "ANON_EXEC=${ANON_EXEC}"
           if [ "${ANON_EXEC}" = "false" ] || [ "${ANON_EXEC}" = "f" ]; then
             echo "MIGRATION65_ANON_EXECUTE_RESULT=PASS"
+            echo "MIGRATION65_ANON_EXECUTE_RESULT=PASS" >> $GITHUB_ENV
           else
             echo "MIGRATION65_ANON_EXECUTE_RESULT=FAIL"
             exit 1
@@ -244,6 +248,7 @@ jobs:
           echo "AUTH_EXEC=${AUTH_EXEC}"
           if [ "${AUTH_EXEC}" = "true" ] || [ "${AUTH_EXEC}" = "t" ]; then
             echo "MIGRATION65_AUTHENTICATED_EXECUTE_RESULT=PASS"
+            echo "MIGRATION65_AUTHENTICATED_EXECUTE_RESULT=PASS" >> $GITHUB_ENV
           else
             echo "MIGRATION65_AUTHENTICATED_EXECUTE_RESULT=FAIL"
             exit 1
@@ -273,7 +278,7 @@ jobs:
             REVOKE SELECT, INSERT, UPDATE, DELETE ON public.usage_counters FROM authenticated;
           " || true
 
-          TRIGGER_STATUS=$(psql "$DB_URL" -t -A -c "SELECT tgenenabled FROM pg_trigger WHERE tgname = 'trg_enforce_staff_quota' AND tgrelid = 'public.staff'::regclass;")
+          TRIGGER_STATUS=$(psql "$DB_URL" -t -A -c "SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_enforce_staff_quota' AND tgrelid = 'public.staff'::regclass;")
           echo "TRIGGER_STATUS=${TRIGGER_STATUS}"
           if [ "${TRIGGER_STATUS}" = "O" ] || [ "${TRIGGER_STATUS}" = "true" ] || [ "${TRIGGER_STATUS}" = "t" ]; then
             echo "STAFF_QUOTA_TRIGGER_ENABLED_AFTER_SUITE=YES"
@@ -433,6 +438,9 @@ jobs:
           if [ "${EXACT_SHA_BINDING_RESULT}" = "PASS" ] && \
              [ "${FULL_MIGRATION_REPLAY_RESULT}" = "PASS" ] && \
              [ "${MIGRATION65_ZERO_ARG_RPC_RESULT}" = "PASS" ] && \
+             [ "${MIGRATION65_LEGACY_SIGNATURE_ABSENT_RESULT}" = "PASS" ] && \
+             [ "${MIGRATION65_ANON_EXECUTE_RESULT}" = "PASS" ] && \
+             [ "${MIGRATION65_AUTHENTICATED_EXECUTE_RESULT}" = "PASS" ] && \
              [ "${CLINIC_AI_COMMERCIAL_SQL_RESULT}" = "PASS" ] && \
              [ "${REAL_TWO_CONNECTION_CONCURRENCY_RESULT}" = "PASS" ] && \
              [ "${CLINIC_REGRESSION_RESULT}" = "PASS" ] && \
@@ -457,6 +465,11 @@ jobs:
           CI_MIGRATION_REPLAY_COUNT=${CI_MIGRATION_REPLAY_COUNT:-NOT_EXECUTED}
           CI_LATEST_MIGRATION=${CI_LATEST_MIGRATION:-NOT_EXECUTED}
           FULL_MIGRATION_REPLAY_RESULT=${FULL_MIGRATION_REPLAY_RESULT:-NOT_EXECUTED}
+
+          MIGRATION65_ZERO_ARG_RPC_RESULT=${MIGRATION65_ZERO_ARG_RPC_RESULT:-NOT_EXECUTED}
+          MIGRATION65_LEGACY_SIGNATURE_ABSENT_RESULT=${MIGRATION65_LEGACY_SIGNATURE_ABSENT_RESULT:-NOT_EXECUTED}
+          MIGRATION65_ANON_EXECUTE_RESULT=${MIGRATION65_ANON_EXECUTE_RESULT:-NOT_EXECUTED}
+          MIGRATION65_AUTHENTICATED_EXECUTE_RESULT=${MIGRATION65_AUTHENTICATED_EXECUTE_RESULT:-NOT_EXECUTED}
 
           CLINIC_AI_COMMERCIAL_SQL_CASE_COUNT=25
           CLINIC_AI_COMMERCIAL_SQL_RESULT=${CLINIC_AI_COMMERCIAL_SQL_RESULT:-NOT_EXECUTED}
