@@ -1,14 +1,14 @@
 // ============================================================================
-// Clinic AI Assist — Provider Abstraction & Real OpenAI Adapters
+// Clinic AI Assist — Multi-Provider Resilience Abstraction (Groq + OpenAI)
 //
 // Shared server-side layer for Supabase Edge Functions.
 // Conforms strictly to ClinicTranscriptionProvider and ClinicSoapDraftProvider.
-// Includes OpenAI Whisper transcription adapter and OpenAI Chat Completion
-// structured SOAP draft adapter with strict JSON schema validation.
+// Implements Groq primary provider adapters and OpenAI fallback adapters with
+// safe error handling, timeout bounds, and candidate resolution chain.
 // ============================================================================
 
 // ---------------------------------------------------------------------------
-// Transcription Provider Interface
+// Transcription Provider Interface & Request/Result Types
 // ---------------------------------------------------------------------------
 
 export interface ClinicTranscriptionProviderRequest {
@@ -29,13 +29,14 @@ export interface ClinicTranscriptionProviderResult {
 }
 
 export interface ClinicTranscriptionProvider {
+  readonly providerName: string;
   transcribe(
     request: ClinicTranscriptionProviderRequest
   ): Promise<ClinicTranscriptionProviderResult>;
 }
 
 // ---------------------------------------------------------------------------
-// SOAP Draft Provider Interface
+// SOAP Draft Provider Interface & Request/Result Types
 // ---------------------------------------------------------------------------
 
 export interface ClinicSoapDraftProviderRequest {
@@ -58,6 +59,7 @@ export interface ClinicSoapDraftProviderResult {
 }
 
 export interface ClinicSoapDraftProvider {
+  readonly providerName: string;
   generateDraft(
     request: ClinicSoapDraftProviderRequest
   ): Promise<ClinicSoapDraftProviderResult>;
@@ -100,6 +102,9 @@ Respond ONLY with the JSON object. No additional text.`;
 /** Maximum audio payload size in bytes (10 MB). */
 export const MAX_AUDIO_PAYLOAD_BYTES = 10 * 1024 * 1024;
 
+/** Default provider HTTP timeout in milliseconds (30s). */
+export const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
+
 /** Allowed audio MIME types for transcription. */
 export const SUPPORTED_AUDIO_MIMES: ReadonlySet<string> = new Set([
   'audio/webm',
@@ -109,6 +114,7 @@ export const SUPPORTED_AUDIO_MIMES: ReadonlySet<string> = new Set([
   'audio/mp4',
   'audio/wav',
   'audio/mpeg',
+  'audio/mp3',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -135,12 +141,232 @@ export class ClinicAiSchemaValidationError extends Error {
 
 export class ClinicAiProviderApiError extends Error {
   public readonly code = 'AI_PROVIDER_API_ERROR' as const;
+  public readonly providerName: string;
   public readonly statusCode?: number;
+  public readonly isRetryable: boolean;
 
-  constructor(message: string, statusCode?: number) {
+  constructor(
+    message: string,
+    options: {
+      providerName: string;
+      statusCode?: number;
+      isRetryable?: boolean;
+    }
+  ) {
     super(message);
     this.name = 'ClinicAiProviderApiError';
-    this.statusCode = statusCode;
+    this.providerName = options.providerName;
+    this.statusCode = options.statusCode;
+    this.isRetryable = options.isRetryable ?? isStatusRetryable(options.statusCode);
+  }
+}
+
+export function isStatusRetryable(statusCode?: number): boolean {
+  if (!statusCode) return true; // Network/timeout transport error is retryable
+  if (statusCode === 408 || statusCode === 429) return true;
+  if (statusCode >= 500 && statusCode <= 599) return true;
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Groq Transcription Provider Adapter
+// ---------------------------------------------------------------------------
+
+export class GroqTranscriptionProvider implements ClinicTranscriptionProvider {
+  public readonly providerName = 'groq';
+  private readonly apiKey: string;
+  private readonly model: string;
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(
+    apiKey: string,
+    model: string = 'whisper-large-v3-turbo',
+    fetchImpl: typeof fetch = fetch
+  ) {
+    if (!apiKey || apiKey.startsWith('replace_with_')) {
+      throw new ClinicAiProviderNotConfiguredError('Groq API key is missing or invalid.');
+    }
+    this.apiKey = apiKey;
+    this.model = model;
+    this.fetchImpl = fetchImpl;
+  }
+
+  async transcribe(
+    request: ClinicTranscriptionProviderRequest
+  ): Promise<ClinicTranscriptionProviderResult> {
+    const ext = getExtensionFromMime(request.mimeType);
+    const blob = new Blob([request.audio], { type: request.mimeType });
+
+    const formData = new FormData();
+    formData.append('file', blob, `audio.${ext}`);
+    formData.append('model', this.model);
+    if (request.locale) {
+      formData.append('language', request.locale);
+    }
+    formData.append('response_format', 'verbose_json');
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), DEFAULT_PROVIDER_TIMEOUT_MS);
+
+    try {
+      const res = await this.fetchImpl('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: formData,
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        throw new ClinicAiProviderApiError(`Groq transcription API returned status ${res.status}`, {
+          providerName: 'groq',
+          statusCode: res.status,
+        });
+      }
+
+      const data = await res.json();
+      if (!data || typeof data.text !== 'string') {
+        throw new ClinicAiSchemaValidationError('Malformed response from Groq transcription API.');
+      }
+
+      return {
+        transcript: data.text.trim(),
+        detectedLanguage: data.language || undefined,
+        providerRequestId: res.headers.get('x-groq-id') || res.headers.get('x-request-id') || undefined,
+      };
+    } catch (err: unknown) {
+      if (err instanceof ClinicAiProviderApiError || err instanceof ClinicAiSchemaValidationError) {
+        throw err;
+      }
+      const isTimeout = err instanceof Error && err.name === 'AbortError';
+      throw new ClinicAiProviderApiError(
+        isTimeout ? 'Groq transcription request timed out.' : 'Groq transcription transport error.',
+        {
+          providerName: 'groq',
+          statusCode: isTimeout ? 408 : undefined,
+          isRetryable: true,
+        }
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Groq SOAP Draft Provider Adapter (Strict JSON Schema Output)
+// ---------------------------------------------------------------------------
+
+export class GroqSoapDraftProvider implements ClinicSoapDraftProvider {
+  public readonly providerName = 'groq';
+  private readonly apiKey: string;
+  private readonly model: string;
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(
+    apiKey: string,
+    model: string = 'openai/gpt-oss-120b',
+    fetchImpl: typeof fetch = fetch
+  ) {
+    if (!apiKey || apiKey.startsWith('replace_with_')) {
+      throw new ClinicAiProviderNotConfiguredError('Groq API key is missing or invalid.');
+    }
+    this.apiKey = apiKey;
+    this.model = model;
+    this.fetchImpl = fetchImpl;
+  }
+
+  async generateDraft(
+    request: ClinicSoapDraftProviderRequest
+  ): Promise<ClinicSoapDraftProviderResult> {
+    let userPrompt = `Dictated encounter transcript:\n"${request.transcript}"`;
+    if (request.encounterReason) {
+      userPrompt += `\n\nEncounter Reason / Visit Complaint:\n"${request.encounterReason}"`;
+    }
+
+    const payload = {
+      model: this.model,
+      messages: [
+        { role: 'system', content: CLINIC_AI_DRAFT_SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ],
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'soap_note_draft',
+          strict: true,
+          schema: {
+            type: 'object',
+            properties: {
+              subjective: { type: 'string' },
+              objective: { type: 'string' },
+              assessment: { type: 'string' },
+              plan: { type: 'string' },
+              warnings: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+            },
+            required: ['subjective', 'objective', 'assessment', 'plan', 'warnings'],
+            additionalProperties: false,
+          },
+        },
+      },
+      temperature: 0.1,
+    };
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), DEFAULT_PROVIDER_TIMEOUT_MS);
+
+    try {
+      const res = await this.fetchImpl('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        throw new ClinicAiProviderApiError(`Groq chat completion API returned status ${res.status}`, {
+          providerName: 'groq',
+          statusCode: res.status,
+        });
+      }
+
+      const data = await res.json();
+      const content = data?.choices?.[0]?.message?.content;
+      if (!content) {
+        throw new ClinicAiSchemaValidationError('Empty content choice from Groq draft API.');
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(content);
+      } catch {
+        throw new ClinicAiSchemaValidationError('Failed to parse Groq JSON output string.');
+      }
+
+      return validateAndNormalizeSoapDraft(parsed);
+    } catch (err: unknown) {
+      if (err instanceof ClinicAiProviderApiError || err instanceof ClinicAiSchemaValidationError) {
+        throw err;
+      }
+      const isTimeout = err instanceof Error && err.name === 'AbortError';
+      throw new ClinicAiProviderApiError(
+        isTimeout ? 'Groq draft request timed out.' : 'Groq draft transport error.',
+        {
+          providerName: 'groq',
+          statusCode: isTimeout ? 408 : undefined,
+          isRetryable: true,
+        }
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 }
 
@@ -149,6 +375,7 @@ export class ClinicAiProviderApiError extends Error {
 // ---------------------------------------------------------------------------
 
 export class OpenAiTranscriptionProvider implements ClinicTranscriptionProvider {
+  public readonly providerName = 'openai';
   private readonly apiKey: string;
   private readonly model: string;
   private readonly fetchImpl: typeof fetch;
@@ -169,7 +396,7 @@ export class OpenAiTranscriptionProvider implements ClinicTranscriptionProvider 
   async transcribe(
     request: ClinicTranscriptionProviderRequest
   ): Promise<ClinicTranscriptionProviderResult> {
-    const ext = this.getExtensionFromMime(request.mimeType);
+    const ext = getExtensionFromMime(request.mimeType);
     const blob = new Blob([request.audio], { type: request.mimeType });
 
     const formData = new FormData();
@@ -180,38 +407,52 @@ export class OpenAiTranscriptionProvider implements ClinicTranscriptionProvider 
     }
     formData.append('response_format', 'verbose_json');
 
-    const res = await this.fetchImpl('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: formData,
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), DEFAULT_PROVIDER_TIMEOUT_MS);
 
-    if (!res.ok) {
-      const errStatus = res.status;
-      throw new ClinicAiProviderApiError(`OpenAI transcription API returned status ${errStatus}`, errStatus);
+    try {
+      const res = await this.fetchImpl('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: formData,
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        throw new ClinicAiProviderApiError(`OpenAI transcription API returned status ${res.status}`, {
+          providerName: 'openai',
+          statusCode: res.status,
+        });
+      }
+
+      const data = await res.json();
+      if (!data || typeof data.text !== 'string') {
+        throw new ClinicAiSchemaValidationError('Malformed response from OpenAI transcription API.');
+      }
+
+      return {
+        transcript: data.text.trim(),
+        detectedLanguage: data.language || undefined,
+        providerRequestId: res.headers.get('x-request-id') || undefined,
+      };
+    } catch (err: unknown) {
+      if (err instanceof ClinicAiProviderApiError || err instanceof ClinicAiSchemaValidationError) {
+        throw err;
+      }
+      const isTimeout = err instanceof Error && err.name === 'AbortError';
+      throw new ClinicAiProviderApiError(
+        isTimeout ? 'OpenAI transcription request timed out.' : 'OpenAI transcription transport error.',
+        {
+          providerName: 'openai',
+          statusCode: isTimeout ? 408 : undefined,
+          isRetryable: true,
+        }
+      );
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    const data = await res.json();
-    if (!data || typeof data.text !== 'string') {
-      throw new ClinicAiSchemaValidationError('Malformed response from OpenAI transcription API.');
-    }
-
-    return {
-      transcript: data.text.trim(),
-      detectedLanguage: data.language || undefined,
-      providerRequestId: res.headers.get('x-request-id') || undefined,
-    };
-  }
-
-  private getExtensionFromMime(mimeType: string): string {
-    if (mimeType.includes('webm')) return 'webm';
-    if (mimeType.includes('ogg')) return 'ogg';
-    if (mimeType.includes('mp4')) return 'mp4';
-    if (mimeType.includes('wav')) return 'wav';
-    if (mimeType.includes('mpeg') || mimeType.includes('mp3')) return 'mp3';
-    return 'webm';
   }
 }
 
@@ -220,6 +461,7 @@ export class OpenAiTranscriptionProvider implements ClinicTranscriptionProvider 
 // ---------------------------------------------------------------------------
 
 export class OpenAiSoapDraftProvider implements ClinicSoapDraftProvider {
+  public readonly providerName = 'openai';
   private readonly apiKey: string;
   private readonly model: string;
   private readonly fetchImpl: typeof fetch;
@@ -276,69 +518,109 @@ export class OpenAiSoapDraftProvider implements ClinicSoapDraftProvider {
       temperature: 0.1,
     };
 
-    const res = await this.fetchImpl('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), DEFAULT_PROVIDER_TIMEOUT_MS);
 
-    if (!res.ok) {
-      const errStatus = res.status;
-      throw new ClinicAiProviderApiError(`OpenAI chat completion API returned status ${errStatus}`, errStatus);
-    }
-
-    const data = await res.json();
-    const content = data?.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new ClinicAiSchemaValidationError('Empty content choice from OpenAI draft API.');
-    }
-
-    let parsed: unknown;
     try {
-      parsed = JSON.parse(content);
-    } catch {
-      throw new ClinicAiSchemaValidationError('Failed to parse OpenAI JSON output string.');
-    }
+      const res = await this.fetchImpl('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
 
-    return this.validateAndNormalizeSoapDraft(parsed);
+      if (!res.ok) {
+        throw new ClinicAiProviderApiError(`OpenAI chat completion API returned status ${res.status}`, {
+          providerName: 'openai',
+          statusCode: res.status,
+        });
+      }
+
+      const data = await res.json();
+      const content = data?.choices?.[0]?.message?.content;
+      if (!content) {
+        throw new ClinicAiSchemaValidationError('Empty content choice from OpenAI draft API.');
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(content);
+      } catch {
+        throw new ClinicAiSchemaValidationError('Failed to parse OpenAI JSON output string.');
+      }
+
+      return validateAndNormalizeSoapDraft(parsed);
+    } catch (err: unknown) {
+      if (err instanceof ClinicAiProviderApiError || err instanceof ClinicAiSchemaValidationError) {
+        throw err;
+      }
+      const isTimeout = err instanceof Error && err.name === 'AbortError';
+      throw new ClinicAiProviderApiError(
+        isTimeout ? 'OpenAI draft request timed out.' : 'OpenAI draft transport error.',
+        {
+          providerName: 'openai',
+          statusCode: isTimeout ? 408 : undefined,
+          isRetryable: true,
+        }
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   public validateAndNormalizeSoapDraft(obj: unknown): ClinicSoapDraftProviderResult {
-    if (!obj || typeof obj !== 'object') {
-      throw new ClinicAiSchemaValidationError('SOAP draft output is not an object.');
-    }
-
-    const record = obj as Record<string, unknown>;
-
-    if (typeof record.subjective !== 'string') {
-      throw new ClinicAiSchemaValidationError('SOAP draft missing required string property "subjective".');
-    }
-    if (typeof record.objective !== 'string') {
-      throw new ClinicAiSchemaValidationError('SOAP draft missing required string property "objective".');
-    }
-    if (typeof record.assessment !== 'string') {
-      throw new ClinicAiSchemaValidationError('SOAP draft missing required string property "assessment".');
-    }
-    if (typeof record.plan !== 'string') {
-      throw new ClinicAiSchemaValidationError('SOAP draft missing required string property "plan".');
-    }
-
-    let warnings: string[] = [];
-    if (Array.isArray(record.warnings)) {
-      warnings = record.warnings.filter((w): w is string => typeof w === 'string');
-    }
-
-    return {
-      subjective: record.subjective.trim(),
-      objective: record.objective.trim(),
-      assessment: record.assessment.trim(),
-      plan: record.plan.trim(),
-      warnings,
-    };
+    return validateAndNormalizeSoapDraft(obj);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers & Validation
+// ---------------------------------------------------------------------------
+
+export function validateAndNormalizeSoapDraft(obj: unknown): ClinicSoapDraftProviderResult {
+  if (!obj || typeof obj !== 'object') {
+    throw new ClinicAiSchemaValidationError('SOAP draft output is not an object.');
+  }
+
+  const record = obj as Record<string, unknown>;
+
+  if (typeof record.subjective !== 'string') {
+    throw new ClinicAiSchemaValidationError('SOAP draft missing required string property "subjective".');
+  }
+  if (typeof record.objective !== 'string') {
+    throw new ClinicAiSchemaValidationError('SOAP draft missing required string property "objective".');
+  }
+  if (typeof record.assessment !== 'string') {
+    throw new ClinicAiSchemaValidationError('SOAP draft missing required string property "assessment".');
+  }
+  if (typeof record.plan !== 'string') {
+    throw new ClinicAiSchemaValidationError('SOAP draft missing required string property "plan".');
+  }
+
+  let warnings: string[] = [];
+  if (Array.isArray(record.warnings)) {
+    warnings = record.warnings.filter((w): w is string => typeof w === 'string');
+  }
+
+  return {
+    subjective: record.subjective.trim(),
+    objective: record.objective.trim(),
+    assessment: record.assessment.trim(),
+    plan: record.plan.trim(),
+    warnings,
+  };
+}
+
+export function getExtensionFromMime(mimeType: string): string {
+  if (mimeType.includes('webm')) return 'webm';
+  if (mimeType.includes('ogg')) return 'ogg';
+  if (mimeType.includes('mp4')) return 'mp4';
+  if (mimeType.includes('wav')) return 'wav';
+  if (mimeType.includes('mpeg') || mimeType.includes('mp3')) return 'mp3';
+  return 'webm';
 }
 
 declare const Deno: {
@@ -347,48 +629,176 @@ declare const Deno: {
   };
 };
 
+function getEnvVar(key: string): string | undefined {
+  if (typeof Deno !== 'undefined') {
+    return Deno.env.get(key);
+  }
+  return process.env[key];
+}
+
+// ---------------------------------------------------------------------------
+// Candidate Chain Resolution (Primary + Optional Fallback)
+// ---------------------------------------------------------------------------
+
+export interface TranscriptionCandidate {
+  providerName: string;
+  createProvider(): ClinicTranscriptionProvider;
+}
+
+export interface SoapDraftCandidate {
+  providerName: string;
+  createProvider(): ClinicSoapDraftProvider;
+}
+
+export function resolveTranscriptionCandidates(
+  fetchImpl: typeof fetch = fetch
+): TranscriptionCandidate[] {
+  const primaryProviderName = getEnvVar('CLINIC_AI_TRANSCRIPTION_PROVIDER') || getEnvVar('OPENAI_TRANSCRIPTION_PROVIDER') || 'groq';
+  const primaryModel = getEnvVar('CLINIC_AI_TRANSCRIPTION_MODEL') || (primaryProviderName === 'openai' ? 'whisper-1' : 'whisper-large-v3-turbo');
+
+  const fallbackEnabled = (getEnvVar('CLINIC_AI_FALLBACK_ENABLED') ?? 'true') === 'true';
+  const fallbackProviderName = getEnvVar('CLINIC_AI_TRANSCRIPTION_FALLBACK_PROVIDER');
+  const fallbackModel = getEnvVar('CLINIC_AI_TRANSCRIPTION_FALLBACK_MODEL') || 'whisper-1';
+
+  // Validation: Check for invalid primary provider name (Fail Closed)
+  if (primaryProviderName !== 'groq' && primaryProviderName !== 'openai' && primaryProviderName !== 'none') {
+    throw new ClinicAiProviderNotConfiguredError(`Unknown transcription provider: ${primaryProviderName}. No provider implementation available.`);
+  }
+
+  const candidates: TranscriptionCandidate[] = [];
+
+  // Primary Candidate
+  if (primaryProviderName === 'groq') {
+    const groqKey = getEnvVar('GROQ_API_KEY');
+    candidates.push({
+      providerName: 'groq',
+      createProvider: () => new GroqTranscriptionProvider(groqKey || '', primaryModel, fetchImpl),
+    });
+  } else if (primaryProviderName === 'openai') {
+    const openAiKey = getEnvVar('OPENAI_API_KEY') || getEnvVar('CLINIC_AI_TRANSCRIPTION_API_KEY');
+    candidates.push({
+      providerName: 'openai',
+      createProvider: () => new OpenAiTranscriptionProvider(openAiKey || '', primaryModel, fetchImpl),
+    });
+  }
+
+  // Fallback Candidate (if enabled and valid)
+  if (fallbackEnabled && fallbackProviderName && fallbackProviderName !== primaryProviderName) {
+    if (fallbackProviderName === 'openai') {
+      const openAiKey = getEnvVar('OPENAI_API_KEY') || getEnvVar('CLINIC_AI_TRANSCRIPTION_API_KEY');
+      candidates.push({
+        providerName: 'openai',
+        createProvider: () => new OpenAiTranscriptionProvider(openAiKey || '', fallbackModel, fetchImpl),
+      });
+    } else if (fallbackProviderName === 'groq') {
+      const groqKey = getEnvVar('GROQ_API_KEY');
+      candidates.push({
+        providerName: 'groq',
+        createProvider: () => new GroqTranscriptionProvider(groqKey || '', fallbackModel, fetchImpl),
+      });
+    }
+  }
+
+  return candidates;
+}
+
+export function resolveSoapDraftCandidates(
+  fetchImpl: typeof fetch = fetch
+): SoapDraftCandidate[] {
+  const primaryProviderName = getEnvVar('CLINIC_AI_DRAFT_PROVIDER') || getEnvVar('OPENAI_DRAFT_PROVIDER') || 'groq';
+  const primaryModel = getEnvVar('CLINIC_AI_DRAFT_MODEL') || (primaryProviderName === 'openai' ? 'gpt-4o-mini' : 'openai/gpt-oss-120b');
+
+  const fallbackEnabled = (getEnvVar('CLINIC_AI_FALLBACK_ENABLED') ?? 'true') === 'true';
+  const fallbackProviderName = getEnvVar('CLINIC_AI_DRAFT_FALLBACK_PROVIDER');
+  const fallbackModel = getEnvVar('CLINIC_AI_DRAFT_FALLBACK_MODEL') || 'gpt-4o-mini';
+
+  // Validation: Check for invalid primary provider name (Fail Closed)
+  if (primaryProviderName !== 'groq' && primaryProviderName !== 'openai' && primaryProviderName !== 'none') {
+    throw new ClinicAiProviderNotConfiguredError(`Unknown SOAP draft provider: ${primaryProviderName}. No provider implementation available.`);
+  }
+
+  const candidates: SoapDraftCandidate[] = [];
+
+  // Primary Candidate
+  if (primaryProviderName === 'groq') {
+    const groqKey = getEnvVar('GROQ_API_KEY');
+    candidates.push({
+      providerName: 'groq',
+      createProvider: () => new GroqSoapDraftProvider(groqKey || '', primaryModel, fetchImpl),
+    });
+  } else if (primaryProviderName === 'openai') {
+    const openAiKey = getEnvVar('OPENAI_API_KEY') || getEnvVar('CLINIC_AI_DRAFT_API_KEY');
+    candidates.push({
+      providerName: 'openai',
+      createProvider: () => new OpenAiSoapDraftProvider(openAiKey || '', primaryModel, fetchImpl),
+    });
+  }
+
+  // Fallback Candidate (if enabled and valid)
+  if (fallbackEnabled && fallbackProviderName && fallbackProviderName !== primaryProviderName) {
+    if (fallbackProviderName === 'openai') {
+      const openAiKey = getEnvVar('OPENAI_API_KEY') || getEnvVar('CLINIC_AI_DRAFT_API_KEY');
+      candidates.push({
+        providerName: 'openai',
+        createProvider: () => new OpenAiSoapDraftProvider(openAiKey || '', fallbackModel, fetchImpl),
+      });
+    } else if (fallbackProviderName === 'groq') {
+      const groqKey = getEnvVar('GROQ_API_KEY');
+      candidates.push({
+        providerName: 'groq',
+        createProvider: () => new GroqSoapDraftProvider(groqKey || '', fallbackModel, fetchImpl),
+      });
+    }
+  }
+
+  return candidates;
+}
+
+// ---------------------------------------------------------------------------
+// Backward-Compatible Single-Provider Factories
+// ---------------------------------------------------------------------------
+
 export function createTranscriptionProvider(
   fetchImpl: typeof fetch = fetch
 ): ClinicTranscriptionProvider {
-  const providerName = typeof Deno !== 'undefined' ? Deno.env.get('CLINIC_AI_TRANSCRIPTION_PROVIDER') || Deno.env.get('OPENAI_TRANSCRIPTION_PROVIDER') : process.env.CLINIC_AI_TRANSCRIPTION_PROVIDER || process.env.OPENAI_TRANSCRIPTION_PROVIDER;
-  const apiKey = typeof Deno !== 'undefined' ? Deno.env.get('OPENAI_API_KEY') || Deno.env.get('CLINIC_AI_TRANSCRIPTION_API_KEY') : process.env.OPENAI_API_KEY || process.env.CLINIC_AI_TRANSCRIPTION_API_KEY;
-  const model = (typeof Deno !== 'undefined' ? Deno.env.get('CLINIC_AI_TRANSCRIPTION_MODEL') : process.env.CLINIC_AI_TRANSCRIPTION_MODEL) || 'whisper-1';
-
-  if (!providerName || providerName === 'none') {
+  const candidates = resolveTranscriptionCandidates(fetchImpl);
+  if (candidates.length === 0) {
     throw new ClinicAiProviderNotConfiguredError('Transcription provider is not configured.');
   }
 
-  if (providerName === 'openai') {
-    if (!apiKey || apiKey.startsWith('replace_with_')) {
-      throw new ClinicAiProviderNotConfiguredError('OpenAI transcription API key is not configured.');
+  // Attempt to initialize first valid provider candidate
+  for (const candidate of candidates) {
+    try {
+      return candidate.createProvider();
+    } catch (err) {
+      if (err instanceof ClinicAiProviderNotConfiguredError && candidates.length > 1) {
+        continue;
+      }
+      throw err;
     }
-    return new OpenAiTranscriptionProvider(apiKey, model, fetchImpl);
   }
 
-  throw new ClinicAiProviderNotConfiguredError(
-    `Unknown transcription provider: ${providerName}. No provider implementation available.`
-  );
+  throw new ClinicAiProviderNotConfiguredError('No valid transcription provider configured.');
 }
 
 export function createSoapDraftProvider(
   fetchImpl: typeof fetch = fetch
 ): ClinicSoapDraftProvider {
-  const providerName = typeof Deno !== 'undefined' ? Deno.env.get('CLINIC_AI_DRAFT_PROVIDER') || Deno.env.get('OPENAI_DRAFT_PROVIDER') : process.env.CLINIC_AI_DRAFT_PROVIDER || process.env.OPENAI_DRAFT_PROVIDER;
-  const apiKey = typeof Deno !== 'undefined' ? Deno.env.get('OPENAI_API_KEY') || Deno.env.get('CLINIC_AI_DRAFT_API_KEY') : process.env.OPENAI_API_KEY || process.env.CLINIC_AI_DRAFT_API_KEY;
-  const model = (typeof Deno !== 'undefined' ? Deno.env.get('CLINIC_AI_DRAFT_MODEL') : process.env.CLINIC_AI_DRAFT_MODEL) || 'gpt-4o-mini';
-
-  if (!providerName || providerName === 'none') {
+  const candidates = resolveSoapDraftCandidates(fetchImpl);
+  if (candidates.length === 0) {
     throw new ClinicAiProviderNotConfiguredError('SOAP draft provider is not configured.');
   }
 
-  if (providerName === 'openai') {
-    if (!apiKey || apiKey.startsWith('replace_with_')) {
-      throw new ClinicAiProviderNotConfiguredError('OpenAI SOAP draft API key is not configured.');
+  for (const candidate of candidates) {
+    try {
+      return candidate.createProvider();
+    } catch (err) {
+      if (err instanceof ClinicAiProviderNotConfiguredError && candidates.length > 1) {
+        continue;
+      }
+      throw err;
     }
-    return new OpenAiSoapDraftProvider(apiKey, model, fetchImpl);
   }
 
-  throw new ClinicAiProviderNotConfiguredError(
-    `Unknown SOAP draft provider: ${providerName}. No provider implementation available.`
-  );
+  throw new ClinicAiProviderNotConfiguredError('No valid SOAP draft provider configured.');
 }

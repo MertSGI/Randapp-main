@@ -154,14 +154,14 @@ check('4. super_admin denied — policy requires can_write_clinical_notes + staf
 // CHECK 5: Valid practitioner => provider adapter may be invoked
 // ===========================================================================
 
-check('5. Valid practitioner path — provider invocation exists', () => {
+check('5. Valid practitioner path — provider candidate resolution exists', () => {
   assert(
-    clinicAiTranscribeEdge.includes('createTranscriptionProvider'),
-    'Transcribe edge function must call createTranscriptionProvider'
+    clinicAiTranscribeEdge.includes('resolveTranscriptionCandidates'),
+    'Transcribe edge function must call resolveTranscriptionCandidates'
   );
   assert(
-    clinicAiDraftEdge.includes('createSoapDraftProvider'),
-    'Draft edge function must call createSoapDraftProvider'
+    clinicAiDraftEdge.includes('resolveSoapDraftCandidates'),
+    'Draft edge function must call resolveSoapDraftCandidates'
   );
 });
 
@@ -488,15 +488,15 @@ check('16. Edge functions call 0-argument quota RPC AFTER provider validation (F
     'Draft edge function must invoke 0-argument quota RPC without tenant_id/delta parameters'
   );
 
-  // Finding 3: Provider factory creation BEFORE quota RPC
-  const transcribeProviderIdx = clinicAiTranscribeEdge.indexOf('createTranscriptionProvider()');
+  // Finding 3: Provider candidate resolution BEFORE quota RPC
+  const transcribeProviderIdx = clinicAiTranscribeEdge.indexOf('resolveTranscriptionCandidates()');
   const transcribeQuotaIdx = clinicAiTranscribeEdge.indexOf('clinic_check_and_consume_ai_allowance');
   assert(
     transcribeProviderIdx > 0 && transcribeQuotaIdx > transcribeProviderIdx,
     'Transcribe edge function must validate provider factory BEFORE invoking commercial quota RPC'
   );
 
-  const draftProviderIdx = clinicAiDraftEdge.indexOf('createSoapDraftProvider()');
+  const draftProviderIdx = clinicAiDraftEdge.indexOf('resolveSoapDraftCandidates()');
   const draftQuotaIdx = clinicAiDraftEdge.indexOf('clinic_check_and_consume_ai_allowance');
   assert(
     draftProviderIdx > 0 && draftQuotaIdx > draftProviderIdx,

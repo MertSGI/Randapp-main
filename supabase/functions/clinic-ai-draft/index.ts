@@ -2,8 +2,8 @@
 // clinic-ai-draft — Supabase Edge Function
 //
 // Accepts a transcript from an authenticated Clinic practitioner with
-// can_write_clinical_notes authority, checks atomic commercial quota,
-// invokes the configured SOAP draft provider, and returns a structured draft for clinician review.
+// can_write_clinical_notes authority, checks atomic commercial quota per attempt,
+// executes Groq primary SOAP draft provider with metered OpenAI fallback, and returns a structured draft for clinician review.
 //
 // ZERO clinical writes. ZERO persistence. ZERO autonomous actions.
 // ============================================================================
@@ -11,10 +11,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import {
-  createSoapDraftProvider,
+  resolveSoapDraftCandidates,
   ClinicAiProviderNotConfiguredError,
   ClinicAiSchemaValidationError,
   ClinicAiProviderApiError,
+  ClinicSoapDraftProviderResult,
 } from "../_shared/clinicAiAssistProvider.ts";
 
 const CORS_HEADERS = {
@@ -56,7 +57,7 @@ serve(async (req: Request) => {
       return jsonError("AI_PROVIDER_NOT_CONFIGURED", "Server configuration incomplete.", 500);
     }
 
-    // Security Repair 1: Pure user-context client using caller JWT only. No service role fallback.
+    // Pure user-context client using caller JWT only. No service role fallback.
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -88,8 +89,6 @@ serve(async (req: Request) => {
 
     // -----------------------------------------------------------------------
     // 3. Parse and validate request body
-    //    Minimized input: transcript + optional encounterReason only.
-    //    Does NOT accept patient history, demographics, or tenant records.
     // -----------------------------------------------------------------------
     const body = await req.json();
     const { transcript, encounterReason } = body;
@@ -115,70 +114,115 @@ serve(async (req: Request) => {
     }
 
     // -----------------------------------------------------------------------
-    // 4. Provider Factory Validation BEFORE Commercial Quota Reservation (Finding 3)
-    //    If provider is not configured or invalid, throw/return before consuming quota (delta 0).
+    // 4. Provider Candidate Chain Resolution BEFORE Quota Reservation
     // -----------------------------------------------------------------------
-    const provider = createSoapDraftProvider();
-
-    // -----------------------------------------------------------------------
-    // 5. Commercial Authority & Atomic Quota Reservation
-    //    Uses zero-argument server-authoritative RPC (Finding 2)
-    // -----------------------------------------------------------------------
-    const { data: quotaData, error: quotaError } = await supabase.rpc(
-      "clinic_check_and_consume_ai_allowance"
-    );
-
-    if (quotaError) {
-      return jsonError("COMMERCIAL_NOT_ELIGIBLE", "Commercial entitlement check failed.", 403);
-    }
-
-    if (!quotaData || !quotaData.success) {
-      const reasonCode = quotaData?.reason_code || "AI_NOT_ENTITLED";
-      const message = quotaData?.message || "AI operation not allowed under commercial policy.";
-      const status = reasonCode === "AI_QUOTA_EXHAUSTED" ? 429 : 403;
-      return jsonError(reasonCode, message, status);
+    const candidates = resolveSoapDraftCandidates();
+    if (candidates.length === 0) {
+      return jsonError("AI_PROVIDER_NOT_CONFIGURED", "SOAP draft provider is not configured.", 503);
     }
 
     // -----------------------------------------------------------------------
-    // 6. Invoke SOAP draft provider — 1 unit consumed upon invocation attempt
+    // 5. Sequential Candidate Execution with Per-Attempt Quota Accounting
     // -----------------------------------------------------------------------
-    const result = await provider.generateDraft({
-      transcript: transcript.trim(),
-      encounterReason: encounterReason && typeof encounterReason === "string" ? encounterReason.trim() : undefined,
-      requestContext: {
-        tenantId: clinicContext.tenant_id,
-        staffId: clinicContext.staff_id,
-      },
-    });
+    let lastError: unknown = null;
+    let successfulResult: ClinicSoapDraftProviderResult | null = null;
+    let attemptedCount = 0;
 
-    // -----------------------------------------------------------------------
-    // 7. Return structured SOAP draft — ZERO persistence, ZERO clinical writes
-    // -----------------------------------------------------------------------
-    return new Response(
-      JSON.stringify({
-        success: true,
-        data: {
-          subjective: result.subjective,
-          objective: result.objective,
-          assessment: result.assessment,
-          plan: result.plan,
-          warnings: result.warnings || [],
-        },
-      }),
-      { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
-    );
+    for (const candidate of candidates) {
+      // Create provider instance for this candidate.
+      // If missing key/unconfigured, skip candidate gracefully without consuming quota.
+      let providerInstance;
+      try {
+        providerInstance = candidate.createProvider();
+      } catch (err) {
+        if (err instanceof ClinicAiProviderNotConfiguredError) {
+          lastError = err;
+          continue;
+        }
+        throw err;
+      }
+
+      // Atomically check & consume 1 ai_allowance unit BEFORE external call
+      const { data: quotaData, error: quotaError } = await supabase.rpc(
+        "clinic_check_and_consume_ai_allowance"
+      );
+
+      if (quotaError) {
+        return jsonError("COMMERCIAL_NOT_ELIGIBLE", "Commercial entitlement check failed.", 403);
+      }
+
+      if (!quotaData || !quotaData.success) {
+        const reasonCode = quotaData?.reason_code || "AI_NOT_ENTITLED";
+        const message = quotaData?.message || "AI operation not allowed under commercial policy.";
+        const status = reasonCode === "AI_QUOTA_EXHAUSTED" ? 429 : 403;
+        return jsonError(reasonCode, message, status);
+      }
+
+      attemptedCount++;
+
+      // Execute external provider invocation
+      try {
+        successfulResult = await providerInstance.generateDraft({
+          transcript: transcript.trim(),
+          encounterReason: encounterReason && typeof encounterReason === "string" ? encounterReason.trim() : undefined,
+          requestContext: {
+            tenantId: clinicContext.tenant_id,
+            staffId: clinicContext.staff_id,
+          },
+        });
+
+        // Provider invocation succeeded! Break loop.
+        break;
+      } catch (err) {
+        lastError = err;
+
+        if (err instanceof ClinicAiProviderApiError && err.isRetryable) {
+          console.warn(`[clinic-ai-draft] Retryable provider error from ${err.providerName} (status=${err.statusCode || 'network'}). Proceeding to fallback if available.`);
+          continue; // Try next candidate in chain
+        }
+
+        // Non-retryable error (e.g. 400, 401, 403, schema validation failure). Do NOT fallback.
+        break;
+      }
+    }
+
+    if (successfulResult) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            subjective: successfulResult.subjective,
+            objective: successfulResult.objective,
+            assessment: successfulResult.assessment,
+            plan: successfulResult.plan,
+            warnings: successfulResult.warnings || [],
+          },
+        }),
+        { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Process final error if all candidates failed or non-retryable error occurred
+    if (lastError instanceof ClinicAiProviderNotConfiguredError) {
+      return jsonError("AI_PROVIDER_NOT_CONFIGURED", lastError.message, 503);
+    }
+    if (lastError instanceof ClinicAiSchemaValidationError) {
+      return jsonError("DRAFT_GENERATION_FAILED", lastError.message, 502);
+    }
+    if (lastError instanceof ClinicAiProviderApiError) {
+      return jsonError("DRAFT_GENERATION_FAILED", "External draft provider error.", 502);
+    }
+
+    if (attemptedCount === 0) {
+      return jsonError("AI_PROVIDER_NOT_CONFIGURED", "No valid SOAP draft provider configured.", 503);
+    }
+
+    console.error(`[clinic-ai-draft] Safe Error Log: function=clinic-ai-draft, code=DRAFT_GENERATION_FAILED`);
+    return jsonError("DRAFT_GENERATION_FAILED", "SOAP draft generation failed.", 500);
   } catch (error) {
     if (error instanceof ClinicAiProviderNotConfiguredError) {
       return jsonError("AI_PROVIDER_NOT_CONFIGURED", error.message, 503);
     }
-    if (error instanceof ClinicAiSchemaValidationError) {
-      return jsonError("DRAFT_GENERATION_FAILED", error.message, 502);
-    }
-    if (error instanceof ClinicAiProviderApiError) {
-      return jsonError("DRAFT_GENERATION_FAILED", "External draft provider error.", 502);
-    }
-
-    // Security Repair 2: Safe error logging without raw details
     const safeCode = (error && typeof error === "object" && "code" in error) ? (error as { code: string }).code : "UNKNOWN_ERROR";
     console.error(`[clinic-ai-draft] Safe Error Log: function=clinic-ai-draft, code=${safeCode}`);
     return jsonError("DRAFT_GENERATION_FAILED", "SOAP draft generation failed.", 500);
