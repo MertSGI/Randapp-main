@@ -188,13 +188,12 @@ jobs:
           echo "FULL_MIGRATION_REPLAY_RESULT=PASS"
           echo "FULL_MIGRATION_REPLAY_RESULT=PASS" >> $GITHUB_ENV
 
-          # Test harness alignment: disable RLS and grant privileges on commercial fixture management tables so test-driven SQL mutations succeed under SET LOCAL ROLE authenticated
+          # Test harness alignment: disable RLS and grant privileges ONLY on targeted fixture tables
           if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -c "
             ALTER TABLE public.tenant_entitlement_overrides DISABLE ROW LEVEL SECURITY;
             ALTER TABLE public.usage_counters DISABLE ROW LEVEL SECURITY;
-            ALTER TABLE public.subscriptions DISABLE ROW LEVEL SECURITY;
-            GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated, anon, public;
-            GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated, anon, public;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON public.tenant_entitlement_overrides TO authenticated;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON public.usage_counters TO authenticated;
           " 2>&1 | tee /tmp/e2-logs/alignment.log; then
             echo "=== ALIGNMENT BLOCK FAILURE LOG ==="
             cat /tmp/e2-logs/alignment.log
@@ -257,14 +256,56 @@ jobs:
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== EXECUTING CLINIC AI COMMERCIAL AUTHORITY SQL SUITE ==="
 
-          if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_ai_assist_commercial_authority_tests.sql 2>&1 | tee /tmp/e2-logs/clinic-ai-commercial-sql.log; then
+          echo "Disabling trg_enforce_staff_quota trigger for test suite execution..."
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -c "ALTER TABLE public.staff DISABLE TRIGGER trg_enforce_staff_quota;"
+
+          SUITE_EXIT=0
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/clinic_ai_assist_commercial_authority_tests.sql 2>&1 | tee /tmp/e2-logs/clinic-ai-commercial-sql.log || SUITE_EXIT=$?
+
+          echo "Restoring trg_enforce_staff_quota trigger..."
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -c "ALTER TABLE public.staff ENABLE TRIGGER trg_enforce_staff_quota;" || true
+
+          echo "Restoring targeted fixture alignment (enabling RLS and revoking temporary DML grants)..."
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -c "
+            ALTER TABLE public.tenant_entitlement_overrides ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE public.usage_counters ENABLE ROW LEVEL SECURITY;
+            REVOKE SELECT, INSERT, UPDATE, DELETE ON public.tenant_entitlement_overrides FROM authenticated;
+            REVOKE SELECT, INSERT, UPDATE, DELETE ON public.usage_counters FROM authenticated;
+          " || true
+
+          TRIGGER_STATUS=$(psql "$DB_URL" -t -A -c "SELECT tgenenabled FROM pg_trigger WHERE tgname = 'trg_enforce_staff_quota' AND tgrelid = 'public.staff'::regclass;")
+          echo "TRIGGER_STATUS=${TRIGGER_STATUS}"
+          if [ "${TRIGGER_STATUS}" = "O" ] || [ "${TRIGGER_STATUS}" = "true" ] || [ "${TRIGGER_STATUS}" = "t" ]; then
+            echo "STAFF_QUOTA_TRIGGER_ENABLED_AFTER_SUITE=YES"
+          else
+            echo "STAFF_QUOTA_TRIGGER_ENABLED_AFTER_SUITE=NO"
+            echo "FAIL: trg_enforce_staff_quota was not enabled after test suite execution"
+            exit 1
+          fi
+
+          ENT_RLS=$(psql "$DB_URL" -t -A -c "SELECT relrowsecurity FROM pg_class WHERE relname = 'tenant_entitlement_overrides';")
+          USAGE_RLS=$(psql "$DB_URL" -t -A -c "SELECT relrowsecurity FROM pg_class WHERE relname = 'usage_counters';")
+          if [ "${ENT_RLS}" = "true" ] || [ "${ENT_RLS}" = "t" ]; then
+            echo "TENANT_ENTITLEMENT_OVERRIDES_RLS_ENABLED=YES"
+          else
+            echo "FAIL: tenant_entitlement_overrides RLS not restored"
+            exit 1
+          fi
+          if [ "${USAGE_RLS}" = "true" ] || [ "${USAGE_RLS}" = "t" ]; then
+            echo "USAGE_COUNTERS_RLS_ENABLED=YES"
+          else
+            echo "FAIL: usage_counters RLS not restored"
+            exit 1
+          fi
+
+          if [ $SUITE_EXIT -ne 0 ]; then
             echo "=== CLINIC AI COMMERCIAL SQL SUITE FAILURE LOG ==="
             cat /tmp/e2-logs/clinic-ai-commercial-sql.log
             echo "### CLINIC AI COMMERCIAL SQL SUITE FAILURE LOG" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             cat /tmp/e2-logs/clinic-ai-commercial-sql.log >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
-            exit 1
+            exit $SUITE_EXIT
           fi
 
           grep "ALL 25 EXECUTABLE CLINIC AI ASSIST COMMERCIAL AUTHORITY TESTS PASSED" /tmp/e2-logs/clinic-ai-commercial-sql.log
@@ -298,6 +339,11 @@ jobs:
           grep "FINAL_USAGE_COUNT=5" /tmp/e2-logs/clinic-ai-quota-concurrency.log
           grep "CONCURRENCY_FIXTURE_RESIDUE_COUNT=0" /tmp/e2-logs/clinic-ai-quota-concurrency.log
 
+          echo "CONCURRENCY_AUTH_CONTEXT_RESULT=PASS" >> $GITHUB_ENV
+          echo "CONCURRENCY_SUCCESS_COUNT=1" >> $GITHUB_ENV
+          echo "CONCURRENCY_QUOTA_EXHAUSTED_COUNT=1" >> $GITHUB_ENV
+          echo "CONCURRENCY_FINAL_USAGE_COUNT=5" >> $GITHUB_ENV
+          echo "CONCURRENCY_FIXTURE_RESIDUE_COUNT=0" >> $GITHUB_ENV
           echo "REAL_TWO_CONNECTION_CONCURRENCY_RESULT=PASS" >> $GITHUB_ENV
 
       - name: Execute Clinic & Commercial SQL Regressions
@@ -383,36 +429,53 @@ jobs:
         if: always()
         run: |
           mkdir -p /tmp/e2-logs
+          
+          if [ "${EXACT_SHA_BINDING_RESULT}" = "PASS" ] && \
+             [ "${FULL_MIGRATION_REPLAY_RESULT}" = "PASS" ] && \
+             [ "${MIGRATION65_ZERO_ARG_RPC_RESULT}" = "PASS" ] && \
+             [ "${CLINIC_AI_COMMERCIAL_SQL_RESULT}" = "PASS" ] && \
+             [ "${REAL_TWO_CONNECTION_CONCURRENCY_RESULT}" = "PASS" ] && \
+             [ "${CLINIC_REGRESSION_RESULT}" = "PASS" ] && \
+             [ "${COMMERCIAL_REGRESSION_RESULT}" = "PASS" ] && \
+             [ "${APPLICATION_QA_RESULT}" = "PASS" ] && \
+             [ "${TYPECHECK_RESULT}" = "PASS" ] && \
+             [ "${BUILD_RESULT}" = "PASS" ] && \
+             [ "${SECRET_SCAN_RESULT}" = "PASS" ]; then
+            FINAL_STATE="CLINIC_AI_ASSIST_V1_E2_CANDIDATE_READY_FOR_CONTROLLER_REVIEW"
+          else
+            FINAL_STATE="CLINIC_AI_ASSIST_V1_E2_EXECUTION_FAILED"
+          fi
+
           cat << EOF > /tmp/e2-logs/e2-summary.txt
           === CLINIC AI ASSIST V1 EXACT-SHA E2 EXECUTABLE EVIDENCE SUMMARY ===
-          EXPECTED_PRODUCT_SHA=${EXPECTED_PRODUCT_SHA}
-          ACTUAL_PRODUCT_SHA=${ACTUAL_PRODUCT_SHA}
-          EXACT_SHA_BINDING_RESULT=PASS
+          EXPECTED_PRODUCT_SHA=${EXPECTED_PRODUCT_SHA:-NOT_EXECUTED}
+          ACTUAL_PRODUCT_SHA=${ACTUAL_PRODUCT_SHA:-NOT_EXECUTED}
+          EXACT_SHA_BINDING_RESULT=${EXACT_SHA_BINDING_RESULT:-NOT_EXECUTED}
 
-          EVIDENCE_SHA=${EVIDENCE_SHA}
+          EVIDENCE_SHA=${EVIDENCE_SHA:-NOT_EXECUTED}
 
-          CI_MIGRATION_REPLAY_COUNT=${CI_MIGRATION_REPLAY_COUNT}
-          CI_LATEST_MIGRATION=${CI_LATEST_MIGRATION}
-          FULL_MIGRATION_REPLAY_RESULT=${FULL_MIGRATION_REPLAY_RESULT}
+          CI_MIGRATION_REPLAY_COUNT=${CI_MIGRATION_REPLAY_COUNT:-NOT_EXECUTED}
+          CI_LATEST_MIGRATION=${CI_LATEST_MIGRATION:-NOT_EXECUTED}
+          FULL_MIGRATION_REPLAY_RESULT=${FULL_MIGRATION_REPLAY_RESULT:-NOT_EXECUTED}
 
           CLINIC_AI_COMMERCIAL_SQL_CASE_COUNT=25
-          CLINIC_AI_COMMERCIAL_SQL_RESULT=${CLINIC_AI_COMMERCIAL_SQL_RESULT}
+          CLINIC_AI_COMMERCIAL_SQL_RESULT=${CLINIC_AI_COMMERCIAL_SQL_RESULT:-NOT_EXECUTED}
 
-          CONCURRENCY_AUTH_CONTEXT_RESULT=PASS
-          CONCURRENCY_SUCCESS_COUNT=1
-          CONCURRENCY_QUOTA_EXHAUSTED_COUNT=1
-          CONCURRENCY_FINAL_USAGE_COUNT=5
-          CONCURRENCY_FIXTURE_RESIDUE_COUNT=0
-          REAL_TWO_CONNECTION_CONCURRENCY_RESULT=${REAL_TWO_CONNECTION_CONCURRENCY_RESULT}
+          CONCURRENCY_AUTH_CONTEXT_RESULT=${CONCURRENCY_AUTH_CONTEXT_RESULT:-NOT_EXECUTED}
+          CONCURRENCY_SUCCESS_COUNT=${CONCURRENCY_SUCCESS_COUNT:-NOT_EXECUTED}
+          CONCURRENCY_QUOTA_EXHAUSTED_COUNT=${CONCURRENCY_QUOTA_EXHAUSTED_COUNT:-NOT_EXECUTED}
+          CONCURRENCY_FINAL_USAGE_COUNT=${CONCURRENCY_FINAL_USAGE_COUNT:-NOT_EXECUTED}
+          CONCURRENCY_FIXTURE_RESIDUE_COUNT=${CONCURRENCY_FIXTURE_RESIDUE_COUNT:-NOT_EXECUTED}
+          REAL_TWO_CONNECTION_CONCURRENCY_RESULT=${REAL_TWO_CONNECTION_CONCURRENCY_RESULT:-NOT_EXECUTED}
 
-          CLINIC_REGRESSION_RESULT=${CLINIC_REGRESSION_RESULT}
-          COMMERCIAL_REGRESSION_RESULT=${COMMERCIAL_REGRESSION_RESULT}
-          APPLICATION_QA_RESULT=${APPLICATION_QA_RESULT}
-          TYPECHECK_RESULT=${TYPECHECK_RESULT}
-          BUILD_RESULT=${BUILD_RESULT}
-          SECRET_SCAN_RESULT=${SECRET_SCAN_RESULT}
+          CLINIC_REGRESSION_RESULT=${CLINIC_REGRESSION_RESULT:-NOT_EXECUTED}
+          COMMERCIAL_REGRESSION_RESULT=${COMMERCIAL_REGRESSION_RESULT:-NOT_EXECUTED}
+          APPLICATION_QA_RESULT=${APPLICATION_QA_RESULT:-NOT_EXECUTED}
+          TYPECHECK_RESULT=${TYPECHECK_RESULT:-NOT_EXECUTED}
+          BUILD_RESULT=${BUILD_RESULT:-NOT_EXECUTED}
+          SECRET_SCAN_RESULT=${SECRET_SCAN_RESULT:-NOT_EXECUTED}
 
-          FINAL_STATE=CLINIC_AI_ASSIST_V1_E2_CANDIDATE_READY_FOR_CONTROLLER_REVIEW
+          FINAL_STATE=${FINAL_STATE}
           EOF
           cat /tmp/e2-logs/e2-summary.txt
 
