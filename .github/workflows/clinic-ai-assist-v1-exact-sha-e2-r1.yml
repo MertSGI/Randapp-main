@@ -196,7 +196,6 @@ jobs:
             GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated, anon, public;
             GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated, anon, public;
             GRANT authenticated TO anon;
-            GRANT anon TO authenticated;
           "
 
       - name: Migration 65 Catalog Verification
