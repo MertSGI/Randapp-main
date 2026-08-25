@@ -189,15 +189,21 @@ jobs:
           echo "FULL_MIGRATION_REPLAY_RESULT=PASS" >> $GITHUB_ENV
 
           # Test harness alignment: disable RLS and grant privileges on commercial fixture management tables so test-driven SQL mutations succeed under SET LOCAL ROLE authenticated
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -c "
+          if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -c "
             ALTER TABLE public.tenant_entitlement_overrides DISABLE ROW LEVEL SECURITY;
             ALTER TABLE public.usage_counters DISABLE ROW LEVEL SECURITY;
             ALTER TABLE public.subscriptions DISABLE ROW LEVEL SECURITY;
             GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated, anon, public;
             GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated, anon, public;
-            ALTER ROLE anon NOINHERIT;
-            GRANT authenticated TO anon;
-          "
+          " 2>&1 | tee /tmp/e2-logs/alignment.log; then
+            echo "=== ALIGNMENT BLOCK FAILURE LOG ==="
+            cat /tmp/e2-logs/alignment.log
+            echo "### ❌ Step 11 Alignment Failed" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat /tmp/e2-logs/alignment.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
 
       - name: Migration 65 Catalog Verification
         run: |
