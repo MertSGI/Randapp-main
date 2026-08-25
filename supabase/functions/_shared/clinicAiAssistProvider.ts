@@ -635,7 +635,14 @@ function getEnvVar(key: string): string | undefined {
   if (typeof Deno !== 'undefined') {
     return Deno.env.get(key);
   }
-  return process.env[key];
+  const nodeProcess = (
+    globalThis as {
+      process?: {
+        env?: Record<string, string | undefined>;
+      };
+    }
+  ).process;
+  return nodeProcess?.env?.[key];
 }
 
 // ---------------------------------------------------------------------------

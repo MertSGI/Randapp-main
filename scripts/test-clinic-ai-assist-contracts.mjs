@@ -727,6 +727,40 @@ check('27. Concurrency runner R2.5 lock-lifetime and integrity guards enforced',
 });
 
 // ===========================================================================
+// CHECK 23: Deno runtime environment lookup compatibility guard
+// ===========================================================================
+
+check('23. Deno environment compatibility & secret exposure safety guard', () => {
+  // Guard 1: Provider contains no bare process.env or bare process reference requiring Node globals
+  assert(
+    !clinicAiAssistProvider.includes('process.env'),
+    'clinicAiAssistProvider.ts must NOT contain bare process.env reference'
+  );
+
+  // Guard 2: Deno.env.get is present for Deno runtime lookup
+  assert(
+    clinicAiAssistProvider.includes('Deno.env.get('),
+    'clinicAiAssistProvider.ts must use Deno.env.get for Deno environment lookup'
+  );
+
+  // Guard 3: Safe globalThis process lookup exists for Node/tsx test runner resolution
+  assert(
+    clinicAiAssistProvider.includes('globalThis as') &&
+    clinicAiAssistProvider.includes('process?:'),
+    'clinicAiAssistProvider.ts must use globalThis-safe process lookup for Node environment resolution'
+  );
+
+  // Guard 4: No provider secret is exposed to frontend code
+  const frontendPanel = clinicAiAssistPanel;
+  const frontendService = clinicAiAssistService;
+  assert(
+    !frontendPanel.includes('GROQ_API_KEY') && !frontendPanel.includes('OPENAI_API_KEY') &&
+    !frontendService.includes('GROQ_API_KEY') && !frontendService.includes('OPENAI_API_KEY'),
+    'Frontend code must NOT contain or expose GROQ_API_KEY or OPENAI_API_KEY'
+  );
+});
+
+// ===========================================================================
 // SUMMARY
 // ===========================================================================
 
@@ -739,5 +773,6 @@ if (failed > 0) {
 
 console.log('');
 console.log('ALL CHECKS PASSED.');
+
 
 
