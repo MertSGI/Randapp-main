@@ -74,6 +74,7 @@ jobs:
           deno check supabase/functions/clinic-ai-draft/index.ts 2>&1 | tee /tmp/e2-logs/deno-edge-draft.log
           echo "DENO_CHECK_DRAFT=PASS" >> $GITHUB_ENV
           echo "PINNED_DENO_VERSION=v1.40.5" >> $GITHUB_ENV
+          git checkout "${EXPECTED_PRODUCT_SHA}" -- supabase/functions/
 
       - name: Install Exact Product Dependencies
         run: |
