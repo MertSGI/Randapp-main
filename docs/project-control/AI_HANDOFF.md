@@ -30,10 +30,8 @@ MANDATORY PROTOCOL:
 - **Clinic Core Baseline**: `feature/lari-clinic-foundation` (`008ebac4496d592d271d612713c437d316c416f0`) — `CLOSED_PROVEN`
 - **Clinic AI Assist V1 Baseline**: `feature/clinic-ai-assist-v1-provider-resilience` (`451081f2619f0342df2a8c64ae401dffb7697363`) — `CLOSED_PROVEN`
 - **Isolated E3 Acceptance Project**: `miuecvkkmyvaciticwtm` — `ACCEPTED_CLOSED_PROVEN` (Migrations: 65 / `20260909_clinic_ai_assist_commercial_authority.sql`, E2 Run: `32840780417`, Artifact: `9560421750`)
-- **Active Milestone**: `LARİ Health Tourism` (`HEALTH_TOURISM_FOUNDATION`) — `HEALTH_TOURISM_READY_FOR_IMPLEMENTATION`
-  - **Scope Reconciliation**: `ACCEPTED_CLOSED` (37/37 numbered items classified: 24 COMMITTED, 3 DEFERRED to Final Delivery, 10 EXPLICITLY_OUT_OF_SCOPE, 0 SUPERSEDED in matrix; 2 cross-cutting superseded items). Canonically persisted in [HEALTH_TOURISM_SCOPE_MATRIX.md](./HEALTH_TOURISM_SCOPE_MATRIX.md). EV-030 ACCEPTED by controller. Authorized to begin first implementation slice.
-  - **Health Tourism Scope**: Multilingual intake, agency attribution, Web AI Lead Agent, lead scoring, coordinator workflow, Clinic integration.
-
-
-
-
+- **Active Milestone**: `LARİ Health Tourism` — `HEALTH_TOURISM_FOUNDATION_SLICE1_CLOSED_PROVEN`
+  - **Foundation Slice 1**: `CLOSED_PROVEN` (`E2_EXECUTABLE_EXACT_SHA_CI`, Product SHA `401dbf9a10ffccef594a19c7c1070a256ae279bf`, Evidence SHA `93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7`, GitHub Actions Run `32996883374`, Job `98263359495`, Artifact `9616929855` digest `sha256:b3cca4afd2620080d3b2237a811f3f99cd281e345a6bfcb90b193aa197e0680d`). 66 migrations applied, staff quota trigger O->D->O aligned, 32/32 pgTAP assertions, 17/17 named behavioral proofs verified.
+  - **Scope Reconciliation**: `ACCEPTED_CLOSED` (37/37 numbered items classified: 24 COMMITTED, 3 DEFERRED to Final Delivery, 10 EXPLICITLY_OUT_OF_SCOPE, 0 SUPERSEDED in matrix; 2 cross-cutting superseded items). Canonically persisted in [HEALTH_TOURISM_SCOPE_MATRIX.md](./HEALTH_TOURISM_SCOPE_MATRIX.md). EV-030 ACCEPTED by controller.
+  - **Next Gate**: `HEALTH_TOURISM_SLICE2_MULTILINGUAL_PUBLIC_INTAKE_AND_SURFACE`
+  - **Non-Blocking Security Follow-up**: Recorded `OBSERVED_DEPENDENCY_AUDIT_RISK / REVIEW_REQUIRED_BEFORE_PRODUCTION` (6 vulnerabilities: 1 low, 5 high reported during R7 npm ci).

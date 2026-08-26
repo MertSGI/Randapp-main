@@ -6,7 +6,7 @@
 LARİ CORE [FROZEN / CLOSED_PROVEN]
   └── PACKAGE / CUSTOMER CUSTOMIZATION [CLOSED_PROVEN]
         └── LARİ CLINIC [CLOSED_PROVEN]
-              └── LARİ HEALTH TOURISM [IN_PROGRESS - RECONCILED]
+              └── LARİ HEALTH TOURISM [IN_PROGRESS - SLICE 1 CLOSED_PROVEN]
                     └── FINAL DELIVERY
 ```
 *Note: UI V2 is a parallel frontend lane and NOT a separate product roadmap phase.*
@@ -44,6 +44,8 @@ LARİ CORE [FROZEN / CLOSED_PROVEN]
 | **3. LARİ Clinic** | Clinic Core Milestone | `CLOSED_PROVEN` | E3 (Isolated Runtime E2E) |
 | **3. LARİ Clinic** | Speech-to-Text & SOAP Draft Assist (`CLINIC_AI_ASSIST_V1`) | `CLOSED_PROVEN` | E3 (Isolated Runtime E2E) |
 | **4. LARİ Health Tourism** | International Patient & Agency Operations Scope | `CLOSED_ACCEPTED` | E1 (Source Proven) |
+| **4. LARİ Health Tourism** | Server Authority & Lead Domain Core (Foundation Slice 1) | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
+| **4. LARİ Health Tourism** | Multilingual Public Intake & Surface (Slice 2) | `IN_PROGRESS` | E1 (Source Planned) |
 | **5. Final Delivery** | Production Cutover & DNS/Commercial Launch | `NOT_STARTED` | N/A |
 
 ---
@@ -68,11 +70,10 @@ LARİ CORE [FROZEN / CLOSED_PROVEN]
   - `Clinic Workspace UI & Isolated Real-Browser Acceptance` (Block 3): `CLOSED_PROVEN` (`E3_ISOLATED_RUNTIME_E2E`, GitHub Actions Run `32624729632`, isolated project `miuecvkkmyvaciticwtm`). Verified workspace UI, authenticated role context switching, read-only evidence recapture (`7E2954A3...`), distinct UI screenshots, and DB immutability.
   - `Speech-to-Text & SOAP Draft Assist` (`CLINIC_AI_ASSIST_V1`): `CLOSED_PROVEN` (`E3_ISOLATED_RUNTIME_E2E`, GitHub Actions Run `32840780417`, isolated project `miuecvkkmyvaciticwtm`, product SHA `451081f2619f0342df2a8c64ae401dffb7697363`). Real Groq transcription (`whisper-large-v3-turbo`) and SOAP draft (`openai/gpt-oss-120b`) proven under practitioner authority with atomic commercial quota metering, strict human approval boundary, zero raw audio DB persistence, and 0 autonomous clinical completions.
 
-### Phase 4: LARİ Health Tourism Package (IN_PROGRESS - SCOPE RECONCILIATION ACCEPTED)
-- **Status**: IN_PROGRESS (Scope Reconciliation Accepted). Complete auditable 37-row matrix canonically persisted in [HEALTH_TOURISM_SCOPE_MATRIX.md](./HEALTH_TOURISM_SCOPE_MATRIX.md) and accepted by controller (24 COMMITTED, 3 DEFERRED to Final Delivery, 10 EXPLICITLY_OUT_OF_SCOPE, 0 SUPERSEDED in matrix; 2 cross-cutting superseded items). Main product delivery train ready for first `HEALTH_TOURISM_FOUNDATION` implementation slice.
-
-
-
+### Phase 4: LARİ Health Tourism Package (IN_PROGRESS)
+- **Status**: IN_PROGRESS. Canonical 37-row scope matrix accepted (24 COMMITTED, 3 DEFERRED, 10 EXPLICITLY_OUT_OF_SCOPE, 0 SUPERSEDED in matrix).
+  - `Health Tourism Foundation Slice 1` (Server Authority & Lead Domain Core): `CLOSED_PROVEN` (`E2_EXECUTABLE_EXACT_SHA_CI`, GitHub Actions Run `32996883374`, Job `98263359495`, Artifact `9616929855`, evidence SHA `93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7`, product SHA `401dbf9a10ffccef594a19c7c1070a256ae279bf`). Materialized 66th migration `20260910_lari_health_tourism_foundation.sql`, `ht_agency_profiles`, `ht_leads`, `ht_lead_audit_logs`, 4 server-authoritative RPCs (`ht_create_public_lead`, `ht_get_lead`, `ht_list_leads`, `ht_update_lead_status`), strict RLS policies denying direct table SELECT for authenticated & anon roles, optional passport storage in DB intake with zero passport exposure in RPC outputs/audits, 100-item pagination limit with negative-offset clamping, lead status lifecycle audit logging (`new` -> `contacted`), zero Clinic/Core side-effect patient/encounter creation, staff quota trigger alignment, and 32/32 pgTAP behavioral tests verified.
+  - `Multilingual Public Intake & Surface` (Slice 2): `IN_PROGRESS` (Next canonical product gate: `HEALTH_TOURISM_SLICE2_MULTILINGUAL_PUBLIC_INTAKE_AND_SURFACE`). Objective: Advance committed customer deliverables including multilingual public HT surface, multilingual intake, real public lead capture using proven HT foundation, language/country context, source_channel attribution, referring agency attribution, and dedicated HT landing surface while reusing existing platform branding, custom domain, maps, and cookie consent foundations.
 
 ### Phase 5: Final Delivery
 - **Status**: Not Started. Final production cutover, wildcard DNS/SSL configuration, SMS/WhatsApp provider account activation, payment activation (Iyzico), and commercial launch mode enablement.

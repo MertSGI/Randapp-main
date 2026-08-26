@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-08-26T11:20:00+03:00",
+  "updated_at": "2026-08-26T21:16:00+03:00",
   "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
@@ -17,7 +17,7 @@
     "Final Delivery"
   ],
   "current_milestone": "LARİ Health Tourism",
-  "current_status": "HEALTH_TOURISM_READY_FOR_IMPLEMENTATION",
+  "current_status": "HEALTH_TOURISM_FOUNDATION_SLICE1_CLOSED_PROVEN",
   "scope_matrix": "docs/project-control/HEALTH_TOURISM_SCOPE_MATRIX.md",
   "canonical_refs": {
     "main_pilot": {
@@ -116,6 +116,16 @@
       "sha": "451081f2619f0342df2a8c64ae401dffb7697363",
       "isolated_project": "miuecvkkmyvaciticwtm",
       "status": "CLOSED_PROVEN"
+    },
+    "ht_foundation_slice1": {
+      "branch": "feature/lari-health-tourism-foundation",
+      "sha": "401dbf9a10ffccef594a19c7c1070a256ae279bf",
+      "status": "CLOSED_PROVEN"
+    },
+    "ht_foundation_slice1_ci_evidence": {
+      "branch": "ci/health-tourism-foundation-slice1-exact-sha-r7-20260826",
+      "sha": "93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7",
+      "status": "CI_RUN_32996883374_SUCCESS"
     }
   },
   "accepted_gates": [
@@ -324,6 +334,18 @@
       "tested_sha": "25c41a7a026bb7e5e7e312c8fbee77f204e4add1",
       "closed_at": "2026-08-26T11:20:00+03:00",
       "reopen_condition": "Contradictory scope reconciliation or unauthorized boundary mutation"
+    },
+    {
+      "gate": "LARİ Health Tourism Foundation Slice 1 Server Authority & Lead Domain Core",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "401dbf9a10ffccef594a19c7c1070a256ae279bf",
+      "evidence_sha": "93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7",
+      "run_ids": [
+        "32996883374"
+      ],
+      "closed_at": "2026-08-26T20:57:48+03:00",
+      "reopen_condition": "Contradictory HT schema, server-authority RPC, capability denial, passport privacy, pagination, audit, core/clinic isolation, or exact-SHA regression evidence"
     }
   ],
   "active_workstreams": {
@@ -411,7 +433,16 @@
     "lari_health_tourism": {
       "status": "IN_PROGRESS",
       "reconciliation_status": "ACCEPTED_RECONCILED",
-      "objective": "Multilingual public/intake experience, Web AI Lead Agent, source attribution, lead capture & scoring, coordinator workflow, and Clinic integration"
+      "objective": "Multilingual public/intake experience, Web AI Lead Agent, source attribution, lead capture & scoring, coordinator workflow, and Clinic integration",
+      "slices": {
+        "foundation_slice1": {
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+          "product_sha": "401dbf9a10ffccef594a19c7c1070a256ae279bf",
+          "evidence_sha": "93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7",
+          "run_id": "32996883374"
+        }
+      }
     }
   },
   "external_dependencies": {
@@ -421,10 +452,11 @@
     "whatsapp_provider": "OUTBOX_SIMULATION"
   },
   "non_blocking_validation": {
-    "human_participant_uat": "DEFERRED_FIELD_VALIDATION"
+    "human_participant_uat": "DEFERRED_FIELD_VALIDATION",
+    "dependency_audit_risk": "OBSERVED_DEPENDENCY_AUDIT_RISK / REVIEW_REQUIRED_BEFORE_PRODUCTION (6 vulnerabilities: 1 low, 5 high reported by npm ci during R7 CI gate)"
   },
   "current_blockers": [],
-  "next_action": "Begin first controller-authorized HEALTH_TOURISM_FOUNDATION implementation slice.",
+  "next_action": "Execute next canonical product gate: HEALTH_TOURISM_SLICE2_MULTILINGUAL_PUBLIC_INTAKE_AND_SURFACE",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true
