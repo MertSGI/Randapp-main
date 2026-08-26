@@ -1,0 +1,100 @@
+export type HtLeadStatus = 'new' | 'contacted' | 'qualified' | 'handoff_pending' | 'converted' | 'closed';
+
+export type HtSourceChannel =
+  | 'web'
+  | 'whatsapp'
+  | 'agency_referral'
+  | 'organic'
+  | 'paid_search'
+  | 'social'
+  | 'direct'
+  | 'other';
+
+export type HtServiceErrorCode =
+  | 'UNAUTHENTICATED'
+  | 'FORBIDDEN'
+  | 'NOT_FOUND'
+  | 'INVALID_INPUT'
+  | 'INVALID_STATE'
+  | 'CROSS_TENANT_VIOLATION'
+  | 'UNKNOWN';
+
+export interface HtReferringAgency {
+  id: string;
+  tenant_id: string;
+  name: string;
+  code: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface HtStaffProfile {
+  tenant_id: string;
+  staff_id: string;
+  can_manage_ht_leads: boolean;
+  can_view_ht_leads: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HtLead {
+  id: string;
+  tenant_id: string;
+  status: HtLeadStatus;
+  source_channel: HtSourceChannel;
+  referring_agency_id: string | null;
+  agency_name?: string;
+  agency_code?: string;
+  preferred_language: string;
+  country_code: string | null;
+  passport_number?: string | null;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreatePublicLeadParams {
+  slug: string;
+  full_name: string;
+  email?: string | null;
+  phone?: string | null;
+  preferred_language?: string;
+  country_code?: string | null;
+  passport_number?: string | null;
+  source_channel?: HtSourceChannel;
+  referring_agency_id?: string | null;
+}
+
+export interface CreatePublicLeadResult {
+  success: boolean;
+  lead_id?: string;
+  tenant_id?: string;
+  status?: HtLeadStatus;
+  created_at?: string;
+  reason_code?: HtServiceErrorCode | string;
+  message?: string;
+}
+
+export interface UpdateLeadStatusParams {
+  lead_id: string;
+  status: HtLeadStatus;
+  notes?: string | null;
+}
+
+export interface UpdateLeadAgencyParams {
+  lead_id: string;
+  referring_agency_id: string | null;
+}
+
+export interface CreateAgencyParams {
+  name: string;
+  code?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+}
