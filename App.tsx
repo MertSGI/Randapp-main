@@ -19,6 +19,7 @@ import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
 import SupportPage from './pages/SupportPage';
 import { ClinicWorkspacePage } from './pages/clinic/ClinicWorkspacePage';
+import { HealthTourismLandingPage } from './pages/health-tourism/HealthTourismLandingPage';
 
 import BookingPage from './pages/BookingPage';
 import AdminPage from './pages/AdminPage';
@@ -101,6 +102,10 @@ const AppFlowSwitcher: React.FC = () => {
       {/* 2. Self-Service Routes (Must precede dynamic /:tenantSlug) */}
       <Route path="/appointment/manage/:token" element={<AppointmentSelfServicePage />} />
       <Route path="/appointment/manage" element={<AppointmentSelfServicePage />} />
+
+      {/* 2.05 Dedicated Health Tourism Routes */}
+      <Route path="/health-tourism" element={<HealthTourismLandingPage />} />
+      <Route path="/health-tourism/:tenantSlug" element={<HealthTourismLandingPage />} />
 
       {/* 2.1 Salon Booking Routes */}
       <Route element={<SalonBookingLayout />}>
