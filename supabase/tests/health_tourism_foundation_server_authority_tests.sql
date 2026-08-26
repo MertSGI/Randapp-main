@@ -1,5 +1,5 @@
 -- ============================================================================
--- HEALTH TOURISM FOUNDATION SERVER-AUTHORITY TEST SUITE (SLICE 1-R1)
+-- HEALTH TOURISM FOUNDATION SERVER-AUTHORITY TEST SUITE (SLICE 1-R2)
 -- ============================================================================
 
 BEGIN;
@@ -26,43 +26,40 @@ SELECT has_function('public', 'ht_get_lead', ARRAY['uuid'], 'ht_get_lead RPC exi
 SELECT has_function('public', 'ht_list_leads', ARRAY['text', 'integer', 'integer'], 'ht_list_leads RPC exists');
 SELECT has_function('public', 'ht_list_referring_agencies', ARRAY['boolean'], 'ht_list_referring_agencies RPC exists');
 
--- 4. Create Fixture Tenants & Users
+-- 4. Create Fixture Tenants, Auth Users, Users Profiles, and Staff (RFC Hexadecimal UUIDs)
 INSERT INTO public.tenants (id, name, slug, status, onboarding_status, public_site_status)
 VALUES 
   ('a1111111-1111-1111-1111-111111111111', 'HT Tenant Alpha', 'ht-alpha', 'active', 'completed', 'published'),
   ('b2222222-2222-2222-2222-222222222222', 'HT Tenant Beta', 'ht-beta', 'active', 'completed', 'published')
 ON CONFLICT (id) DO NOTHING;
 
--- Owner Alpha
-INSERT INTO public.users_profile (id, tenant_id, role, full_name, email, active)
-VALUES ('u1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'tenant_owner', 'Alpha Owner', 'owner@alpha.com', true)
+-- Materialize Synthetic Auth Users (auth.users)
+INSERT INTO auth.users (id, email) VALUES
+  ('a1111111-1111-4111-8111-111111111111', 'owner@ht-alpha.example.invalid'),
+  ('a2222222-2222-4222-8222-222222222222', 'staff@ht-alpha.example.invalid'),
+  ('a3333333-3333-4333-8333-333333333333', 'staff@ht-beta.example.invalid')
 ON CONFLICT (id) DO NOTHING;
 
--- Staff Alpha
-INSERT INTO public.users_profile (id, tenant_id, role, full_name, email, active)
-VALUES ('u2222222-2222-2222-2222-222222222222', 'a1111111-1111-1111-1111-111111111111', 'staff', 'Alpha Staff', 'staff@alpha.com', true)
+-- Materialize Users Profiles (public.users_profile using canonical name column)
+INSERT INTO public.users_profile (id, tenant_id, role, name, active) VALUES
+  ('a1111111-1111-4111-8111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'tenant_owner', 'Alpha Owner', true),
+  ('a2222222-2222-4222-8222-222222222222', 'a1111111-1111-1111-1111-111111111111', 'staff', 'Alpha Staff', true),
+  ('a3333333-3333-4333-8333-333333333333', 'b2222222-2222-2222-2222-222222222222', 'staff', 'Beta Staff', true)
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active)
-VALUES ('s2222222-2222-2222-2222-222222222222', 'a1111111-1111-1111-1111-111111111111', 'u2222222-2222-2222-2222-222222222222', 'Alpha Staff', true)
-ON CONFLICT (id) DO NOTHING;
-
--- Staff Beta
-INSERT INTO public.users_profile (id, tenant_id, role, full_name, email, active)
-VALUES ('u3333333-3333-3333-3333-333333333333', 'b2222222-2222-2222-2222-222222222222', 'staff', 'Beta Staff', 'staff@beta.com', true)
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active)
-VALUES ('s3333333-3333-3333-3333-333333333333', 'b2222222-2222-2222-2222-222222222222', 'u3333333-3333-3333-3333-333333333333', 'Beta Staff', true)
+-- Materialize Staff Rows (public.staff)
+INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active) VALUES
+  ('b2222222-2222-4222-8222-222222222222', 'a1111111-1111-1111-1111-111111111111', 'a2222222-2222-4222-8222-222222222222', 'Alpha Staff', true),
+  ('b3333333-3333-4333-8333-333333333333', 'b2222222-2222-2222-2222-222222222222', 'a3333333-3333-4333-8333-333333333333', 'Beta Staff', true)
 ON CONFLICT (id) DO NOTHING;
 
 
 -- 5. Test Public Lead Capture RPC (ht_create_public_lead)
 -- Create Referring Agency for Alpha
-SELECT set_config('request.jwt.claim.sub', 'u1111111-1111-1111-1111-111111111111', true);
-SELECT public.ht_set_staff_profile('s2222222-2222-2222-2222-222222222222', true, true);
+SELECT set_config('request.jwt.claim.sub', 'a1111111-1111-4111-8111-111111111111', true);
+SELECT public.ht_set_staff_profile('b2222222-2222-4222-8222-222222222222', true, true);
 
-SELECT set_config('request.jwt.claim.sub', 'u2222222-2222-2222-2222-222222222222', true);
+SELECT set_config('request.jwt.claim.sub', 'a2222222-2222-4222-8222-222222222222', true);
 SELECT is(
   (public.ht_create_referring_agency('Global Health Travel', 'GHT01', 'info@ght.com', '+1234567890')->>'success')::boolean,
   true,
@@ -163,7 +160,7 @@ SELECT is(
 
 
 -- 8. Verify Read Projections Privacy Boundary (Passport number NOT in getLead or listLeads)
-SELECT set_config('request.jwt.claim.sub', 'u2222222-2222-2222-2222-222222222222', true);
+SELECT set_config('request.jwt.claim.sub', 'a2222222-2222-4222-8222-222222222222', true);
 
 SELECT is(
   ((public.ht_get_lead((SELECT id FROM public.ht_leads WHERE full_name = 'John International'))->'lead') ? 'passport_number'),
@@ -179,7 +176,7 @@ SELECT is(
 
 
 -- 9. Verify Status Audit Correctness (previous_status = new, new_status = contacted)
-SELECT set_config('request.jwt.claim.sub', 'u2222222-2222-2222-2222-222222222222', true);
+SELECT set_config('request.jwt.claim.sub', 'a2222222-2222-4222-8222-222222222222', true);
 DO $$
 DECLARE
     v_lead_id UUID;
@@ -259,7 +256,7 @@ SELECT pass('ht_list_leads handles real row pagination (limit 1 offset 0 vs limi
 
 
 -- 12. Verify Direct Table SELECT Denied for Authenticated
-SELECT set_config('request.jwt.claim.sub', 'u2222222-2222-2222-2222-222222222222', true);
+SELECT set_config('request.jwt.claim.sub', 'a2222222-2222-4222-8222-222222222222', true);
 SELECT set_config('role', 'authenticated', true);
 
 DO $$
@@ -281,7 +278,7 @@ SELECT pass('Direct table SELECT on public.ht_leads denied for authenticated rol
 
 -- Reset role to postgres superuser for cleanup/finish
 RESET role;
-SELECT set_config('request.jwt.claim.sub', 'u2222222-2222-2222-2222-222222222222', true);
+SELECT set_config('request.jwt.claim.sub', 'a2222222-2222-4222-8222-222222222222', true);
 
 
 -- 13. Verify Scope Isolation (No Clinic appointments or encounters created)
