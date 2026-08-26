@@ -60,3 +60,17 @@
 ## DECISION-014: Master Delivery Train Advancement to LARİ Health Tourism
 - **Status**: ACCEPTED
 - **Decision**: Main product delivery train advances to `LARİ Health Tourism` (`HEALTH_TOURISM_FOUNDATION`). Scope includes multilingual public/intake experience, source/agency attribution, Web AI Lead Agent, lead capture & scoring, conversation summary, coordinator workflow, and Clinic integration. AI remains assistive (not a doctor). No autonomous medical diagnosis, e-prescriptions, DICOM/PACS, or split payments unless separately authorized.
+
+## DECISION-015: LARİ Clinic AI Assist V1 Formal Control-Plane Closure
+- **Status**: ACCEPTED
+- **Decision**: Milestone LARİ Clinic AI Assist V1 is formally closed as proven (`CLOSED_PROVEN` at level `E3_ISOLATED_RUNTIME_E2E`). Product SHA `451081f2619f0342df2a8c64ae401dffb7697363`, evidence branch `ci/clinic-ai-assist-v1-groq-exact-sha-r2-20260825` at SHA `332c276b69f5d46524d57302a0ee62336380d8e8`, GitHub Actions Run `32840780417`, isolated Supabase acceptance project `miuecvkkmyvaciticwtm`, remote migrations 65 (`20260909_clinic_ai_assist_commercial_authority.sql`). Real Groq transcription (`whisper-large-v3-turbo`) and SOAP draft (`openai/gpt-oss-120b`) proven under practitioner authority (`can_write_clinical_notes`) with atomic commercial quota metering (+1 STT, +1 SOAP draft, total +2 delta verified), zero raw audio DB persistence, strict human approval boundary, and zero autonomous clinical completions.
+
+## DECISION-016: Health Tourism Historical Scope Reconciliation & Governance Matrix
+- **Status**: ACCEPTED
+- **Decision**: Full historical and current scope reconciliation for LARİ Health Tourism is formally established. All 37 candidate items are classified with zero unclassified items (`UNCLASSIFIED_SCOPE_ITEM_COUNT=0`), zero unintentional scope loss (`UNINTENTIONAL_SCOPE_LOSS_COUNT=0`), and zero unauthorized scope expansion (`UNAUTHORIZED_SCOPE_EXPANSION_COUNT=0`).
+  - **Committed Scope (14 items)**: Multilingual public/intake, source_channel attribution, referring_agency_id attribution, Web AI Lead Agent, lead capture, lead scoring, conversation summary, coordinator workflow, explicit AI-to-human handoff, lead -> booking -> Clinic acceptance flow, passport number forward-compatible intake, country code forward-compatible intake, SEO, separate Health Tourism lead/landing surface.
+  - **Deferred to Final Delivery (2 items)**: WhatsApp provider activation, SMS provider activation.
+  - **Explicitly Out of Scope (9 items)**: e-prescription, lab order tracking, DICOM/X-ray, insurance/TSB, agency commission management, Marketplace, settlement/split payments, inpatient/bed/operating-room ERP scope, autonomous medical AI.
+  - **Superseded (2 items)**: Clinic "in_consultation" appointment status (superseded by Core appointment status model), owner-wide implicit clinical access (superseded by server-authoritative `clinic_staff_profiles`).
+  - **Completed Prior Package Capabilities (10 items)**: Clinic speech-to-text, AI SOAP draft + human approval (completed in Clinic AI Assist V1); Package branding controls integration, custom-domain/white-label integration, privacy/audit requirements, AI data-retention requirements, maps support, cookie-consent support, iyzico/payment activation capability, multilingual clinical text/notes forward compatibility (completed in Core/Package/Clinic baselines).
+

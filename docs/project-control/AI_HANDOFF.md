@@ -28,7 +28,9 @@ MANDATORY PROTOCOL:
 - **Commercial Core Baseline**: `feature/p2a-commercial-core-foundation` (`80297685cb3fd1c73a41207e6fd3dd1faedfbab2`) — `CLOSED_PROVEN`
 - **Package Customization Baseline**: `feature/package-customer-customization-foundation` (`65a53427f52c21e60aa8f92e02a17d693a201601`) — `CLOSED_PROVEN`
 - **Clinic Core Baseline**: `feature/lari-clinic-foundation` (`008ebac4496d592d271d612713c437d316c416f0`) — `CLOSED_PROVEN`
-- **Isolated E3 Acceptance Project**: `miuecvkkmyvaciticwtm` — `ACCEPTED_CLOSED_PROVEN` (Migrations: 64 / `20260908`, E2 Run: `32624729632`, Recapture ZIP: `7E2954A3...`)
-- **Active Milestone**: `LARİ Health Tourism` (`HEALTH_TOURISM_FOUNDATION`)
-  - **Immediate Carry-Forward Slice**: `CLINIC_AI_ASSIST_V1` (`CLINIC_AI_ASSIST_SPEECH_TO_TEXT = DEFERRED_CARRY_FORWARD`)
+- **Clinic AI Assist V1 Baseline**: `feature/clinic-ai-assist-v1-provider-resilience` (`451081f2619f0342df2a8c64ae401dffb7697363`) — `CLOSED_PROVEN`
+- **Isolated E3 Acceptance Project**: `miuecvkkmyvaciticwtm` — `ACCEPTED_CLOSED_PROVEN` (Migrations: 65 / `20260909_clinic_ai_assist_commercial_authority.sql`, E2 Run: `32840780417`, Artifact: `9560421750`)
+- **Active Milestone**: `LARİ Health Tourism` (`HEALTH_TOURISM_FOUNDATION`) — `HEALTH_TOURISM_SCOPE_RECONCILED`
+  - **Reconciled Scope**: 37/37 items classified (14 COMMITTED, 2 DEFERRED, 9 EXPLICITLY_OUT_OF_SCOPE, 2 SUPERSEDED, 10 COMPLETED prior package capabilities). Zero unclassified scope items.
   - **Health Tourism Scope**: Multilingual intake, agency attribution, Web AI Lead Agent, lead scoring, coordinator workflow, Clinic integration.
+

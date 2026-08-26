@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-08-24T13:45:00+03:00",
+  "updated_at": "2026-08-26T10:15:00+03:00",
   "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
@@ -17,7 +17,7 @@
     "Final Delivery"
   ],
   "current_milestone": "LARİ Health Tourism",
-  "current_status": "CLINIC_CORE_CLOSED_PROVEN",
+  "current_status": "HEALTH_TOURISM_SCOPE_RECONCILED",
   "canonical_refs": {
     "main_pilot": {
       "branch": "staging/supabase-staging-consistency",
@@ -97,6 +97,22 @@
     "clinic_block3_e3_isolated_runtime": {
       "branch": "feature/lari-clinic-foundation",
       "sha": "008ebac4496d592d271d612713c437d316c416f0",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "status": "CLOSED_PROVEN"
+    },
+    "clinic_ai_assist_v1_product": {
+      "branch": "feature/clinic-ai-assist-v1-provider-resilience",
+      "sha": "451081f2619f0342df2a8c64ae401dffb7697363",
+      "status": "CLOSED_PROVEN"
+    },
+    "clinic_ai_assist_v1_ci_evidence": {
+      "branch": "ci/clinic-ai-assist-v1-groq-exact-sha-r2-20260825",
+      "sha": "332c276b69f5d46524d57302a0ee62336380d8e8",
+      "status": "CI_RUN_32840780417_SUCCESS"
+    },
+    "clinic_ai_assist_v1_e3_isolated_runtime": {
+      "branch": "feature/clinic-ai-assist-v1-provider-resilience",
+      "sha": "451081f2619f0342df2a8c64ae401dffb7697363",
       "isolated_project": "miuecvkkmyvaciticwtm",
       "status": "CLOSED_PROVEN"
     }
@@ -288,6 +304,17 @@
       "tested_sha": "008ebac4496d592d271d612713c437d316c416f0",
       "closed_at": "2026-08-24T13:45:00+03:00",
       "reopen_condition": "Contradictory clinical RLS, note immutability, RPC authority, cross-tenant boundary, or isolated runtime evidence"
+    },
+    {
+      "gate": "LARİ Clinic AI Assist V1 Baseline & Real Groq Runtime",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+      "tested_sha": "451081f2619f0342df2a8c64ae401dffb7697363",
+      "e2_evidence_sha": "332c276b69f5d46524d57302a0ee62336380d8e8",
+      "e2_run_id": "32840780417",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "closed_at": "2026-08-25T19:30:00Z",
+      "reopen_condition": "Contradictory real Groq runtime provider result, quota accounting regression, or clinical boundary violation"
     }
   ],
   "active_workstreams": {
@@ -361,28 +388,34 @@
         }
       },
       "extensions": {
-        "clinic_ai_assist_speech_to_text": {
-          "status": "DEFERRED_CARRY_FORWARD",
-          "classification": "NON_BLOCKING_EXTENSION_AFTER_CLINIC_CORE_CLOSURE",
-          "target_slice": "CLINIC_AI_ASSIST_V1"
+        "clinic_ai_assist_v1": {
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+          "product_sha": "451081f2619f0342df2a8c64ae401dffb7697363",
+          "e2_evidence_sha": "332c276b69f5d46524d57302a0ee62336380d8e8",
+          "e2_run_id": "32840780417",
+          "isolated_project": "miuecvkkmyvaciticwtm",
+          "closed_at": "2026-08-25T19:30:00Z"
         }
       }
     },
     "lari_health_tourism": {
       "status": "IN_PROGRESS",
+      "reconciliation_status": "RECONCILED",
       "objective": "Multilingual public/intake experience, Web AI Lead Agent, source attribution, lead capture & scoring, coordinator workflow, and Clinic integration"
     }
   },
   "external_dependencies": {
     "iyzico_payment": "DISABLED_COMMERCIAL_MODE",
     "external_dns": "PENDING_WILDCARD_SETUP",
-    "sms_provider": "OUTBOX_SIMULATION"
+    "sms_provider": "OUTBOX_SIMULATION",
+    "whatsapp_provider": "OUTBOX_SIMULATION"
   },
   "non_blocking_validation": {
     "human_participant_uat": "DEFERRED_FIELD_VALIDATION"
   },
   "current_blockers": [],
-  "next_action": "Proceed to CLINIC_AI_ASSIST_V1 carry-forward slice and HEALTH_TOURISM_FOUNDATION implementation.",
+  "next_action": "Begin HEALTH_TOURISM_FOUNDATION implementation slice following controller review.",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true
