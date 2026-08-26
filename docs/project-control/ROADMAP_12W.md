@@ -43,7 +43,7 @@ LARİ CORE [FROZEN / CLOSED_PROVEN]
 | **3. LARİ Clinic** | Clinic Workspace UI & Isolated E3 Acceptance (Block 3) | `CLOSED_PROVEN` | E3 (Isolated Runtime E2E) |
 | **3. LARİ Clinic** | Clinic Core Milestone | `CLOSED_PROVEN` | E3 (Isolated Runtime E2E) |
 | **3. LARİ Clinic** | Speech-to-Text & SOAP Draft Assist (`CLINIC_AI_ASSIST_V1`) | `CLOSED_PROVEN` | E3 (Isolated Runtime E2E) |
-| **4. LARİ Health Tourism** | International Patient & Agency Operations Scope | `RECONCILED_READY_FOR_IMPLEMENTATION` | N/A |
+| **4. LARİ Health Tourism** | International Patient & Agency Operations Scope | `RECONCILIATION_CANDIDATE_SUBMITTED` | N/A |
 | **5. Final Delivery** | Production Cutover & DNS/Commercial Launch | `NOT_STARTED` | N/A |
 
 ---
@@ -68,8 +68,9 @@ LARİ CORE [FROZEN / CLOSED_PROVEN]
   - `Clinic Workspace UI & Isolated Real-Browser Acceptance` (Block 3): `CLOSED_PROVEN` (`E3_ISOLATED_RUNTIME_E2E`, GitHub Actions Run `32624729632`, isolated project `miuecvkkmyvaciticwtm`). Verified workspace UI, authenticated role context switching, read-only evidence recapture (`7E2954A3...`), distinct UI screenshots, and DB immutability.
   - `Speech-to-Text & SOAP Draft Assist` (`CLINIC_AI_ASSIST_V1`): `CLOSED_PROVEN` (`E3_ISOLATED_RUNTIME_E2E`, GitHub Actions Run `32840780417`, isolated project `miuecvkkmyvaciticwtm`, product SHA `451081f2619f0342df2a8c64ae401dffb7697363`). Real Groq transcription (`whisper-large-v3-turbo`) and SOAP draft (`openai/gpt-oss-120b`) proven under practitioner authority with atomic commercial quota metering, strict human approval boundary, zero raw audio DB persistence, and 0 autonomous clinical completions.
 
-### Phase 4: LARİ Health Tourism Package (IN_PROGRESS - RECONCILED)
-- **Status**: IN_PROGRESS (Scope Reconciled). Scope reconciliation complete (37/37 historical items classified: 14 COMMITTED, 2 DEFERRED to Final Delivery, 9 EXPLICITLY_OUT_OF_SCOPE, 2 SUPERSEDED, 10 COMPLETED prior package capabilities). Extends Clinic Package for international patient coordination, agency attribution, multilingual intake, Web AI Lead Agent, and coordinator workflows.
+### Phase 4: LARİ Health Tourism Package (IN_PROGRESS - RECONCILIATION CANDIDATE)
+- **Status**: IN_PROGRESS (Scope Reconciliation Candidate Submitted). Corrected 37-row historical matrix submitted for controller review (18 COMMITTED, 4 DEFERRED, 13 EXPLICITLY_OUT_OF_SCOPE, 2 SUPERSEDED). Implementation start remains forbidden until controller authorization.
+
 
 ### Phase 5: Final Delivery
 - **Status**: Not Started. Final production cutover, wildcard DNS/SSL configuration, SMS/WhatsApp provider account activation, payment activation (Iyzico), and commercial launch mode enablement.
