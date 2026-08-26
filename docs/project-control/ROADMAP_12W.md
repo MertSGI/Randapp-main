@@ -69,7 +69,8 @@ LARİ CORE [FROZEN / CLOSED_PROVEN]
   - `Speech-to-Text & SOAP Draft Assist` (`CLINIC_AI_ASSIST_V1`): `CLOSED_PROVEN` (`E3_ISOLATED_RUNTIME_E2E`, GitHub Actions Run `32840780417`, isolated project `miuecvkkmyvaciticwtm`, product SHA `451081f2619f0342df2a8c64ae401dffb7697363`). Real Groq transcription (`whisper-large-v3-turbo`) and SOAP draft (`openai/gpt-oss-120b`) proven under practitioner authority with atomic commercial quota metering, strict human approval boundary, zero raw audio DB persistence, and 0 autonomous clinical completions.
 
 ### Phase 4: LARİ Health Tourism Package (IN_PROGRESS - RECONCILIATION CANDIDATE)
-- **Status**: IN_PROGRESS (Scope Reconciliation Candidate Submitted). Corrected 37-row historical matrix submitted for controller review (18 COMMITTED, 4 DEFERRED, 13 EXPLICITLY_OUT_OF_SCOPE, 2 SUPERSEDED). Implementation start remains forbidden until controller authorization.
+- **Status**: IN_PROGRESS (Scope Reconciliation Candidate Submitted). Complete auditable 37-row matrix canonically persisted in [HEALTH_TOURISM_SCOPE_MATRIX.md](file:///C:/Users/mozcelikbas/Desktop/Randapp/Randapp-control/docs/project-control/HEALTH_TOURISM_SCOPE_MATRIX.md) and submitted for controller review (24 COMMITTED, 3 DEFERRED, 10 EXPLICITLY_OUT_OF_SCOPE, 0 SUPERSEDED; 2 cross-cutting superseded items). Implementation start remains forbidden until controller authorization.
+
 
 
 ### Phase 5: Final Delivery

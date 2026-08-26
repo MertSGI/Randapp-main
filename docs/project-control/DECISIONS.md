@@ -67,6 +67,7 @@
 
 ## DECISION-016: Health Tourism Corrected 37-Row Historical Scope Reconciliation Matrix Submission
 - **Status**: CANDIDATE_SUBMITTED_FOR_REVIEW
-- **Decision**: Corrected 37-row historical scope reconciliation matrix for LARİ Health Tourism is formally established and submitted for controller review. Every historical candidate item (1 through 37) is classified using strictly one of 4 allowed classifications: `COMMITTED` (18 items), `DEFERRED` (4 items), `EXPLICITLY_OUT_OF_SCOPE` (13 items), `SUPERSEDED` (2 items). Zero invalid classifications, zero missing item IDs, zero duplicate item IDs (`NUMBERED_MATRIX_ROW_COUNT=37`). Implementation mode and specific HT obligations are explicitly assigned. Implementation remains forbidden until controller authorization (`IMPLEMENTATION_START_ALLOWED=false`).
+- **Decision**: Corrected 37-row historical scope reconciliation matrix for LARİ Health Tourism is formally established, canonically persisted in [HEALTH_TOURISM_SCOPE_MATRIX.md](file:///C:/Users/mozcelikbas/Desktop/Randapp/Randapp-control/docs/project-control/HEALTH_TOURISM_SCOPE_MATRIX.md), and submitted for controller review. Every historical candidate item (1 through 37) is classified using strictly one of 4 allowed classifications: `COMMITTED` (24 items), `DEFERRED` (3 items), `EXPLICITLY_OUT_OF_SCOPE` (10 items), `SUPERSEDED` (0 items in 37 rows; 2 cross-cutting superseded items). Zero invalid classifications, zero missing item IDs, zero duplicate item IDs (`NUMBERED_MATRIX_ROW_COUNT=37`). Implementation mode and specific HT obligations are explicitly assigned. Implementation remains forbidden until controller authorization (`IMPLEMENTATION_START_ALLOWED=false`).
+
 
 
