@@ -1,5 +1,5 @@
 -- ============================================================================
--- HEALTH TOURISM FOUNDATION SERVER-AUTHORITY TEST SUITE (SLICE 1-R3)
+-- HEALTH TOURISM FOUNDATION SERVER-AUTHORITY TEST SUITE (SLICE 1-R4)
 -- ============================================================================
 
 BEGIN;
@@ -177,7 +177,7 @@ SELECT is(
 
 
 -- 9. Verify Unauthorized HT Staff Access Denied (1 assertion)
--- Beta staff (a3333333-3333-4333-8333-333333333333) has NOT been granted HT staff profile
+-- Beta staff (a3333333-3333-4333-8333-333333333333) has active staff identity but NO ht_staff_profiles row
 SELECT set_config('request.jwt.claim.sub', 'a3333333-3333-4333-8333-333333333333', true);
 DO $$
 DECLARE
@@ -186,13 +186,13 @@ BEGIN
     BEGIN
         PERFORM public.ht_list_leads();
     EXCEPTION WHEN OTHERS THEN
-        IF SQLERRM LIKE '%UNAUTHORIZED_HT_STAFF%' THEN
+        IF SQLERRM LIKE '%FORBIDDEN%' AND SQLERRM LIKE '%lacks HT lead view permission%' THEN
             v_err_caught := true;
         END IF;
     END;
 
     IF NOT v_err_caught THEN
-        RAISE EXCEPTION 'Staff without HT capability was allowed to call ht_list_leads!';
+        RAISE EXCEPTION 'Staff without HT capability was allowed to call ht_list_leads or emitted unexpected error contract!';
     END IF;
 END $$;
 
