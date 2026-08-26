@@ -15,7 +15,8 @@ export class HealthTourismService {
   constructor(private client: SupabaseClient) {}
 
   /**
-   * Public lead intake via server-authoritative RPC
+   * Public lead intake via server-authoritative RPC.
+   * Maps database exceptions to a stable, non-disclosing public result.
    */
   async createPublicLead(params: CreatePublicLeadParams): Promise<CreatePublicLeadResult> {
     const { data, error } = await this.client.rpc('ht_create_public_lead', {
@@ -33,8 +34,8 @@ export class HealthTourismService {
     if (error) {
       return {
         success: false,
-        reason_code: error.code || 'RPC_ERROR',
-        message: error.message
+        reason_code: 'PUBLIC_INTAKE_FAILED',
+        message: 'Unable to submit health tourism request.'
       };
     }
 

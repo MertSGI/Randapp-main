@@ -40,6 +40,10 @@ export interface HtStaffProfile {
   updated_at: string;
 }
 
+/**
+  * Ordinary HtLead projection for browser/coordinator workspace.
+  * NOTE: Sensitive passport_number is strictly excluded from ordinary read contracts for privacy containment.
+  */
 export interface HtLead {
   id: string;
   tenant_id: string;
@@ -50,7 +54,6 @@ export interface HtLead {
   agency_code?: string;
   preferred_language: string;
   country_code: string | null;
-  passport_number?: string | null;
   full_name: string;
   email: string | null;
   phone: string | null;

@@ -383,10 +383,9 @@ check('14. No frontend provider secret — no VITE_*KEY for AI', () => {
 // ===========================================================================
 
 check('15. Migration 65 defines 0-argument RPC, consumes canonical "eligible" boolean & drops parameterized legacy RPC', () => {
-  assert.strictEqual(
-    migrationFiles.length,
-    65,
-    `Expected 65 migration files, got ${migrationFiles.length}`
+  assert(
+    migrationFiles.length >= 65,
+    `Expected at least 65 migration files, got ${migrationFiles.length}`
   );
   const migration65Path = path.join(migrationsDir, '20260909_clinic_ai_assist_commercial_authority.sql');
   assert(fs.existsSync(migration65Path), 'Migration 65 file missing');
@@ -430,9 +429,10 @@ check('15. Migration 65 defines 0-argument RPC, consumes canonical "eligible" bo
   );
 
   // Static Hygiene Guard 5: Post-rollback residue query (CASE 25)
+  const normSqlContent = sqlTestContent.replace(/\r\n/g, '\n');
   assert(
-    sqlTestContent.includes('SELECT COUNT(*) INTO v_table_residue FROM public.tenants') &&
-    sqlTestContent.includes('ROLLBACK;\n\n\n-- ============================================================================\n-- SECTION 4: CASE 25'),
+    normSqlContent.includes('SELECT COUNT(*) INTO v_table_residue FROM public.tenants') &&
+    normSqlContent.includes('ROLLBACK;\n\n\n-- ============================================================================\n-- SECTION 4: CASE 25'),
     'SQL test suite must execute post-rollback query checks for residue outside the transaction'
   );
 

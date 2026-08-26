@@ -1,6 +1,6 @@
 -- =========================================================================
 -- MIGRATION 20260910_lari_health_tourism_foundation.sql
--- Description: Foundational Health Tourism Domain & Server Authority for LARİ (Slice 1)
+-- Description: Foundational Health Tourism Domain & Server Authority for LARİ (Slice 1-R1)
 -- Target: Disposable PostgreSQL database / Supabase
 -- =========================================================================
 
@@ -107,9 +107,15 @@ FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 ALTER TABLE public.ht_leads ENABLE ROW LEVEL SECURITY;
 
+-- Hardened Privacy Boundary: Revoke direct browser table access to ht_leads for sensitive PII containment.
+-- All DML and SELECT reads proceed through server-authoritative SECURITY DEFINER RPCs.
+REVOKE ALL ON TABLE public.ht_leads FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.ht_referring_agencies FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.ht_staff_profiles FROM PUBLIC, anon, authenticated;
+
 
 -- =========================================================================
--- 4. RLS POLICIES FOR DIRECT DML HARDENING
+-- 4. RLS POLICIES FOR DEFENSE IN DEPTH
 -- =========================================================================
 
 -- ht_referring_agencies RLS
@@ -491,6 +497,7 @@ DECLARE
     v_hsp RECORD;
     v_lead RECORD;
     v_status TEXT := lower(trim(p_status));
+    v_previous_status TEXT;
 BEGIN
     IF v_caller_uid IS NULL THEN
         RAISE EXCEPTION 'UNAUTHENTICATED: Authentication required.';
@@ -513,7 +520,12 @@ BEGIN
         RAISE EXCEPTION 'FORBIDDEN: Staff member lacks can_manage_ht_leads permission.';
     END IF;
 
-    IF v_status NOT IN ('new', 'contacted', 'qualified', 'handoff_pending', 'converted', 'closed') THEN
+    -- Reserve 'converted' status for dedicated server-authoritative Clinic acceptance RPC
+    IF v_status = 'converted' THEN
+        RAISE EXCEPTION 'INVALID_TRANSITION: The converted status is reserved for server-authoritative Clinic acceptance.';
+    END IF;
+
+    IF v_status NOT IN ('new', 'contacted', 'qualified', 'handoff_pending', 'closed') THEN
         RAISE EXCEPTION 'INVALID_INPUT: Invalid lead status transition.';
     END IF;
 
@@ -528,6 +540,9 @@ BEGIN
     IF v_lead.tenant_id <> v_staff.tenant_id THEN
         RAISE EXCEPTION 'FORBIDDEN: Cross-tenant lead mutation denied.';
     END IF;
+
+    -- CAPTURE PREVIOUS STATUS BEFORE MUTATION FOR AUDIT CORRECTNESS
+    v_previous_status := v_lead.status;
 
     UPDATE public.ht_leads
     SET status = v_status,
@@ -553,7 +568,7 @@ BEGIN
         p_lead_id::text,
         jsonb_build_object(
             'lead_id', p_lead_id,
-            'previous_status', v_lead.status,
+            'previous_status', v_previous_status,
             'new_status', v_status
         )
     );
@@ -669,7 +684,7 @@ END;
 $$;
 
 
--- F. ht_get_lead (STAFF READ)
+-- F. ht_get_lead (STAFF READ) - STRICTLY EXCLUDES SENSITIVE PASSPORT NUMBER
 CREATE OR REPLACE FUNCTION public.ht_get_lead(
     p_lead_id UUID
 )
@@ -732,20 +747,20 @@ BEGIN
             'agency_code', v_agency.code,
             'preferred_language', v_lead.preferred_language,
             'country_code', v_lead.country_code,
-            'passport_number', v_lead.passport_number,
             'full_name', v_lead.full_name,
             'email', v_lead.email,
             'phone', v_lead.phone,
             'notes', v_lead.notes,
             'created_at', v_lead.created_at,
             'updated_at', v_lead.updated_at
+            -- NOTE: passport_number IS STRICTLY EXCLUDED FROM GENERAL BROWSER READ CONTRACTS!
         )
     );
 END;
 $$;
 
 
--- G. ht_list_leads (STAFF READ) - EXCLUDES PASSPORT_NUMBER IN BROAD PROJECTION
+-- G. ht_list_leads (STAFF READ) - CORRECT SUBQUERY ROW PAGINATION & EXCLUDES PASSPORT_NUMBER
 CREATE OR REPLACE FUNCTION public.ht_list_leads(
     p_status TEXT DEFAULT NULL,
     p_limit INT DEFAULT 50,
@@ -760,6 +775,8 @@ DECLARE
     v_caller_uid UUID := auth.uid();
     v_staff RECORD;
     v_hsp RECORD;
+    v_limit INT := LEAST(GREATEST(coalesce(p_limit, 50), 1), 100);
+    v_offset INT := GREATEST(coalesce(p_offset, 0), 0);
     v_leads JSONB;
 BEGIN
     IF v_caller_uid IS NULL THEN
@@ -783,29 +800,34 @@ BEGIN
         RAISE EXCEPTION 'FORBIDDEN: Staff member lacks HT lead view permission.';
     END IF;
 
+    -- SUBQUERY PAGINATION OVER ROW RESULTS FIRST BEFORE JSON AGGREGATION
     SELECT coalesce(jsonb_agg(
         jsonb_build_object(
-            'id', l.id,
-            'tenant_id', l.tenant_id,
-            'status', l.status,
-            'source_channel', l.source_channel,
-            'referring_agency_id', l.referring_agency_id,
-            'agency_name', a.name,
-            'preferred_language', l.preferred_language,
-            'country_code', l.country_code,
-            'full_name', l.full_name,
-            'email', l.email,
-            'phone', l.phone,
-            'created_at', l.created_at,
-            'updated_at', l.updated_at
+            'id', sub.id,
+            'tenant_id', sub.tenant_id,
+            'status', sub.status,
+            'source_channel', sub.source_channel,
+            'referring_agency_id', sub.referring_agency_id,
+            'agency_name', sub.agency_name,
+            'preferred_language', sub.preferred_language,
+            'country_code', sub.country_code,
+            'full_name', sub.full_name,
+            'email', sub.email,
+            'phone', sub.phone,
+            'created_at', sub.created_at,
+            'updated_at', sub.updated_at
             -- NOTE: passport_number IS EXCLUDED FROM LIST PROJECTION FOR PII SAFETY!
-        ) ORDER BY l.created_at DESC
+        ) ORDER BY sub.created_at DESC
     ), '[]'::jsonb) INTO v_leads
-    FROM public.ht_leads l
-    LEFT JOIN public.ht_referring_agencies a ON a.id = l.referring_agency_id
-    WHERE l.tenant_id = v_staff.tenant_id
-      AND (p_status IS NULL OR l.status = lower(trim(p_status)))
-    LIMIT p_limit OFFSET p_offset;
+    FROM (
+        SELECT l.*, a.name AS agency_name
+        FROM public.ht_leads l
+        LEFT JOIN public.ht_referring_agencies a ON a.id = l.referring_agency_id
+        WHERE l.tenant_id = v_staff.tenant_id
+          AND (p_status IS NULL OR l.status = lower(trim(p_status)))
+        ORDER BY l.created_at DESC
+        LIMIT v_limit OFFSET v_offset
+    ) sub;
 
     RETURN jsonb_build_object(
         'success', true,

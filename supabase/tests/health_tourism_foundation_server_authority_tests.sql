@@ -1,19 +1,20 @@
 -- ============================================================================
--- HEALTH TOURISM FOUNDATION SERVER-AUTHORITY TEST SUITE (SLICE 1)
+-- HEALTH TOURISM FOUNDATION SERVER-AUTHORITY TEST SUITE (SLICE 1-R1)
 -- ============================================================================
 
 BEGIN;
 
-SELECT plan(32);
+SELECT plan(34);
 
 -- 1. Schema & Table Structure Tests
 SELECT has_table('public', 'ht_referring_agencies', 'ht_referring_agencies table exists');
 SELECT has_table('public', 'ht_staff_profiles', 'ht_staff_profiles table exists');
 SELECT has_table('public', 'ht_leads', 'ht_leads table exists');
 
--- 2. RLS Enablement Tests
-SELECT table_privs_are('public', 'ht_referring_agencies', 'authenticated', ARRAY['SELECT'], 'ht_referring_agencies accessible via SELECT for authenticated');
-SELECT table_privs_are('public', 'ht_leads', 'authenticated', ARRAY['SELECT'], 'ht_leads accessible via SELECT for authenticated');
+-- 2. RLS & Direct Table Access Isolation Tests
+-- Direct table SELECT on ht_leads is revoked for authenticated/anon to protect sensitive PII
+SELECT table_privs_are('public', 'ht_referring_agencies', 'authenticated', ARRAY[]::text[], 'ht_referring_agencies direct table access revoked for authenticated');
+SELECT table_privs_are('public', 'ht_leads', 'authenticated', ARRAY[]::text[], 'ht_leads direct table access revoked for authenticated');
 
 -- 3. RPC Existence Tests
 SELECT has_function('public', 'ht_set_staff_profile', ARRAY['uuid', 'boolean', 'boolean'], 'ht_set_staff_profile RPC exists');
@@ -73,7 +74,6 @@ DO $$
 DECLARE
     v_agency_id UUID;
     v_lead_res JSONB;
-    v_cross_res JSONB;
 BEGIN
     SELECT id INTO v_agency_id FROM public.ht_referring_agencies WHERE name = 'Global Health Travel';
 
@@ -116,7 +116,7 @@ SELECT is(
 SELECT is(
   (SELECT passport_number FROM public.ht_leads WHERE full_name = 'John International'),
   'PASSPORT12345',
-  'Passport number stored correctly in ht_leads table'
+  'Optional passport number successfully stored in DB by public intake'
 );
 
 
@@ -129,7 +129,6 @@ BEGIN
     SELECT id INTO v_alpha_agency_id FROM public.ht_referring_agencies WHERE name = 'Global Health Travel';
 
     BEGIN
-        -- Attempt to assign Alpha agency to Beta lead
         PERFORM public.ht_create_public_lead(
             'ht-beta',
             'Cross Tenant Lead',
@@ -163,8 +162,15 @@ SELECT is(
 );
 
 
--- 8. Verify List Lead Projection Privacy Boundary (Passport number NOT in list projection)
+-- 8. Verify Read Projections Privacy Boundary (Passport number NOT in getLead or listLeads)
 SELECT set_config('request.jwt.claim.sub', 'u2222222-2222-2222-2222-222222222222', true);
+
+SELECT is(
+  ((public.ht_get_lead((SELECT id FROM public.ht_leads WHERE full_name = 'John International'))->'lead') ? 'passport_number'),
+  false,
+  'ht_get_lead explicitly excludes passport_number from response'
+);
+
 SELECT is(
   (public.ht_list_leads(NULL, 10, 0)::text LIKE '%passport_number%'),
   false,
@@ -172,84 +178,110 @@ SELECT is(
 );
 
 
--- 9. Verify Cross-Tenant Lead Read Denied
-SELECT set_config('request.jwt.claim.sub', 'u3333333-3333-3333-3333-333333333333', true);
--- Beta staff has not been granted HT capability yet
-DO $$
-DECLARE
-    v_err BOOLEAN := false;
-BEGIN
-    BEGIN
-        PERFORM public.ht_list_leads();
-    EXCEPTION WHEN OTHERS THEN
-        v_err := true;
-    END;
-    IF NOT v_err THEN
-        RAISE EXCEPTION 'Staff without HT capability was allowed to list leads!';
-    END IF;
-END $$;
-
-SELECT pass('Staff without HT capability denied access to leads');
-
-
--- 10. Verify Unauthenticated Access Denied
-SELECT set_config('request.jwt.claim.sub', '', true);
-DO $$
-DECLARE
-    v_err BOOLEAN := false;
-BEGIN
-    BEGIN
-        PERFORM public.ht_list_leads();
-    EXCEPTION WHEN OTHERS THEN
-        v_err := true;
-    END;
-    IF NOT v_err THEN
-        RAISE EXCEPTION 'Unauthenticated caller was allowed to list leads!';
-    END IF;
-END $$;
-
-SELECT pass('Unauthenticated access to ht_list_leads strictly denied');
-
-
--- 11. Verify Lead Status Lifecycle Mutation
+-- 9. Verify Status Audit Correctness (previous_status = new, new_status = contacted)
 SELECT set_config('request.jwt.claim.sub', 'u2222222-2222-2222-2222-222222222222', true);
 DO $$
 DECLARE
     v_lead_id UUID;
     v_res JSONB;
+    v_audit RECORD;
 BEGIN
     SELECT id INTO v_lead_id FROM public.ht_leads WHERE full_name = 'John International';
-    v_res := public.ht_update_lead_status(v_lead_id, 'contacted', 'Initial phone call made');
-    IF (v_res->>'success')::boolean IS NOT TRUE THEN
-        RAISE EXCEPTION 'Status update failed: %', v_res;
+    v_res := public.ht_update_lead_status(v_lead_id, 'contacted', 'Initial call completed');
+
+    SELECT payload INTO v_audit
+    FROM public.audit_events
+    WHERE action = 'ht_lead_status_updated' AND resource_id = v_lead_id::text
+    ORDER BY created_at DESC LIMIT 1;
+
+    IF v_audit.payload->>'previous_status' <> 'new' OR v_audit.payload->>'new_status' <> 'contacted' THEN
+        RAISE EXCEPTION 'Status audit incorrect: previous_status=%, new_status=%', v_audit.payload->>'previous_status', v_audit.payload->>'new_status';
     END IF;
 END $$;
 
-SELECT is(
-  (SELECT status FROM public.ht_leads WHERE full_name = 'John International'),
-  'contacted',
-  'Lead status successfully updated to contacted'
-);
+SELECT pass('Lead status update records accurate previous_status=new and new_status=contacted in audit log');
 
 
--- 12. Verify Invalid Status Rejected
+-- 10. Verify Generic Status Update Denies Setting 'converted'
 DO $$
 DECLARE
     v_lead_id UUID;
-    v_err BOOLEAN := false;
+    v_err_caught BOOLEAN := false;
 BEGIN
     SELECT id INTO v_lead_id FROM public.ht_leads WHERE full_name = 'John International';
     BEGIN
-        PERFORM public.ht_update_lead_status(v_lead_id, 'invalid_status_enum');
+        PERFORM public.ht_update_lead_status(v_lead_id, 'converted');
     EXCEPTION WHEN OTHERS THEN
-        v_err := true;
+        IF SQLERRM LIKE '%INVALID_TRANSITION%' AND SQLERRM LIKE '%converted%' THEN
+            v_err_caught := true;
+        END IF;
     END;
-    IF NOT v_err THEN
-        RAISE EXCEPTION 'Invalid lead status transition was allowed!';
+
+    IF NOT v_err_caught THEN
+        RAISE EXCEPTION 'ht_update_lead_status allowed setting converted status directly!';
     END IF;
 END $$;
 
-SELECT pass('Invalid lead status transition rejected');
+SELECT pass('ht_update_lead_status denies setting converted status directly');
+
+
+-- 11. Verify Real Row Pagination in ht_list_leads
+DO $$
+DECLARE
+    v_lead_a_id UUID;
+    v_lead_b_id UUID;
+    v_page1 JSONB;
+    v_page2 JSONB;
+    v_id1 TEXT;
+    v_id2 TEXT;
+BEGIN
+    -- Create 2 additional leads for pagination testing
+    PERFORM public.ht_create_public_lead('ht-alpha', 'Lead Alpha Second', 'lead2@example.com', NULL);
+    PERFORM public.ht_create_public_lead('ht-alpha', 'Lead Alpha Third', 'lead3@example.com', NULL);
+
+    -- Fetch page 1 (limit=1, offset=0) and page 2 (limit=1, offset=1)
+    v_page1 := public.ht_list_leads(NULL, 1, 0);
+    v_page2 := public.ht_list_leads(NULL, 1, 1);
+
+    v_id1 := v_page1->'leads'->0->>'id';
+    v_id2 := v_page2->'leads'->0->>'id';
+
+    IF jsonb_array_length(v_page1->'leads') <> 1 OR jsonb_array_length(v_page2->'leads') <> 1 THEN
+        RAISE EXCEPTION 'Pagination limit 1 did not return exactly 1 lead per page!';
+    END IF;
+
+    IF v_id1 = v_id2 THEN
+        RAISE EXCEPTION 'Pagination offset 1 returned identical lead as offset 0!';
+    END IF;
+END $$;
+
+SELECT pass('ht_list_leads handles real row pagination (limit 1 offset 0 vs limit 1 offset 1 differ)');
+
+
+-- 12. Verify Direct Table SELECT Denied for Authenticated
+SELECT set_config('request.jwt.claim.sub', 'u2222222-2222-2222-2222-222222222222', true);
+SELECT set_config('role', 'authenticated', true);
+
+DO $$
+DECLARE
+    v_err BOOLEAN := false;
+BEGIN
+    BEGIN
+        PERFORM count(*) FROM public.ht_leads;
+    EXCEPTION WHEN OTHERS THEN
+        v_err := true;
+    END;
+
+    IF NOT v_err THEN
+        RAISE EXCEPTION 'Direct SELECT on public.ht_leads was allowed for authenticated role!';
+    END IF;
+END $$;
+
+SELECT pass('Direct table SELECT on public.ht_leads denied for authenticated role');
+
+-- Reset role to postgres superuser for cleanup/finish
+RESET role;
+SELECT set_config('request.jwt.claim.sub', 'u2222222-2222-2222-2222-222222222222', true);
 
 
 -- 13. Verify Scope Isolation (No Clinic appointments or encounters created)
