@@ -1,22 +1,23 @@
 -- ============================================================================
--- HEALTH TOURISM FOUNDATION SERVER-AUTHORITY TEST SUITE (SLICE 1-R2)
+-- HEALTH TOURISM FOUNDATION SERVER-AUTHORITY TEST SUITE (SLICE 1-R3)
 -- ============================================================================
 
 BEGIN;
 
-SELECT plan(34);
+SELECT plan(32);
 
--- 1. Schema & Table Structure Tests
+-- 1. Schema & Table Structure Tests (3 assertions)
 SELECT has_table('public', 'ht_referring_agencies', 'ht_referring_agencies table exists');
 SELECT has_table('public', 'ht_staff_profiles', 'ht_staff_profiles table exists');
 SELECT has_table('public', 'ht_leads', 'ht_leads table exists');
 
--- 2. RLS & Direct Table Access Isolation Tests
--- Direct table SELECT on ht_leads is revoked for authenticated/anon to protect sensitive PII
+-- 2. RLS & Direct Table Access Isolation Tests (3 assertions)
+-- Direct table SELECT on ht_leads is revoked for authenticated and anon to protect sensitive PII
 SELECT table_privs_are('public', 'ht_referring_agencies', 'authenticated', ARRAY[]::text[], 'ht_referring_agencies direct table access revoked for authenticated');
 SELECT table_privs_are('public', 'ht_leads', 'authenticated', ARRAY[]::text[], 'ht_leads direct table access revoked for authenticated');
+SELECT table_privs_are('public', 'ht_leads', 'anon', ARRAY[]::text[], 'ht_leads direct table access revoked for anon');
 
--- 3. RPC Existence Tests
+-- 3. RPC Existence Tests (8 assertions)
 SELECT has_function('public', 'ht_set_staff_profile', ARRAY['uuid', 'boolean', 'boolean'], 'ht_set_staff_profile RPC exists');
 SELECT has_function('public', 'ht_create_referring_agency', ARRAY['text', 'text', 'text', 'text'], 'ht_create_referring_agency RPC exists');
 SELECT has_function('public', 'ht_create_public_lead', ARRAY['text', 'text', 'text', 'text', 'text', 'text', 'text', 'text', 'uuid'], 'ht_create_public_lead RPC exists');
@@ -54,7 +55,7 @@ INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 
--- 5. Test Public Lead Capture RPC (ht_create_public_lead)
+-- 5. Test Public Lead Capture RPC (ht_create_public_lead) (5 assertions)
 -- Create Referring Agency for Alpha
 SELECT set_config('request.jwt.claim.sub', 'a1111111-1111-4111-8111-111111111111', true);
 SELECT public.ht_set_staff_profile('b2222222-2222-4222-8222-222222222222', true, true);
@@ -117,7 +118,7 @@ SELECT is(
 );
 
 
--- 6. Verify Cross-Tenant Agency Injection Blocked
+-- 6. Verify Cross-Tenant Agency Injection Blocked (1 assertion)
 DO $$
 DECLARE
     v_alpha_agency_id UUID;
@@ -151,7 +152,7 @@ END $$;
 SELECT pass('Cross-tenant agency injection rejected by ht_create_public_lead');
 
 
--- 7. Verify Audit Event Privacy Boundary (Passport number NOT in audit)
+-- 7. Verify Audit Event Privacy Boundary (Passport number NOT in audit) (1 assertion)
 SELECT is(
   (SELECT count(*) FROM public.audit_events WHERE action = 'ht_lead_created' AND payload::text LIKE '%PASSPORT12345%'),
   0::bigint,
@@ -159,7 +160,7 @@ SELECT is(
 );
 
 
--- 8. Verify Read Projections Privacy Boundary (Passport number NOT in getLead or listLeads)
+-- 8. Verify Read Projections Privacy Boundary (Passport number NOT in getLead or listLeads) (2 assertions)
 SELECT set_config('request.jwt.claim.sub', 'a2222222-2222-4222-8222-222222222222', true);
 
 SELECT is(
@@ -175,7 +176,30 @@ SELECT is(
 );
 
 
--- 9. Verify Status Audit Correctness (previous_status = new, new_status = contacted)
+-- 9. Verify Unauthorized HT Staff Access Denied (1 assertion)
+-- Beta staff (a3333333-3333-4333-8333-333333333333) has NOT been granted HT staff profile
+SELECT set_config('request.jwt.claim.sub', 'a3333333-3333-4333-8333-333333333333', true);
+DO $$
+DECLARE
+    v_err_caught BOOLEAN := false;
+BEGIN
+    BEGIN
+        PERFORM public.ht_list_leads();
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM LIKE '%UNAUTHORIZED_HT_STAFF%' THEN
+            v_err_caught := true;
+        END IF;
+    END;
+
+    IF NOT v_err_caught THEN
+        RAISE EXCEPTION 'Staff without HT capability was allowed to call ht_list_leads!';
+    END IF;
+END $$;
+
+SELECT pass('Staff without HT capability denied access to ht_list_leads');
+
+
+-- 10. Verify Status Audit Correctness (previous_status = new, new_status = contacted) (1 assertion)
 SELECT set_config('request.jwt.claim.sub', 'a2222222-2222-4222-8222-222222222222', true);
 DO $$
 DECLARE
@@ -199,7 +223,7 @@ END $$;
 SELECT pass('Lead status update records accurate previous_status=new and new_status=contacted in audit log');
 
 
--- 10. Verify Generic Status Update Denies Setting 'converted'
+-- 11. Verify Generic Status Update Denies Setting 'converted' (1 assertion)
 DO $$
 DECLARE
     v_lead_id UUID;
@@ -222,7 +246,7 @@ END $$;
 SELECT pass('ht_update_lead_status denies setting converted status directly');
 
 
--- 11. Verify Real Row Pagination in ht_list_leads
+-- 12. Verify Real Row Pagination in ht_list_leads (1 assertion)
 DO $$
 DECLARE
     v_lead_a_id UUID;
@@ -255,7 +279,8 @@ END $$;
 SELECT pass('ht_list_leads handles real row pagination (limit 1 offset 0 vs limit 1 offset 1 differ)');
 
 
--- 12. Verify Direct Table SELECT Denied for Authenticated
+-- 13. Verify Direct Table Access Denials for Authenticated & Anon Roles (2 assertions)
+-- A. Authenticated direct table SELECT attempt
 SELECT set_config('request.jwt.claim.sub', 'a2222222-2222-4222-8222-222222222222', true);
 SELECT set_config('role', 'authenticated', true);
 
@@ -276,16 +301,49 @@ END $$;
 
 SELECT pass('Direct table SELECT on public.ht_leads denied for authenticated role');
 
--- Reset role to postgres superuser for cleanup/finish
+-- B. Anon direct table SELECT attempt
+SELECT set_config('request.jwt.claim.sub', '', true);
+SELECT set_config('role', 'anon', true);
+
+DO $$
+DECLARE
+    v_err BOOLEAN := false;
+BEGIN
+    BEGIN
+        PERFORM count(*) FROM public.ht_leads;
+    EXCEPTION WHEN OTHERS THEN
+        v_err := true;
+    END;
+
+    IF NOT v_err THEN
+        RAISE EXCEPTION 'Direct SELECT on public.ht_leads was allowed for anon role!';
+    END IF;
+END $$;
+
+SELECT pass('Direct table SELECT on public.ht_leads denied for anon role');
+
+-- Reset role to postgres superuser for remaining checks
 RESET role;
 SELECT set_config('request.jwt.claim.sub', 'a2222222-2222-4222-8222-222222222222', true);
 
 
--- 13. Verify Scope Isolation (No Clinic appointments or encounters created)
+-- 14. Verify Scope Isolation (No Clinic patient/encounter or Core appointment creation) (3 assertions)
+SELECT is(
+  (SELECT count(*) FROM public.clinic_patient_profiles),
+  0::bigint,
+  'No Clinic patient profiles created by Health Tourism lead domain operations'
+);
+
 SELECT is(
   (SELECT count(*) FROM public.clinic_encounters),
   0::bigint,
   'No Clinic encounters created by Health Tourism lead domain operations'
+);
+
+SELECT is(
+  (SELECT count(*) FROM public.appointments),
+  0::bigint,
+  'No Core appointments created by Health Tourism lead domain operations'
 );
 
 SELECT finish();
