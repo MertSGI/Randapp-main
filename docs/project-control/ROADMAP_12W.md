@@ -43,7 +43,7 @@ LARİ CORE [FROZEN / CLOSED_PROVEN]
 | **3. LARİ Clinic** | Clinic Workspace UI & Isolated E3 Acceptance (Block 3) | `CLOSED_PROVEN` | E3 (Isolated Runtime E2E) |
 | **3. LARİ Clinic** | Clinic Core Milestone | `CLOSED_PROVEN` | E3 (Isolated Runtime E2E) |
 | **3. LARİ Clinic** | Speech-to-Text & SOAP Draft Assist (`CLINIC_AI_ASSIST_V1`) | `CLOSED_PROVEN` | E3 (Isolated Runtime E2E) |
-| **4. LARİ Health Tourism** | International Patient & Agency Operations Scope | `RECONCILIATION_CANDIDATE_SUBMITTED` | N/A |
+| **4. LARİ Health Tourism** | International Patient & Agency Operations Scope | `CLOSED_ACCEPTED` | E1 (Source Proven) |
 | **5. Final Delivery** | Production Cutover & DNS/Commercial Launch | `NOT_STARTED` | N/A |
 
 ---
@@ -68,8 +68,9 @@ LARİ CORE [FROZEN / CLOSED_PROVEN]
   - `Clinic Workspace UI & Isolated Real-Browser Acceptance` (Block 3): `CLOSED_PROVEN` (`E3_ISOLATED_RUNTIME_E2E`, GitHub Actions Run `32624729632`, isolated project `miuecvkkmyvaciticwtm`). Verified workspace UI, authenticated role context switching, read-only evidence recapture (`7E2954A3...`), distinct UI screenshots, and DB immutability.
   - `Speech-to-Text & SOAP Draft Assist` (`CLINIC_AI_ASSIST_V1`): `CLOSED_PROVEN` (`E3_ISOLATED_RUNTIME_E2E`, GitHub Actions Run `32840780417`, isolated project `miuecvkkmyvaciticwtm`, product SHA `451081f2619f0342df2a8c64ae401dffb7697363`). Real Groq transcription (`whisper-large-v3-turbo`) and SOAP draft (`openai/gpt-oss-120b`) proven under practitioner authority with atomic commercial quota metering, strict human approval boundary, zero raw audio DB persistence, and 0 autonomous clinical completions.
 
-### Phase 4: LARİ Health Tourism Package (IN_PROGRESS - RECONCILIATION CANDIDATE)
-- **Status**: IN_PROGRESS (Scope Reconciliation Candidate Submitted). Complete auditable 37-row matrix canonically persisted in [HEALTH_TOURISM_SCOPE_MATRIX.md](file:///C:/Users/mozcelikbas/Desktop/Randapp/Randapp-control/docs/project-control/HEALTH_TOURISM_SCOPE_MATRIX.md) and submitted for controller review (24 COMMITTED, 3 DEFERRED, 10 EXPLICITLY_OUT_OF_SCOPE, 0 SUPERSEDED; 2 cross-cutting superseded items). Implementation start remains forbidden until controller authorization.
+### Phase 4: LARİ Health Tourism Package (IN_PROGRESS - SCOPE RECONCILIATION ACCEPTED)
+- **Status**: IN_PROGRESS (Scope Reconciliation Accepted). Complete auditable 37-row matrix canonically persisted in [HEALTH_TOURISM_SCOPE_MATRIX.md](./HEALTH_TOURISM_SCOPE_MATRIX.md) and accepted by controller (24 COMMITTED, 3 DEFERRED to Final Delivery, 10 EXPLICITLY_OUT_OF_SCOPE, 0 SUPERSEDED in matrix; 2 cross-cutting superseded items). Main product delivery train ready for first `HEALTH_TOURISM_FOUNDATION` implementation slice.
+
 
 
 

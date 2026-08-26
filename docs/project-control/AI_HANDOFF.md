@@ -30,9 +30,10 @@ MANDATORY PROTOCOL:
 - **Clinic Core Baseline**: `feature/lari-clinic-foundation` (`008ebac4496d592d271d612713c437d316c416f0`) — `CLOSED_PROVEN`
 - **Clinic AI Assist V1 Baseline**: `feature/clinic-ai-assist-v1-provider-resilience` (`451081f2619f0342df2a8c64ae401dffb7697363`) — `CLOSED_PROVEN`
 - **Isolated E3 Acceptance Project**: `miuecvkkmyvaciticwtm` — `ACCEPTED_CLOSED_PROVEN` (Migrations: 65 / `20260909_clinic_ai_assist_commercial_authority.sql`, E2 Run: `32840780417`, Artifact: `9560421750`)
-- **Active Milestone**: `LARİ Health Tourism` (`HEALTH_TOURISM_FOUNDATION`) — `HEALTH_TOURISM_SCOPE_RECONCILIATION_CANDIDATE`
-  - **Reconciliation Candidate Matrix**: 37/37 numbered items classified (24 COMMITTED, 3 DEFERRED, 10 EXPLICITLY_OUT_OF_SCOPE, 0 SUPERSEDED in matrix; 2 cross-cutting superseded). Canonically persisted in [HEALTH_TOURISM_SCOPE_MATRIX.md](file:///C:/Users/mozcelikbas/Desktop/Randapp/Randapp-control/docs/project-control/HEALTH_TOURISM_SCOPE_MATRIX.md). EV-029 candidate submitted for controller review. Implementation start forbidden.
+- **Active Milestone**: `LARİ Health Tourism` (`HEALTH_TOURISM_FOUNDATION`) — `HEALTH_TOURISM_READY_FOR_IMPLEMENTATION`
+  - **Scope Reconciliation**: `ACCEPTED_CLOSED` (37/37 numbered items classified: 24 COMMITTED, 3 DEFERRED to Final Delivery, 10 EXPLICITLY_OUT_OF_SCOPE, 0 SUPERSEDED in matrix; 2 cross-cutting superseded items). Canonically persisted in [HEALTH_TOURISM_SCOPE_MATRIX.md](./HEALTH_TOURISM_SCOPE_MATRIX.md). EV-030 ACCEPTED by controller. Authorized to begin first implementation slice.
   - **Health Tourism Scope**: Multilingual intake, agency attribution, Web AI Lead Agent, lead scoring, coordinator workflow, Clinic integration.
+
 
 
 

@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-08-26T10:15:00+03:00",
+  "updated_at": "2026-08-26T11:20:00+03:00",
   "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
@@ -17,7 +17,8 @@
     "Final Delivery"
   ],
   "current_milestone": "LARİ Health Tourism",
-  "current_status": "HEALTH_TOURISM_SCOPE_RECONCILIATION_CANDIDATE",
+  "current_status": "HEALTH_TOURISM_READY_FOR_IMPLEMENTATION",
+  "scope_matrix": "docs/project-control/HEALTH_TOURISM_SCOPE_MATRIX.md",
   "canonical_refs": {
     "main_pilot": {
       "branch": "staging/supabase-staging-consistency",
@@ -318,11 +319,11 @@
     },
     {
       "gate": "LARİ Health Tourism Scope Reconciliation Gate",
-      "status": "CANDIDATE_SUBMITTED_FOR_REVIEW",
+      "status": "ACCEPTED",
       "evidence_level": "E1_SOURCE_PROVEN",
-      "tested_sha": "fc8e16ee3b31007522a864ca7eef9bef5d1b8df6",
-      "closed_at": null,
-      "reopen_condition": "Controller review feedback or scope adjustment"
+      "tested_sha": "25c41a7a026bb7e5e7e312c8fbee77f204e4add1",
+      "closed_at": "2026-08-26T11:20:00+03:00",
+      "reopen_condition": "Contradictory scope reconciliation or unauthorized boundary mutation"
     }
   ],
   "active_workstreams": {
@@ -409,7 +410,7 @@
     },
     "lari_health_tourism": {
       "status": "IN_PROGRESS",
-      "reconciliation_status": "CANDIDATE_SUBMITTED_FOR_REVIEW",
+      "reconciliation_status": "ACCEPTED_RECONCILED",
       "objective": "Multilingual public/intake experience, Web AI Lead Agent, source attribution, lead capture & scoring, coordinator workflow, and Clinic integration"
     }
   },
@@ -423,7 +424,7 @@
     "human_participant_uat": "DEFERRED_FIELD_VALIDATION"
   },
   "current_blockers": [],
-  "next_action": "Await controller review and explicit authorization before beginning HEALTH_TOURISM_FOUNDATION implementation slice.",
+  "next_action": "Begin first controller-authorized HEALTH_TOURISM_FOUNDATION implementation slice.",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true
