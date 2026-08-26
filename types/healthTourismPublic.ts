@@ -30,13 +30,16 @@ export interface HtTranslationDictionary {
   getDirectionsBtn: string;
   contactTitle: string;
 
-  // Intake Form Headers & Navigation
+  // Intake Form Headers & Navigation Controls
   intakeFormTitle: string;
   intakeFormSubtitle: string;
   step1Tab: string;
   step2Tab: string;
   step3Tab: string;
   step4Tab: string;
+  nextBtn: string;
+  backBtn: string;
+  homeBtn: string;
 
   // Step 1 - Patient Context
   intakeStep1Title: string;
@@ -58,18 +61,26 @@ export interface HtTranslationDictionary {
   intakeStep3Title: string;
   passportLabel: string;
   passportPlaceholder: string;
-  passportOptionalNotice: string;
+  passportNotice: string;
   agencyReferralNotice: string;
+  invalidAgencyWarning: string;
+  additionalInfoEmptyText: string;
 
   // Step 4 - Review & Submit
   intakeStep4Title: string;
   reviewNotice: string;
   fullNameSummary: string;
   contactSummary: string;
+  emailSummary: string;
+  phoneSummary: string;
   countrySummary: string;
   languageSummary: string;
   passportSummary: string;
   agencySummary: string;
+  providedStatus: string;
+  notProvidedStatus: string;
+  agencyDetectedStatus: string;
+  noAgencyStatus: string;
   submitBtn: string;
   submittingBtn: string;
   submitErrorGeneric: string;
@@ -80,7 +91,7 @@ export interface HtTranslationDictionary {
   referenceCodeLabel: string;
   newInquiryBtn: string;
 
-  // Validation Errors
+  // Validation Errors & Tenant Statuses
   fullNameRequiredErr: string;
   contactRequiredErr: string;
   invalidAgencyErr: string;

@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { HtLanguage, HtTranslationDictionary } from '../../types/healthTourismPublic';
 import { HtSourceChannel } from '../../types/healthTourism';
 import { HealthTourismService } from '../../utils/healthTourismService';
 import { supabase } from '../../services/supabaseClient';
+import { getLocalizedCountries, isValidIsoCountryCode } from '../../utils/countryHelper';
 
 export interface HealthTourismIntakeFormProps {
   tenantSlug: string;
@@ -11,28 +12,31 @@ export interface HealthTourismIntakeFormProps {
   onLanguageChange: (lang: HtLanguage) => void;
   sourceChannel: HtSourceChannel;
   referringAgencyId: string | null;
+  hasInvalidAgencyWarning?: boolean;
   isRtl?: boolean;
 }
 
-const COUNTRY_LIST = [
-  { code: 'DE', label: 'Germany / Deutschland' },
-  { code: 'GB', label: 'United Kingdom' },
-  { code: 'US', label: 'United States' },
-  { code: 'RU', label: 'Russian Federation / Россия' },
-  { code: 'SA', label: 'Saudi Arabia / المملكة العربية السعودية' },
-  { code: 'AE', label: 'United Arab Emirates / الإمارات' },
-  { code: 'KW', label: 'Kuwait / الكويت' },
-  { code: 'QA', label: 'Qatar / قطر' },
-  { code: 'IQ', label: 'Iraq / العراق' },
-  { code: 'NL', label: 'Netherlands / Nederland' },
-  { code: 'BE', label: 'Belgium / België' },
-  { code: 'FR', label: 'France' },
-  { code: 'CH', label: 'Switzerland / Schweiz' },
-  { code: 'AT', label: 'Austria / Österreich' },
-  { code: 'AZ', label: 'Azerbaijan / Azərbaycan' },
-  { code: 'TR', label: 'Turkey / Türkiye' },
-  { code: 'OTHER', label: 'Other / Diğer' },
-];
+/**
+ * Utility to mask email for non-sensitive review summary
+ */
+function maskEmail(email: string): string {
+  if (!email || !email.includes('@')) return email;
+  const [local, domain] = email.split('@');
+  if (local.length <= 2) {
+    return `${local.charAt(0)}***@${domain}`;
+  }
+  return `${local.charAt(0)}***${local.charAt(local.length - 1)}@${domain}`;
+}
+
+/**
+ * Utility to mask phone for non-sensitive review summary
+ */
+function maskPhone(phone: string): string {
+  if (!phone || phone.length < 6) return phone;
+  const visiblePrefix = phone.slice(0, 4);
+  const visibleSuffix = phone.slice(-2);
+  return `${visiblePrefix} *** **${visibleSuffix}`;
+}
 
 export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = ({
   tenantSlug,
@@ -41,6 +45,7 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
   onLanguageChange,
   sourceChannel,
   referringAgencyId,
+  hasInvalidAgencyWarning = false,
   isRtl = false,
 }) => {
   const [currentStep, setCurrentStep] = useState<number>(1);
@@ -57,8 +62,15 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
 
   const [leadResult, setLeadResult] = useState<{ lead_id?: string } | null>(null);
 
+  // Sync preferred language when active surface language changes
+  useEffect(() => {
+    setPreferredLanguage(activeLanguage);
+  }, [activeLanguage]);
+
   // Passport UI is disabled by default via feature flag
   const isPassportEnabled = (import.meta as any).env?.VITE_HT_PASSPORT_INTAKE_ENABLED === 'true';
+
+  const countryOptions = getLocalizedCountries(activeLanguage);
 
   const handleLanguageSelect = (lang: HtLanguage) => {
     setPreferredLanguage(lang);
@@ -100,6 +112,12 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
       return;
     }
 
+    // Validate country code if selected
+    if (countryCode && !isValidIsoCountryCode(countryCode)) {
+      setValidationError(t.submitErrorGeneric);
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmitError(null);
 
@@ -112,7 +130,7 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
         email: email.trim() || null,
         phone: phone.trim() || null,
         preferred_language: preferredLanguage,
-        country_code: countryCode || null,
+        country_code: countryCode && isValidIsoCountryCode(countryCode) ? countryCode : null,
         passport_number: isPassportEnabled ? passportNumber.trim() || null : null,
         source_channel: sourceChannel,
         referring_agency_id: referringAgencyId || null,
@@ -121,10 +139,16 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
       if (result.success) {
         setLeadResult({ lead_id: result.lead_id });
         setCurrentStep(5);
-        // Clear sensitive state upon successful submission
+
+        // Completely clear ALL intake PII state upon successful submission
+        setFullName('');
+        setEmail('');
+        setPhone('');
         setPassportNumber('');
+        setCountryCode('');
       } else {
-        setSubmitError(result.message || t.submitErrorGeneric);
+        // Display localized generic public error, strictly suppressing raw DB error message
+        setSubmitError(t.submitErrorGeneric);
       }
     } catch (err) {
       setSubmitError(t.submitErrorGeneric);
@@ -135,19 +159,19 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
 
   if (currentStep === 5) {
     return (
-      <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl p-8 text-center shadow-lg">
+      <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl p-8 text-center shadow-lg" role="region" aria-live="polite">
         <div className="w-16 h-16 bg-emerald-500 text-white rounded-full flex items-center justify-center mx-auto mb-4 text-3xl font-bold">
           ✓
         </div>
         <h3 className="text-2xl font-bold text-emerald-900 dark:text-emerald-200 mb-2">
           {t.successTitle}
         </h3>
-        <p className="text-emerald-700 dark:text-emerald-300 max-w-md mx-auto mb-6">
+        <p className="text-emerald-700 dark:text-emerald-300 max-w-md mx-auto mb-6 text-sm">
           {t.successMessage}
         </p>
 
         {leadResult?.lead_id && (
-          <div className="bg-white dark:bg-slate-900 rounded-lg p-4 inline-block mb-6 border border-emerald-100 dark:border-emerald-900">
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-4 inline-block mb-6 border border-emerald-100 dark:border-emerald-900 shadow-sm">
             <span className="text-xs text-gray-500 uppercase tracking-wider block mb-1">
               {t.referenceCodeLabel}
             </span>
@@ -163,12 +187,8 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
             onClick={() => {
               setCurrentStep(1);
               setLeadResult(null);
-              setFullName('');
-              setEmail('');
-              setPhone('');
-              setCountryCode('');
             }}
-            className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl shadow-md transition"
+            className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl shadow-md transition focus:ring-2 focus:ring-emerald-500"
           >
             {t.newInquiryBtn}
           </button>
@@ -179,8 +199,8 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
 
   return (
     <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-2xl p-6 sm:p-8 shadow-xl">
-      {/* Form Title */}
-      <div className="mb-6 text-center sm:text-left">
+      {/* Form Header */}
+      <div className="mb-6 text-center sm:text-left rtl:sm:text-right">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
           {t.intakeFormTitle}
         </h2>
@@ -189,8 +209,8 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
         </p>
       </div>
 
-      {/* Progress Tabs */}
-      <div className="flex border-b border-gray-200 dark:border-slate-700 mb-6 overflow-x-auto no-scrollbar">
+      {/* Progress Navigation Tabs */}
+      <div className="flex border-b border-gray-200 dark:border-slate-700 mb-6 overflow-x-auto no-scrollbar" role="tablist">
         {[
           { step: 1, label: t.step1Tab },
           { step: 2, label: t.step2Tab },
@@ -200,6 +220,8 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
           <button
             key={tab.step}
             type="button"
+            role="tab"
+            aria-selected={currentStep === tab.step}
             onClick={() => {
               if (tab.step < currentStep || (tab.step === 2 && currentStep >= 1)) {
                 setCurrentStep(tab.step);
@@ -219,15 +241,22 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
         ))}
       </div>
 
-      {/* Global Validation / Submit Error */}
+      {/* Global Validation / Submit Error Banner */}
       {(validationError || submitError) && (
-        <div className="mb-6 p-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm">
+        <div className="mb-6 p-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm" role="alert" aria-live="polite">
           {validationError || submitError}
         </div>
       )}
 
-      {/* Form Steps */}
-      <form onSubmit={handleSubmit}>
+      {/* Malformed Agency Warning Banner */}
+      {hasInvalidAgencyWarning && currentStep === 1 && (
+        <div className="mb-6 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs sm:text-sm" role="alert">
+          ⚠️ {t.invalidAgencyWarning}
+        </div>
+      )}
+
+      {/* Form Container */}
+      <form onSubmit={handleSubmit} noValidate>
         {/* STEP 1: Language & Country */}
         {currentStep === 1 && (
           <div className="space-y-6">
@@ -247,9 +276,9 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
                     key={lang.code}
                     type="button"
                     onClick={() => handleLanguageSelect(lang.code)}
-                    className={`py-3 px-4 rounded-xl border text-sm font-medium transition ${
+                    className={`py-3 px-4 rounded-xl border text-sm font-medium transition focus:ring-2 focus:ring-indigo-500 ${
                       preferredLanguage === lang.code
-                        ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 ring-2 ring-indigo-500'
+                        ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-bold'
                         : 'border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900 text-gray-700 dark:text-gray-300 hover:bg-gray-100'
                     }`}
                   >
@@ -260,18 +289,19 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label htmlFor="ht-country" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 {t.countryLabel}
               </label>
               <select
+                id="ht-country"
                 value={countryCode}
                 onChange={(e) => setCountryCode(e.target.value)}
                 className="w-full p-3 rounded-xl border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               >
                 <option value="">{t.countrySelectPlaceholder}</option>
-                {COUNTRY_LIST.map((c) => (
+                {countryOptions.map((c) => (
                   <option key={c.code} value={c.code}>
-                    {c.label}
+                    {c.name} ({c.code})
                   </option>
                 ))}
               </select>
@@ -281,9 +311,9 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
               <button
                 type="button"
                 onClick={handleNext}
-                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-md transition"
+                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-md transition focus:ring-2 focus:ring-indigo-500"
               >
-                İleri →
+                {t.nextBtn}
               </button>
             </div>
           </div>
@@ -293,12 +323,14 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
         {currentStep === 2 && (
           <div className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label htmlFor="ht-fullname" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 {t.fullNameLabel} *
               </label>
               <input
+                id="ht-fullname"
                 type="text"
                 required
+                aria-required="true"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder={t.fullNamePlaceholder}
@@ -307,10 +339,11 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label htmlFor="ht-email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 {t.emailLabel}
               </label>
               <input
+                id="ht-email"
                 type="email"
                 dir="ltr"
                 value={email}
@@ -321,10 +354,11 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label htmlFor="ht-phone" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 {t.phoneLabel}
               </label>
               <input
+                id="ht-phone"
                 type="tel"
                 dir="ltr"
                 value={phone}
@@ -341,16 +375,16 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
               <button
                 type="button"
                 onClick={handlePrev}
-                className="px-6 py-3 border border-gray-300 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 font-semibold rounded-xl transition"
+                className="px-6 py-3 border border-gray-300 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 font-semibold rounded-xl transition focus:ring-2 focus:ring-indigo-500"
               >
-                ← Geri
+                {t.backBtn}
               </button>
               <button
                 type="button"
                 onClick={handleNext}
-                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-md transition"
+                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-md transition focus:ring-2 focus:ring-indigo-500"
               >
-                İleri →
+                {t.nextBtn}
               </button>
             </div>
           </div>
@@ -361,10 +395,11 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
           <div className="space-y-6">
             {isPassportEnabled && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label htmlFor="ht-passport" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   {t.passportLabel}
                 </label>
                 <input
+                  id="ht-passport"
                   type="text"
                   dir="ltr"
                   value={passportNumber}
@@ -373,7 +408,7 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
                   className="w-full p-3 rounded-xl border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                 />
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  {t.passportOptionalNotice}
+                  {t.passportNotice}
                 </p>
               </div>
             )}
@@ -386,7 +421,7 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
 
             {!isPassportEnabled && !referringAgencyId && (
               <div className="p-6 text-center text-gray-500 dark:text-gray-400 text-sm">
-                {t.intakeFormSubtitle}
+                {t.additionalInfoEmptyText}
               </div>
             )}
 
@@ -394,60 +429,70 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
               <button
                 type="button"
                 onClick={handlePrev}
-                className="px-6 py-3 border border-gray-300 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 font-semibold rounded-xl transition"
+                className="px-6 py-3 border border-gray-300 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 font-semibold rounded-xl transition focus:ring-2 focus:ring-indigo-500"
               >
-                ← Geri
+                {t.backBtn}
               </button>
               <button
                 type="button"
                 onClick={handleNext}
-                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-md transition"
+                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-md transition focus:ring-2 focus:ring-indigo-500"
               >
-                İleri →
+                {t.nextBtn}
               </button>
             </div>
           </div>
         )}
 
-        {/* STEP 4: Review & Submit */}
+        {/* STEP 4: Non-Sensitive Review & Submit */}
         {currentStep === 4 && (
           <div className="space-y-6">
             <div className="bg-gray-50 dark:bg-slate-900 p-6 rounded-xl border border-gray-200 dark:border-slate-700 space-y-3 text-sm">
               <h3 className="font-bold text-gray-900 dark:text-white border-b border-gray-200 dark:border-slate-700 pb-2 mb-3">
-                {t.step4Title}
+                {t.intakeStep4Title}
               </h3>
               <div className="flex justify-between">
                 <span className="text-gray-500">{t.fullNameSummary}:</span>
                 <span className="font-medium text-gray-900 dark:text-white">{fullName}</span>
               </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">{t.contactSummary}:</span>
+                <span className="font-medium text-gray-900 dark:text-white">{t.providedStatus}</span>
+              </div>
               {email && (
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Email:</span>
-                  <span className="font-medium text-gray-900 dark:text-white">{email}</span>
+                  <span className="text-gray-500">{t.emailSummary}:</span>
+                  <span className="font-mono text-gray-900 dark:text-white">{maskEmail(email)}</span>
                 </div>
               )}
               {phone && (
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Telefon:</span>
-                  <span className="font-medium text-gray-900 dark:text-white">{phone}</span>
+                  <span className="text-gray-500">{t.phoneSummary}:</span>
+                  <span className="font-mono text-gray-900 dark:text-white">{maskPhone(phone)}</span>
                 </div>
               )}
               <div className="flex justify-between">
                 <span className="text-gray-500">{t.languageSummary}:</span>
                 <span className="font-medium text-gray-900 dark:text-white uppercase">{preferredLanguage}</span>
               </div>
-              {countryCode && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">{t.countrySummary}:</span>
-                  <span className="font-medium text-gray-900 dark:text-white">{countryCode}</span>
-                </div>
-              )}
-              {isPassportEnabled && passportNumber && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">{t.countrySummary}:</span>
+                <span className="font-medium text-gray-900 dark:text-white">{countryCode || t.notProvidedStatus}</span>
+              </div>
+              {isPassportEnabled && (
                 <div className="flex justify-between">
                   <span className="text-gray-500">{t.passportSummary}:</span>
-                  <span className="font-medium text-gray-900 dark:text-white">••••••••</span>
+                  <span className="font-mono text-gray-900 dark:text-white">
+                    {passportNumber ? '••••••••' : t.notProvidedStatus}
+                  </span>
                 </div>
               )}
+              <div className="flex justify-between">
+                <span className="text-gray-500">{t.agencySummary}:</span>
+                <span className="font-medium text-gray-900 dark:text-white">
+                  {referringAgencyId ? t.agencyDetectedStatus : t.noAgencyStatus}
+                </span>
+              </div>
             </div>
 
             <div className="pt-4 flex justify-between">
@@ -455,14 +500,14 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
                 type="button"
                 onClick={handlePrev}
                 disabled={isSubmitting}
-                className="px-6 py-3 border border-gray-300 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 font-semibold rounded-xl transition disabled:opacity-50"
+                className="px-6 py-3 border border-gray-300 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 font-semibold rounded-xl transition disabled:opacity-50 focus:ring-2 focus:ring-indigo-500"
               >
-                ← Geri
+                {t.backBtn}
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-lg transition disabled:opacity-50"
+                className="px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-lg transition disabled:opacity-50 focus:ring-2 focus:ring-emerald-500"
               >
                 {isSubmitting ? t.submittingBtn : t.submitBtn}
               </button>

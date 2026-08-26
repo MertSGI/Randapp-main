@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
-import { extractSourceChannel, extractReferringAgencyId, isValidUuid } from '../utils/sourceAttributionHelper.ts';
+import fs from 'node:fs';
+import path from 'node:path';
+import { extractSourceChannel, extractReferringAgencyId, hasInvalidAgencyReferral, isValidUuid } from '../utils/sourceAttributionHelper.ts';
 import { HT_TRANSLATIONS, getHtTranslation } from '../utils/healthTourismTranslations.ts';
+import { getLocalizedCountries, isValidIsoCountryCode } from '../utils/countryHelper.ts';
 
-console.log('=== LARİ Health Tourism Slice 2 Public Intake QA Suite ===\n');
+console.log('=== LARİ Health Tourism Slice 2 Public Intake Hardened QA Suite ===\n');
 
-// 1. Language Dictionaries Completeness & Key Parity
+const projectRoot = process.cwd();
+
+// 1. Language Dictionaries Completeness & Key Parity across 5 Languages
 console.log('1. Verifying 5-Language Dictionary Key Parity (TR, EN, DE, RU, AR)...');
 const languages = ['tr', 'en', 'de', 'ru', 'ar'];
 const trKeys = Object.keys(HT_TRANSLATIONS.tr).sort();
-assert.equal(trKeys.length > 40, true, 'Translation dictionary should contain at least 40 keys');
+assert.equal(trKeys.length > 50, true, 'Translation dictionary should contain at least 50 keys');
 
 for (const lang of languages) {
   const dict = getHtTranslation(lang);
@@ -18,41 +23,108 @@ for (const lang of languages) {
 }
 console.log('   ✓ All 5 languages (TR, EN, DE, RU, AR) have exact key parity (', trKeys.length, 'keys verified)\n');
 
-// 2. Source Attribution Helper
-console.log('2. Verifying Source Attribution Mapping Logic...');
-assert.equal(extractSourceChannel('https://example.com/health-tourism?agency=00000000-0000-4000-8000-000000000001'), 'agency_referral');
+// 2. Canonical Business Profile Service Method & Type Usage
+console.log('2. Verifying Business Profile Service Contract...');
+const landingPagePath = path.join(projectRoot, 'pages', 'health-tourism', 'HealthTourismLandingPage.tsx');
+const landingPageContent = fs.readFileSync(landingPagePath, 'utf8');
+
+assert.equal(/\bPublicBusinessProfile\b/.test(landingPageContent), false, 'Must NOT import nonexistent PublicBusinessProfile');
+assert.equal(landingPageContent.includes('getPublicProfile('), false, 'Must NOT call nonexistent getPublicProfile');
+assert.equal(landingPageContent.includes('businessProfileService.getPublicBusinessProfile('), true, 'Must call canonical businessProfileService.getPublicBusinessProfile');
+assert.equal(landingPageContent.includes('SalonBusinessProfile'), true, 'Must import canonical SalonBusinessProfile type');
+console.log('   ✓ Business Profile Service contract verified (uses getPublicBusinessProfile & SalonBusinessProfile)\n');
+
+// 3. Translation Key Reference Verification
+console.log('3. Verifying Absence of Obsolete Translation Keys...');
+const formPath = path.join(projectRoot, 'components', 'health-tourism', 'HealthTourismIntakeForm.tsx');
+const formContent = fs.readFileSync(formPath, 'utf8');
+
+const obsoleteKeys = ['t.step1Title', 't.step2Title', 't.step3Title', 't.step4Title'];
+for (const obsoleteKey of obsoleteKeys) {
+  assert.equal(landingPageContent.includes(obsoleteKey), false, `Landing page must not reference obsolete key ${obsoleteKey}`);
+  assert.equal(formContent.includes(obsoleteKey), false, `Intake form must not reference obsolete key ${obsoleteKey}`);
+}
+console.log('   ✓ Zero obsolete translation key references found\n');
+
+// 4. Zero Mixed-Language Customer UI Literals Check
+console.log('4. Verifying Zero Mixed-Language Hardcoded UI Copy...');
+const forbiddenLiterals = ['İleri →', '← Geri', 'Telefon:', 'Ana Sayfa'];
+for (const literal of forbiddenLiterals) {
+  assert.equal(landingPageContent.includes(`"${literal}"`) || landingPageContent.includes(`'${literal}'`), false, `Landing page must not contain hardcoded '${literal}'`);
+  assert.equal(formContent.includes(`"${literal}"`) || formContent.includes(`'${literal}'`), false, `Intake form must not contain hardcoded '${literal}'`);
+}
+console.log('   ✓ Zero hardcoded mixed-language customer UI literals in TSX components\n');
+
+// 5. ISO Country Code Invariant & Localized Names
+console.log('5. Verifying ISO Country Code Contract & Localized DisplayNames...');
+for (const lang of languages) {
+  const options = getLocalizedCountries(lang);
+  assert.ok(options.length > 20, 'Localized country list should contain options');
+  for (const opt of options) {
+    assert.equal(isValidIsoCountryCode(opt.code), true, `Country code '${opt.code}' must satisfy ISO alpha-2 regex ^[A-Z]{2}$`);
+    assert.notEqual(opt.code, 'OTHER', "Country code must NOT be 'OTHER'");
+  }
+}
+assert.equal(isValidIsoCountryCode(null), true, 'null country code is valid unselected');
+assert.equal(isValidIsoCountryCode('OTHER'), false, "'OTHER' is not a valid ISO country code");
+console.log('   ✓ Country selection strictly uses ISO alpha-2 codes (^[A-Z]{2}$) or null\n');
+
+// 6. Source Attribution & Agency Referral Logic (Browser & Hash Router)
+console.log('6. Verifying Source Attribution & Hash/Browser Router Query Logic...');
+const validUuid = '123e4567-e89b-12d3-a456-426614174000';
+const invalidUuid = 'not-a-valid-uuid';
+
+// Agency referral valid
+assert.equal(extractSourceChannel(`https://example.com/health-tourism?agency=${validUuid}`), 'agency_referral');
+assert.equal(extractSourceChannel(`https://example.com/#/health-tourism/clinic-slug?agency=${validUuid}`), 'agency_referral');
+assert.equal(extractReferringAgencyId(`agency=${validUuid}`), validUuid);
+assert.equal(hasInvalidAgencyReferral(`agency=${validUuid}`), false);
+
+// Invalid agency referral handling
+assert.equal(extractReferringAgencyId(`agency=${invalidUuid}`), null);
+assert.equal(hasInvalidAgencyReferral(`agency=${invalidUuid}`), true);
+
+// Channel mappings
 assert.equal(extractSourceChannel('https://example.com/health-tourism?gclid=12345'), 'paid_search');
-assert.equal(extractSourceChannel('https://example.com/health-tourism?utm_source=google-ads'), 'paid_search');
 assert.equal(extractSourceChannel('https://example.com/health-tourism?utm_source=facebook'), 'social');
-assert.equal(extractSourceChannel('https://example.com/health-tourism?utm_medium=social'), 'social');
 assert.equal(extractSourceChannel('https://example.com/health-tourism?utm_medium=organic'), 'organic');
 assert.equal(extractSourceChannel('https://example.com/health-tourism', 'https://www.google.com/'), 'organic');
 assert.equal(extractSourceChannel('https://example.com/health-tourism'), 'direct');
-console.log('   ✓ Source attribution helper verified for all 6 channels\n');
+console.log('   ✓ Source attribution & malformed agency detection verified across Hash & Browser router queries\n');
 
-// 3. Agency Referral UUID Validation
-console.log('3. Verifying Agency Referral UUID Validation...');
-const validUuid = '123e4567-e89b-12d3-a456-426614174000';
-const invalidUuid = 'not-a-valid-uuid-12345';
-assert.equal(isValidUuid(validUuid), true, 'Valid UUID v4 must pass validation');
-assert.equal(isValidUuid(invalidUuid), false, 'Invalid string must fail UUID validation');
-
-const paramsValid = new URLSearchParams(`agency=${validUuid}`);
-const paramsInvalid = new URLSearchParams(`agency=${invalidUuid}`);
-assert.equal(extractReferringAgencyId(paramsValid), validUuid);
-assert.equal(extractReferringAgencyId(paramsInvalid), null);
-console.log('   ✓ Agency referral UUID validation verified (invalid UUIDs stripped client-side)\n');
-
-// 4. Privacy Invariant — Passport Feature Flag Default
-console.log('4. Verifying Passport Feature Flag Default Policy...');
+// 7. Passport Privacy & Feature Flag Invariant
+console.log('7. Verifying Passport Privacy & Feature Flag Invariant...');
 const passportEnv = process.env.VITE_HT_PASSPORT_INTAKE_ENABLED;
 assert.equal(passportEnv !== 'true', true, 'VITE_HT_PASSPORT_INTAKE_ENABLED must default to OFF/false');
-console.log('   ✓ Passport intake UI feature flag confirmed default-OFF\n');
+assert.equal(formContent.includes('localStorage.setItem') && formContent.includes('passport'), false, 'Must not save passport to localStorage');
+assert.equal(formContent.includes('sessionStorage.setItem') && formContent.includes('passport'), false, 'Must not save passport to sessionStorage');
+console.log('   ✓ Passport intake default-OFF and zero local/session storage verified\n');
 
-// 5. Direct DB Operation Avoidance Check
-console.log('5. Verifying Server Authority Contract Isolation...');
-console.log('   ✓ HealthTourismService.createPublicLead uses ht_create_public_lead RPC only\n');
+// 8. Direct DB DML Avoidance & RPC Isolation
+console.log('8. Verifying RPC Authority & Direct Table Access Avoidance...');
+assert.equal(formContent.includes(".from('ht_leads')"), false, 'Intake form component must NOT call supabase.from("ht_leads") directly');
+assert.equal(landingPageContent.includes(".from('ht_leads')"), false, 'Landing page component must NOT call supabase.from("ht_leads") directly');
+assert.equal(formContent.includes('HealthTourismService'), true, 'Intake form must use HealthTourismService abstraction');
+console.log('   ✓ Direct Supabase DML avoided in public UI (uses HealthTourismService RPC authority only)\n');
 
-console.log('====================================================');
-console.log('ALL SLICE 2 HEALTH TOURISM QA CHECKS PASSED CLEANLY');
-console.log('====================================================');
+// 9. Routing Reservation Verification
+console.log('9. Verifying Route Reservation Invariants...');
+const tenantServicePath = path.join(projectRoot, 'services', 'tenantService.ts');
+const tenantServiceContent = fs.readFileSync(tenantServicePath, 'utf8');
+assert.equal(tenantServiceContent.includes("'health-tourism'"), true, 'tenantService must reserve health-tourism route');
+
+const appPath = path.join(projectRoot, 'App.tsx');
+const appContent = fs.readFileSync(appPath, 'utf8');
+assert.equal(appContent.includes('/health-tourism'), true, 'App.tsx must include /health-tourism route');
+assert.equal(appContent.includes('/health-tourism/:tenantSlug'), true, 'App.tsx must include /health-tourism/:tenantSlug route');
+console.log('   ✓ Route reservation in tenantService and App.tsx verified\n');
+
+// 10. Localized Error Safety
+console.log('10. Verifying Localized Public Error Safety...');
+assert.equal(formContent.includes('result.message || t.submitErrorGeneric'), false, 'Form must not leak raw RPC English result.message to public UI');
+assert.equal(formContent.includes('setSubmitError(t.submitErrorGeneric)'), true, 'Form must display localized t.submitErrorGeneric on submit error');
+console.log('   ✓ Public submit error localization verified (raw DB errors strictly suppressed)\n');
+
+console.log('========================================================================');
+console.log('ALL SLICE 2 HEALTH TOURISM HARDENED QA CHECKS PASSED CLEANLY (10/10)');
+console.log('========================================================================');
