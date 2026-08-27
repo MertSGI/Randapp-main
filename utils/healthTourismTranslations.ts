@@ -84,6 +84,7 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
 
     fullNameRequiredErr: 'Ad ve soyad alanı zorunludur.',
     contactRequiredErr: 'E-posta veya telefon numaralarından en az biri girilmelidir.',
+    invalidCountryErr: 'Geçersiz ülke seçimi. Lütfen listeden geçerli bir ülke seçin.',
     invalidAgencyErr: 'Geçersiz acente referans kodu.',
     tenantNotFoundTitle: 'Klinik Bulunamadı',
     tenantNotFoundDesc: 'Aradığınız sağlık turizmi hizmeti mevcut değil veya bağlantı adresi hatalı.',
@@ -181,6 +182,7 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
 
     fullNameRequiredErr: 'Full name is required.',
     contactRequiredErr: 'Please provide at least one contact method (Email or Phone).',
+    invalidCountryErr: 'Invalid country selection. Please select a valid country from the list.',
     invalidAgencyErr: 'Invalid agency referral code.',
     tenantNotFoundTitle: 'Clinic Not Found',
     tenantNotFoundDesc: 'The requested health tourism service is not available or URL is incorrect.',
@@ -278,6 +280,7 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
 
     fullNameRequiredErr: 'Vollständiger Name ist erforderlich.',
     contactRequiredErr: 'Geben Sie mindestens eine Kontaktmethode (E-Mail oder Telefon) an.',
+    invalidCountryErr: 'Ungültige Länderauswahl. Bitte wählen Sie ein gültiges Land aus der Liste.',
     invalidAgencyErr: 'Ungültiger Agentur-Referenzcode.',
     tenantNotFoundTitle: 'Klinik nicht gefunden',
     tenantNotFoundDesc: 'Der angeforderte Dienst ist nicht verfügbar oder die URL ist fehlerhaft.',
@@ -375,6 +378,7 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
 
     fullNameRequiredErr: 'Поле Имя и фамилия обязательно для заполнения.',
     contactRequiredErr: 'Укажите хотя бы один контакт (Email или Телефон).',
+    invalidCountryErr: 'Недопустимый выбор страны. Выберите действительную страну из списка.',
     invalidAgencyErr: 'Недействительный код агентства.',
     tenantNotFoundTitle: 'Клиника не найдена',
     tenantNotFoundDesc: 'Запрошенная услуга недоступна или указан неверный адрес.',
@@ -472,6 +476,7 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
 
     fullNameRequiredErr: 'الاسم الكامل مطلوب.',
     contactRequiredErr: 'يرجى تقديم طريقة اتصال واحدة على الأقل (بريد إلكتروني أو هاتف).',
+    invalidCountryErr: 'اختيار البلد غير صالح. يرجى اختيار بلد صالح من القائمة.',
     invalidAgencyErr: 'رمز إحالة الوكالة غير صالحة.',
     tenantNotFoundTitle: 'العيادة غير موجودة',
     tenantNotFoundDesc: 'خدمة السياحة العلاجية المطلوبة غير متوفرة أو الرابط غير صحيح.',

@@ -94,6 +94,7 @@ export interface HtTranslationDictionary {
   // Validation Errors & Tenant Statuses
   fullNameRequiredErr: string;
   contactRequiredErr: string;
+  invalidCountryErr: string;
   invalidAgencyErr: string;
   tenantNotFoundTitle: string;
   tenantNotFoundDesc: string;

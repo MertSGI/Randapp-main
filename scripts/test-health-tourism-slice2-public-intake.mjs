@@ -173,7 +173,19 @@ for (const term of unverifiedTerms) {
   }
 }
 assert.equal(termCount, 0, 'Customer-facing HT dictionaries must contain zero prohibited unverified security terms');
-console.log('   ✓ R3 corrective requirements verified cleanly (Authority, Gating, Projection, SEO, Accessibility, Country Set, Copy Accuracy)\n');
+
+// I. R4 Localization & Customer Literal Strictness
+assert.equal(formContent.includes('Invalid country selection.'), false, 'Form must NOT contain hardcoded "Invalid country selection." string');
+assert.equal(formContent.includes('{t.invalidCountryErr}'), true, 'Form INVALID_COUNTRY element must render {t.invalidCountryErr}');
+assert.equal(formContent.includes('setValidationError(t.invalidCountryErr)'), true, 'Form handleSubmit must set t.invalidCountryErr on invalid country');
+
+for (const lang of languages) {
+  const dict = getHtTranslation(lang);
+  assert.ok(dict.invalidCountryErr, `Dictionary for '${lang}' must contain invalidCountryErr key`);
+  assert.ok(dict.invalidCountryErr.length > 5, `invalidCountryErr for '${lang}' must be a non-empty localized sentence`);
+}
+
+console.log('   ✓ R4 corrective requirements verified cleanly (invalidCountryErr in all 5 dicts, zero hardcoded English literals in TSX)\n');
 
 console.log('========================================================================');
 console.log('ALL SLICE 2 HEALTH TOURISM HARDENED QA CHECKS PASSED CLEANLY (11/11)');

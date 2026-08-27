@@ -114,7 +114,7 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
 
     // Validate country code if selected
     if (countryCode && !isValidIsoCountryCode(countryCode)) {
-      setValidationError(t.submitErrorGeneric);
+      setValidationError(t.invalidCountryErr);
       return;
     }
 
@@ -311,7 +311,7 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
               </select>
               {countryCode && !isValidIsoCountryCode(countryCode) && (
                 <p id="INVALID_COUNTRY" className="text-xs text-red-600 dark:text-red-400 mt-1" role="alert">
-                  Invalid country selection.
+                  {t.invalidCountryErr}
                 </p>
               )}
             </div>
