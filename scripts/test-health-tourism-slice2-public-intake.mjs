@@ -125,6 +125,56 @@ assert.equal(formContent.includes('result.message || t.submitErrorGeneric'), fal
 assert.equal(formContent.includes('setSubmitError(t.submitErrorGeneric)'), true, 'Form must display localized t.submitErrorGeneric on submit error');
 console.log('   ✓ Public submit error localization verified (raw DB errors strictly suppressed)\n');
 
+// 11. R3 mechanical assertions: Custom Domain Authority, Gating, Projection, SEO Cleanup, Accessibility & Copy Accuracy
+console.log('11. Verifying R3 Corrective Requirements (Custom Domain Authority, Active/Publication Gate, Projection, SEO Cleanup, Accessibility, Country Set, Copy)...');
+
+// A. Custom Domain Resolver
+assert.equal(landingPageContent.includes('resolveTenantFromHost(window.location.hostname)'), true, 'Landing page must use resolveTenantFromHost for host authority when routeSlug is absent');
+assert.equal(landingPageContent.includes('tenantService.getCurrentTenant()'), false, 'Public HT Landing page must NOT call getCurrentTenant()');
+
+// B & C. Active & Publication Gate
+assert.equal(landingPageContent.includes("activeTenant.status === 'active'"), true, 'Landing page must check status === active');
+assert.equal(landingPageContent.includes("activeTenant.publicSiteStatus === 'published'"), true, 'Landing page must check publicSiteStatus === published when available');
+
+// D. Projection
+assert.equal(tenantServiceContent.includes('verificationStatus: tenant.verification_status'), true, 'tenantService must map verificationStatus');
+assert.equal(tenantServiceContent.includes('publicSiteStatus: tenant.public_site_status'), true, 'tenantService must map publicSiteStatus');
+assert.equal(tenantServiceContent.includes('businessRiskStatus: tenant.business_risk_status'), true, 'tenantService must map businessRiskStatus');
+assert.equal(tenantServiceContent.includes('isPublished: tenant.is_published'), true, 'tenantService must map isPublished');
+assert.equal(tenantServiceContent.includes('customDomain: tenant.custom_domain'), true, 'tenantService must map customDomain');
+
+// E. SEO Cleanup
+assert.equal(landingPageContent.includes('createdMetaDesc && metaDesc && metaDesc.parentNode'), true, 'Landing page must remove created meta description element on cleanup');
+assert.equal(landingPageContent.includes('metaDesc.setAttribute(\'content\', prevMetaDescContent)'), true, 'Landing page must restore previous meta description on cleanup');
+
+// F. Accessibility
+assert.equal(formContent.includes('aria-invalid'), true, 'Intake form must contain aria-invalid');
+assert.equal(formContent.includes('aria-describedby'), true, 'Intake form must contain aria-describedby');
+assert.equal(formContent.includes('FULL_NAME_REQUIRED'), true, 'Intake form must contain FULL_NAME_REQUIRED error ID');
+assert.equal(formContent.includes('CONTACT_METHOD_REQUIRED'), true, 'Intake form must contain CONTACT_METHOD_REQUIRED error ID');
+assert.equal(formContent.includes('INVALID_COUNTRY'), true, 'Intake form must contain INVALID_COUNTRY error ID');
+
+// G. Country Validation Set
+assert.equal(isValidIsoCountryCode('DE'), true, 'DE must pass ISO validation');
+assert.equal(isValidIsoCountryCode('TR'), true, 'TR must pass ISO validation');
+assert.equal(isValidIsoCountryCode('US'), true, 'US must pass ISO validation');
+assert.equal(isValidIsoCountryCode('ZZ'), false, 'ZZ must fail ISO validation');
+assert.equal(isValidIsoCountryCode('OTHER'), false, 'OTHER must fail ISO validation');
+assert.equal(isValidIsoCountryCode('ABC'), false, 'ABC must fail ISO validation');
+assert.equal(isValidIsoCountryCode(null), true, 'null must pass ISO validation');
+
+// H. Security Claim Copy Accuracy
+const allDictsJson = JSON.stringify(HT_TRANSLATIONS);
+const unverifiedTerms = ['secure form', 'safely submit', 'securely stored', 'güvenli form', 'güvenle gönder'];
+let termCount = 0;
+for (const term of unverifiedTerms) {
+  if (allDictsJson.toLowerCase().includes(term.toLowerCase())) {
+    termCount++;
+  }
+}
+assert.equal(termCount, 0, 'Customer-facing HT dictionaries must contain zero prohibited unverified security terms');
+console.log('   ✓ R3 corrective requirements verified cleanly (Authority, Gating, Projection, SEO, Accessibility, Country Set, Copy Accuracy)\n');
+
 console.log('========================================================================');
-console.log('ALL SLICE 2 HEALTH TOURISM HARDENED QA CHECKS PASSED CLEANLY (10/10)');
+console.log('ALL SLICE 2 HEALTH TOURISM HARDENED QA CHECKS PASSED CLEANLY (11/11)');
 console.log('========================================================================');

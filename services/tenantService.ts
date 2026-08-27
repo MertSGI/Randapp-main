@@ -58,6 +58,11 @@ export const tenantService = {
           status: tenant.status,
           createdAt: tenant.created_at || new Date().toISOString(),
           updatedAt: tenant.updated_at || new Date().toISOString(),
+          verificationStatus: tenant.verification_status,
+          publicSiteStatus: tenant.public_site_status,
+          businessRiskStatus: tenant.business_risk_status,
+          isPublished: tenant.is_published,
+          customDomain: tenant.custom_domain,
         } as Tenant;
       }
       
@@ -97,6 +102,11 @@ export const tenantService = {
           status: data.status,
           createdAt: data.created_at,
           updatedAt: data.updated_at,
+          verificationStatus: data.verification_status,
+          publicSiteStatus: data.public_site_status,
+          businessRiskStatus: data.business_risk_status,
+          isPublished: data.is_published,
+          customDomain: data.custom_domain,
         } as Tenant;
       }
       return null;

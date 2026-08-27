@@ -49,7 +49,7 @@ export const HealthTourismLandingPage: React.FC = () => {
         if (routeSlug) {
           activeTenant = await tenantService.getTenantBySlug(routeSlug);
         } else {
-          activeTenant = await tenantService.getCurrentTenant();
+          activeTenant = await tenantService.resolveTenantFromHost(window.location.hostname);
         }
 
         if (!isMounted) return;
@@ -60,7 +60,22 @@ export const HealthTourismLandingPage: React.FC = () => {
           return;
         }
 
-        if (activeTenant.verificationStatus === 'suspended' || activeTenant.publicSiteStatus === 'suspended') {
+        // Active Tenant & Publication Gating
+        // 1. Must be status === 'active'
+        // 2. If publicSiteStatus exists, it must NOT be suspended, paused, draft, pending_review, or preview_ready
+        //    (i.e. if publicSiteStatus is present, it must be 'published')
+        const isStatusActive = activeTenant.status === 'active';
+        const isVerificationSuspended = activeTenant.verificationStatus === 'suspended';
+        
+        const hasPublicSiteStatus = Boolean(activeTenant.publicSiteStatus);
+        const isPublicSitePublished = activeTenant.publicSiteStatus === 'published';
+        
+        // Gate logic:
+        // Must be active status and not suspended.
+        // If publicSiteStatus field is available/present on tenant, require publicSiteStatus === 'published'.
+        const isEligible = isStatusActive && !isVerificationSuspended && (!hasPublicSiteStatus || isPublicSitePublished);
+
+        if (!isEligible) {
           setTenantError('suspended');
           setIsLoadingTenant(false);
           return;
@@ -107,7 +122,9 @@ export const HealthTourismLandingPage: React.FC = () => {
 
     // Update Meta Description
     let metaDesc = document.querySelector('meta[name="description"]');
-    let prevMetaDescContent = metaDesc ? metaDesc.getAttribute('content') : null;
+    const createdMetaDesc = !metaDesc;
+    const prevMetaDescContent = metaDesc ? metaDesc.getAttribute('content') : null;
+
     if (metaDesc) {
       metaDesc.setAttribute('content', t.metaDescription);
     } else {
@@ -121,7 +138,10 @@ export const HealthTourismLandingPage: React.FC = () => {
       document.documentElement.lang = prevLang || 'tr';
       document.documentElement.dir = prevDir || 'ltr';
       document.title = prevTitle;
-      if (metaDesc && prevMetaDescContent !== null) {
+
+      if (createdMetaDesc && metaDesc && metaDesc.parentNode) {
+        metaDesc.parentNode.removeChild(metaDesc);
+      } else if (metaDesc && prevMetaDescContent !== null) {
         metaDesc.setAttribute('content', prevMetaDescContent);
       }
     };

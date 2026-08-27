@@ -2,6 +2,8 @@ const ISO_COUNTRY_CODES = [
   'DE', 'GB', 'US', 'RU', 'SA', 'AE', 'KW', 'QA', 'IQ', 'NL', 'BE', 'FR', 'CH', 'AT', 'AZ', 'TR', 'IT', 'ES', 'SE', 'NO', 'DK', 'FI', 'PL', 'CZ', 'UA', 'KZ', 'UZ', 'CA', 'AU'
 ];
 
+const ISO_COUNTRY_SET = new Set(ISO_COUNTRY_CODES);
+
 export interface LocalizedCountryOption {
   code: string;
   name: string;
@@ -34,9 +36,10 @@ export function getLocalizedCountries(lang: string): LocalizedCountryOption[] {
 }
 
 /**
- * Validates whether a country code is a valid 2-letter uppercase ISO alpha-2 code or null/empty.
+ * Validates whether a country code is a supported ISO alpha-2 code or null/empty.
  */
 export function isValidIsoCountryCode(code: string | null | undefined): boolean {
-  if (!code) return true;
-  return /^[A-Z]{2}$/.test(code.trim());
+  if (code === null || code === undefined || code.trim() === '') return true;
+  const upper = code.trim().toUpperCase();
+  return ISO_COUNTRY_SET.has(upper);
 }

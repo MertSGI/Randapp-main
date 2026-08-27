@@ -296,7 +296,11 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
                 id="ht-country"
                 value={countryCode}
                 onChange={(e) => setCountryCode(e.target.value)}
-                className="w-full p-3 rounded-xl border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                aria-invalid={Boolean(countryCode && !isValidIsoCountryCode(countryCode))}
+                aria-describedby={countryCode && !isValidIsoCountryCode(countryCode) ? 'INVALID_COUNTRY' : undefined}
+                className={`w-full p-3 rounded-xl border bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+                  countryCode && !isValidIsoCountryCode(countryCode) ? 'border-red-500 dark:border-red-500' : 'border-gray-300 dark:border-slate-600'
+                }`}
               >
                 <option value="">{t.countrySelectPlaceholder}</option>
                 {countryOptions.map((c) => (
@@ -305,6 +309,11 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
                   </option>
                 ))}
               </select>
+              {countryCode && !isValidIsoCountryCode(countryCode) && (
+                <p id="INVALID_COUNTRY" className="text-xs text-red-600 dark:text-red-400 mt-1" role="alert">
+                  Invalid country selection.
+                </p>
+              )}
             </div>
 
             <div className="pt-4 flex justify-end">
@@ -331,11 +340,20 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
                 type="text"
                 required
                 aria-required="true"
+                aria-invalid={validationError === t.fullNameRequiredErr}
+                aria-describedby={validationError === t.fullNameRequiredErr ? 'FULL_NAME_REQUIRED' : undefined}
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder={t.fullNamePlaceholder}
-                className="w-full p-3 rounded-xl border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                className={`w-full p-3 rounded-xl border bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+                  validationError === t.fullNameRequiredErr ? 'border-red-500 dark:border-red-500' : 'border-gray-300 dark:border-slate-600'
+                }`}
               />
+              {validationError === t.fullNameRequiredErr && (
+                <p id="FULL_NAME_REQUIRED" className="text-xs text-red-600 dark:text-red-400 mt-1" role="alert">
+                  {t.fullNameRequiredErr}
+                </p>
+              )}
             </div>
 
             <div>
@@ -346,10 +364,14 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
                 id="ht-email"
                 type="email"
                 dir="ltr"
+                aria-invalid={validationError === t.contactRequiredErr}
+                aria-describedby={validationError === t.contactRequiredErr ? 'CONTACT_METHOD_REQUIRED' : undefined}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder={t.emailPlaceholder}
-                className="w-full p-3 rounded-xl border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                className={`w-full p-3 rounded-xl border bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+                  validationError === t.contactRequiredErr ? 'border-red-500 dark:border-red-500' : 'border-gray-300 dark:border-slate-600'
+                }`}
               />
             </div>
 
@@ -361,14 +383,23 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
                 id="ht-phone"
                 type="tel"
                 dir="ltr"
+                aria-invalid={validationError === t.contactRequiredErr}
+                aria-describedby={validationError === t.contactRequiredErr ? 'CONTACT_METHOD_REQUIRED' : 'ht-phone-notice'}
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder={t.phonePlaceholder}
-                className="w-full p-3 rounded-xl border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                className={`w-full p-3 rounded-xl border bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+                  validationError === t.contactRequiredErr ? 'border-red-500 dark:border-red-500' : 'border-gray-300 dark:border-slate-600'
+                }`}
               />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              <p id="ht-phone-notice" className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 {t.contactNotice}
               </p>
+              {validationError === t.contactRequiredErr && (
+                <p id="CONTACT_METHOD_REQUIRED" className="text-xs text-red-600 dark:text-red-400 mt-1" role="alert">
+                  {t.contactRequiredErr}
+                </p>
+              )}
             </div>
 
             <div className="pt-4 flex justify-between">
