@@ -24,7 +24,7 @@ SELECT has_function('public', 'ht_create_public_lead', ARRAY['text', 'text', 'te
 SELECT has_function('public', 'ht_update_lead_status', ARRAY['uuid', 'text', 'text'], 'ht_update_lead_status RPC exists');
 SELECT has_function('public', 'ht_update_lead_agency_attribution', ARRAY['uuid', 'uuid'], 'ht_update_lead_agency_attribution RPC exists');
 SELECT has_function('public', 'ht_get_lead', ARRAY['uuid'], 'ht_get_lead RPC exists');
-SELECT has_function('public', 'ht_list_leads', ARRAY['text', 'integer', 'integer'], 'ht_list_leads RPC exists');
+SELECT has_function('public', 'ht_list_leads', ARRAY['text', 'integer', 'integer', 'text', 'text'], 'ht_list_leads RPC exists');
 SELECT has_function('public', 'ht_list_referring_agencies', ARRAY['boolean'], 'ht_list_referring_agencies RPC exists');
 
 -- 4. Create Fixture Tenants, Auth Users, Users Profiles, and Staff (RFC Hexadecimal UUIDs)
