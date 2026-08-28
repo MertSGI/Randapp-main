@@ -17,7 +17,7 @@
     "Final Delivery"
   ],
   "current_milestone": "LARİ Health Tourism",
-  "current_status": "HEALTH_TOURISM_FOUNDATION_SLICE1_CLOSED_PROVEN",
+  "current_status": "HEALTH_TOURISM_SLICE2_CLOSED_PROVEN",
   "scope_matrix": "docs/project-control/HEALTH_TOURISM_SCOPE_MATRIX.md",
   "canonical_refs": {
     "main_pilot": {
@@ -126,6 +126,22 @@
       "branch": "ci/health-tourism-foundation-slice1-exact-sha-r7-20260826",
       "sha": "93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7",
       "status": "CI_RUN_32996883374_SUCCESS"
+    },
+    "ht_multilingual_public_intake_slice2": {
+      "branch": "feature/lari-health-tourism-slice2-public-intake",
+      "sha": "6e8d423083d44510c8446c7a858c26d1555cac0c",
+      "status": "CLOSED_PROVEN"
+    },
+    "ht_multilingual_public_intake_slice2_ci_evidence": {
+      "branch": "ci/health-tourism-slice2-public-intake-exact-sha-r7-20260828",
+      "sha": "c89dab28e9784d400c8643ac9d57a132701a4d82",
+      "status": "CI_RUN_33145277911_SUCCESS"
+    },
+    "ht_multilingual_public_intake_slice2_e3_isolated_runtime": {
+      "branch": "feature/lari-health-tourism-slice2-public-intake",
+      "sha": "6e8d423083d44510c8446c7a858c26d1555cac0c",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "status": "CLOSED_PROVEN"
     }
   },
   "accepted_gates": [
@@ -445,7 +461,13 @@
           "job_id": "98268377731"
         },
         "multilingual_public_intake_slice2": {
-          "status": "READY_FOR_IMPLEMENTATION"
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+          "product_sha": "6e8d423083d44510c8446c7a858c26d1555cac0c",
+          "e2_evidence_sha": "c89dab28e9784d400c8643ac9d57a132701a4d82",
+          "e2_run_id": "33145277911",
+          "e2_job_id": "98764791271",
+          "isolated_project": "miuecvkkmyvaciticwtm"
         }
       }
     }
@@ -458,10 +480,11 @@
   },
   "non_blocking_validation": {
     "human_participant_uat": "DEFERRED_FIELD_VALIDATION",
-    "dependency_audit_risk": "OBSERVED_DEPENDENCY_AUDIT_RISK / REVIEW_REQUIRED_BEFORE_PRODUCTION (6 vulnerabilities: 1 low, 5 high reported by npm ci during R7 CI gate)"
+    "dependency_audit_risk": "OBSERVED_DEPENDENCY_AUDIT_RISK / REVIEW_REQUIRED_BEFORE_PRODUCTION (6 vulnerabilities: 1 low, 5 high reported by npm ci during R7 CI gate)",
+    "arabic_copy_polish": "OPEN_NON_BLOCKING_COPY_POLISH (Arabic back-button copy polish deferred to pre-release polish)"
   },
   "current_blockers": [],
-  "next_action": "Wait for Controller authorization before commencing implementation of HEALTH_TOURISM_SLICE2_MULTILINGUAL_PUBLIC_INTAKE_AND_SURFACE",
+  "next_action": "Wait for Controller authorization for next cohesive Health Tourism customer-value slice: Coordinator Lead Workflow, Scoring, AI Assist, and Handoff to Clinic",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true
