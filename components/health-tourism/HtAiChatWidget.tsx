@@ -101,8 +101,14 @@ export const HtAiChatWidget: React.FC<Props> = ({
         }
         if (response.requires_contact) {
           setShowContactForm(true);
+          if (!response.reply) {
+            addMessage('assistant', t.contactDetailsRequiredReply);
+          }
         } else if (response.handoff_triggered) {
           setHandoffTriggered(true);
+          if (!response.reply) {
+            addMessage('assistant', t.handoffSubmittedSuccess);
+          }
         }
       } else {
         addMessage('assistant', response.error?.message || t.submitErrorGeneric);
@@ -126,8 +132,14 @@ export const HtAiChatWidget: React.FC<Props> = ({
         }
         if (response.requires_contact) {
           setShowContactForm(true);
+          if (!response.reply) {
+            addMessage('assistant', t.contactDetailsRequiredReply);
+          }
         } else if (response.handoff_triggered) {
           setHandoffTriggered(true);
+          if (!response.reply) {
+            addMessage('assistant', t.handoffSubmittedSuccess);
+          }
         }
       } else {
         addMessage('assistant', response.error?.message || t.submitErrorGeneric);
@@ -169,9 +181,7 @@ export const HtAiChatWidget: React.FC<Props> = ({
       if (response.success && response.handoff_triggered && !response.requires_contact) {
         setShowContactForm(false);
         setHandoffTriggered(true);
-        if (response.reply) {
-          addMessage('assistant', response.reply);
-        }
+        addMessage('assistant', response.reply || t.handoffSubmittedSuccess);
       } else if (response.success && response.requires_contact) {
         setContactError(t.contactRequiredFormErr);
       } else {

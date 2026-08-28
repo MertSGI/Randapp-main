@@ -1,11 +1,11 @@
 -- ============================================================================
--- HEALTH TOURISM SLICE 3 SERVER-AUTHORITY TEST SUITE (34 ASSERTIONS)
--- Corrected for E1 R3 acceptance
+-- HEALTH TOURISM SLICE 3 SERVER-AUTHORITY TEST SUITE (36 ASSERTIONS)
+-- Corrected for E1 R5 acceptance
 -- ============================================================================
 
 BEGIN;
 
-SELECT plan(34);
+SELECT plan(36);
 
 -- ----------------------------------------------------------------------------
 -- Setup Fixture Data (Tenants, Auth Users, Profiles, Staff)
@@ -47,9 +47,9 @@ SELECT public.ht_set_staff_profile('b4444444-4444-4444-8444-444444444444', true,
 
 -- Create Base Test Lead for Alpha
 INSERT INTO public.ht_leads (
-    id, tenant_id, status, source_channel, preferred_language, country_code, full_name, email, phone, notes
+    id, tenant_id, status, source_channel, preferred_language, country_code, full_name, email, phone, passport_number, notes
 ) VALUES (
-    'c1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'new', 'web', 'de', 'DE', 'Hans Mueller', 'hans@example.de', '+49151123456', 'SYNTHETIC_SECRET_TRANSCRIPT_PHRASE_99'
+    'c1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'new', 'web', 'de', 'DE', 'Hans Mueller', 'hans@example.de', '+49151123456', 'E3R5_PASSPORT_SENTINEL_DO_NOT_EXPOSE', 'SYNTHETIC_SECRET_TRANSCRIPT_PHRASE_99'
 ) ON CONFLICT (id) DO NOTHING;
 
 -- Create Base Test Lead for Beta (for cross-tenant checks)
@@ -283,11 +283,15 @@ SELECT is(
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 19: Retention test — expired AI messages/conversations cleaned up, linked lead survives
+-- ITEM 19 & 20: Retention behavioral test — expired AI messages/conversations cleaned up, linked lead survives
 -- ----------------------------------------------------------------------------
 DO $$
 DECLARE
-    v_expired_conv_id UUID;
+    v_msg_count_before INTEGER;
+    v_conv_count_before INTEGER;
+    v_msg_count_after INTEGER;
+    v_conv_count_after INTEGER;
+    v_lead_count_after INTEGER;
 BEGIN
     -- Create expired conversation & message fixtures
     INSERT INTO public.ht_ai_conversations (
@@ -302,21 +306,37 @@ BEGIN
     ) VALUES (
         'm1111111-1111-1111-1111-111111111111', 'e1111111-1111-1111-1111-111111111111', 'user', 'Expired message', now() - INTERVAL '1 day'
     );
+
+    -- Assert fixture existence before cleanup
+    SELECT count(*) INTO v_msg_count_before FROM public.ht_ai_messages WHERE id = 'm1111111-1111-1111-1111-111111111111';
+    SELECT count(*) INTO v_conv_count_before FROM public.ht_ai_conversations WHERE id = 'e1111111-1111-1111-1111-111111111111';
+
+    IF v_msg_count_before <> 1 OR v_conv_count_before <> 1 THEN
+        RAISE EXCEPTION 'FIXTURE_FAILURE: Expired retention fixtures failed to record prior to cleanup';
+    END IF;
+
+    -- Run cleanup
+    PERFORM public.ht_cleanup_expired_ai_data();
+
+    -- Post-cleanup checks
+    SELECT count(*) INTO v_msg_count_after FROM public.ht_ai_messages WHERE id = 'm1111111-1111-1111-1111-111111111111';
+    SELECT count(*) INTO v_conv_count_after FROM public.ht_ai_conversations WHERE id = 'e1111111-1111-1111-1111-111111111111';
+    SELECT count(*) INTO v_lead_count_after FROM public.ht_leads WHERE id = 'c1111111-1111-1111-1111-111111111111';
+
+    IF v_msg_count_after <> 0 OR v_conv_count_after <> 0 THEN
+        RAISE EXCEPTION 'RETENTION_FAILURE: Expired data was not deleted by cleanup RPC';
+    END IF;
+
+    IF v_lead_count_after <> 1 THEN
+        RAISE EXCEPTION 'RETENTION_FAILURE: Linked HT lead was illegally removed during cleanup';
+    END IF;
 END $$;
 
-SELECT is(
-    (public.ht_cleanup_expired_ai_data()->>'success')::boolean,
-    true,
-    '19. Expired transcript cleanup RPC executes successfully'
-);
-
--- ----------------------------------------------------------------------------
--- ITEM 20: Lead survives transcript cleanup
--- ----------------------------------------------------------------------------
+SELECT is(true, true, '19. Expired AI messages and conversations deleted by retention cleanup');
 SELECT is(
     (SELECT count(*) FROM public.ht_leads WHERE id = 'c1111111-1111-1111-1111-111111111111'),
     1::bigint,
-    '20. Lead survives transcript cleanup'
+    '20. Linked HT lead survives transcript retention cleanup'
 );
 
 -- ----------------------------------------------------------------------------
@@ -408,13 +428,32 @@ SELECT is(
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 27: Passport privacy (case-insensitive) — absent from audit/outbox/AI summary
+-- ITEM 27: Multi-Surface Passport Privacy (case-insensitive)
 -- ----------------------------------------------------------------------------
-SELECT is(
-    (SELECT count(*) FROM public.audit_events WHERE lower(payload::text) LIKE '%passport%'),
-    0::bigint,
-    '27. Passport absent from audit payloads (case-insensitive check)'
-);
+DO $$
+DECLARE
+    v_audit_leaks INTEGER;
+    v_outbox_leaks INTEGER;
+    v_conv_summary_leaks INTEGER;
+    v_lead_summary_leaks INTEGER;
+BEGIN
+    SELECT count(*) INTO v_audit_leaks FROM public.audit_events
+    WHERE lower(payload::text) LIKE '%passport%' OR lower(payload::text) LIKE '%e3r5_passport_sentinel_do_not_expose%';
+
+    SELECT count(*) INTO v_outbox_leaks FROM public.communication_outbox
+    WHERE lower(metadata::text) LIKE '%passport%' OR lower(metadata::text) LIKE '%e3r5_passport_sentinel_do_not_expose%';
+
+    SELECT count(*) INTO v_conv_summary_leaks FROM public.ht_ai_conversations
+    WHERE lower(coalesce(summary, '')) LIKE '%passport%' OR lower(coalesce(summary, '')) LIKE '%e3r5_passport_sentinel_do_not_expose%';
+
+    SELECT count(*) INTO v_lead_summary_leaks FROM public.ht_leads
+    WHERE lower(coalesce(ai_summary, '')) LIKE '%passport%' OR lower(coalesce(ai_summary, '')) LIKE '%e3r5_passport_sentinel_do_not_expose%';
+
+    IF v_audit_leaks <> 0 OR v_outbox_leaks <> 0 OR v_conv_summary_leaks <> 0 OR v_lead_summary_leaks <> 0 THEN
+        RAISE EXCEPTION 'PASSPORT_PRIVACY_LEAK: Passport value or key leaked across system surfaces';
+    END IF;
+END $$;
+SELECT is(true, true, '27. Multi-surface passport privacy verified (case-insensitive across audit, outbox, and summaries)');
 
 -- ----------------------------------------------------------------------------
 -- ITEM 28: Unique synthetic transcript phrase absent from audit payload
@@ -435,31 +474,36 @@ SELECT is(
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 30: AI summary contains explicit assistive label & propagates to lead
+-- ITEM 30: AI summary contains explicit assistive label on BOTH conversation & lead
 -- ----------------------------------------------------------------------------
 SELECT set_config('request.jwt.claim.sub', '', true); -- Server internal
 DO $$
 DECLARE
     v_conv_id UUID;
     v_res JSONB;
+    v_conv_has_marker BOOLEAN;
+    v_lead_has_marker BOOLEAN;
 BEGIN
     SELECT id INTO v_conv_id FROM public.ht_ai_conversations WHERE tenant_id = 'a1111111-1111-1111-1111-111111111111' LIMIT 1;
     v_res := public.ht_update_ai_conversation_summary(v_conv_id, 'User interested in dental package');
+
+    SELECT summary LIKE '%AI-generated assistive summary — not verified clinical fact%' INTO v_conv_has_marker FROM public.ht_ai_conversations WHERE id = v_conv_id;
+    SELECT ai_summary LIKE '%AI-generated assistive summary — not verified clinical fact%' INTO v_lead_has_marker FROM public.ht_leads WHERE id = 'c1111111-1111-1111-1111-111111111111';
+
+    IF NOT v_conv_has_marker OR NOT v_lead_has_marker THEN
+        RAISE EXCEPTION 'SUMMARY_MARKER_MISSING: Assistive summary marker missing from conversation or lead';
+    END IF;
 END $$;
 
-SELECT is(
-    (SELECT ai_summary LIKE '%AI-generated assistive summary — not verified clinical fact%' FROM public.ht_leads WHERE id = 'c1111111-1111-1111-1111-111111111111'),
-    true,
-    '30. AI summary contains explicit assistive marker and propagates to linked lead'
-);
+SELECT is(true, true, '30. AI summary contains explicit assistive marker on BOTH ht_ai_conversations and ht_leads');
 
 -- ----------------------------------------------------------------------------
--- ITEM 31: Medical advice request causes safe deferral/handoff behavior
+-- ITEM 31: DB handoff state tracking mechanics for medical boundary handoffs
 -- ----------------------------------------------------------------------------
 SELECT is(
     (SELECT handoff_state FROM public.ht_leads WHERE id = 'c1111111-1111-1111-1111-111111111111'),
     'acknowledged',
-    '31. Medical advice deferral/handoff state tracked on lead'
+    '31. DB handoff state tracking mechanics for medical boundary handoffs'
 );
 
 -- ----------------------------------------------------------------------------

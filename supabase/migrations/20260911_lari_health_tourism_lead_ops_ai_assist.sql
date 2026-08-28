@@ -1651,6 +1651,8 @@ GRANT EXECUTE ON FUNCTION public.ht_get_ai_conversation_by_session TO service_ro
 GRANT EXECUTE ON FUNCTION public.ht_cleanup_expired_ai_data TO service_role;
 GRANT EXECUTE ON FUNCTION public.ht_link_ai_conversation_to_lead TO service_role;
 GRANT EXECUTE ON FUNCTION public.ht_update_ai_conversation_summary TO service_role;
+GRANT EXECUTE ON FUNCTION public.ht_request_handoff TO service_role;
+GRANT EXECUTE ON FUNCTION public.ht_create_public_lead TO service_role;
 
 -- Staff-side operational RPCs (restricted to authenticated)
 GRANT EXECUTE ON FUNCTION public.ht_assign_coordinator TO authenticated;

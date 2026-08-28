@@ -201,17 +201,6 @@ serve(async (req: Request) => {
         role: m.role,
         content: m.content,
       }));
-
-      // Check message limit
-      if (conversationMessages.length >= MAX_CONVERSATION_MESSAGES) {
-        return jsonSuccess({
-          session_token: currentSessionToken,
-          reply: "This conversation has reached its limit. Please connect with a human coordinator for further assistance.",
-          conversation_id: conversationId,
-          handoff_triggered: true,
-          handoff_reason: "conversation_limit_reached",
-        });
-      }
     } else {
       // Create new conversation
       const { data: newConv, error: createConvErr } = await supabase.rpc("ht_create_ai_conversation", {
@@ -267,6 +256,43 @@ serve(async (req: Request) => {
     }
 
     // -----------------------------------------------------------------------
+    // 5C. Check message limit (with server-authoritative handoff persistence)
+    // -----------------------------------------------------------------------
+    if (conversationMessages.length >= MAX_CONVERSATION_MESSAGES) {
+      if (!activeLeadId) {
+        return jsonSuccess({
+          session_token: currentSessionToken,
+          reply: null,
+          conversation_id: conversationId,
+          handoff_triggered: false,
+          requires_contact: true,
+          handoff_reason: "conversation_limit_reached",
+          outcome_code: "LIMIT_REACHED_REQUIRES_CONTACT",
+        });
+      }
+
+      const { data: limitHandoffRes, error: limitHandoffErr } = await supabase.rpc("ht_request_handoff", {
+        p_conversation_id: conversationId,
+        p_reason: "conversation_limit_reached",
+      });
+
+      if (limitHandoffErr || !limitHandoffRes?.success) {
+        console.error("ht_request_handoff (limit reached) error:", limitHandoffErr || limitHandoffRes);
+        return jsonError("HANDOFF_REQUEST_FAILED", "Unable to process conversation limit handoff.", 500);
+      }
+
+      return jsonSuccess({
+        session_token: currentSessionToken,
+        reply: null,
+        conversation_id: conversationId,
+        handoff_triggered: true,
+        requires_contact: false,
+        handoff_reason: "conversation_limit_reached",
+        outcome_code: "LIMIT_REACHED_HANDOFF_COMPLETED",
+      });
+    }
+
+    // -----------------------------------------------------------------------
     // 6. Handle handoff
     // -----------------------------------------------------------------------
     if (isHandoffRequest) {
@@ -276,11 +302,12 @@ serve(async (req: Request) => {
       if (!activeLeadId) {
         return jsonSuccess({
           session_token: currentSessionToken,
-          reply: "To connect you with a coordinator, please provide your contact details.",
+          reply: null,
           conversation_id: conversationId,
           handoff_triggered: false,
           requires_contact: true,
           handoff_reason: reason,
+          outcome_code: "CONTACT_REQUIRED",
         });
       }
 
@@ -296,11 +323,12 @@ serve(async (req: Request) => {
 
       return jsonSuccess({
         session_token: currentSessionToken,
-        reply: "I've connected you with our human coordination team. A coordinator will review your inquiry and reach out to you shortly.",
+        reply: null,
         conversation_id: conversationId,
         handoff_triggered: true,
         requires_contact: false,
         handoff_reason: reason,
+        outcome_code: "HANDOFF_COMPLETED",
       });
     }
 
