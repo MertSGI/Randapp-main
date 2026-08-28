@@ -46,6 +46,7 @@
     "qa:clinic-ai-assist-quota-concurrency": "node scripts/test-clinic-ai-assist-quota-concurrency.mjs",
     "qa:health-tourism-foundation": "node scripts/test-health-tourism-foundation-static-contracts.mjs",
     "qa:health-tourism-slice2": "node --import tsx scripts/test-health-tourism-slice2-public-intake.mjs",
+    "qa:health-tourism-slice3": "node scripts/test-health-tourism-slice3-lead-ops-ai-assist.mjs",
     "qa:public-links": "node scripts/verify-public-links.mjs",
     "qa:share-toolkit": "node scripts/verify-share-toolkit.mjs",
     "qa:data-governance": "node scripts/verify-data-governance-readiness.mjs",

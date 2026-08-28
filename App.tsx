@@ -20,6 +20,7 @@ import TermsPage from './pages/TermsPage';
 import SupportPage from './pages/SupportPage';
 import { ClinicWorkspacePage } from './pages/clinic/ClinicWorkspacePage';
 import { HealthTourismLandingPage } from './pages/health-tourism/HealthTourismLandingPage';
+import { HtCoordinatorWorkspacePage } from './pages/health-tourism/HtCoordinatorWorkspacePage';
 
 import BookingPage from './pages/BookingPage';
 import AdminPage from './pages/AdminPage';
@@ -139,6 +140,12 @@ const AppFlowSwitcher: React.FC = () => {
       <Route element={<ProtectedRoute allowedRoles={['tenant_owner', 'staff']}><ClinicLayout /></ProtectedRoute>}>
         <Route path="/clinic" element={<ClinicWorkspacePage />} />
         <Route path="/clinic/*" element={<ClinicWorkspacePage />} />
+      </Route>
+
+      {/* 3.6 Health Tourism Coordinator Routes */}
+      <Route element={<ProtectedRoute allowedRoles={['tenant_owner', 'staff']}><AdminLayout /></ProtectedRoute>}>
+        <Route path="/ht-coordinator" element={<HtCoordinatorWorkspacePage />} />
+        <Route path="/ht-coordinator/*" element={<HtCoordinatorWorkspacePage />} />
       </Route>
 
       {/* 4. Super Admin Routes */}

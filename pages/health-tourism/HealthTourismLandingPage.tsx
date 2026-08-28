@@ -5,6 +5,7 @@ import { businessProfileService } from '../../services/businessProfileService';
 import { Tenant, TenantBranding, SalonBusinessProfile } from '../../types';
 import { useHealthTourismLanguage } from '../../hooks/useHealthTourismLanguage';
 import { HealthTourismIntakeForm } from '../../components/health-tourism/HealthTourismIntakeForm';
+import { HtAiChatWidget } from '../../components/health-tourism/HtAiChatWidget';
 import { extractSourceChannel, extractReferringAgencyId, hasInvalidAgencyReferral } from '../../utils/sourceAttributionHelper';
 import { HtLanguage } from '../../types/healthTourismPublic';
 
@@ -361,6 +362,22 @@ export const HealthTourismLandingPage: React.FC = () => {
           </p>
         </div>
       </footer>
+
+      {/* AI Chat Widget — only when tenant is loaded */}
+      {tenant && businessProfile?.slug && (
+        <HtAiChatWidget
+          tenantSlug={businessProfile.slug}
+          preferredLanguage={language}
+          translations={{
+            chatTitle: language === 'tr' ? 'Sağlık Turizmi Asistanı' : language === 'de' ? 'Gesundheitstourismus-Assistent' : language === 'ru' ? 'Ассистент медицинского туризма' : language === 'ar' ? 'مساعد السياحة الصحية' : 'Health Tourism Assistant',
+            chatPlaceholder: language === 'tr' ? 'Mesajınızı yazın...' : language === 'de' ? 'Nachricht eingeben...' : language === 'ru' ? 'Введите сообщение...' : language === 'ar' ? 'اكتب رسالتك...' : 'Type your message...',
+            chatSend: language === 'tr' ? 'Gönder' : language === 'de' ? 'Senden' : language === 'ru' ? 'Отправить' : language === 'ar' ? 'إرسال' : 'Send',
+            chatHandoff: language === 'tr' ? 'İnsan koordinatörle görüşün' : language === 'de' ? 'Mit einem Koordinator sprechen' : language === 'ru' ? 'Связаться с координатором' : language === 'ar' ? 'تحدث مع منسق' : 'Talk to a human coordinator',
+            chatWelcome: language === 'tr' ? 'Merhaba! Sağlık turizmi süreciniz hakkında sorularınızı yanıtlamak için buradayım.' : language === 'de' ? 'Hallo! Ich bin hier, um Ihre Fragen zum Gesundheitstourismus zu beantworten.' : language === 'ru' ? 'Здравствуйте! Я здесь, чтобы ответить на ваши вопросы о медицинском туризме.' : language === 'ar' ? 'مرحباً! أنا هنا للإجابة على أسئلتكم حول السياحة الصحية.' : 'Hello! I\'m here to answer your questions about health tourism.',
+            chatMedicalDisclaimer: language === 'tr' ? 'Bu asistan tıbbi teşhis veya tedavi önerisi sunamaz. Tıbbi sorularınız uzman koordinatörlerimize yönlendirilecektir.' : language === 'de' ? 'Dieser Assistent kann keine medizinische Diagnose oder Behandlungsempfehlung geben.' : language === 'ru' ? 'Этот ассистент не может предоставить медицинский диагноз или рекомендации по лечению.' : language === 'ar' ? 'لا يمكن لهذا المساعد تقديم تشخيص طبي أو توصيات علاجية.' : 'This assistant cannot provide medical diagnosis or treatment recommendations. Medical questions will be directed to our qualified coordinators.',
+          }}
+        />
+      )}
     </div>
   );
 };

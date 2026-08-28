@@ -1,15 +1,22 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import {
+  AssignCoordinatorParams,
+  AcknowledgeHandoffParams,
   CreateAgencyParams,
   CreatePublicLeadParams,
   CreatePublicLeadResult,
+  EnqueueWhatsAppHandoffParams,
   HtLead,
+  HtLeadListParams,
+  HtLeadListResult,
   HtLeadStatus,
   HtReferringAgency,
   HtStaffProfile,
+  ScoreLeadParams,
   UpdateLeadAgencyParams,
   UpdateLeadStatusParams
 } from '../types/healthTourism';
+import { HtLeadScoreResult } from '../types/healthTourismAi';
 
 export class HealthTourismService {
   constructor(private client: SupabaseClient) {}
@@ -61,21 +68,21 @@ export class HealthTourismService {
    * List leads for authorized HT staff
    */
   async listLeads(
-    status?: HtLeadStatus,
-    limit = 50,
-    offset = 0
-  ): Promise<{ success: boolean; leads?: HtLead[]; message?: string }> {
+    params?: HtLeadListParams
+  ): Promise<HtLeadListResult> {
     const { data, error } = await this.client.rpc('ht_list_leads', {
-      p_status: status ?? null,
-      p_limit: limit,
-      p_offset: offset
+      p_status: params?.status ?? null,
+      p_limit: params?.limit ?? 50,
+      p_offset: params?.offset ?? 0,
+      p_score_band: params?.score_band ?? null,
+      p_source_channel: params?.source_channel ?? null
     });
 
     if (error) {
       return { success: false, message: error.message };
     }
 
-    return data as { success: boolean; leads?: HtLead[] };
+    return data as HtLeadListResult;
   }
 
   /**
@@ -163,5 +170,104 @@ export class HealthTourismService {
     }
 
     return data as { success: boolean; staff_id?: string };
+  }
+
+  // =========================================================================
+  // Slice 3: Coordinator Operations
+  // =========================================================================
+
+  /**
+   * Assign a coordinator to a lead (same-tenant, active staff only)
+   */
+  async assignCoordinator(params: AssignCoordinatorParams): Promise<{ success: boolean; lead_id?: string; assigned_coordinator_staff_id?: string; message?: string }> {
+    const { data, error } = await this.client.rpc('ht_assign_coordinator', {
+      p_lead_id: params.lead_id,
+      p_coordinator_staff_id: params.coordinator_staff_id
+    });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    return data as { success: boolean; lead_id?: string; assigned_coordinator_staff_id?: string };
+  }
+
+  /**
+   * Score a lead using deterministic rules + bounded AI delta
+   */
+  async scoreLead(params: ScoreLeadParams): Promise<HtLeadScoreResult> {
+    const { data, error } = await this.client.rpc('ht_score_lead', {
+      p_lead_id: params.lead_id,
+      p_ai_intent_delta: params.ai_intent_delta ?? 0
+    });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    return data as HtLeadScoreResult;
+  }
+
+  /**
+   * Update AI-generated summary for a lead
+   */
+  async updateAiSummary(leadId: string, summary: string): Promise<{ success: boolean; lead_id?: string; message?: string }> {
+    const { data, error } = await this.client.rpc('ht_update_ai_summary', {
+      p_lead_id: leadId,
+      p_summary: summary
+    });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    return data as { success: boolean; lead_id?: string };
+  }
+
+  /**
+   * Acknowledge a handoff request for a lead
+   */
+  async acknowledgeHandoff(params: AcknowledgeHandoffParams): Promise<{ success: boolean; lead_id?: string; handoff_state?: string; message?: string }> {
+    const { data, error } = await this.client.rpc('ht_acknowledge_handoff', {
+      p_lead_id: params.lead_id
+    });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    return data as { success: boolean; lead_id?: string; handoff_state?: string };
+  }
+
+  /**
+   * Enqueue a WhatsApp handoff primitive into communication_outbox.
+   * No real external send. Status stays 'queued' for future provider activation.
+   */
+  async enqueueWhatsAppHandoff(params: EnqueueWhatsAppHandoffParams): Promise<{ success: boolean; outbox_id?: string; message?: string }> {
+    const { data, error } = await this.client.rpc('ht_enqueue_whatsapp_handoff', {
+      p_lead_id: params.lead_id,
+      p_conversation_id: params.conversation_id ?? null,
+      p_handoff_reason: params.handoff_reason ?? 'human_handoff_requested'
+    });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    return data as { success: boolean; outbox_id?: string };
+  }
+
+  /**
+   * Clean up expired AI data (messages and conversations).
+   * Leads are NEVER deleted by this function.
+   */
+  async cleanupExpiredAiData(): Promise<{ success: boolean; deleted_messages?: number; deleted_conversations?: number; message?: string }> {
+    const { data, error } = await this.client.rpc('ht_cleanup_expired_ai_data');
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    return data as { success: boolean; deleted_messages?: number; deleted_conversations?: number };
   }
 }

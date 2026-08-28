@@ -10,12 +10,19 @@ export type HtSourceChannel =
   | 'direct'
   | 'other';
 
+export type HtLeadScoreBand = 'cold' | 'warm' | 'hot';
+
+export type HtHandoffState = 'none' | 'requested' | 'acknowledged';
+
+export type HtConversationStatus = 'active' | 'completed' | 'expired';
+
 export type HtServiceErrorCode =
   | 'UNAUTHENTICATED'
   | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'INVALID_INPUT'
   | 'INVALID_STATE'
+  | 'INVALID_TRANSITION'
   | 'CROSS_TENANT_VIOLATION'
   | 'UNKNOWN';
 
@@ -58,8 +65,41 @@ export interface HtLead {
   email: string | null;
   phone: string | null;
   notes?: string | null;
+  // Slice 3: Operational fields
+  assigned_coordinator_staff_id?: string | null;
+  coordinator_name?: string | null;
+  lead_score?: number | null;
+  lead_score_band?: HtLeadScoreBand | null;
+  lead_score_reasons?: string[] | null;
+  ai_summary?: string | null;
+  ai_summary_updated_at?: string | null;
+  handoff_state?: HtHandoffState;
+  handoff_reason?: string | null;
+  handoff_requested_at?: string | null;
+  last_activity_at?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface HtAiConversation {
+  id: string;
+  tenant_id: string;
+  lead_id: string | null;
+  session_token?: string;
+  preferred_language: string;
+  status: HtConversationStatus;
+  handoff_state: HtHandoffState;
+  summary: string | null;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HtAiMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  created_at: string;
 }
 
 export interface CreatePublicLeadParams {
@@ -100,4 +140,42 @@ export interface CreateAgencyParams {
   code?: string | null;
   contact_email?: string | null;
   contact_phone?: string | null;
+}
+
+// Slice 3: Coordinator Operations
+export interface AssignCoordinatorParams {
+  lead_id: string;
+  coordinator_staff_id: string;
+}
+
+export interface ScoreLeadParams {
+  lead_id: string;
+  ai_intent_delta?: number;
+}
+
+export interface AcknowledgeHandoffParams {
+  lead_id: string;
+}
+
+export interface EnqueueWhatsAppHandoffParams {
+  lead_id: string;
+  conversation_id?: string | null;
+  handoff_reason?: string;
+}
+
+export interface HtLeadListParams {
+  status?: HtLeadStatus | null;
+  score_band?: HtLeadScoreBand | null;
+  source_channel?: HtSourceChannel | null;
+  limit?: number;
+  offset?: number;
+}
+
+export interface HtLeadListResult {
+  success: boolean;
+  leads?: HtLead[];
+  total?: number;
+  limit?: number;
+  offset?: number;
+  message?: string;
 }

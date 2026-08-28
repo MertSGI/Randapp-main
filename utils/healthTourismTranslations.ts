@@ -426,7 +426,7 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
     step3Tab: 'تفاصيل إضافية',
     step4Tab: 'المراجعة والإرسال',
     nextBtn: 'التالي ←',
-    backBtn: 'السباق →',
+    backBtn: '← السابق',
     homeBtn: 'الرئيسية',
 
     intakeStep1Title: 'اللغة المفضلة والدولة',
