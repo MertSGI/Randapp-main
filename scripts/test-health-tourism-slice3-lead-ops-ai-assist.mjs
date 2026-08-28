@@ -75,19 +75,27 @@ if (fs.existsSync(migrationPath)) {
     'Zero GRANT EXECUTE on ht_create_ai_conversation TO anon');
   assert(!migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_add_ai_message TO anon'),
     'Zero GRANT EXECUTE on ht_add_ai_message TO anon');
-  // R11 Migration 67 Overload & ACL Determinism Contracts
+  assert(!migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_get_ai_conversation_by_session TO anon'),
+    'Zero GRANT EXECUTE on ht_get_ai_conversation_by_session TO anon');
+
+  // R11/R12 Migration 67 Overload & ACL Determinism Contracts
   assert(migContent.includes('DROP FUNCTION IF EXISTS public.ht_list_leads(text, integer, integer);'),
     'Migration 67 explicitly drops legacy 3-argument ht_list_leads overload');
   assert(!migContent.includes('DROP FUNCTION IF EXISTS public.ht_list_leads(text, integer, integer) CASCADE;'),
     'Drop legacy ht_list_leads overload does NOT use CASCADE');
   assert(migContent.includes('CREATE OR REPLACE FUNCTION public.ht_list_leads(\n    p_status TEXT DEFAULT NULL,\n    p_limit INT DEFAULT 50,\n    p_offset INT DEFAULT 0,\n    p_score_band TEXT DEFAULT NULL,\n    p_source_channel TEXT DEFAULT NULL\n)'),
     'Canonical 5-argument ht_list_leads exists with p_status, p_limit, p_offset, p_score_band, p_source_channel');
+  assert(migContent.includes('REVOKE ALL ON FUNCTION public.ht_list_leads(text, integer, integer, text, text) FROM PUBLIC, anon;'),
+    'ACL statements use exact 5-argument ht_list_leads REVOKE signature');
   assert(migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_list_leads(text, integer, integer, text, text) TO authenticated;'),
-    'ACL statements use exact 5-argument ht_list_leads signature');
+    'ACL statements use exact 5-argument ht_list_leads GRANT signature');
   assert(!migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_list_leads TO authenticated;'),
     'No signature-less GRANT EXECUTE on ht_list_leads');
   assert(!migContent.includes('REVOKE ALL ON FUNCTION public.ht_list_leads FROM'),
     'No signature-less REVOKE on ht_list_leads');
+  assert(!migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_list_leads(text, integer, integer, text, text) TO anon') &&
+         !migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_list_leads TO anon'),
+    'No GRANT EXECUTE of ht_list_leads to anon');
   assert(migContent.includes('l.lead_score_band = lower(trim(p_score_band))') && migContent.includes('l.source_channel = lower(trim(p_source_channel))') && migContent.includes('passport_number IS EXCLUDED'),
     'Canonical ht_list_leads retains score_band/source_channel filtering and passport exclusion');
 }

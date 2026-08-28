@@ -1672,6 +1672,7 @@ GRANT EXECUTE ON FUNCTION public.ht_get_my_context TO authenticated;
 
 -- Re-grant existing hardened functions
 GRANT EXECUTE ON FUNCTION public.ht_update_lead_status TO authenticated;
+REVOKE ALL ON FUNCTION public.ht_list_leads(text, integer, integer, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.ht_list_leads(text, integer, integer, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_get_lead TO authenticated;
 
