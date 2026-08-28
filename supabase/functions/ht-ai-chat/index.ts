@@ -167,6 +167,60 @@ serve(async (req: Request) => {
     const tenantId = tenantData.id;
 
     // -----------------------------------------------------------------------
+    // 3B. Server-Side Anti-Abuse Rate Limit Enforcement
+    // -----------------------------------------------------------------------
+    const rawIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || 
+                  req.headers.get("cf-connecting-ip")?.trim() || 
+                  req.headers.get("x-real-ip")?.trim() || 
+                  "127.0.0.1";
+
+    // Create a one-way hashed bucket identifier (never persist raw IP)
+    const secretSalt = supabaseServiceKey.slice(0, 16);
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(`${rawIp}:${secretSalt}`);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", keyData);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashedRequester = hashArray.map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 24);
+
+    const isNewSession = !session_token;
+    const bucketKey = isNewSession
+      ? `ht:rl:conv:${tenantId}:${hashedRequester}`
+      : `ht:rl:msg:${tenantId}:${hashedRequester}`;
+
+    const maxAllowed = isNewSession ? 5 : 30; // 5 new convs/hr, 30 msgs/hr
+    const windowSeconds = 3600;
+
+    const { data: rlResult, error: rlErr } = await supabase.rpc("ht_check_rate_limit", {
+      p_bucket_key: bucketKey,
+      p_max_requests: maxAllowed,
+      p_window_seconds: windowSeconds,
+    });
+
+    if (rlErr) {
+      console.error("ht_check_rate_limit error:", rlErr);
+    } else if (rlResult && rlResult.allowed === false) {
+      const retryAfter = rlResult.retry_after_seconds || 60;
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: {
+            code: "RATE_LIMITED",
+            message: "Too many requests. Please wait a moment before trying again.",
+          },
+        }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": String(retryAfter),
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+          },
+        }
+      );
+    }
+
+    // -----------------------------------------------------------------------
     // 4. Handle handoff request
     // -----------------------------------------------------------------------
     const isHandoffRequest = message.startsWith("__HANDOFF_REQUEST__:");
@@ -352,9 +406,9 @@ serve(async (req: Request) => {
     const isMedicalQuery = containsMedicalQuery(message);
 
     if (isMedicalQuery) {
-      const safetyResponse = "I'm an intake assistant and cannot provide medical advice, diagnosis, or treatment recommendations. Our qualified medical professionals will review your inquiry personally. Would you like me to connect you with a human coordinator who can properly address your health questions?";
+      const safetyResponse = "[Medical Safety Deferral]";
 
-      // Store safety response
+      // Store safety response indicator
       const { data: safetyMsgRes, error: safetyMsgErr } = await supabase.rpc("ht_add_ai_message", {
         p_session_token: currentSessionToken,
         p_role: "assistant",
@@ -382,11 +436,12 @@ serve(async (req: Request) => {
 
       return jsonSuccess({
         session_token: currentSessionToken,
-        reply: safetyResponse,
+        reply: null,
         conversation_id: conversationId,
         handoff_triggered: true,
         requires_contact: requiresContact,
         handoff_reason: "medical_advice_boundary",
+        outcome_code: "MEDICAL_SAFETY_BOUNDARY",
       });
     }
 

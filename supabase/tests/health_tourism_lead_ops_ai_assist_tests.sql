@@ -5,7 +5,7 @@
 
 BEGIN;
 
-SELECT plan(36);
+SELECT plan(40);
 
 -- ----------------------------------------------------------------------------
 -- Setup Fixture Data (Tenants, Auth Users, Profiles, Staff)
@@ -531,6 +531,72 @@ SELECT is(
     (SELECT count(*) FROM public.appointments WHERE tenant_id = 'a1111111-1111-1111-1111-111111111111'),
     0::bigint,
     '34. Zero Core appointments created'
+);
+
+-- ----------------------------------------------------------------------------
+-- ITEM 35 & 36: Anti-Abuse Rate Limiting Primitive Behavioral Assertions
+-- ----------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_res JSONB;
+    i INTEGER;
+BEGIN
+    -- 5 allowed requests for test bucket
+    FOR i IN 1..5 LOOP
+        v_res := public.ht_check_rate_limit('ht:rl:test_bucket_99', 5, 3600);
+        IF (v_res->>'allowed')::boolean IS NOT TRUE THEN
+            RAISE EXCEPTION 'RATE_LIMIT_FAILURE: Request % was illegally denied', i;
+        END IF;
+    END LOOP;
+
+    -- 6th request must be denied
+    v_res := public.ht_check_rate_limit('ht:rl:test_bucket_99', 5, 3600);
+    IF (v_res->>'allowed')::boolean IS TRUE THEN
+        RAISE EXCEPTION 'RATE_LIMIT_FAILURE: 6th request was illegally allowed';
+    END IF;
+    IF (v_res->>'retry_after_seconds')::integer <= 0 THEN
+        RAISE EXCEPTION 'RATE_LIMIT_FAILURE: retry_after_seconds missing or invalid';
+    END IF;
+END $$;
+
+SELECT is(
+    (public.ht_check_rate_limit('ht:rl:test_bucket_allowed', 5, 3600)->>'allowed')::boolean,
+    true,
+    '35. Anti-Abuse rate limit permits under max limit'
+);
+
+SELECT is(
+    (public.ht_check_rate_limit('ht:rl:test_bucket_99', 5, 3600)->>'allowed')::boolean,
+    false,
+    '36. Anti-Abuse rate limit rejects request exceeding max limit'
+);
+
+-- ----------------------------------------------------------------------------
+-- ITEM 37: Rate Limit Bucket Expiry Cleanup & Privilege Assertions
+-- ----------------------------------------------------------------------------
+INSERT INTO public.ht_rate_limit_buckets (bucket_key, request_count, expires_at)
+VALUES ('ht:rl:expired_test', 10, now() - INTERVAL '1 hour');
+
+DO $$
+BEGIN
+    PERFORM public.ht_cleanup_expired_ai_data();
+END $$;
+
+SELECT is(
+    (SELECT count(*) FROM public.ht_rate_limit_buckets WHERE bucket_key = 'ht:rl:expired_test'),
+    0::bigint,
+    '37. Expired rate limit buckets cleaned up by retention procedure'
+);
+
+-- ----------------------------------------------------------------------------
+-- ITEM 38: Executable Privilege Assertion for ht_check_rate_limit
+-- ----------------------------------------------------------------------------
+SELECT is(
+    (has_function_privilege('anon', 'public.ht_check_rate_limit(text, integer, integer)', 'EXECUTE') = false AND
+     has_function_privilege('authenticated', 'public.ht_check_rate_limit(text, integer, integer)', 'EXECUTE') = false AND
+     has_function_privilege('service_role', 'public.ht_check_rate_limit(text, integer, integer)', 'EXECUTE') = true),
+    true,
+    '38. Executable privilege assertion: ht_check_rate_limit REVOKED from anon/authenticated, GRANTED to service_role'
 );
 
 SELECT * FROM finish();

@@ -109,8 +109,19 @@ if (fs.existsSync(edgeFnPath)) {
   assert(fnContent.includes('LIMIT_REACHED_HANDOFF_COMPLETED') && fnContent.includes('limitHandoffErr'),
     'Edge Function message-limit branch persists handoff via RPC before returning handoff_triggered=true');
 
-  // Medical boundary & handoff check
-  assert(fnContent.includes('STRICT MEDICAL BOUNDARY'), 'Medical safety boundary prompt present in Edge Function');
+  // R6 Anti-Abuse Rate Limiting Checks
+  assert(fnContent.includes('ht_check_rate_limit'), 'Edge Function invokes ht_check_rate_limit anti-abuse RPC');
+  assert(fnContent.includes('RATE_LIMITED') && fnContent.includes('Retry-After'), 'Edge Function handles rate limit response with HTTP 429 and Retry-After header');
+  assert(!fnContent.includes('p_raw_ip') && fnContent.includes('hashedRequester'), 'Edge Function hashes requester identity before persistence (no raw IP storage)');
+  
+  // Verify anti-abuse check occurs BEFORE expensive AI provider fetch call
+  const rlIndex = fnContent.indexOf('ht_check_rate_limit');
+  const providerIndex = fnContent.indexOf('fetch(');
+  assert(rlIndex !== -1 && (providerIndex === -1 || rlIndex < providerIndex), 'Anti-abuse rate limit check executes BEFORE AI provider fetch call');
+
+  // R6 Medical boundary & localized safety response check
+  assert(fnContent.includes('MEDICAL_SAFETY_BOUNDARY'), 'Edge Function returns MEDICAL_SAFETY_BOUNDARY outcome code for medical queries');
+  assert(!fnContent.includes('safetyResponse = "I\'m an intake assistant'), 'Edge Function does NOT return hard-coded English medical safety text');
   assert(fnContent.includes('ht_request_handoff'), 'Edge Function triggers handoff for medical queries');
 }
 
@@ -125,18 +136,19 @@ if (fs.existsSync(sqlTestPath)) {
   assert(sqlContent.includes('public.clinic_patient_profiles'), 'SQL test suite queries canonical public.clinic_patient_profiles');
   assert(sqlContent.includes('public.clinic_encounters'), 'SQL test suite queries canonical public.clinic_encounters');
 
-  // R5 TAP Plan and count assertions
+  // R5/R6 TAP Plan and count assertions
   const planMatch = sqlContent.match(/SELECT plan\((\d+)\);/);
   const plannedCount = planMatch ? parseInt(planMatch[1], 10) : 0;
   const tapMatches = sqlContent.match(/SELECT\s+(is|has_table|throws_ok)\s*\(/g) || [];
   const actualCount = tapMatches.length;
   assert(plannedCount === actualCount, `TAP plan count (${plannedCount}) matches actual TAP assertion count (${actualCount})`);
 
-  // R4/R5 SQL Test additions
+  // R4/R5/R6 SQL Test additions
   assert(sqlContent.includes('has_function_privilege'), 'SQL test suite contains executable privilege assertions');
   assert(sqlContent.includes('View-only staff and cross-tenant staff handoff mutation denied'), 'SQL test suite tests cross-tenant handoff mutation denial');
   assert(sqlContent.includes('PASSPORT_PRIVACY_LEAK'), 'SQL test suite tests multi-surface passport privacy (case-insensitive across audit, outbox, summaries)');
   assert(sqlContent.includes('Expired AI messages and conversations deleted by retention cleanup'), 'SQL test suite tests post-delete retention assertion');
+  assert(sqlContent.includes('ht_check_rate_limit'), 'SQL test suite tests anti-abuse rate limit primitive');
 }
 
 // 4. Landing & Chat Widget Attribution Propagation Check
@@ -193,7 +205,7 @@ if (fs.existsSync(detailPanelPath)) {
          'Converted status is not exposed as a coordinator action');
 }
 
-// 7. Secret Check in Public Bundle / UI
+// 7. Secret Check & Error Localization in Public Bundle / UI
 const chatWidgetPath = path.join(rootDir, 'components', 'health-tourism', 'HtAiChatWidget.tsx');
 if (fs.existsSync(chatWidgetPath)) {
   const chatContent = fs.readFileSync(chatWidgetPath, 'utf8');
@@ -201,14 +213,28 @@ if (fs.existsSync(chatWidgetPath)) {
          'AI secret keys absent from client chat widget');
   assert(chatContent.includes('HealthTourismAiService'),
          'Chat widget uses Edge Function boundary service');
+  assert(!chatContent.includes('addMessage(\'assistant\', response.error?.message'),
+         'Chat widget does NOT display raw response.error.message directly to public UI');
+  assert(chatContent.includes('t.chatMedicalSafetyDeferral'),
+         'Chat widget renders localized chatMedicalSafetyDeferral for medical boundary');
+  assert(chatContent.includes('t.rateLimitedErr'),
+         'Chat widget renders localized rateLimitedErr on RATE_LIMITED response');
 }
 
-// 8. Arabic Back Copy Correction
+// 8. Translation Parity Check (TR, EN, DE, RU, AR)
 const translationsPath = path.join(rootDir, 'utils', 'healthTourismTranslations.ts');
 if (fs.existsSync(translationsPath)) {
   const transContent = fs.readFileSync(translationsPath, 'utf8');
   assert(!transContent.includes("'السباق →'"), 'Obsolete Arabic back copy "السباق →" is removed');
   assert(transContent.includes("'← السابق'"), 'Correct Arabic back copy "← السابق" is present');
+
+  // Verify chatMedicalSafetyDeferral in all 5 languages
+  const safetyMatches = (transContent.match(/chatMedicalSafetyDeferral:/g) || []).length;
+  assert(safetyMatches === 5, `chatMedicalSafetyDeferral present in all 5 languages (found ${safetyMatches}/5)`);
+
+  // Verify rateLimitedErr in all 5 languages
+  const rateMatches = (transContent.match(/rateLimitedErr:/g) || []).length;
+  assert(rateMatches === 5, `rateLimitedErr present in all 5 languages (found ${rateMatches}/5)`);
 }
 
 if (failures > 0) {

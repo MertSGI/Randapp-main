@@ -100,6 +100,8 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
     contactCaptureFailedErr: 'Kayıt başarısız.',
     genericConnectionErr: 'Bağlantı hatası.',
     contactDetailsRequiredReply: 'Sizi bir koordinatörle buluşturmak için lütfen iletişim bilgilerinizi girin.',
+    chatMedicalSafetyDeferral: 'Tıbbi teşhis veya tedavi önerisi verememekteyim. Talebiniz uzman sağlık turizmi koordinatörümüze iletilmiştir.',
+    rateLimitedErr: 'Çok fazla istek gönderildi. Lütfen bir süre sonra tekrar deneyiniz.',
 
     footerCopyright: 'LARİ Health Tourism Platform.',
     footerRights: 'Tüm hakları saklıdır.',
@@ -207,6 +209,8 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
     contactCaptureFailedErr: 'Unable to save contact details.',
     genericConnectionErr: 'Connection error.',
     contactDetailsRequiredReply: 'To connect you with a coordinator, please provide your contact details.',
+    chatMedicalSafetyDeferral: 'I cannot provide medical diagnosis or treatment advice. Your request has been directed to our qualified health tourism coordinator.',
+    rateLimitedErr: 'Too many requests. Please wait a moment before trying again.',
 
     footerCopyright: 'LARİ Health Tourism Platform.',
     footerRights: 'All rights reserved.',
@@ -314,6 +318,8 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
     contactCaptureFailedErr: 'Kontaktdaten konnten nicht gespeichert werden.',
     genericConnectionErr: 'Verbindungsfehler.',
     contactDetailsRequiredReply: 'Um Sie mit einem Koordinator zu verbinden, geben Sie bitte Ihre Kontaktdaten an.',
+    chatMedicalSafetyDeferral: 'Ich kann keine medizinische Diagnose oder Behandlungsempfehlung abgeben. Ihre Anfrage wurde an unseren Koordinator weitergeleitet.',
+    rateLimitedErr: 'Zu viele Anfragen. Bitte warten Sie einen Moment.',
 
     footerCopyright: 'LARİ Health Tourism Platform.',
     footerRights: 'Alle Rechte vorbehalten.',
@@ -421,6 +427,8 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
     contactCaptureFailedErr: 'Не удалось сохранить контактные данные.',
     genericConnectionErr: 'Ошибка соединения.',
     contactDetailsRequiredReply: 'Чтобы связать вас с координатором, пожалуйста, укажите ваши контактные данные.',
+    chatMedicalSafetyDeferral: 'Я не могу предоставить медицинский диагноз или рекомендации по лечению. Ваш запрос направлен нашему координатору.',
+    rateLimitedErr: 'Слишком много запросов. Пожалуйста, подождите немного.',
 
     footerCopyright: 'LARİ Health Tourism Platform.',
     footerRights: 'Все права защищены.',
@@ -528,6 +536,8 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
     contactCaptureFailedErr: 'تعذر حفظ بيانات الاتصال.',
     genericConnectionErr: 'خطأ في الاتصال.',
     contactDetailsRequiredReply: 'لتوصيلك بالمنسق، يرجى تقديم بيانات الاتصال الخاصة بك.',
+    chatMedicalSafetyDeferral: 'لا يمكنني تقديم تشخيص طبي أو توصيات علاجية. تم توجيه طلبك إلى منسق السياحة العلاجية.',
+    rateLimitedErr: 'عدد كبير جداً من الطلبات. يرجى الانتظار قليلاً.',
 
     footerCopyright: 'منصة LARİ للسياحة العلاجية.',
     footerRights: 'جميع الحقوق محفوظة.',

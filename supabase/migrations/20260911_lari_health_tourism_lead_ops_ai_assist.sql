@@ -1114,6 +1114,10 @@ BEGIN
     )
     SELECT count(*) INTO v_deleted_conversations FROM deleted_convs;
 
+    -- Delete expired rate limit buckets
+    DELETE FROM public.ht_rate_limit_buckets
+    WHERE expires_at < now();
+
     -- NOTE: ht_leads are NEVER deleted by this function.
     -- Lead records survive transcript cleanup.
 
@@ -1667,4 +1671,78 @@ GRANT EXECUTE ON FUNCTION public.ht_get_my_context TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_update_lead_status TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_list_leads TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_get_lead TO authenticated;
+
+
+-- =========================================================================
+-- 21. EPHEMERAL RATE LIMIT BUCKETS & SERVER-SIDE ANTI-ABUSE PRIMITIVE
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS public.ht_rate_limit_buckets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    bucket_key TEXT NOT NULL,
+    request_count INTEGER NOT NULL DEFAULT 1,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ht_rate_limit_buckets_key_key UNIQUE (bucket_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ht_rate_limit_buckets_expires ON public.ht_rate_limit_buckets (expires_at);
+
+CREATE OR REPLACE FUNCTION public.ht_check_rate_limit(
+    p_bucket_key TEXT,
+    p_max_requests INTEGER,
+    p_window_seconds INTEGER
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_now TIMESTAMPTZ := now();
+    v_expires_at TIMESTAMPTZ := v_now + (p_window_seconds || ' seconds')::INTERVAL;
+    v_bucket RECORD;
+    v_count INTEGER;
+BEGIN
+    IF p_bucket_key IS NULL OR length(p_bucket_key) = 0 THEN
+        RAISE EXCEPTION 'INVALID_INPUT: Rate limit bucket key is required.';
+    END IF;
+
+    -- Upsert atomic bucket counter
+    INSERT INTO public.ht_rate_limit_buckets (bucket_key, request_count, expires_at)
+    VALUES (p_bucket_key, 1, v_expires_at)
+    ON CONFLICT (bucket_key) DO UPDATE
+    SET request_count = CASE 
+            WHEN public.ht_rate_limit_buckets.expires_at < v_now THEN 1 
+            ELSE public.ht_rate_limit_buckets.request_count + 1 
+        END,
+        expires_at = CASE 
+            WHEN public.ht_rate_limit_buckets.expires_at < v_now THEN v_expires_at 
+            ELSE public.ht_rate_limit_buckets.expires_at 
+        END
+    RETURNING request_count, expires_at INTO v_bucket;
+
+    v_count := v_bucket.request_count;
+
+    IF v_count > p_max_requests THEN
+        RETURN jsonb_build_object(
+            'allowed', false,
+            'current_count', v_count,
+            'max_requests', p_max_requests,
+            'retry_after_seconds', GREATEST(1, extract(epoch from (v_bucket.expires_at - v_now))::integer)
+        );
+    END IF;
+
+    RETURN jsonb_build_object(
+        'allowed', true,
+        'current_count', v_count,
+        'max_requests', p_max_requests,
+        'retry_after_seconds', 0
+    );
+END;
+$$;
+
+
+-- Revoke from public, anon, authenticated; Grant to service_role only
+REVOKE ALL ON FUNCTION public.ht_check_rate_limit FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ht_check_rate_limit TO service_role;
 

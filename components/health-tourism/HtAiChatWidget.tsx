@@ -98,20 +98,26 @@ export const HtAiChatWidget: React.FC<Props> = ({
         }
         if (response.reply) {
           addMessage('assistant', response.reply);
+        } else if (response.outcome_code === 'MEDICAL_SAFETY_BOUNDARY') {
+          addMessage('assistant', t.chatMedicalSafetyDeferral);
         }
         if (response.requires_contact) {
           setShowContactForm(true);
-          if (!response.reply) {
+          if (!response.reply && response.outcome_code !== 'MEDICAL_SAFETY_BOUNDARY') {
             addMessage('assistant', t.contactDetailsRequiredReply);
           }
         } else if (response.handoff_triggered) {
           setHandoffTriggered(true);
-          if (!response.reply) {
+          if (!response.reply && response.outcome_code !== 'MEDICAL_SAFETY_BOUNDARY') {
             addMessage('assistant', t.handoffSubmittedSuccess);
           }
         }
       } else {
-        addMessage('assistant', response.error?.message || t.submitErrorGeneric);
+        if (response.error?.code === 'RATE_LIMITED') {
+          addMessage('assistant', t.rateLimitedErr);
+        } else {
+          addMessage('assistant', t.submitErrorGeneric);
+        }
       }
     } catch {
       addMessage('assistant', t.genericConnectionErr);
@@ -129,20 +135,26 @@ export const HtAiChatWidget: React.FC<Props> = ({
       if (response.success) {
         if (response.reply) {
           addMessage('assistant', response.reply);
+        } else if (response.outcome_code === 'MEDICAL_SAFETY_BOUNDARY') {
+          addMessage('assistant', t.chatMedicalSafetyDeferral);
         }
         if (response.requires_contact) {
           setShowContactForm(true);
-          if (!response.reply) {
+          if (!response.reply && response.outcome_code !== 'MEDICAL_SAFETY_BOUNDARY') {
             addMessage('assistant', t.contactDetailsRequiredReply);
           }
         } else if (response.handoff_triggered) {
           setHandoffTriggered(true);
-          if (!response.reply) {
+          if (!response.reply && response.outcome_code !== 'MEDICAL_SAFETY_BOUNDARY') {
             addMessage('assistant', t.handoffSubmittedSuccess);
           }
         }
       } else {
-        addMessage('assistant', response.error?.message || t.submitErrorGeneric);
+        if (response.error?.code === 'RATE_LIMITED') {
+          addMessage('assistant', t.rateLimitedErr);
+        } else {
+          addMessage('assistant', t.submitErrorGeneric);
+        }
       }
     } catch {
       addMessage('assistant', t.genericConnectionErr);
@@ -185,7 +197,11 @@ export const HtAiChatWidget: React.FC<Props> = ({
       } else if (response.success && response.requires_contact) {
         setContactError(t.contactRequiredFormErr);
       } else {
-        setContactError(response.error?.message || t.contactCaptureFailedErr);
+        if (response.error?.code === 'RATE_LIMITED') {
+          setContactError(t.rateLimitedErr);
+        } else {
+          setContactError(t.contactCaptureFailedErr);
+        }
       }
     } catch {
       setContactError(t.genericConnectionErr);

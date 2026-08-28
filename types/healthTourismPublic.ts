@@ -111,6 +111,8 @@ export interface HtTranslationDictionary {
   contactCaptureFailedErr: string;
   genericConnectionErr: string;
   contactDetailsRequiredReply: string;
+  chatMedicalSafetyDeferral: string;
+  rateLimitedErr: string;
 
   // Footer
   footerCopyright: string;
