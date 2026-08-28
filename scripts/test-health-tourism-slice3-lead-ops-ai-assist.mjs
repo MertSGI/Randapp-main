@@ -116,7 +116,15 @@ if (fs.existsSync(edgeFnPath)) {
   assert(!fnContent.includes('SUPABASE_SERVICE_ROLE_KEY.slice'), 'Requester hashing does NOT depend on SUPABASE_SERVICE_ROLE_KEY prefix');
   assert(fnContent.includes('HT_RATE_LIMIT_HASH_KEY'), 'Requester hashing uses dedicated HT_RATE_LIMIT_HASH_KEY secret');
   assert(fnContent.includes('"HMAC"') && fnContent.includes('"SHA-256"'), 'Requester hashing algorithm uses HMAC-SHA-256');
-  assert(fnContent.includes('jsonError("ANTI_ABUSE_UNAVAILABLE"') && fnContent.includes('503'), 'Rate limit RPC failure fails closed with HTTP 503 ANTI_ABUSE_UNAVAILABLE');
+  // In-script selftest & structural matcher for jsonError("ANTI_ABUSE_UNAVAILABLE", ..., 503)
+  const antiAbuse503Regex = /jsonError\s*\(\s*["']ANTI_ABUSE_UNAVAILABLE["']\s*,\s*["'][^"']+["']\s*,\s*503\s*\)/;
+  
+  // Selftest
+  assert(antiAbuse503Regex.test('jsonError("ANTI_ABUSE_UNAVAILABLE", "Service unavailable.", 503)'), 'Selftest positive: matched 503 anti-abuse error');
+  assert(!antiAbuse503Regex.test('jsonError("ANTI_ABUSE_UNAVAILABLE", "Service unavailable.", 500)'), 'Selftest negative 1: rejected 500 status');
+  assert(!antiAbuse503Regex.test('jsonError("OTHER_ERROR", "Service unavailable.", 503)'), 'Selftest negative 2: rejected non-anti-abuse 503 error');
+  
+  assert(antiAbuse503Regex.test(fnContent), 'Rate limit RPC failure fails closed with HTTP 503 ANTI_ABUSE_UNAVAILABLE');
   assert(fnContent.includes('isHandoffOrContactProtocol') && fnContent.includes('isHandoffRequest'), 'Edge Function classifies handoff and contact protocol requests before rate limit consumption');
   assert(fnContent.includes('typeof rlResult.allowed !== "boolean"') && fnContent.includes('rlResult.allowed === true'), 'rateLimitAllowed requires explicit rlResult.allowed === true decision (fails closed on null/malformed)');
 
