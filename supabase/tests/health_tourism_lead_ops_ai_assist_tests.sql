@@ -1,5 +1,5 @@
 -- ============================================================================
--- HEALTH TOURISM SLICE 3 SERVER-AUTHORITY TEST SUITE (36 ASSERTIONS)
+-- HEALTH TOURISM SLICE 3 SERVER-AUTHORITY TEST SUITE (40 ASSERTIONS)
 -- Corrected for E1 R5 acceptance
 -- ============================================================================
 
@@ -21,7 +21,8 @@ INSERT INTO auth.users (id, email) VALUES
   ('a2222222-2222-4222-8222-222222222222', 'manager@ht-alpha.example.invalid'),
   ('a3333333-3333-4333-8333-333333333333', 'viewonly@ht-alpha.example.invalid'),
   ('a4444444-4444-4444-8444-444444444444', 'staff@ht-beta.example.invalid'),
-  ('a5555555-5555-4555-8555-555555555555', 'inactive@ht-alpha.example.invalid')
+  ('a5555555-5555-4555-8555-555555555555', 'inactive@ht-alpha.example.invalid'),
+  ('a6666666-6666-4666-8666-666666666666', 'owner@ht-beta.example.invalid')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.users_profile (id, tenant_id, role, name, active) VALUES
@@ -29,7 +30,8 @@ INSERT INTO public.users_profile (id, tenant_id, role, name, active) VALUES
   ('a2222222-2222-4222-8222-222222222222', 'a1111111-1111-1111-1111-111111111111', 'staff', 'Alpha Manager', true),
   ('a3333333-3333-4333-8333-333333333333', 'a1111111-1111-1111-1111-111111111111', 'staff', 'Alpha ViewOnly', true),
   ('a4444444-4444-4444-8444-444444444444', 'b2222222-2222-2222-2222-222222222222', 'staff', 'Beta Staff', true),
-  ('a5555555-5555-4555-8555-555555555555', 'a1111111-1111-1111-1111-111111111111', 'staff', 'Alpha Inactive', false)
+  ('a5555555-5555-4555-8555-555555555555', 'a1111111-1111-1111-1111-111111111111', 'staff', 'Alpha Inactive', false),
+  ('a6666666-6666-4666-8666-666666666666', 'b2222222-2222-2222-2222-222222222222', 'tenant_owner', 'Beta Owner', true)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active) VALUES
@@ -39,10 +41,12 @@ INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active) VALUES
   ('b5555555-5555-4555-8555-555555555555', 'a1111111-1111-1111-1111-111111111111', 'a5555555-5555-4555-8555-555555555555', 'Alpha Inactive Staff', false)
 ON CONFLICT (id) DO NOTHING;
 
--- Configure HT Staff Profiles
+-- Configure HT Staff Profiles under respective tenant owners
 SELECT set_config('request.jwt.claim.sub', 'a1111111-1111-4111-8111-111111111111', true);
 SELECT public.ht_set_staff_profile('b2222222-2222-4222-8222-222222222222', true, true);
 SELECT public.ht_set_staff_profile('b3333333-3333-4333-8333-333333333333', false, true);
+
+SELECT set_config('request.jwt.claim.sub', 'a6666666-6666-4666-8666-666666666666', true);
 SELECT public.ht_set_staff_profile('b4444444-4444-4444-8444-444444444444', true, true);
 
 -- Create Base Test Lead for Alpha
