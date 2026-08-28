@@ -1342,6 +1342,9 @@ $$;
 -- 17. EXTEND ht_list_leads WITH OPERATIONAL FIELDS + FILTERS
 -- =========================================================================
 
+-- Explicitly drop legacy 3-argument overload from Migration 66 to avoid ambiguity
+DROP FUNCTION IF EXISTS public.ht_list_leads(text, integer, integer);
+
 CREATE OR REPLACE FUNCTION public.ht_list_leads(
     p_status TEXT DEFAULT NULL,
     p_limit INT DEFAULT 50,
@@ -1669,7 +1672,7 @@ GRANT EXECUTE ON FUNCTION public.ht_get_my_context TO authenticated;
 
 -- Re-grant existing hardened functions
 GRANT EXECUTE ON FUNCTION public.ht_update_lead_status TO authenticated;
-GRANT EXECUTE ON FUNCTION public.ht_list_leads TO authenticated;
+GRANT EXECUTE ON FUNCTION public.ht_list_leads(text, integer, integer, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_get_lead TO authenticated;
 
 
