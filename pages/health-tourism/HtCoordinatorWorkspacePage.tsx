@@ -52,14 +52,12 @@ export const HtCoordinatorWorkspacePage: React.FC = () => {
     }
 
     try {
-      // Try to list leads — if it works, we're authorized
-      const result = await service.listLeads({ limit: 1, offset: 0 });
-      if (result.success) {
+      const ctxResult = await service.getMyHtContext();
+      if (ctxResult.success && (ctxResult.can_view_ht_leads || ctxResult.can_manage_ht_leads)) {
         setAuthorized(true);
-        // Check manage permission by attempting a read (actual manage check is server-side)
-        setCanManage(true); // Will be verified per-action server-side
+        setCanManage(!!ctxResult.can_manage_ht_leads);
       } else {
-        setErrorMsg('Sağlık turizmi lead erişim yetkiniz bulunmamaktadır.');
+        setErrorMsg(ctxResult.message || 'Sağlık turizmi lead erişim yetkiniz bulunmamaktadır.');
       }
     } catch {
       setErrorMsg('Sunucu bağlantı hatası.');

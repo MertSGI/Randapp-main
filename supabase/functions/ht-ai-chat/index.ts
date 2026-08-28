@@ -136,30 +136,35 @@ serve(async (req: Request) => {
     }
 
     // -----------------------------------------------------------------------
-    // 3. Resolve tenant from slug
+    // 3. Resolve tenant from slug using canonical tenant authority
     // -----------------------------------------------------------------------
     const { data: tenantData } = await supabase
-      .from("salon_business_profiles")
-      .select("tenant_id")
+      .from("tenants")
+      .select("id, status, verification_status, public_site_status")
       .eq("slug", tenant_slug.toLowerCase().trim())
       .maybeSingle();
 
-    if (!tenantData?.tenant_id) {
+    if (!tenantData?.id) {
       return jsonError("NOT_FOUND", "Health tourism service not found.", 404);
     }
 
-    const tenantId = tenantData.tenant_id;
-
-    // Check if tenant has HT publication enabled
-    const { data: tenantRecord } = await supabase
-      .from("tenants")
-      .select("ht_leads_published")
-      .eq("id", tenantId)
-      .maybeSingle();
-
-    if (!tenantRecord?.ht_leads_published) {
-      return jsonError("FORBIDDEN", "Health tourism is not available for this provider.", 403);
+    // Gating checks according to canonical Slice 2 public site authority:
+    // 1. Must be active status
+    // 2. Verification status must NOT be suspended
+    // 3. If public_site_status is present, it must be 'published'
+    if (tenantData.status !== "active") {
+      return jsonError("NOT_FOUND", "Tenant is not active.", 404);
     }
+
+    if (tenantData.verification_status === "suspended") {
+      return jsonError("FORBIDDEN", "Tenant service is suspended.", 403);
+    }
+
+    if (tenantData.public_site_status && tenantData.public_site_status !== "published") {
+      return jsonError("FORBIDDEN", "Health tourism public site is not published.", 403);
+    }
+
+    const tenantId = tenantData.id;
 
     // -----------------------------------------------------------------------
     // 4. Handle handoff request

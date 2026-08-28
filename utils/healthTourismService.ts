@@ -50,6 +50,19 @@ export class HealthTourismService {
   }
 
   /**
+   * Fetch current staff's HT context and capabilities server-authoritatively.
+   */
+  async getMyHtContext(): Promise<{ success: boolean; tenant_id?: string; staff_id?: string; can_view_ht_leads?: boolean; can_manage_ht_leads?: boolean; reason_code?: string; message?: string }> {
+    const { data, error } = await this.client.rpc('ht_get_my_context');
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    return data as { success: boolean; tenant_id?: string; staff_id?: string; can_view_ht_leads?: boolean; can_manage_ht_leads?: boolean; reason_code?: string };
+  }
+
+  /**
    * Fetch single lead detail for authorized HT staff
    */
   async getLead(leadId: string): Promise<{ success: boolean; lead?: HtLead; message?: string }> {

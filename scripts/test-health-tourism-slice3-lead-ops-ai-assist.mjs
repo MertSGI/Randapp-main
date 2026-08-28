@@ -17,9 +17,9 @@ function assert(condition, message) {
   }
 }
 
-console.log('🏁 Running Health Tourism Slice 3 Static QA Suite...\n');
+console.log('🏁 Running Health Tourism Slice 3 Hardened Static QA Suite...\n');
 
-// 1. Migration 67 Existence & Structure
+// 1. Migration 67 Existence & Authority Checks
 const migrationPath = path.join(rootDir, 'supabase/migrations/20260911_lari_health_tourism_lead_ops_ai_assist.sql');
 assert(fs.existsSync(migrationPath), 'Migration 20260911_lari_health_tourism_lead_ops_ai_assist.sql exists');
 
@@ -42,9 +42,61 @@ if (fs.existsSync(migrationPath)) {
   assert(migContent.includes('FUNCTION public.ht_acknowledge_handoff'), 'Contains ht_acknowledge_handoff RPC');
   assert(migContent.includes('FUNCTION public.ht_cleanup_expired_ai_data'), 'Contains ht_cleanup_expired_ai_data RPC');
   assert(migContent.includes('FUNCTION public.ht_enqueue_whatsapp_handoff'), 'Contains ht_enqueue_whatsapp_handoff RPC');
+  assert(migContent.includes('FUNCTION public.ht_get_my_context'), 'Contains ht_get_my_context RPC for server-authoritative staff context');
+
+  // Verify Tightened AI Persistence RPC Permissions (REVOKED from anon/authenticated)
+  assert(migContent.includes('REVOKE ALL ON FUNCTION public.ht_create_ai_conversation FROM PUBLIC, anon, authenticated;'),
+    'ht_create_ai_conversation is REVOKED from anon and authenticated');
+  assert(migContent.includes('REVOKE ALL ON FUNCTION public.ht_add_ai_message FROM PUBLIC, anon, authenticated;'),
+    'ht_add_ai_message is REVOKED from anon and authenticated');
+  assert(migContent.includes('REVOKE ALL ON FUNCTION public.ht_get_ai_conversation_by_session FROM PUBLIC, anon, authenticated;'),
+    'ht_get_ai_conversation_by_session is REVOKED from anon and authenticated');
+  assert(migContent.includes('REVOKE ALL ON FUNCTION public.ht_cleanup_expired_ai_data FROM PUBLIC, anon, authenticated;'),
+    'ht_cleanup_expired_ai_data is REVOKED from anon and authenticated');
+
+  // Ensure NO invalid grants exist for internal AI persistence RPCs to anon
+  assert(!migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_create_ai_conversation TO anon'),
+    'Zero GRANT EXECUTE on ht_create_ai_conversation TO anon');
+  assert(!migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_add_ai_message TO anon'),
+    'Zero GRANT EXECUTE on ht_add_ai_message TO anon');
+  assert(!migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_get_ai_conversation_by_session TO anon'),
+    'Zero GRANT EXECUTE on ht_get_ai_conversation_by_session TO anon');
 }
 
-// 2. No Direct UI HT DML Check
+// 2. Edge Function Canonical Tenant Authority Check
+const edgeFnPath = path.join(rootDir, 'supabase', 'functions', 'ht-ai-chat', 'index.ts');
+assert(fs.existsSync(edgeFnPath), 'Edge Function ht-ai-chat exists');
+
+if (fs.existsSync(edgeFnPath)) {
+  const fnContent = fs.readFileSync(edgeFnPath, 'utf8');
+
+  // Forbidden schema references check
+  assert(!fnContent.includes('salon_business_profiles'), 'Edge Function does NOT reference non-canonical salon_business_profiles');
+  assert(!fnContent.includes('ht_leads_published'), 'Edge Function does NOT reference non-canonical ht_leads_published');
+
+  // Canonical tenant resolution check
+  assert(fnContent.includes('.from("tenants")'), 'Edge Function queries canonical tenants table');
+  assert(fnContent.includes('public_site_status'), 'Edge Function checks canonical public_site_status');
+  assert(fnContent.includes('verification_status === "suspended"'), 'Edge Function checks verification_status suspension');
+
+  // Medical boundary & handoff check
+  assert(fnContent.includes('STRICT MEDICAL BOUNDARY'), 'Medical safety boundary prompt present in Edge Function');
+  assert(fnContent.includes('ht_request_handoff'), 'Edge Function triggers handoff for medical queries');
+}
+
+// 3. UI Context & Permission Gating Check
+const workspacePath = path.join(rootDir, 'pages', 'health-tourism', 'HtCoordinatorWorkspacePage.tsx');
+if (fs.existsSync(workspacePath)) {
+  const wsContent = fs.readFileSync(workspacePath, 'utf8');
+
+  // Verify setCanManage is NOT derived merely from list success
+  assert(!wsContent.includes('setCanManage(true) // Will be verified per-action'),
+    'UI does NOT setCanManage(true) based only on list success');
+  assert(wsContent.includes('getMyHtContext()'),
+    'UI resolves capabilities server-authoritatively via getMyHtContext()');
+}
+
+// 4. No Direct UI HT DML Check
 const componentsDir = path.join(rootDir, 'components', 'health-tourism');
 const pagesDir = path.join(rootDir, 'pages', 'health-tourism');
 
@@ -70,7 +122,7 @@ function checkNoDirectDml(dir) {
 checkNoDirectDml(componentsDir);
 checkNoDirectDml(pagesDir);
 
-// 3. Converted Status Exclusions in UI
+// 5. Converted Status Exclusions in UI
 const detailPanelPath = path.join(rootDir, 'components', 'health-tourism', 'HtLeadDetailPanel.tsx');
 if (fs.existsSync(detailPanelPath)) {
   const detailContent = fs.readFileSync(detailPanelPath, 'utf8');
@@ -78,7 +130,7 @@ if (fs.existsSync(detailPanelPath)) {
          'Converted status is not exposed as a coordinator action');
 }
 
-// 4. Secret Check in Public Bundle / UI
+// 6. Secret Check in Public Bundle / UI
 const chatWidgetPath = path.join(rootDir, 'components', 'health-tourism', 'HtAiChatWidget.tsx');
 if (fs.existsSync(chatWidgetPath)) {
   const chatContent = fs.readFileSync(chatWidgetPath, 'utf8');
@@ -88,7 +140,7 @@ if (fs.existsSync(chatWidgetPath)) {
          'Chat widget uses Edge Function boundary service');
 }
 
-// 5. Arabic Back Copy Correction
+// 7. Arabic Back Copy Correction
 const translationsPath = path.join(rootDir, 'utils', 'healthTourismTranslations.ts');
 if (fs.existsSync(translationsPath)) {
   const transContent = fs.readFileSync(translationsPath, 'utf8');
@@ -96,17 +148,9 @@ if (fs.existsSync(translationsPath)) {
   assert(transContent.includes("'← السابق'"), 'Correct Arabic back copy "← السابق" is present');
 }
 
-// 6. Medical Safety Boundary & Assistive Label
-const edgeFnPath = path.join(rootDir, 'supabase', 'functions', 'ht-ai-chat', 'index.ts');
-if (fs.existsSync(edgeFnPath)) {
-  const fnContent = fs.readFileSync(edgeFnPath, 'utf8');
-  assert(fnContent.includes('STRICT MEDICAL BOUNDARY'), 'Medical safety boundary prompt present in Edge Function');
-  assert(fnContent.includes('ht_request_handoff'), 'Edge function triggers handoff for medical queries');
-}
-
 if (failures > 0) {
   console.error(`\n❌ Total Failures: ${failures}`);
   process.exit(1);
 } else {
-  console.log('\n✅ All Static QA Contracts Passed Successfully!');
+  console.log('\n✅ All Hardened Static QA Contracts Passed Successfully!');
 }

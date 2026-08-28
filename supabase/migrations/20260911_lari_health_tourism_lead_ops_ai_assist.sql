@@ -647,7 +647,7 @@ $$;
 
 
 -- =========================================================================
--- 9. ht_request_handoff RPC
+-- 9. ht_request_handoff RPC (SERVER-INTERNAL & STAFF AUTHORIZED)
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.ht_request_handoff(
@@ -660,8 +660,13 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
+    v_caller_uid UUID := auth.uid();
     v_conv RECORD;
     v_lead RECORD;
+    v_staff RECORD;
+    v_hsp RECORD;
+    v_previous_status TEXT;
+    v_valid_transition BOOLEAN := false;
 BEGIN
     SELECT * INTO v_conv
     FROM public.ht_ai_conversations
@@ -671,52 +676,87 @@ BEGIN
         RAISE EXCEPTION 'NOT_FOUND: Conversation not found.';
     END IF;
 
+    -- Caller Authority Gate: Must be service-role (auth.uid() IS NULL in Security Definer when service role calls)
+    -- OR caller must be active staff for the exact tenant with HT permissions.
+    IF v_caller_uid IS NOT NULL THEN
+        SELECT s.* INTO v_staff
+        FROM public.staff s
+        WHERE s.user_profile_id = v_caller_uid
+          AND s.active = true;
+
+        IF v_staff.id IS NULL OR v_staff.tenant_id <> v_conv.tenant_id THEN
+            RAISE EXCEPTION 'FORBIDDEN: Cross-tenant handoff request denied.';
+        END IF;
+
+        SELECT * INTO v_hsp
+        FROM public.ht_staff_profiles
+        WHERE staff_id = v_staff.id;
+
+        IF v_hsp.staff_id IS NULL OR (v_hsp.can_view_ht_leads = false AND v_hsp.can_manage_ht_leads = false) THEN
+            RAISE EXCEPTION 'FORBIDDEN: Staff member lacks HT permission.';
+        END IF;
+    END IF;
+
     -- Update conversation handoff state
     UPDATE public.ht_ai_conversations
     SET handoff_state = 'requested',
         updated_at = now()
     WHERE id = p_conversation_id;
 
-    -- If associated with a lead, update lead handoff state and status
+    -- If associated with a lead, update lead handoff state and status IF lifecycle permits
     IF v_conv.lead_id IS NOT NULL THEN
         SELECT * INTO v_lead FROM public.ht_leads WHERE id = v_conv.lead_id;
         IF v_lead.id IS NOT NULL THEN
-            UPDATE public.ht_leads
-            SET handoff_state = 'requested',
-                handoff_reason = p_reason,
-                handoff_requested_at = now(),
-                status = 'handoff_pending',
-                last_activity_at = now(),
-                updated_at = now()
-            WHERE id = v_conv.lead_id
-              AND status <> 'converted';
+            IF v_lead.tenant_id <> v_conv.tenant_id THEN
+                RAISE EXCEPTION 'CROSS_TENANT_VIOLATION: Lead does not belong to conversation tenant.';
+            END IF;
 
-            INSERT INTO public.audit_events (
-                tenant_id, actor_id, actor_role, action,
-                resource_type, resource_id, payload
-            ) VALUES (
-                v_conv.tenant_id::text,
-                'system',
-                'system',
-                'ht_ai_handoff_requested',
-                'ht_leads',
-                v_conv.lead_id::text,
-                jsonb_build_object(
-                    'conversation_id', p_conversation_id,
-                    'reason', p_reason
-                )
-            );
+            v_previous_status := v_lead.status;
+
+            -- Validate lifecycle transition to handoff_pending according to canonical matrix:
+            -- qualified -> handoff_pending (valid)
+            -- new/contacted/handoff_pending -> handoff_pending
+            IF v_previous_status IN ('qualified', 'contacted', 'new', 'handoff_pending') THEN
+                v_valid_transition := true;
+            END IF;
+
+            IF v_valid_transition THEN
+                UPDATE public.ht_leads
+                SET handoff_state = 'requested',
+                    handoff_reason = p_reason,
+                    handoff_requested_at = now(),
+                    status = 'handoff_pending',
+                    last_activity_at = now(),
+                    updated_at = now()
+                WHERE id = v_conv.lead_id;
+
+                INSERT INTO public.audit_events (
+                    tenant_id, actor_id, actor_role, action,
+                    resource_type, resource_id, payload
+                ) VALUES (
+                    v_conv.tenant_id::text,
+                    COALESCE(v_caller_uid::text, 'system'),
+                    CASE WHEN v_caller_uid IS NULL THEN 'system' ELSE 'staff' END,
+                    'ht_ai_handoff_requested',
+                    'ht_leads',
+                    v_conv.lead_id::text,
+                    jsonb_build_object(
+                        'conversation_id', p_conversation_id,
+                        'reason', p_reason
+                    )
+                );
+            END IF;
         END IF;
     END IF;
 
-    -- Always audit at conversation level
+    -- Audit at conversation level
     INSERT INTO public.audit_events (
         tenant_id, actor_id, actor_role, action,
         resource_type, resource_id, payload
     ) VALUES (
         v_conv.tenant_id::text,
-        'system',
-        'system',
+        COALESCE(v_caller_uid::text, 'system'),
+        CASE WHEN v_caller_uid IS NULL THEN 'system' ELSE 'staff' END,
         'ht_ai_handoff_requested',
         'ht_ai_conversations',
         p_conversation_id::text,
@@ -1388,40 +1428,91 @@ $$;
 
 
 -- =========================================================================
--- 18. EXECUTE PERMISSIONS FOR NEW FUNCTIONS
+-- 18. ht_get_my_context RPC (SERVER-AUTHORITATIVE HT STAFF CONTEXT)
 -- =========================================================================
 
--- Revoke from public/anon
+CREATE OR REPLACE FUNCTION public.ht_get_my_context()
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_caller_uid UUID := auth.uid();
+    v_staff RECORD;
+    v_hsp RECORD;
+BEGIN
+    IF v_caller_uid IS NULL THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'reason_code', 'unauthenticated'
+        );
+    END IF;
+
+    SELECT s.* INTO v_staff
+    FROM public.staff s
+    WHERE s.user_profile_id = v_caller_uid
+      AND s.active = true;
+
+    IF v_staff.id IS NULL THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'reason_code', 'not_staff'
+        );
+    END IF;
+
+    SELECT * INTO v_hsp
+    FROM public.ht_staff_profiles
+    WHERE staff_id = v_staff.id;
+
+    IF v_hsp.staff_id IS NULL THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'reason_code', 'no_ht_profile'
+        );
+    END IF;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'tenant_id', v_staff.tenant_id,
+        'staff_id', v_staff.id,
+        'can_view_ht_leads', v_hsp.can_view_ht_leads,
+        'can_manage_ht_leads', v_hsp.can_manage_ht_leads
+    );
+END;
+$$;
+
+
+-- =========================================================================
+-- 19. EXECUTE PERMISSIONS FOR NEW FUNCTIONS
+-- =========================================================================
+
+-- Revoke from public, anon, and authenticated for server-internal AI persistence & global cleanup RPCs
 REVOKE ALL ON FUNCTION public.ht_assign_coordinator FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.ht_score_lead FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.ht_update_ai_summary FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.ht_request_handoff FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.ht_acknowledge_handoff FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.ht_create_ai_conversation FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.ht_add_ai_message FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.ht_get_ai_conversation_by_session FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.ht_cleanup_expired_ai_data FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.ht_create_ai_conversation FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.ht_add_ai_message FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.ht_get_ai_conversation_by_session FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.ht_cleanup_expired_ai_data FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.ht_enqueue_whatsapp_handoff FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.ht_get_my_context FROM PUBLIC, anon;
 
--- Staff-side operational RPCs
+-- Staff-side operational RPCs (restricted to authenticated)
 GRANT EXECUTE ON FUNCTION public.ht_assign_coordinator TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_score_lead TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_update_ai_summary TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_acknowledge_handoff TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_enqueue_whatsapp_handoff TO authenticated;
-GRANT EXECUTE ON FUNCTION public.ht_cleanup_expired_ai_data TO authenticated;
-
--- Server-authoritative RPCs (called from Edge Functions with service role)
--- Also allow authenticated for ht_request_handoff (can be triggered by coordinator)
 GRANT EXECUTE ON FUNCTION public.ht_request_handoff TO authenticated;
+GRANT EXECUTE ON FUNCTION public.ht_get_my_context TO authenticated;
 
--- Public AI conversation RPCs: granted to anon + authenticated for Edge Function invocation
--- These are SECURITY DEFINER and enforce their own session-token-based auth
-GRANT EXECUTE ON FUNCTION public.ht_create_ai_conversation TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.ht_add_ai_message TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.ht_get_ai_conversation_by_session TO anon, authenticated;
+-- Server-internal persistence RPCs: ht_create_ai_conversation, ht_add_ai_message, ht_get_ai_conversation_by_session, ht_cleanup_expired_ai_data
+-- remain REVOKED from anon and authenticated. Service-role (Edge Functions / backend workers) bypasses RLS and permissions.
 
--- Re-grant existing hardened function
+-- Re-grant existing hardened functions
 GRANT EXECUTE ON FUNCTION public.ht_update_lead_status TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_list_leads TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_get_lead TO authenticated;
