@@ -109,10 +109,15 @@ if (fs.existsSync(edgeFnPath)) {
   assert(fnContent.includes('LIMIT_REACHED_HANDOFF_COMPLETED') && fnContent.includes('limitHandoffErr'),
     'Edge Function message-limit branch persists handoff via RPC before returning handoff_triggered=true');
 
-  // R6 Anti-Abuse Rate Limiting Checks
+  // R6/R7 Anti-Abuse Rate Limiting & Fail-Closed Boundary Checks
   assert(fnContent.includes('ht_check_rate_limit'), 'Edge Function invokes ht_check_rate_limit anti-abuse RPC');
   assert(fnContent.includes('RATE_LIMITED') && fnContent.includes('Retry-After'), 'Edge Function handles rate limit response with HTTP 429 and Retry-After header');
   assert(!fnContent.includes('p_raw_ip') && fnContent.includes('hashedRequester'), 'Edge Function hashes requester identity before persistence (no raw IP storage)');
+  assert(!fnContent.includes('SUPABASE_SERVICE_ROLE_KEY.slice'), 'Requester hashing does NOT depend on SUPABASE_SERVICE_ROLE_KEY prefix');
+  assert(fnContent.includes('HT_RATE_LIMIT_HASH_KEY'), 'Requester hashing uses dedicated HT_RATE_LIMIT_HASH_KEY secret');
+  assert(fnContent.includes('"HMAC"') && fnContent.includes('"SHA-256"'), 'Requester hashing algorithm uses HMAC-SHA-256');
+  assert(fnContent.includes('ANTI_ABUSE_UNAVAILABLE') && fnContent.includes('status: 503'), 'Rate limit RPC failure fails closed with HTTP 503 ANTI_ABUSE_UNAVAILABLE');
+  assert(fnContent.includes('isHandoffOrContactProtocol') && fnContent.includes('isHandoffRequest'), 'Edge Function classifies handoff and contact protocol requests before rate limit consumption');
   
   // Verify anti-abuse check occurs BEFORE expensive AI provider fetch call
   const rlIndex = fnContent.indexOf('ht_check_rate_limit');

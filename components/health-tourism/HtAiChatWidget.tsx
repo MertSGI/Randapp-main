@@ -115,6 +115,8 @@ export const HtAiChatWidget: React.FC<Props> = ({
       } else {
         if (response.error?.code === 'RATE_LIMITED') {
           addMessage('assistant', t.rateLimitedErr);
+        } else if (response.error?.code === 'ANTI_ABUSE_UNAVAILABLE') {
+          addMessage('assistant', t.genericConnectionErr);
         } else {
           addMessage('assistant', t.submitErrorGeneric);
         }
@@ -152,6 +154,8 @@ export const HtAiChatWidget: React.FC<Props> = ({
       } else {
         if (response.error?.code === 'RATE_LIMITED') {
           addMessage('assistant', t.rateLimitedErr);
+        } else if (response.error?.code === 'ANTI_ABUSE_UNAVAILABLE') {
+          addMessage('assistant', t.genericConnectionErr);
         } else {
           addMessage('assistant', t.submitErrorGeneric);
         }
@@ -199,6 +203,8 @@ export const HtAiChatWidget: React.FC<Props> = ({
       } else {
         if (response.error?.code === 'RATE_LIMITED') {
           setContactError(t.rateLimitedErr);
+        } else if (response.error?.code === 'ANTI_ABUSE_UNAVAILABLE') {
+          setContactError(t.genericConnectionErr);
         } else {
           setContactError(t.contactCaptureFailedErr);
         }

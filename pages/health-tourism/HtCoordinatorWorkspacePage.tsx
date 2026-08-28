@@ -5,7 +5,7 @@ import { HtLead, HtLeadListParams, HtLeadListResult, HtLeadStatus, HtLeadScoreBa
 import { HtLeadListPanel } from '../../components/health-tourism/HtLeadListPanel';
 import { HtLeadDetailPanel } from '../../components/health-tourism/HtLeadDetailPanel';
 import { ShieldAlert, AlertCircle, RefreshCw, UserX, ServerOff, Globe } from 'lucide-react';
-import { supabase, isSupabaseMode } from '../../utils/supabaseClient';
+import { supabase, isSupabaseMode } from '../../services/supabaseClient';
 
 export const HtCoordinatorWorkspacePage: React.FC = () => {
   const { currentUser } = useAuth();

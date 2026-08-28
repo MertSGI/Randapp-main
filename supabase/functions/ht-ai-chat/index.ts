@@ -106,11 +106,12 @@ serve(async (req: Request) => {
     // -----------------------------------------------------------------------
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const rateLimitHashKey = Deno.env.get("HT_RATE_LIMIT_HASH_KEY");
     const aiApiKey = Deno.env.get("GROQ_API_KEY") || Deno.env.get("OPENAI_API_KEY");
     const aiProvider = Deno.env.get("HT_AI_CHAT_PROVIDER") || Deno.env.get("CLINIC_AI_DRAFT_PROVIDER") || "groq";
     const aiModel = Deno.env.get("HT_AI_CHAT_MODEL") || (aiProvider === "openai" ? "gpt-4o-mini" : "llama-3.1-70b-versatile");
 
-    if (!supabaseUrl || !supabaseServiceKey) {
+    if (!supabaseUrl || !supabaseServiceKey || !rateLimitHashKey) {
       return jsonError("SERVER_CONFIG_ERROR", "Server configuration incomplete.", 500);
     }
 
@@ -137,6 +138,11 @@ serve(async (req: Request) => {
     if (!tenant_slug || typeof tenant_slug !== "string") {
       return jsonError("INVALID_INPUT", "Tenant slug is required.", 400);
     }
+
+    // Classify protocol request BEFORE anti-abuse rate limit consumption / checks
+    const isHandoffRequest = message.startsWith("__HANDOFF_REQUEST__:");
+    const isContactSubmission = Boolean(!isHandoffRequest && session_token && full_name && (email || phone));
+    const isHandoffOrContactProtocol = isHandoffRequest || isContactSubmission;
 
     // -----------------------------------------------------------------------
     // 3. Resolve tenant from slug using canonical tenant authority
@@ -174,56 +180,106 @@ serve(async (req: Request) => {
                   req.headers.get("x-real-ip")?.trim() || 
                   "127.0.0.1";
 
-    // Create a one-way hashed bucket identifier (never persist raw IP)
-    const secretSalt = supabaseServiceKey.slice(0, 16);
+    // Create non-reversible HMAC-SHA-256 hashed requester identifier using dedicated HT_RATE_LIMIT_HASH_KEY
     const encoder = new TextEncoder();
-    const keyData = encoder.encode(`${rawIp}:${secretSalt}`);
-    const hashBuffer = await crypto.subtle.digest("SHA-256", keyData);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const keyData = encoder.encode(rateLimitHashKey);
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      keyData,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const messageData = encoder.encode(`${tenantId}:${rawIp}`);
+    const signatureBuffer = await crypto.subtle.sign("HMAC", cryptoKey, messageData);
+    const hashArray = Array.from(new Uint8Array(signatureBuffer));
     const hashedRequester = hashArray.map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 24);
 
     const isNewSession = !session_token;
-    const bucketKey = isNewSession
-      ? `ht:rl:conv:${tenantId}:${hashedRequester}`
-      : `ht:rl:msg:${tenantId}:${hashedRequester}`;
 
-    const maxAllowed = isNewSession ? 5 : 30; // 5 new convs/hr, 30 msgs/hr
-    const windowSeconds = 3600;
+    // Protocol check: __HANDOFF_REQUEST__ and contact capture for existing handoff
+    // bypass provider-message bucket consumption. New session creation is still rate-limited.
+    let rateLimitAllowed = false;
 
-    const { data: rlResult, error: rlErr } = await supabase.rpc("ht_check_rate_limit", {
-      p_bucket_key: bucketKey,
-      p_max_requests: maxAllowed,
-      p_window_seconds: windowSeconds,
-    });
+    if (isNewSession) {
+      const bucketKey = `ht:rl:conv:${tenantId}:${hashedRequester}`;
+      const { data: rlResult, error: rlErr } = await supabase.rpc("ht_check_rate_limit", {
+        p_bucket_key: bucketKey,
+        p_max_requests: 5, // 5 new convs/hr
+        p_window_seconds: 3600,
+      });
 
-    if (rlErr) {
-      console.error("ht_check_rate_limit error:", rlErr);
-    } else if (rlResult && rlResult.allowed === false) {
-      const retryAfter = rlResult.retry_after_seconds || 60;
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: {
-            code: "RATE_LIMITED",
-            message: "Too many requests. Please wait a moment before trying again.",
-          },
-        }),
-        {
-          status: 429,
-          headers: {
-            "Content-Type": "application/json",
-            "Retry-After": String(retryAfter),
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-          },
-        }
-      );
+      if (rlErr) {
+        console.error("ht_check_rate_limit error:", rlErr);
+        return jsonError("ANTI_ABUSE_UNAVAILABLE", "Service temporarily unavailable. Please try again later.", 503);
+      }
+
+      if (rlResult && rlResult.allowed === false) {
+        const retryAfter = rlResult.retry_after_seconds || 60;
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: {
+              code: "RATE_LIMITED",
+              message: "Too many requests. Please wait a moment before trying again.",
+            },
+          }),
+          {
+            status: 429,
+            headers: {
+              "Content-Type": "application/json",
+              "Retry-After": String(retryAfter),
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+            },
+          }
+        );
+      }
+      rateLimitAllowed = true;
+    } else if (isHandoffOrContactProtocol) {
+      // Handoff/contact protocol requests on an existing session bypass provider message quota
+      rateLimitAllowed = true;
+    } else {
+      // Normal AI message request on existing session consumes provider-message bucket quota
+      const bucketKey = `ht:rl:msg:${tenantId}:${hashedRequester}`;
+      const { data: rlResult, error: rlErr } = await supabase.rpc("ht_check_rate_limit", {
+        p_bucket_key: bucketKey,
+        p_max_requests: 30, // 30 msgs/hr
+        p_window_seconds: 3600,
+      });
+
+      if (rlErr) {
+        console.error("ht_check_rate_limit error:", rlErr);
+        return jsonError("ANTI_ABUSE_UNAVAILABLE", "Service temporarily unavailable. Please try again later.", 503);
+      }
+
+      if (rlResult && rlResult.allowed === false) {
+        const retryAfter = rlResult.retry_after_seconds || 60;
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: {
+              code: "RATE_LIMITED",
+              message: "Too many requests. Please wait a moment before trying again.",
+            },
+          }),
+          {
+            status: 429,
+            headers: {
+              "Content-Type": "application/json",
+              "Retry-After": String(retryAfter),
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+            },
+          }
+        );
+      }
+      rateLimitAllowed = true;
     }
 
-    // -----------------------------------------------------------------------
-    // 4. Handle handoff request
-    // -----------------------------------------------------------------------
-    const isHandoffRequest = message.startsWith("__HANDOFF_REQUEST__:");
+    if (!rateLimitAllowed) {
+      return jsonError("ANTI_ABUSE_UNAVAILABLE", "Service temporarily unavailable. Please try again later.", 503);
+    }
 
     // -----------------------------------------------------------------------
     // 5. Resolve or create conversation
