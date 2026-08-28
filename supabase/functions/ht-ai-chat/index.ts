@@ -181,12 +181,12 @@ serve(async (req: Request) => {
 
     if (session_token) {
       // Validate existing session
-      const { data: convData } = await supabase.rpc("ht_get_ai_conversation_by_session", {
+      const { data: convData, error: getConvErr } = await supabase.rpc("ht_get_ai_conversation_by_session", {
         p_session_token: session_token,
       });
 
-      if (!convData?.success || !convData?.conversation) {
-        return jsonError("INVALID_SESSION", "Invalid or expired session.", 401);
+      if (getConvErr || !convData?.success || !convData?.conversation) {
+        return jsonError("INVALID_SESSION", "Invalid or expired conversation session.", 401);
       }
 
       // Cross-tenant check
@@ -214,13 +214,14 @@ serve(async (req: Request) => {
       }
     } else {
       // Create new conversation
-      const { data: newConv } = await supabase.rpc("ht_create_ai_conversation", {
+      const { data: newConv, error: createConvErr } = await supabase.rpc("ht_create_ai_conversation", {
         p_tenant_id: tenantId,
         p_preferred_language: preferred_language || "en",
       });
 
-      if (!newConv?.success) {
-        return jsonError("CONVERSATION_CREATE_FAILED", "Unable to start conversation.", 500);
+      if (createConvErr || !newConv?.success) {
+        console.error("ht_create_ai_conversation error:", createConvErr || newConv);
+        return jsonError("CONVERSATION_CREATE_FAILED", "Unable to start conversation. Please try again.", 500);
       }
 
       conversationId = newConv.conversation_id;
@@ -234,7 +235,7 @@ serve(async (req: Request) => {
 
     if (!activeLeadId && full_name && (email || phone)) {
       // Create lead through canonical public authority
-      const { data: leadResult } = await supabase.rpc("ht_create_public_lead", {
+      const { data: leadResult, error: leadErr } = await supabase.rpc("ht_create_public_lead", {
         p_slug: tenant_slug.toLowerCase().trim(),
         p_full_name: full_name,
         p_email: email || null,
@@ -246,14 +247,22 @@ serve(async (req: Request) => {
         p_referring_agency_id: referring_agency_id || null,
       });
 
-      if (leadResult?.success && leadResult?.lead_id) {
-        activeLeadId = leadResult.lead_id;
+      if (leadErr || !leadResult?.success || !leadResult?.lead_id) {
+        console.error("ht_create_public_lead error:", leadErr || leadResult);
+        return jsonError("LEAD_CREATION_FAILED", "Unable to process contact details. Please try again.", 500);
+      }
 
-        // Link conversation to created/reused lead via server-internal primitive
-        await supabase.rpc("ht_link_ai_conversation_to_lead", {
-          p_conversation_id: conversationId,
-          p_lead_id: activeLeadId,
-        });
+      activeLeadId = leadResult.lead_id;
+
+      // Link conversation to created/reused lead via server-internal primitive
+      const { data: linkResult, error: linkErr } = await supabase.rpc("ht_link_ai_conversation_to_lead", {
+        p_conversation_id: conversationId,
+        p_lead_id: activeLeadId,
+      });
+
+      if (linkErr || !linkResult?.success) {
+        console.error("ht_link_ai_conversation_to_lead error:", linkErr || linkResult);
+        return jsonError("CONVERSATION_LINK_FAILED", "Unable to connect conversation to lead record.", 500);
       }
     }
 
@@ -275,10 +284,15 @@ serve(async (req: Request) => {
         });
       }
 
-      await supabase.rpc("ht_request_handoff", {
+      const { data: handoffRes, error: handoffErr } = await supabase.rpc("ht_request_handoff", {
         p_conversation_id: conversationId,
         p_reason: reason,
       });
+
+      if (handoffErr || !handoffRes?.success) {
+        console.error("ht_request_handoff error:", handoffErr || handoffRes);
+        return jsonError("HANDOFF_REQUEST_FAILED", "Unable to process handoff request. Please try again.", 500);
+      }
 
       return jsonSuccess({
         session_token: currentSessionToken,
@@ -293,11 +307,16 @@ serve(async (req: Request) => {
     // -----------------------------------------------------------------------
     // 7. Store user message
     // -----------------------------------------------------------------------
-    await supabase.rpc("ht_add_ai_message", {
+    const { data: userMsgRes, error: userMsgErr } = await supabase.rpc("ht_add_ai_message", {
       p_session_token: currentSessionToken,
       p_role: "user",
       p_content: message.trim(),
     });
+
+    if (userMsgErr || !userMsgRes?.success) {
+      console.error("ht_add_ai_message (user) error:", userMsgErr || userMsgRes);
+      return jsonError("MESSAGE_PERSIST_FAILED", "Unable to record message. Please try again.", 500);
+    }
 
     // -----------------------------------------------------------------------
     // 8. Check medical safety boundary
@@ -308,17 +327,27 @@ serve(async (req: Request) => {
       const safetyResponse = "I'm an intake assistant and cannot provide medical advice, diagnosis, or treatment recommendations. Our qualified medical professionals will review your inquiry personally. Would you like me to connect you with a human coordinator who can properly address your health questions?";
 
       // Store safety response
-      await supabase.rpc("ht_add_ai_message", {
+      const { data: safetyMsgRes, error: safetyMsgErr } = await supabase.rpc("ht_add_ai_message", {
         p_session_token: currentSessionToken,
         p_role: "assistant",
         p_content: safetyResponse,
       });
 
+      if (safetyMsgErr || !safetyMsgRes?.success) {
+        console.error("ht_add_ai_message (safety assistant) error:", safetyMsgErr || safetyMsgRes);
+        return jsonError("MESSAGE_PERSIST_FAILED", "Unable to record response. Please try again.", 500);
+      }
+
       // Trigger handoff state
-      await supabase.rpc("ht_request_handoff", {
+      const { data: medHandoffRes, error: medHandoffErr } = await supabase.rpc("ht_request_handoff", {
         p_conversation_id: conversationId,
         p_reason: "medical_advice_boundary",
       });
+
+      if (medHandoffErr || !medHandoffRes?.success) {
+        console.error("ht_request_handoff (medical boundary) error:", medHandoffErr || medHandoffRes);
+        return jsonError("HANDOFF_REQUEST_FAILED", "Unable to record medical safety handoff. Please try again.", 500);
+      }
 
       // If no lead bound, request contact details, do NOT claim coordinator reached out yet
       const requiresContact = !activeLeadId;
@@ -380,11 +409,16 @@ serve(async (req: Request) => {
     // -----------------------------------------------------------------------
     // 10. Store AI response
     // -----------------------------------------------------------------------
-    await supabase.rpc("ht_add_ai_message", {
+    const { data: aiMsgRes, error: aiMsgErr } = await supabase.rpc("ht_add_ai_message", {
       p_session_token: currentSessionToken,
       p_role: "assistant",
       p_content: aiReply,
     });
+
+    if (aiMsgErr || !aiMsgRes?.success) {
+      console.error("ht_add_ai_message (assistant) error:", aiMsgErr || aiMsgRes);
+      return jsonError("MESSAGE_PERSIST_FAILED", "Unable to record AI response. Please try again.", 500);
+    }
 
     // -----------------------------------------------------------------------
     // 11. Generate and persist summary for coordinator
@@ -396,10 +430,15 @@ serve(async (req: Request) => {
       summary = `[AI-generated assistive summary — not verified clinical fact] User interests: ${userMsgs.slice(-3).join("; ").substring(0, 300)}`;
 
       // Persist summary server-side to ht_ai_conversations and (if linked) ht_leads
-      await supabase.rpc("ht_update_ai_conversation_summary", {
+      const { data: summaryRes, error: summaryErr } = await supabase.rpc("ht_update_ai_conversation_summary", {
         p_conversation_id: conversationId,
         p_summary: summary,
       });
+
+      if (summaryErr || !summaryRes?.success) {
+        console.error("ht_update_ai_conversation_summary error:", summaryErr || summaryRes);
+        return jsonError("SUMMARY_PERSIST_FAILED", "Unable to update conversation summary. Please try again.", 500);
+      }
     }
 
     return jsonSuccess({
@@ -411,7 +450,7 @@ serve(async (req: Request) => {
     });
 
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : "Unknown error";
-    return jsonError("INTERNAL_ERROR", `AI chat service error: ${errorMessage}`, 500);
+    console.error("ht-ai-chat unhandled internal error:", err);
+    return jsonError("INTERNAL_ERROR", "An unexpected error occurred in the AI chat service. Please try again.", 500);
   }
 });

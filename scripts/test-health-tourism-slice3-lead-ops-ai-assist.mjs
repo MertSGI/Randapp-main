@@ -97,12 +97,18 @@ if (fs.existsSync(edgeFnPath)) {
   assert(fnContent.includes('ht_update_ai_conversation_summary'), 'Edge Function persists summary via server primitive');
   assert(fnContent.includes('requires_contact'), 'Edge Function prompts for contact before claiming coordinator reached out');
 
+  // R4 RPC Error handling & generic error response checks
+  assert(fnContent.includes('getConvErr') && fnContent.includes('createConvErr') && fnContent.includes('leadErr') && fnContent.includes('linkErr') && fnContent.includes('handoffErr') && fnContent.includes('userMsgErr') && fnContent.includes('aiMsgErr') && fnContent.includes('summaryErr'),
+    'Edge Function checks error results for all Supabase RPC calls');
+  assert(!fnContent.includes('AI chat service error: ${errorMessage}') && !fnContent.includes('AI chat service error: ${internalErrorMessage}'),
+    'Edge Function does NOT leak raw internal error messages in public JSON responses');
+
   // Medical boundary & handoff check
   assert(fnContent.includes('STRICT MEDICAL BOUNDARY'), 'Medical safety boundary prompt present in Edge Function');
   assert(fnContent.includes('ht_request_handoff'), 'Edge Function triggers handoff for medical queries');
 }
 
-// 3. SQL Test Suite Canonical Clinic Table Checks
+// 3. SQL Test Suite Canonical Clinic Table & Privilege Checks
 const sqlTestPath = path.join(rootDir, 'supabase', 'tests', 'health_tourism_lead_ops_ai_assist_tests.sql');
 assert(fs.existsSync(sqlTestPath), 'SQL test suite exists');
 
@@ -112,9 +118,22 @@ if (fs.existsSync(sqlTestPath)) {
   assert(!sqlContent.includes('public.encounters'), 'SQL test suite does NOT query non-canonical public.encounters');
   assert(sqlContent.includes('public.clinic_patient_profiles'), 'SQL test suite queries canonical public.clinic_patient_profiles');
   assert(sqlContent.includes('public.clinic_encounters'), 'SQL test suite queries canonical public.clinic_encounters');
+
+  // R4 SQL Test additions
+  assert(sqlContent.includes('has_function_privilege'), 'SQL test suite contains executable privilege assertions');
+  assert(sqlContent.includes('View-only staff and cross-tenant staff handoff mutation denied'), 'SQL test suite tests cross-tenant handoff mutation denial');
+  assert(sqlContent.includes('SYNTHETIC_SECRET_TRANSCRIPT_PHRASE_99'), 'SQL test suite tests raw synthetic phrase non-duplication');
 }
 
-// 4. UI Context & Permission Gating Check
+// 4. Landing & Chat Widget Attribution Propagation Check
+const landingPath = path.join(rootDir, 'pages', 'health-tourism', 'HealthTourismLandingPage.tsx');
+if (fs.existsSync(landingPath)) {
+  const landingContent = fs.readFileSync(landingPath, 'utf8');
+  assert(landingContent.includes('sourceChannel={sourceChannel}') && landingContent.includes('referringAgencyId={referringAgencyId'),
+    'HealthTourismLandingPage passes sourceChannel and referringAgencyId into HtAiChatWidget');
+}
+
+// 5. UI Context & Permission Gating Check
 const workspacePath = path.join(rootDir, 'pages', 'health-tourism', 'HtCoordinatorWorkspacePage.tsx');
 if (fs.existsSync(workspacePath)) {
   const wsContent = fs.readFileSync(workspacePath, 'utf8');

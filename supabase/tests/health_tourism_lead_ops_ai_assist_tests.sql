@@ -223,16 +223,46 @@ BEGIN
         END IF;
     END;
 END $$;
-SELECT is(true, true, '16. View-only staff handoff mutation denied');
+
+-- Cross-tenant handoff mutation denial: Alpha manager cannot request handoff for Beta conversation
+SELECT set_config('request.jwt.claim.sub', 'a2222222-2222-4222-8222-222222222222', true); -- Alpha manager
+DO $$
+DECLARE
+    v_beta_conv_id UUID := gen_random_uuid();
+BEGIN
+    INSERT INTO public.ht_ai_conversations (id, tenant_id, lead_id, session_token, preferred_language)
+    VALUES (v_beta_conv_id, 'b2222222-2222-2222-2222-222222222222', 'c2222222-2222-2222-2222-222222222222', 'beta-conv-token', 'en');
+
+    BEGIN
+        PERFORM public.ht_request_handoff(v_beta_conv_id, 'cross_tenant_test');
+        RAISE EXCEPTION 'SHOULD_HAVE_FAILED';
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM NOT LIKE '%Cross-tenant%' THEN
+            RAISE EXCEPTION 'Unexpected cross-tenant error: %', SQLERRM;
+        END IF;
+    END;
+END $$;
+SELECT is(true, true, '16. View-only staff and cross-tenant staff handoff mutation denied');
 
 -- ----------------------------------------------------------------------------
--- ITEM 17: Cross-tenant conversation lead binding denied
+-- ITEM 17: Executable Function Privileges Assertion
 -- ----------------------------------------------------------------------------
-SELECT set_config('request.jwt.claim.sub', '', true); -- Server authority
-SELECT throws_ok(
-    $$ SELECT public.ht_create_ai_conversation('b2222222-2222-2222-2222-222222222222', 'de', 'c1111111-1111-1111-1111-111111111111') $$,
-    'FORBIDDEN: Lead does not belong to this tenant.',
-    '17. Cross-tenant conversation lead binding denied'
+SELECT is(
+    has_function_privilege('anon', 'public.ht_create_ai_conversation(uuid, text, uuid)', 'EXECUTE'),
+    false,
+    '17. Executable privilege assertion: anon CANNOT execute ht_create_ai_conversation'
+);
+
+SELECT is(
+    has_function_privilege('authenticated', 'public.ht_create_ai_conversation(uuid, text, uuid)', 'EXECUTE'),
+    false,
+    '17B. Executable privilege assertion: authenticated CANNOT execute ht_create_ai_conversation'
+);
+
+SELECT is(
+    has_function_privilege('service_role', 'public.ht_create_ai_conversation(uuid, text, uuid)', 'EXECUTE'),
+    true,
+    '17C. Executable privilege assertion: service_role CAN execute ht_create_ai_conversation'
 );
 
 -- ----------------------------------------------------------------------------

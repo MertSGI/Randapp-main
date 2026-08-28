@@ -92,6 +92,15 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
     tenantSuspendedDesc: 'Bu kliniğin sağlık turizmi portalı şu anda yayında değildir.',
     loadingTenantText: 'Klinik bilgileri yükleniyor...',
 
+    contactFormIntro: 'Koordinatör iletişimi için bilgilerinizi girin:',
+    nameRequiredErr: 'Lütfen adınızı ve soyadınızı girin.',
+    contactRequiredFormErr: 'Lütfen e-posta veya telefon numarası girin.',
+    submitToCoordinatorBtn: 'Koordinatöre Gönder',
+    handoffSubmittedSuccess: '✓ Bir koordinatör en kısa sürede sizinle iletişime geçecektir.',
+    contactCaptureFailedErr: 'Kayıt başarısız.',
+    genericConnectionErr: 'Bağlantı hatası.',
+    contactDetailsRequiredReply: 'Sizi bir koordinatörle buluşturmak için lütfen iletişim bilgilerinizi girin.',
+
     footerCopyright: 'LARİ Health Tourism Platform.',
     footerRights: 'Tüm hakları saklıdır.',
 
@@ -189,6 +198,15 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
     tenantSuspendedTitle: 'Service Temporarily Unavailable',
     tenantSuspendedDesc: 'This clinic health tourism portal is currently offline.',
     loadingTenantText: 'Loading clinic information...',
+
+    contactFormIntro: 'Please provide your details to connect with a coordinator:',
+    nameRequiredErr: 'Please enter your full name.',
+    contactRequiredFormErr: 'Please provide an email address or phone number.',
+    submitToCoordinatorBtn: 'Send to Coordinator',
+    handoffSubmittedSuccess: '✓ A coordinator will review your inquiry and reach out shortly.',
+    contactCaptureFailedErr: 'Unable to save contact details.',
+    genericConnectionErr: 'Connection error.',
+    contactDetailsRequiredReply: 'To connect you with a coordinator, please provide your contact details.',
 
     footerCopyright: 'LARİ Health Tourism Platform.',
     footerRights: 'All rights reserved.',
@@ -288,6 +306,15 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
     tenantSuspendedDesc: 'Das Portal dieser Klinik ist derzeit offline.',
     loadingTenantText: 'Klinikinformationen werden geladen...',
 
+    contactFormIntro: 'Bitte geben Sie Ihre Kontaktdaten für den Koordinator ein:',
+    nameRequiredErr: 'Bitte geben Sie Ihren vollständigen Namen ein.',
+    contactRequiredFormErr: 'Bitte geben Sie eine E-Mail-Adresse oder Telefonnummer an.',
+    submitToCoordinatorBtn: 'An Koordinator senden',
+    handoffSubmittedSuccess: '✓ Ein Koordinator wird Ihre Anfrage prüfen und sich in Kürze melden.',
+    contactCaptureFailedErr: 'Kontaktdaten konnten nicht gespeichert werden.',
+    genericConnectionErr: 'Verbindungsfehler.',
+    contactDetailsRequiredReply: 'Um Sie mit einem Koordinator zu verbinden, geben Sie bitte Ihre Kontaktdaten an.',
+
     footerCopyright: 'LARİ Health Tourism Platform.',
     footerRights: 'Alle Rechte vorbehalten.',
 
@@ -386,6 +413,15 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
     tenantSuspendedDesc: 'Портал данной клиники в настоящее время отключен.',
     loadingTenantText: 'Загрузка информации о клинике...',
 
+    contactFormIntro: 'Укажите ваши данные для связи с координатором:',
+    nameRequiredErr: 'Пожалуйста, введите ваше имя и фамилию.',
+    contactRequiredFormErr: 'Пожалуйста, укажите email или номер телефона.',
+    submitToCoordinatorBtn: 'Отправить координатору',
+    handoffSubmittedSuccess: '✓ Координатор изучит ваш запрос и свяжется с вами в ближайшее время.',
+    contactCaptureFailedErr: 'Не удалось сохранить контактные данные.',
+    genericConnectionErr: 'Ошибка соединения.',
+    contactDetailsRequiredReply: 'Чтобы связать вас с координатором, пожалуйста, укажите ваши контактные данные.',
+
     footerCopyright: 'LARİ Health Tourism Platform.',
     footerRights: 'Все права защищены.',
 
@@ -455,7 +491,7 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
     reviewNotice: 'يرجى التحقق من صحة بياناتك قبل الإرسال.',
     fullNameSummary: 'الاسم الكامل',
     contactSummary: 'حالة الاتصال',
-    emailSummary: 'البريد الإلكتروني',
+    emailSummary: 'الهاتف',
     phoneSummary: 'الهاتف',
     countrySummary: 'الدولة',
     languageSummary: 'اللغة المفضلة',
@@ -483,6 +519,15 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
     tenantSuspendedTitle: 'الخدمة غير متوفرة مؤقتاً',
     tenantSuspendedDesc: 'بوابة السياحة العلاجية لهذه العيادة متوقفة حالياً.',
     loadingTenantText: 'جاري تحميل معلومات العيادة...',
+
+    contactFormIntro: 'يرجى تقديم بياناتك للتواصل مع المنسق:',
+    nameRequiredErr: 'يرجى إدخال الاسم الكامل.',
+    contactRequiredFormErr: 'يرجى تقديم البريد الإلكتروني أو رقم الهاتف.',
+    submitToCoordinatorBtn: 'إرسال للمنسق',
+    handoffSubmittedSuccess: '✓ سيتواصل معك المنسق قريباً بعد مراجعة استفسارك.',
+    contactCaptureFailedErr: 'تعذر حفظ بيانات الاتصال.',
+    genericConnectionErr: 'خطأ في الاتصال.',
+    contactDetailsRequiredReply: 'لتوصيلك بالمنسق، يرجى تقديم بيانات الاتصال الخاصة بك.',
 
     footerCopyright: 'منصة LARİ للسياحة العلاجية.',
     footerRights: 'جميع الحقوق محفوظة.',

@@ -368,6 +368,10 @@ export const HealthTourismLandingPage: React.FC = () => {
         <HtAiChatWidget
           tenantSlug={businessProfile.slug}
           preferredLanguage={language}
+          sourceChannel={sourceChannel}
+          referringAgencyId={referringAgencyId || undefined}
+          t={t}
+          isRtl={isRtl}
           translations={{
             chatTitle: language === 'tr' ? 'Sağlık Turizmi Asistanı' : language === 'de' ? 'Gesundheitstourismus-Assistent' : language === 'ru' ? 'Ассистент медицинского туризма' : language === 'ar' ? 'مساعد السياحة الصحية' : 'Health Tourism Assistant',
             chatPlaceholder: language === 'tr' ? 'Mesajınızı yazın...' : language === 'de' ? 'Nachricht eingeben...' : language === 'ru' ? 'Введите сообщение...' : language === 'ar' ? 'اكتب رسالتك...' : 'Type your message...',

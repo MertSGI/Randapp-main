@@ -102,6 +102,16 @@ export interface HtTranslationDictionary {
   tenantSuspendedDesc: string;
   loadingTenantText: string;
 
+  // Chat & Handoff Contact Capture
+  contactFormIntro: string;
+  nameRequiredErr: string;
+  contactRequiredFormErr: string;
+  submitToCoordinatorBtn: string;
+  handoffSubmittedSuccess: string;
+  contactCaptureFailedErr: string;
+  genericConnectionErr: string;
+  contactDetailsRequiredReply: string;
+
   // Footer
   footerCopyright: string;
   footerRights: string;

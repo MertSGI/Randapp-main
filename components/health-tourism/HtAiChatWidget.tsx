@@ -1,11 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { HealthTourismAiService } from '../../utils/healthTourismAiService';
 import { HtAiChatResponse } from '../../types/healthTourismAi';
+import { HtTranslationDictionary } from '../../types/healthTourismPublic';
 import { MessageCircle, Send, X, User, Bot, ArrowRightLeft } from 'lucide-react';
 
 interface Props {
   tenantSlug: string;
   preferredLanguage: string;
+  sourceChannel?: string;
+  referringAgencyId?: string;
   translations: {
     chatTitle: string;
     chatPlaceholder: string;
@@ -14,6 +17,8 @@ interface Props {
     chatWelcome: string;
     chatMedicalDisclaimer: string;
   };
+  t: HtTranslationDictionary;
+  isRtl?: boolean;
 }
 
 interface ChatMessage {
@@ -34,7 +39,15 @@ const aiService = new HealthTourismAiService();
  * Medical safety: Defers medical questions to human coordinators.
  * AI summary is explicitly labeled as assistive, not verified clinical fact.
  */
-export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage, translations }) => {
+export const HtAiChatWidget: React.FC<Props> = ({
+  tenantSlug,
+  preferredLanguage,
+  sourceChannel,
+  referringAgencyId,
+  translations,
+  t,
+  isRtl = false,
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -75,6 +88,8 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
         message: userMessage,
         tenant_slug: tenantSlug,
         preferred_language: preferredLanguage,
+        source_channel: sourceChannel,
+        referring_agency_id: referringAgencyId,
       });
 
       if (response.success) {
@@ -90,10 +105,10 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
           setHandoffTriggered(true);
         }
       } else {
-        addMessage('assistant', response.error?.message || 'Üzgünüz, bir hata oluştu. Lütfen daha sonra tekrar deneyin.');
+        addMessage('assistant', response.error?.message || t.submitErrorGeneric);
       }
     } catch {
-      addMessage('assistant', 'Bağlantı hatası. Lütfen daha sonra tekrar deneyin.');
+      addMessage('assistant', t.genericConnectionErr);
     }
 
     setSending(false);
@@ -114,9 +129,11 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
         } else if (response.handoff_triggered) {
           setHandoffTriggered(true);
         }
+      } else {
+        addMessage('assistant', response.error?.message || t.submitErrorGeneric);
       }
     } catch {
-      addMessage('assistant', 'Bağlantı hatası.');
+      addMessage('assistant', t.genericConnectionErr);
     }
 
     setSending(false);
@@ -125,11 +142,11 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
   const handleContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!contactName.trim()) {
-      setContactError('Lütfen adınızı ve soyadınızı girin.');
+      setContactError(t.nameRequiredErr);
       return;
     }
     if (!contactEmail.trim() && !contactPhone.trim()) {
-      setContactError('Lütfen e-posta veya telefon numarası girin.');
+      setContactError(t.contactRequiredFormErr);
       return;
     }
 
@@ -145,19 +162,23 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
         full_name: contactName.trim(),
         email: contactEmail.trim() || undefined,
         phone: contactPhone.trim() || undefined,
+        source_channel: sourceChannel,
+        referring_agency_id: referringAgencyId,
       });
 
-      if (response.success) {
+      if (response.success && response.handoff_triggered && !response.requires_contact) {
         setShowContactForm(false);
         setHandoffTriggered(true);
         if (response.reply) {
           addMessage('assistant', response.reply);
         }
+      } else if (response.success && response.requires_contact) {
+        setContactError(t.contactRequiredFormErr);
       } else {
-        setContactError(response.error?.message || 'Kayıt başarısız.');
+        setContactError(response.error?.message || t.contactCaptureFailedErr);
       }
     } catch {
-      setContactError('Bağlantı hatası.');
+      setContactError(t.genericConnectionErr);
     }
 
     setSending(false);
@@ -183,10 +204,10 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
   }
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 w-[360px] max-h-[540px] flex flex-col bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+    <div className={`fixed bottom-6 right-6 z-50 w-[360px] max-h-[540px] flex flex-col bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden ${isRtl ? 'rtl' : 'ltr'}`}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-teal-500 to-emerald-600 text-white">
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2 rtl:space-x-reverse">
           <Bot className="h-5 w-5" />
           <span className="text-sm font-bold">{translations.chatTitle}</span>
         </div>
@@ -213,7 +234,7 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
         {messages.map(msg => (
           <div
             key={msg.id}
-            className={`flex items-start space-x-2 ${msg.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}
+            className={`flex items-start space-x-2 rtl:space-x-reverse ${msg.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}
           >
             <div className={`flex-shrink-0 h-6 w-6 rounded-full flex items-center justify-center ${
               msg.role === 'user'
@@ -236,49 +257,49 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
         {showContactForm && (
           <div className="bg-teal-50/80 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800 p-3 rounded-xl space-y-2">
             <p className="text-xs font-semibold text-teal-900 dark:text-teal-200">
-              Koordinatör iletişimi için bilgilerinizi girin:
+              {t.contactFormIntro}
             </p>
             {contactError && <p className="text-[10px] text-red-600 font-medium">{contactError}</p>}
             <form onSubmit={handleContactSubmit} className="space-y-2">
               <input
                 type="text"
-                placeholder="Ad Soyad *"
+                placeholder={`${t.fullNameLabel} *`}
                 value={contactName}
                 onChange={e => setContactName(e.target.value)}
-                className="w-full text-xs px-2.5 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700"
+                className="w-full text-xs px-2.5 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
               />
               <input
                 type="email"
-                placeholder="E-posta"
+                placeholder={t.emailLabel}
                 value={contactEmail}
                 onChange={e => setContactEmail(e.target.value)}
-                className="w-full text-xs px-2.5 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700"
+                className="w-full text-xs px-2.5 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
               />
               <input
                 type="tel"
-                placeholder="Telefon"
+                placeholder={t.phoneLabel}
                 value={contactPhone}
                 onChange={e => setContactPhone(e.target.value)}
-                className="w-full text-xs px-2.5 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700"
+                className="w-full text-xs px-2.5 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
               />
               <button
                 type="submit"
                 disabled={sending}
-                className="w-full py-1.5 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 rounded transition-colors"
+                className="w-full py-1.5 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 rounded transition-colors disabled:opacity-50"
               >
-                Koordinatöre Gönder
+                {t.submitToCoordinatorBtn}
               </button>
             </form>
           </div>
         )}
 
         {sending && (
-          <div className="flex items-start space-x-2">
+          <div className="flex items-start space-x-2 rtl:space-x-reverse">
             <div className="h-6 w-6 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
               <Bot className="h-3 w-3 text-slate-400 animate-pulse" />
             </div>
             <div className="bg-slate-100 dark:bg-slate-700 px-3 py-2 rounded-xl rounded-tl-sm">
-              <div className="flex space-x-1">
+              <div className="flex space-x-1 rtl:space-x-reverse">
                 <span className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }} />
                 <span className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '150ms' }} />
                 <span className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '300ms' }} />
@@ -294,11 +315,11 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
         {handoffTriggered ? (
           <div className="text-center py-2 px-3 bg-green-50 dark:bg-green-950/20 rounded-lg">
             <p className="text-[10px] text-green-700 dark:text-green-300 font-medium">
-              ✓ Bir koordinatör en kısa sürede sizinle iletişime geçecektir.
+              {t.handoffSubmittedSuccess}
             </p>
           </div>
         ) : (
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 rtl:space-x-reverse">
             <button
               onClick={handleHandoff}
               disabled={!sessionToken || sending}

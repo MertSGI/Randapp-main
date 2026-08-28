@@ -1524,6 +1524,11 @@ BEGIN
         RAISE EXCEPTION 'FORBIDDEN: Cross-tenant conversation lead binding denied.';
     END IF;
 
+    -- Prevent rebinding to a DIFFERENT lead
+    IF v_conv.lead_id IS NOT NULL AND v_conv.lead_id <> p_lead_id THEN
+        RAISE EXCEPTION 'INVALID_STATE: Conversation is already linked to a different lead.';
+    END IF;
+
     -- Idempotent check: if already linked to same lead, return success
     IF v_conv.lead_id = p_lead_id THEN
         RETURN jsonb_build_object(
