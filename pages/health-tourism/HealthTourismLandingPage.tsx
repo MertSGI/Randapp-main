@@ -364,9 +364,9 @@ export const HealthTourismLandingPage: React.FC = () => {
       </footer>
 
       {/* AI Chat Widget — only when tenant is loaded */}
-      {tenant && businessProfile?.slug && (
+      {tenant?.slug && (
         <HtAiChatWidget
-          tenantSlug={businessProfile.slug}
+          tenantSlug={tenant.slug}
           preferredLanguage={language}
           sourceChannel={sourceChannel}
           referringAgencyId={referringAgencyId || undefined}

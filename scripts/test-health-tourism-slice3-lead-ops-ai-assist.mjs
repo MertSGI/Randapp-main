@@ -116,7 +116,7 @@ if (fs.existsSync(edgeFnPath)) {
   assert(!fnContent.includes('SUPABASE_SERVICE_ROLE_KEY.slice'), 'Requester hashing does NOT depend on SUPABASE_SERVICE_ROLE_KEY prefix');
   assert(fnContent.includes('HT_RATE_LIMIT_HASH_KEY'), 'Requester hashing uses dedicated HT_RATE_LIMIT_HASH_KEY secret');
   assert(fnContent.includes('"HMAC"') && fnContent.includes('"SHA-256"'), 'Requester hashing algorithm uses HMAC-SHA-256');
-  assert(fnContent.includes('ANTI_ABUSE_UNAVAILABLE') && fnContent.includes('status: 503'), 'Rate limit RPC failure fails closed with HTTP 503 ANTI_ABUSE_UNAVAILABLE');
+  assert(fnContent.includes('jsonError("ANTI_ABUSE_UNAVAILABLE"') && fnContent.includes('503'), 'Rate limit RPC failure fails closed with HTTP 503 ANTI_ABUSE_UNAVAILABLE');
   assert(fnContent.includes('isHandoffOrContactProtocol') && fnContent.includes('isHandoffRequest'), 'Edge Function classifies handoff and contact protocol requests before rate limit consumption');
   assert(fnContent.includes('typeof rlResult.allowed !== "boolean"') && fnContent.includes('rlResult.allowed === true'), 'rateLimitAllowed requires explicit rlResult.allowed === true decision (fails closed on null/malformed)');
 

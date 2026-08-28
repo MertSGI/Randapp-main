@@ -116,7 +116,9 @@ export const HtLeadListPanel: React.FC<Props> = ({
                   <div className="flex items-center space-x-2">
                     <span className="text-xs font-semibold text-slate-900 dark:text-white truncate">{lead.full_name}</span>
                     {lead.handoff_state === 'requested' && (
-                      <Bell className="h-3 w-3 text-amber-500 animate-pulse flex-shrink-0" title="Handoff bekliyor" />
+                      <span title="Handoff bekliyor" aria-label="Handoff bekliyor" className="inline-flex flex-shrink-0">
+                        <Bell className="h-3 w-3 text-amber-500 animate-pulse" />
+                      </span>
                     )}
                   </div>
 

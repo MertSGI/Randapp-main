@@ -16,8 +16,13 @@ export class HealthTourismAiService {
   private supabaseAnonKey: string;
 
   constructor() {
-    this.supabaseUrl = (import.meta as Record<string, Record<string, string>>).env?.VITE_SUPABASE_URL || '';
-    this.supabaseAnonKey = (import.meta as Record<string, Record<string, string>>).env?.VITE_SUPABASE_ANON_KEY || '';
+    let env: Record<string, string | undefined> = {};
+    try {
+      env = (import.meta as unknown as { env?: Record<string, string> }).env || {};
+    } catch {}
+
+    this.supabaseUrl = env.VITE_SUPABASE_URL || '';
+    this.supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || '';
   }
 
   /**

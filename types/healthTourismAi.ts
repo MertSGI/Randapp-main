@@ -24,6 +24,12 @@ export interface HtAiChatResponse {
   handoff_triggered?: boolean;
   requires_contact?: boolean;
   handoff_reason?: string;
+  outcome_code?:
+    | 'MEDICAL_SAFETY_BOUNDARY'
+    | 'CONTACT_REQUIRED'
+    | 'HANDOFF_COMPLETED'
+    | 'LIMIT_REACHED_REQUIRES_CONTACT'
+    | 'LIMIT_REACHED_HANDOFF_COMPLETED';
   /** AI-generated assistive summary — not verified clinical fact */
   summary?: string;
   error?: {
