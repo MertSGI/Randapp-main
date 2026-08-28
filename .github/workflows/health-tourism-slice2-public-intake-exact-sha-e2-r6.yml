@@ -38,6 +38,8 @@ jobs:
             fi
           }
 
+          set_result "EXPECTED_PRODUCT_SHA" "6e8d423083d44510c8446c7a858c26d1555cac0c"
+          set_result "EXPECTED_EVIDENCE_BRANCH" "ci/health-tourism-slice2-public-intake-exact-sha-r6-20260828"
           set_result "GITHUB_SHA" "${GITHUB_SHA}"
           set_result "EVIDENCE_SHA_GITHUB_SHA_MATCH" "NO"
           if [ "${ACTUAL_EVIDENCE_SHA}" = "${GITHUB_SHA}" ]; then
@@ -960,6 +962,13 @@ jobs:
             fi
           }
 
+          check_exact "EXPECTED_PRODUCT_SHA" "6e8d423083d44510c8446c7a858c26d1555cac0c"
+          check_exact "REQUESTED_PRODUCT_SHA" "6e8d423083d44510c8446c7a858c26d1555cac0c"
+          check_exact "ACTUAL_TEST_WORKTREE_SHA" "6e8d423083d44510c8446c7a858c26d1555cac0c"
+          check_exact "POST_TEST_PRODUCT_SHA" "6e8d423083d44510c8446c7a858c26d1555cac0c"
+          check_exact "EXPECTED_EVIDENCE_BRANCH" "ci/health-tourism-slice2-public-intake-exact-sha-r6-20260828"
+          check_exact "EXPECTED_EVIDENCE_FILE" ".github/workflows/health-tourism-slice2-public-intake-exact-sha-e2-r6.yml"
+          check_exact "ACTUAL_EVIDENCE_FILE" ".github/workflows/health-tourism-slice2-public-intake-exact-sha-e2-r6.yml"
           check_exact "EVIDENCE_BRANCH_CONTAINMENT_RESULT" "PASS"
           check_exact "EVIDENCE_SHA_GITHUB_SHA_MATCH" "YES"
           check_exact "EXACT_SHA_BINDING_RESULT" "PASS"
