@@ -969,6 +969,8 @@ jobs:
           check_exact "EXPECTED_EVIDENCE_BRANCH" "ci/health-tourism-slice2-public-intake-exact-sha-r6-20260828"
           check_exact "EXPECTED_EVIDENCE_FILE" ".github/workflows/health-tourism-slice2-public-intake-exact-sha-e2-r6.yml"
           check_exact "ACTUAL_EVIDENCE_FILE" ".github/workflows/health-tourism-slice2-public-intake-exact-sha-e2-r6.yml"
+          check_exact "EVIDENCE_BRANCH_FILE_CHANGE_COUNT" "1"
+          check_exact "EVIDENCE_PRODUCT_FILE_CHANGE_COUNT" "0"
           check_exact "EVIDENCE_BRANCH_CONTAINMENT_RESULT" "PASS"
           check_exact "EVIDENCE_SHA_GITHUB_SHA_MATCH" "YES"
           check_exact "EXACT_SHA_BINDING_RESULT" "PASS"
