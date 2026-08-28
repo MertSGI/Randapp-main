@@ -12,3 +12,11 @@ const supabaseUrl = env.VITE_SUPABASE_URL || 'https://mock.supabase.co';
 const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || 'mock-anon-key';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+export const isSupabaseMode = (): boolean => {
+  return Boolean(
+    env.VITE_SUPABASE_URL &&
+    env.VITE_SUPABASE_ANON_KEY
+  );
+};
+

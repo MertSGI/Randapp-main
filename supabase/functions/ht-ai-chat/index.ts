@@ -214,7 +214,12 @@ serve(async (req: Request) => {
         return jsonError("ANTI_ABUSE_UNAVAILABLE", "Service temporarily unavailable. Please try again later.", 503);
       }
 
-      if (rlResult && rlResult.allowed === false) {
+      if (!rlResult || typeof rlResult.allowed !== "boolean") {
+        console.error("ht_check_rate_limit returned malformed response:", rlResult);
+        return jsonError("ANTI_ABUSE_UNAVAILABLE", "Service temporarily unavailable. Please try again later.", 503);
+      }
+
+      if (rlResult.allowed === false) {
         const retryAfter = rlResult.retry_after_seconds || 60;
         return new Response(
           JSON.stringify({
@@ -235,7 +240,10 @@ serve(async (req: Request) => {
           }
         );
       }
-      rateLimitAllowed = true;
+
+      if (rlResult.allowed === true) {
+        rateLimitAllowed = true;
+      }
     } else if (isHandoffOrContactProtocol) {
       // Handoff/contact protocol requests on an existing session bypass provider message quota
       rateLimitAllowed = true;
@@ -253,7 +261,12 @@ serve(async (req: Request) => {
         return jsonError("ANTI_ABUSE_UNAVAILABLE", "Service temporarily unavailable. Please try again later.", 503);
       }
 
-      if (rlResult && rlResult.allowed === false) {
+      if (!rlResult || typeof rlResult.allowed !== "boolean") {
+        console.error("ht_check_rate_limit returned malformed response:", rlResult);
+        return jsonError("ANTI_ABUSE_UNAVAILABLE", "Service temporarily unavailable. Please try again later.", 503);
+      }
+
+      if (rlResult.allowed === false) {
         const retryAfter = rlResult.retry_after_seconds || 60;
         return new Response(
           JSON.stringify({
@@ -274,7 +287,10 @@ serve(async (req: Request) => {
           }
         );
       }
-      rateLimitAllowed = true;
+
+      if (rlResult.allowed === true) {
+        rateLimitAllowed = true;
+      }
     }
 
     if (!rateLimitAllowed) {

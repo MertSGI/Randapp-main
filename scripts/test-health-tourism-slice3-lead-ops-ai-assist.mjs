@@ -109,7 +109,7 @@ if (fs.existsSync(edgeFnPath)) {
   assert(fnContent.includes('LIMIT_REACHED_HANDOFF_COMPLETED') && fnContent.includes('limitHandoffErr'),
     'Edge Function message-limit branch persists handoff via RPC before returning handoff_triggered=true');
 
-  // R6/R7 Anti-Abuse Rate Limiting & Fail-Closed Boundary Checks
+  // R6/R7/R8 Anti-Abuse Rate Limiting & Fail-Closed Boundary Checks
   assert(fnContent.includes('ht_check_rate_limit'), 'Edge Function invokes ht_check_rate_limit anti-abuse RPC');
   assert(fnContent.includes('RATE_LIMITED') && fnContent.includes('Retry-After'), 'Edge Function handles rate limit response with HTTP 429 and Retry-After header');
   assert(!fnContent.includes('p_raw_ip') && fnContent.includes('hashedRequester'), 'Edge Function hashes requester identity before persistence (no raw IP storage)');
@@ -118,7 +118,8 @@ if (fs.existsSync(edgeFnPath)) {
   assert(fnContent.includes('"HMAC"') && fnContent.includes('"SHA-256"'), 'Requester hashing algorithm uses HMAC-SHA-256');
   assert(fnContent.includes('ANTI_ABUSE_UNAVAILABLE') && fnContent.includes('status: 503'), 'Rate limit RPC failure fails closed with HTTP 503 ANTI_ABUSE_UNAVAILABLE');
   assert(fnContent.includes('isHandoffOrContactProtocol') && fnContent.includes('isHandoffRequest'), 'Edge Function classifies handoff and contact protocol requests before rate limit consumption');
-  
+  assert(fnContent.includes('typeof rlResult.allowed !== "boolean"') && fnContent.includes('rlResult.allowed === true'), 'rateLimitAllowed requires explicit rlResult.allowed === true decision (fails closed on null/malformed)');
+
   // Verify anti-abuse check occurs BEFORE expensive AI provider fetch call
   const rlIndex = fnContent.indexOf('ht_check_rate_limit');
   const providerIndex = fnContent.indexOf('fetch(');
@@ -128,6 +129,14 @@ if (fs.existsSync(edgeFnPath)) {
   assert(fnContent.includes('MEDICAL_SAFETY_BOUNDARY'), 'Edge Function returns MEDICAL_SAFETY_BOUNDARY outcome code for medical queries');
   assert(!fnContent.includes('safetyResponse = "I\'m an intake assistant'), 'Edge Function does NOT return hard-coded English medical safety text');
   assert(fnContent.includes('ht_request_handoff'), 'Edge Function triggers handoff for medical queries');
+}
+
+// 2B. Supabase Client Export & Coordinator Workspace Import Check
+const supabaseClientPath = path.join(rootDir, 'services', 'supabaseClient.ts');
+assert(fs.existsSync(supabaseClientPath), 'services/supabaseClient.ts exists');
+if (fs.existsSync(supabaseClientPath)) {
+  const clientContent = fs.readFileSync(supabaseClientPath, 'utf8');
+  assert(clientContent.includes('export const isSupabaseMode'), 'services/supabaseClient.ts exports isSupabaseMode helper');
 }
 
 // 3. SQL Test Suite Canonical Clinic Table & Privilege Checks
