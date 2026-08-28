@@ -158,7 +158,7 @@ SELECT throws_ok(
 -- ITEM 11: Score clamped 0..100
 -- ----------------------------------------------------------------------------
 SELECT is(
-    (public.ht_score_lead('c1111111-1111-1111-1111-111111111111', 100)->>'lead_score')::integer <= 100,
+    (public.ht_score_lead('c1111111-1111-1111-1111-111111111111', 100::smallint)->>'lead_score')::integer <= 100,
     true,
     '11. Score clamped to max 100'
 );
@@ -167,7 +167,7 @@ SELECT is(
 -- ITEM 12: Deterministic score reason codes
 -- ----------------------------------------------------------------------------
 SELECT is(
-    (public.ht_score_lead('c1111111-1111-1111-1111-111111111111', 0)->>'lead_score_reasons')::jsonb @> '["email_present"]'::jsonb,
+    (public.ht_score_lead('c1111111-1111-1111-1111-111111111111', 0::smallint)->>'lead_score_reasons')::jsonb @> '["email_present"]'::jsonb,
     true,
     '12. Deterministic score reason codes generated'
 );
@@ -176,7 +176,7 @@ SELECT is(
 -- ITEM 13: AI contribution bounded
 -- ----------------------------------------------------------------------------
 SELECT is(
-    (public.ht_score_lead('c1111111-1111-1111-1111-111111111111', 99)->>'ai_intent_delta')::integer,
+    (public.ht_score_lead('c1111111-1111-1111-1111-111111111111', 99::smallint)->>'ai_intent_delta')::integer,
     10,
     '13. AI intent delta bounded to max 10'
 );
@@ -185,7 +185,7 @@ SELECT is(
 -- ITEM 14: No clinical severity scoring
 -- ----------------------------------------------------------------------------
 SELECT is(
-    (public.ht_score_lead('c1111111-1111-1111-1111-111111111111', 0)->>'lead_score_reasons')::jsonb @> '["clinical_severity"]'::jsonb,
+    (public.ht_score_lead('c1111111-1111-1111-1111-111111111111', 0::smallint)->>'lead_score_reasons')::jsonb @> '["clinical_severity"]'::jsonb,
     false,
     '14. No clinical severity scoring in reasons'
 );
