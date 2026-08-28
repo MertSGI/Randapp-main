@@ -676,8 +676,9 @@ BEGIN
         RAISE EXCEPTION 'NOT_FOUND: Conversation not found.';
     END IF;
 
-    -- Caller Authority Gate: Must be service-role (auth.uid() IS NULL in Security Definer when service role calls)
-    -- OR caller must be active staff for the exact tenant with HT permissions.
+    -- Caller Authority Gate:
+    -- If caller is authenticated user (auth.uid() IS NOT NULL):
+    -- MUST be active staff for exact tenant with can_manage_ht_leads = true. View-only receives FORBIDDEN.
     IF v_caller_uid IS NOT NULL THEN
         SELECT s.* INTO v_staff
         FROM public.staff s
@@ -692,8 +693,8 @@ BEGIN
         FROM public.ht_staff_profiles
         WHERE staff_id = v_staff.id;
 
-        IF v_hsp.staff_id IS NULL OR (v_hsp.can_view_ht_leads = false AND v_hsp.can_manage_ht_leads = false) THEN
-            RAISE EXCEPTION 'FORBIDDEN: Staff member lacks HT permission.';
+        IF v_hsp.staff_id IS NULL OR v_hsp.can_manage_ht_leads = false THEN
+            RAISE EXCEPTION 'FORBIDDEN: Staff member lacks can_manage_ht_leads permission.';
         END IF;
     END IF;
 
@@ -703,7 +704,7 @@ BEGIN
         updated_at = now()
     WHERE id = p_conversation_id;
 
-    -- If associated with a lead, update lead handoff state and status IF lifecycle permits
+    -- If associated with a lead, update lead handoff state ALWAYS, and status ONLY IF lifecycle permits (qualified -> handoff_pending)
     IF v_conv.lead_id IS NOT NULL THEN
         SELECT * INTO v_lead FROM public.ht_leads WHERE id = v_conv.lead_id;
         IF v_lead.id IS NOT NULL THEN
@@ -713,10 +714,8 @@ BEGIN
 
             v_previous_status := v_lead.status;
 
-            -- Validate lifecycle transition to handoff_pending according to canonical matrix:
-            -- qualified -> handoff_pending (valid)
-            -- new/contacted/handoff_pending -> handoff_pending
-            IF v_previous_status IN ('qualified', 'contacted', 'new', 'handoff_pending') THEN
+            -- Lifecycle transition check: ONLY qualified -> handoff_pending or idempotent handoff_pending -> handoff_pending moves status
+            IF v_previous_status IN ('qualified', 'handoff_pending') THEN
                 v_valid_transition := true;
             END IF;
 
@@ -729,23 +728,33 @@ BEGIN
                     last_activity_at = now(),
                     updated_at = now()
                 WHERE id = v_conv.lead_id;
-
-                INSERT INTO public.audit_events (
-                    tenant_id, actor_id, actor_role, action,
-                    resource_type, resource_id, payload
-                ) VALUES (
-                    v_conv.tenant_id::text,
-                    COALESCE(v_caller_uid::text, 'system'),
-                    CASE WHEN v_caller_uid IS NULL THEN 'system' ELSE 'staff' END,
-                    'ht_ai_handoff_requested',
-                    'ht_leads',
-                    v_conv.lead_id::text,
-                    jsonb_build_object(
-                        'conversation_id', p_conversation_id,
-                        'reason', p_reason
-                    )
-                );
+            ELSE
+                -- For 'new' or 'contacted' status: record handoff_state and reason, but DO NOT jump status to handoff_pending
+                UPDATE public.ht_leads
+                SET handoff_state = 'requested',
+                    handoff_reason = p_reason,
+                    handoff_requested_at = now(),
+                    last_activity_at = now(),
+                    updated_at = now()
+                WHERE id = v_conv.lead_id;
             END IF;
+
+            INSERT INTO public.audit_events (
+                tenant_id, actor_id, actor_role, action,
+                resource_type, resource_id, payload
+            ) VALUES (
+                v_conv.tenant_id::text,
+                COALESCE(v_caller_uid::text, 'system'),
+                CASE WHEN v_caller_uid IS NULL THEN 'system' ELSE 'staff' END,
+                'ht_ai_handoff_requested',
+                'ht_leads',
+                v_conv.lead_id::text,
+                jsonb_build_object(
+                    'conversation_id', p_conversation_id,
+                    'reason', p_reason,
+                    'status_changed', v_valid_transition
+                )
+            );
         END IF;
     END IF;
 
@@ -1484,7 +1493,135 @@ $$;
 
 
 -- =========================================================================
--- 19. EXECUTE PERMISSIONS FOR NEW FUNCTIONS
+-- 19. SERVER-INTERNAL PRIMITIVES: LINKING & SUMMARY PERSISTENCE
+-- =========================================================================
+
+CREATE OR REPLACE FUNCTION public.ht_link_ai_conversation_to_lead(
+    p_conversation_id UUID,
+    p_lead_id UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_conv RECORD;
+    v_lead RECORD;
+BEGIN
+    SELECT * INTO v_conv FROM public.ht_ai_conversations WHERE id = p_conversation_id;
+    IF v_conv.id IS NULL THEN
+        RAISE EXCEPTION 'NOT_FOUND: Conversation not found.';
+    END IF;
+
+    SELECT * INTO v_lead FROM public.ht_leads WHERE id = p_lead_id;
+    IF v_lead.id IS NULL THEN
+        RAISE EXCEPTION 'NOT_FOUND: Lead not found.';
+    END IF;
+
+    -- Enforce exact same tenant
+    IF v_conv.tenant_id <> v_lead.tenant_id THEN
+        RAISE EXCEPTION 'FORBIDDEN: Cross-tenant conversation lead binding denied.';
+    END IF;
+
+    -- Idempotent check: if already linked to same lead, return success
+    IF v_conv.lead_id = p_lead_id THEN
+        RETURN jsonb_build_object(
+            'success', true,
+            'conversation_id', p_conversation_id,
+            'lead_id', p_lead_id,
+            'already_linked', true
+        );
+    END IF;
+
+    UPDATE public.ht_ai_conversations
+    SET lead_id = p_lead_id,
+        updated_at = now()
+    WHERE id = p_conversation_id;
+
+    -- Also copy latest summary to lead if present
+    IF v_conv.summary IS NOT NULL THEN
+        UPDATE public.ht_leads
+        SET ai_summary = v_conv.summary,
+            ai_summary_updated_at = now(),
+            updated_at = now()
+        WHERE id = p_lead_id;
+    END IF;
+
+    INSERT INTO public.audit_events (
+        tenant_id, actor_id, actor_role, action,
+        resource_type, resource_id, payload
+    ) VALUES (
+        v_conv.tenant_id::text,
+        'system',
+        'system',
+        'ht_ai_conversation_linked_to_lead',
+        'ht_ai_conversations',
+        p_conversation_id::text,
+        jsonb_build_object('lead_id', p_lead_id)
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'conversation_id', p_conversation_id,
+        'lead_id', p_lead_id,
+        'already_linked', false
+    );
+END;
+$$;
+
+
+CREATE OR REPLACE FUNCTION public.ht_update_ai_conversation_summary(
+    p_conversation_id UUID,
+    p_summary TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_conv RECORD;
+    v_labeled_summary TEXT;
+BEGIN
+    SELECT * INTO v_conv FROM public.ht_ai_conversations WHERE id = p_conversation_id;
+    IF v_conv.id IS NULL THEN
+        RAISE EXCEPTION 'NOT_FOUND: Conversation not found.';
+    END IF;
+
+    -- Ensure explicit assistive label
+    IF p_summary NOT LIKE '%AI-generated assistive summary — not verified clinical fact%' THEN
+        v_labeled_summary := '[AI-generated assistive summary — not verified clinical fact] ' || p_summary;
+    ELSE
+        v_labeled_summary := p_summary;
+    END IF;
+
+    UPDATE public.ht_ai_conversations
+    SET summary = v_labeled_summary,
+        updated_at = now()
+    WHERE id = p_conversation_id;
+
+    -- If linked to lead, propagate to ht_leads
+    IF v_conv.lead_id IS NOT NULL THEN
+        UPDATE public.ht_leads
+        SET ai_summary = v_labeled_summary,
+            ai_summary_updated_at = now(),
+            updated_at = now()
+        WHERE id = v_conv.lead_id;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'conversation_id', p_conversation_id,
+        'lead_id', v_conv.lead_id,
+        'summary', v_labeled_summary
+    );
+END;
+$$;
+
+
+-- =========================================================================
+-- 20. EXECUTE PERMISSIONS FOR NEW FUNCTIONS
 -- =========================================================================
 
 -- Revoke from public, anon, and authenticated for server-internal AI persistence & global cleanup RPCs
@@ -1497,8 +1634,18 @@ REVOKE ALL ON FUNCTION public.ht_create_ai_conversation FROM PUBLIC, anon, authe
 REVOKE ALL ON FUNCTION public.ht_add_ai_message FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.ht_get_ai_conversation_by_session FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.ht_cleanup_expired_ai_data FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.ht_link_ai_conversation_to_lead FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.ht_update_ai_conversation_summary FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.ht_enqueue_whatsapp_handoff FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.ht_get_my_context FROM PUBLIC, anon;
+
+-- Explicitly GRANT EXECUTE ON server-internal functions TO service_role
+GRANT EXECUTE ON FUNCTION public.ht_create_ai_conversation TO service_role;
+GRANT EXECUTE ON FUNCTION public.ht_add_ai_message TO service_role;
+GRANT EXECUTE ON FUNCTION public.ht_get_ai_conversation_by_session TO service_role;
+GRANT EXECUTE ON FUNCTION public.ht_cleanup_expired_ai_data TO service_role;
+GRANT EXECUTE ON FUNCTION public.ht_link_ai_conversation_to_lead TO service_role;
+GRANT EXECUTE ON FUNCTION public.ht_update_ai_conversation_summary TO service_role;
 
 -- Staff-side operational RPCs (restricted to authenticated)
 GRANT EXECUTE ON FUNCTION public.ht_assign_coordinator TO authenticated;
@@ -1509,10 +1656,8 @@ GRANT EXECUTE ON FUNCTION public.ht_enqueue_whatsapp_handoff TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_request_handoff TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_get_my_context TO authenticated;
 
--- Server-internal persistence RPCs: ht_create_ai_conversation, ht_add_ai_message, ht_get_ai_conversation_by_session, ht_cleanup_expired_ai_data
--- remain REVOKED from anon and authenticated. Service-role (Edge Functions / backend workers) bypasses RLS and permissions.
-
 -- Re-grant existing hardened functions
 GRANT EXECUTE ON FUNCTION public.ht_update_lead_status TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_list_leads TO authenticated;
 GRANT EXECUTE ON FUNCTION public.ht_get_lead TO authenticated;
+

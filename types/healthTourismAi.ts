@@ -8,6 +8,12 @@ export interface HtAiChatRequest {
   message: string;
   tenant_slug: string;
   preferred_language?: string;
+  full_name?: string;
+  email?: string;
+  phone?: string;
+  country_code?: string;
+  source_channel?: string;
+  referring_agency_id?: string;
 }
 
 export interface HtAiChatResponse {
@@ -16,6 +22,7 @@ export interface HtAiChatResponse {
   reply?: string;
   conversation_id?: string;
   handoff_triggered?: boolean;
+  requires_contact?: boolean;
   handoff_reason?: string;
   /** AI-generated assistive summary — not verified clinical fact */
   summary?: string;

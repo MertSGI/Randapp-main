@@ -121,7 +121,10 @@ serve(async (req: Request) => {
     // 2. Parse request
     // -----------------------------------------------------------------------
     const body = await req.json();
-    const { session_token, message, tenant_slug, preferred_language } = body;
+    const {
+      session_token, message, tenant_slug, preferred_language,
+      full_name, email, phone, country_code, source_channel, referring_agency_id
+    } = body;
 
     if (!message || typeof message !== "string" || message.trim().length === 0) {
       return jsonError("INVALID_INPUT", "Message is required.", 400);
@@ -149,9 +152,6 @@ serve(async (req: Request) => {
     }
 
     // Gating checks according to canonical Slice 2 public site authority:
-    // 1. Must be active status
-    // 2. Verification status must NOT be suspended
-    // 3. If public_site_status is present, it must be 'published'
     if (tenantData.status !== "active") {
       return jsonError("NOT_FOUND", "Tenant is not active.", 404);
     }
@@ -176,6 +176,7 @@ serve(async (req: Request) => {
     // -----------------------------------------------------------------------
     let conversationId: string;
     let currentSessionToken: string;
+    let existingLeadId: string | null = null;
     let conversationMessages: Array<{ role: string; content: string }> = [];
 
     if (session_token) {
@@ -195,6 +196,7 @@ serve(async (req: Request) => {
 
       conversationId = convData.conversation.id;
       currentSessionToken = session_token;
+      existingLeadId = convData.conversation.lead_id || null;
       conversationMessages = (convData.messages || []).map((m: { role: string; content: string }) => ({
         role: m.role,
         content: m.content,
@@ -226,10 +228,52 @@ serve(async (req: Request) => {
     }
 
     // -----------------------------------------------------------------------
+    // 5B. Handle Lead Creation & Linking if Contact Info Provided
+    // -----------------------------------------------------------------------
+    let activeLeadId: string | null = existingLeadId;
+
+    if (!activeLeadId && full_name && (email || phone)) {
+      // Create lead through canonical public authority
+      const { data: leadResult } = await supabase.rpc("ht_create_public_lead", {
+        p_slug: tenant_slug.toLowerCase().trim(),
+        p_full_name: full_name,
+        p_email: email || null,
+        p_phone: phone || null,
+        p_preferred_language: preferred_language || "en",
+        p_country_code: country_code || null,
+        p_passport_number: null,
+        p_source_channel: source_channel || "web",
+        p_referring_agency_id: referring_agency_id || null,
+      });
+
+      if (leadResult?.success && leadResult?.lead_id) {
+        activeLeadId = leadResult.lead_id;
+
+        // Link conversation to created/reused lead via server-internal primitive
+        await supabase.rpc("ht_link_ai_conversation_to_lead", {
+          p_conversation_id: conversationId,
+          p_lead_id: activeLeadId,
+        });
+      }
+    }
+
+    // -----------------------------------------------------------------------
     // 6. Handle handoff
     // -----------------------------------------------------------------------
     if (isHandoffRequest) {
       const reason = message.replace("__HANDOFF_REQUEST__:", "").trim() || "user_requested";
+
+      // If conversation is NOT bound to a lead (no contact info), prompt for contact details!
+      if (!activeLeadId) {
+        return jsonSuccess({
+          session_token: currentSessionToken,
+          reply: "To connect you with a coordinator, please provide your contact details.",
+          conversation_id: conversationId,
+          handoff_triggered: false,
+          requires_contact: true,
+          handoff_reason: reason,
+        });
+      }
 
       await supabase.rpc("ht_request_handoff", {
         p_conversation_id: conversationId,
@@ -241,6 +285,7 @@ serve(async (req: Request) => {
         reply: "I've connected you with our human coordination team. A coordinator will review your inquiry and reach out to you shortly.",
         conversation_id: conversationId,
         handoff_triggered: true,
+        requires_contact: false,
         handoff_reason: reason,
       });
     }
@@ -269,17 +314,21 @@ serve(async (req: Request) => {
         p_content: safetyResponse,
       });
 
-      // Trigger handoff for medical queries
+      // Trigger handoff state
       await supabase.rpc("ht_request_handoff", {
         p_conversation_id: conversationId,
         p_reason: "medical_advice_boundary",
       });
+
+      // If no lead bound, request contact details, do NOT claim coordinator reached out yet
+      const requiresContact = !activeLeadId;
 
       return jsonSuccess({
         session_token: currentSessionToken,
         reply: safetyResponse,
         conversation_id: conversationId,
         handoff_triggered: true,
+        requires_contact: requiresContact,
         handoff_reason: "medical_advice_boundary",
       });
     }
@@ -338,14 +387,19 @@ serve(async (req: Request) => {
     });
 
     // -----------------------------------------------------------------------
-    // 11. Generate summary for coordinator
+    // 11. Generate and persist summary for coordinator
     // -----------------------------------------------------------------------
     let summary: string | undefined;
     const totalMessages = conversationMessages.length + 2; // +user +assistant
     if (totalMessages >= 4) {
-      // Simple extractive summary based on user messages
       const userMsgs = [...conversationMessages.filter(m => m.role === "user").map(m => m.content), message.trim()];
       summary = `[AI-generated assistive summary — not verified clinical fact] User interests: ${userMsgs.slice(-3).join("; ").substring(0, 300)}`;
+
+      // Persist summary server-side to ht_ai_conversations and (if linked) ht_leads
+      await supabase.rpc("ht_update_ai_conversation_summary", {
+        p_conversation_id: conversationId,
+        p_summary: summary,
+      });
     }
 
     return jsonSuccess({

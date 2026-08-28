@@ -44,7 +44,7 @@ if (fs.existsSync(migrationPath)) {
   assert(migContent.includes('FUNCTION public.ht_enqueue_whatsapp_handoff'), 'Contains ht_enqueue_whatsapp_handoff RPC');
   assert(migContent.includes('FUNCTION public.ht_get_my_context'), 'Contains ht_get_my_context RPC for server-authoritative staff context');
 
-  // Verify Tightened AI Persistence RPC Permissions (REVOKED from anon/authenticated)
+  // Verify Tightened AI Persistence RPC Permissions (REVOKED from anon/authenticated, GRANTED to service_role)
   assert(migContent.includes('REVOKE ALL ON FUNCTION public.ht_create_ai_conversation FROM PUBLIC, anon, authenticated;'),
     'ht_create_ai_conversation is REVOKED from anon and authenticated');
   assert(migContent.includes('REVOKE ALL ON FUNCTION public.ht_add_ai_message FROM PUBLIC, anon, authenticated;'),
@@ -53,6 +53,18 @@ if (fs.existsSync(migrationPath)) {
     'ht_get_ai_conversation_by_session is REVOKED from anon and authenticated');
   assert(migContent.includes('REVOKE ALL ON FUNCTION public.ht_cleanup_expired_ai_data FROM PUBLIC, anon, authenticated;'),
     'ht_cleanup_expired_ai_data is REVOKED from anon and authenticated');
+
+  // Verify service_role explicit grants
+  assert(migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_create_ai_conversation TO service_role;'),
+    'ht_create_ai_conversation is explicitly GRANTED to service_role');
+  assert(migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_link_ai_conversation_to_lead TO service_role;'),
+    'ht_link_ai_conversation_to_lead is explicitly GRANTED to service_role');
+  assert(migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_update_ai_conversation_summary TO service_role;'),
+    'ht_update_ai_conversation_summary is explicitly GRANTED to service_role');
+
+  // Verify staff view-only gate on handoff
+  assert(migContent.includes('v_hsp.can_manage_ht_leads = false THEN'),
+    'ht_request_handoff requires can_manage_ht_leads=true for staff callers');
 
   // Ensure NO invalid grants exist for internal AI persistence RPCs to anon
   assert(!migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_create_ai_conversation TO anon'),
@@ -63,7 +75,7 @@ if (fs.existsSync(migrationPath)) {
     'Zero GRANT EXECUTE on ht_get_ai_conversation_by_session TO anon');
 }
 
-// 2. Edge Function Canonical Tenant Authority Check
+// 2. Edge Function Canonical Tenant Authority & Handoff Flow Check
 const edgeFnPath = path.join(rootDir, 'supabase', 'functions', 'ht-ai-chat', 'index.ts');
 assert(fs.existsSync(edgeFnPath), 'Edge Function ht-ai-chat exists');
 
@@ -79,12 +91,30 @@ if (fs.existsSync(edgeFnPath)) {
   assert(fnContent.includes('public_site_status'), 'Edge Function checks canonical public_site_status');
   assert(fnContent.includes('verification_status === "suspended"'), 'Edge Function checks verification_status suspension');
 
+  // Contact capture & lead linking check
+  assert(fnContent.includes('ht_create_public_lead'), 'Edge Function creates lead via canonical ht_create_public_lead authority');
+  assert(fnContent.includes('ht_link_ai_conversation_to_lead'), 'Edge Function links conversation to lead via server primitive');
+  assert(fnContent.includes('ht_update_ai_conversation_summary'), 'Edge Function persists summary via server primitive');
+  assert(fnContent.includes('requires_contact'), 'Edge Function prompts for contact before claiming coordinator reached out');
+
   // Medical boundary & handoff check
   assert(fnContent.includes('STRICT MEDICAL BOUNDARY'), 'Medical safety boundary prompt present in Edge Function');
   assert(fnContent.includes('ht_request_handoff'), 'Edge Function triggers handoff for medical queries');
 }
 
-// 3. UI Context & Permission Gating Check
+// 3. SQL Test Suite Canonical Clinic Table Checks
+const sqlTestPath = path.join(rootDir, 'supabase', 'tests', 'health_tourism_lead_ops_ai_assist_tests.sql');
+assert(fs.existsSync(sqlTestPath), 'SQL test suite exists');
+
+if (fs.existsSync(sqlTestPath)) {
+  const sqlContent = fs.readFileSync(sqlTestPath, 'utf8');
+  assert(!sqlContent.includes('public.patients'), 'SQL test suite does NOT query non-canonical public.patients');
+  assert(!sqlContent.includes('public.encounters'), 'SQL test suite does NOT query non-canonical public.encounters');
+  assert(sqlContent.includes('public.clinic_patient_profiles'), 'SQL test suite queries canonical public.clinic_patient_profiles');
+  assert(sqlContent.includes('public.clinic_encounters'), 'SQL test suite queries canonical public.clinic_encounters');
+}
+
+// 4. UI Context & Permission Gating Check
 const workspacePath = path.join(rootDir, 'pages', 'health-tourism', 'HtCoordinatorWorkspacePage.tsx');
 if (fs.existsSync(workspacePath)) {
   const wsContent = fs.readFileSync(workspacePath, 'utf8');
@@ -96,7 +126,7 @@ if (fs.existsSync(workspacePath)) {
     'UI resolves capabilities server-authoritatively via getMyHtContext()');
 }
 
-// 4. No Direct UI HT DML Check
+// 5. No Direct UI HT DML Check
 const componentsDir = path.join(rootDir, 'components', 'health-tourism');
 const pagesDir = path.join(rootDir, 'pages', 'health-tourism');
 
@@ -122,7 +152,7 @@ function checkNoDirectDml(dir) {
 checkNoDirectDml(componentsDir);
 checkNoDirectDml(pagesDir);
 
-// 5. Converted Status Exclusions in UI
+// 6. Converted Status Exclusions in UI
 const detailPanelPath = path.join(rootDir, 'components', 'health-tourism', 'HtLeadDetailPanel.tsx');
 if (fs.existsSync(detailPanelPath)) {
   const detailContent = fs.readFileSync(detailPanelPath, 'utf8');
@@ -130,7 +160,7 @@ if (fs.existsSync(detailPanelPath)) {
          'Converted status is not exposed as a coordinator action');
 }
 
-// 6. Secret Check in Public Bundle / UI
+// 7. Secret Check in Public Bundle / UI
 const chatWidgetPath = path.join(rootDir, 'components', 'health-tourism', 'HtAiChatWidget.tsx');
 if (fs.existsSync(chatWidgetPath)) {
   const chatContent = fs.readFileSync(chatWidgetPath, 'utf8');
@@ -140,7 +170,7 @@ if (fs.existsSync(chatWidgetPath)) {
          'Chat widget uses Edge Function boundary service');
 }
 
-// 7. Arabic Back Copy Correction
+// 8. Arabic Back Copy Correction
 const translationsPath = path.join(rootDir, 'utils', 'healthTourismTranslations.ts');
 if (fs.existsSync(translationsPath)) {
   const transContent = fs.readFileSync(translationsPath, 'utf8');

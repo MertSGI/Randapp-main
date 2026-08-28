@@ -1,5 +1,6 @@
 -- ============================================================================
 -- HEALTH TOURISM SLICE 3 SERVER-AUTHORITY TEST SUITE (34 ASSERTIONS)
+-- Corrected for E1 R3 acceptance
 -- ============================================================================
 
 BEGIN;
@@ -42,12 +43,20 @@ ON CONFLICT (id) DO NOTHING;
 SELECT set_config('request.jwt.claim.sub', 'a1111111-1111-4111-8111-111111111111', true);
 SELECT public.ht_set_staff_profile('b2222222-2222-4222-8222-222222222222', true, true);
 SELECT public.ht_set_staff_profile('b3333333-3333-4333-8333-333333333333', false, true);
+SELECT public.ht_set_staff_profile('b4444444-4444-4444-8444-444444444444', true, true);
 
 -- Create Base Test Lead for Alpha
 INSERT INTO public.ht_leads (
     id, tenant_id, status, source_channel, preferred_language, country_code, full_name, email, phone, notes
 ) VALUES (
-    'c1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'new', 'web', 'de', 'DE', 'Hans Mueller', 'hans@example.de', '+49151123456', 'Interested in dental package'
+    'c1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'new', 'web', 'de', 'DE', 'Hans Mueller', 'hans@example.de', '+49151123456', 'SYNTHETIC_SECRET_TRANSCRIPT_PHRASE_99'
+) ON CONFLICT (id) DO NOTHING;
+
+-- Create Base Test Lead for Beta (for cross-tenant checks)
+INSERT INTO public.ht_leads (
+    id, tenant_id, status, source_channel, preferred_language, country_code, full_name, email, phone, notes
+) VALUES (
+    'c2222222-2222-2222-2222-222222222222', 'b2222222-2222-2222-2222-222222222222', 'new', 'web', 'en', 'GB', 'John Doe', 'john@example.co.uk', '+447911123456', 'Beta lead notes'
 ) ON CONFLICT (id) DO NOTHING;
 
 -- ----------------------------------------------------------------------------
@@ -58,7 +67,7 @@ SELECT has_table('public', 'ht_ai_conversations', '1. Migration 67 applied (ht_a
 -- ----------------------------------------------------------------------------
 -- ITEM 2: Unauthorized HT workspace denied
 -- ----------------------------------------------------------------------------
-SELECT set_config('request.jwt.claim.sub', 'a4444444-4444-4444-8444-444444444444', true); -- Beta staff has no HT profile
+SELECT set_config('request.jwt.claim.sub', 'a5555555-5555-4555-8555-555555555555', true); -- Inactive staff has no HT profile
 SELECT is(
     (public.ht_get_my_context()->>'success')::boolean,
     false,
@@ -66,7 +75,7 @@ SELECT is(
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 3: View-only staff cannot mutate
+-- ITEM 3: View-only staff cannot mutate lead status
 -- ----------------------------------------------------------------------------
 SELECT set_config('request.jwt.claim.sub', 'a3333333-3333-4333-8333-333333333333', true); -- ViewOnly staff
 SELECT throws_ok(
@@ -91,7 +100,7 @@ SELECT is(
 SELECT set_config('request.jwt.claim.sub', 'a4444444-4444-4444-8444-444444444444', true); -- Beta staff
 SELECT throws_ok(
     $$ SELECT public.ht_get_lead('c1111111-1111-1111-1111-111111111111') $$,
-    'FORBIDDEN: Staff member lacks HT lead view permission.',
+    'NOT_FOUND: Lead not found or cross-tenant access denied.',
     '5. Cross-tenant lead read denied'
 );
 
@@ -178,7 +187,7 @@ SELECT is(
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 15: Public AI conversation tenant authority
+-- ITEM 15: Public AI conversation tenant authority & link
 -- ----------------------------------------------------------------------------
 SELECT set_config('request.jwt.claim.sub', '', true); -- Service-role / Server authority
 DO $$
@@ -197,17 +206,29 @@ SELECT is(
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 16: Invalid public session token denied
+-- ITEM 16: View-only staff handoff mutation denied & Cross-tenant handoff denied
 -- ----------------------------------------------------------------------------
-SELECT throws_ok(
-    $$ SELECT public.ht_add_ai_message('invalid-session-token', 'user', 'Hello') $$,
-    'NOT_FOUND: Conversation not found for session token.',
-    '16. Invalid public session token denied'
-);
+SELECT set_config('request.jwt.claim.sub', 'a3333333-3333-4333-8333-333333333333', true); -- ViewOnly staff
+DO $$
+DECLARE
+    v_conv_id UUID;
+BEGIN
+    SELECT id INTO v_conv_id FROM public.ht_ai_conversations WHERE tenant_id = 'a1111111-1111-1111-1111-111111111111' LIMIT 1;
+    BEGIN
+        PERFORM public.ht_request_handoff(v_conv_id, 'test');
+        RAISE EXCEPTION 'SHOULD_HAVE_FAILED';
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM NOT LIKE '%can_manage_ht_leads%' THEN
+            RAISE EXCEPTION 'Unexpected error message: %', SQLERRM;
+        END IF;
+    END;
+END $$;
+SELECT is(true, true, '16. View-only staff handoff mutation denied');
 
 -- ----------------------------------------------------------------------------
--- ITEM 17: Cross-tenant conversation denied
+-- ITEM 17: Cross-tenant conversation lead binding denied
 -- ----------------------------------------------------------------------------
+SELECT set_config('request.jwt.claim.sub', '', true); -- Server authority
 SELECT throws_ok(
     $$ SELECT public.ht_create_ai_conversation('b2222222-2222-2222-2222-222222222222', 'de', 'c1111111-1111-1111-1111-111111111111') $$,
     'FORBIDDEN: Lead does not belong to this tenant.',
@@ -215,17 +236,44 @@ SELECT throws_ok(
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 18: AI message retention timestamp exists
+-- ITEM 18: AI message retention timestamp exists on ht_ai_messages
 -- ----------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_session TEXT;
+BEGIN
+    SELECT session_token INTO v_session FROM public.ht_ai_conversations LIMIT 1;
+    PERFORM public.ht_add_ai_message(v_session, 'user', 'Hello AI world');
+END $$;
+
 SELECT is(
-    (SELECT expires_at IS NOT NULL FROM public.ht_ai_conversations LIMIT 1),
+    (SELECT expires_at IS NOT NULL FROM public.ht_ai_messages LIMIT 1),
     true,
-    '18. AI message retention timestamp exists'
+    '18. AI message retention timestamp exists on ht_ai_messages'
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 19: Expired transcript cleanup works
+-- ITEM 19: Retention test — expired AI messages/conversations cleaned up, linked lead survives
 -- ----------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_expired_conv_id UUID;
+BEGIN
+    -- Create expired conversation & message fixtures
+    INSERT INTO public.ht_ai_conversations (
+        id, tenant_id, lead_id, session_token, preferred_language, status, expires_at
+    ) VALUES (
+        'e1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'c1111111-1111-1111-1111-111111111111',
+        'expired-session-token-999', 'en', 'expired', now() - INTERVAL '1 day'
+    );
+
+    INSERT INTO public.ht_ai_messages (
+        id, conversation_id, role, content, expires_at
+    ) VALUES (
+        'm1111111-1111-1111-1111-111111111111', 'e1111111-1111-1111-1111-111111111111', 'user', 'Expired message', now() - INTERVAL '1 day'
+    );
+END $$;
+
 SELECT is(
     (public.ht_cleanup_expired_ai_data()->>'success')::boolean,
     true,
@@ -242,7 +290,7 @@ SELECT is(
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 21: Explicit handoff -> handoff_pending
+-- ITEM 21: Qualified lead handoff transitions status to handoff_pending
 -- ----------------------------------------------------------------------------
 DO $$
 DECLARE
@@ -254,17 +302,34 @@ END $$;
 SELECT is(
     (SELECT status FROM public.ht_leads WHERE id = 'c1111111-1111-1111-1111-111111111111'),
     'handoff_pending',
-    '21. Explicit handoff transitions lead status to handoff_pending'
+    '21. Qualified lead handoff transitions status to handoff_pending'
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 22: Handoff audit created
+-- ITEM 22: New/Contacted lead handoff does NOT illegally jump status to handoff_pending
 -- ----------------------------------------------------------------------------
-SELECT is(
-    (SELECT count(*) FROM public.audit_events WHERE action = 'ht_ai_handoff_requested'),
-    2::bigint, -- 1 lead level + 1 conversation level
-    '22. Handoff audit events created'
-);
+DO $$
+DECLARE
+    v_new_lead_id UUID := gen_random_uuid();
+    v_conv_res JSONB;
+    v_conv_id UUID;
+BEGIN
+    INSERT INTO public.ht_leads (id, tenant_id, status, source_channel, preferred_language, full_name, email)
+    VALUES (v_new_lead_id, 'a1111111-1111-1111-1111-111111111111', 'new', 'web', 'en', 'New Lead Handoff Test', 'newhandoff@example.com');
+
+    v_conv_res := public.ht_create_ai_conversation('a1111111-1111-1111-1111-111111111111', 'en', v_new_lead_id);
+    v_conv_id := (v_conv_res->>'conversation_id')::uuid;
+
+    PERFORM public.ht_request_handoff(v_conv_id, 'new_lead_handoff');
+
+    IF (SELECT status FROM public.ht_leads WHERE id = v_new_lead_id) <> 'new' THEN
+        RAISE EXCEPTION 'STATUS_OVERWRITTEN: New lead status was illegally changed';
+    END IF;
+    IF (SELECT handoff_state FROM public.ht_leads WHERE id = v_new_lead_id) <> 'requested' THEN
+        RAISE EXCEPTION 'HANDOFF_NOT_RECORDED: Handoff state requested was not recorded';
+    END IF;
+END $$;
+SELECT is(true, true, '22. New lead handoff records handoff_state=requested without changing status to handoff_pending');
 
 -- ----------------------------------------------------------------------------
 -- ITEM 23: Acknowledgement authority works
@@ -313,21 +378,21 @@ SELECT is(
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 27: Passport absent from audit/outbox/AI summary payload
+-- ITEM 27: Passport privacy (case-insensitive) — absent from audit/outbox/AI summary
 -- ----------------------------------------------------------------------------
 SELECT is(
-    (SELECT count(*) FROM public.audit_events WHERE payload::text LIKE '%PASSPORT%'),
+    (SELECT count(*) FROM public.audit_events WHERE lower(payload::text) LIKE '%passport%'),
     0::bigint,
-    '27. Passport absent from audit payloads'
+    '27. Passport absent from audit payloads (case-insensitive check)'
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 28: Raw transcript not duplicated into audit
+-- ITEM 28: Unique synthetic transcript phrase absent from audit payload
 -- ----------------------------------------------------------------------------
 SELECT is(
-    (SELECT count(*) FROM public.audit_events WHERE payload::text LIKE '%Interested in dental package%'),
+    (SELECT count(*) FROM public.audit_events WHERE payload::text LIKE '%SYNTHETIC_SECRET_TRANSCRIPT_PHRASE_99%'),
     0::bigint,
-    '28. Raw transcript not duplicated into audit events'
+    '28. Synthetic raw transcript phrase absent from audit event payload'
 );
 
 -- ----------------------------------------------------------------------------
@@ -340,12 +405,22 @@ SELECT is(
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 30: AI summary marked assistive
+-- ITEM 30: AI summary contains explicit assistive label & propagates to lead
 -- ----------------------------------------------------------------------------
+SELECT set_config('request.jwt.claim.sub', '', true); -- Server internal
+DO $$
+DECLARE
+    v_conv_id UUID;
+    v_res JSONB;
+BEGIN
+    SELECT id INTO v_conv_id FROM public.ht_ai_conversations WHERE tenant_id = 'a1111111-1111-1111-1111-111111111111' LIMIT 1;
+    v_res := public.ht_update_ai_conversation_summary(v_conv_id, 'User interested in dental package');
+END $$;
+
 SELECT is(
-    (public.ht_update_ai_summary('c1111111-1111-1111-1111-111111111111', 'Assistive summary test')->>'success')::boolean,
+    (SELECT ai_summary LIKE '%AI-generated assistive summary — not verified clinical fact%' FROM public.ht_leads WHERE id = 'c1111111-1111-1111-1111-111111111111'),
     true,
-    '30. AI summary update succeeds'
+    '30. AI summary contains explicit assistive marker and propagates to linked lead'
 );
 
 -- ----------------------------------------------------------------------------
@@ -358,25 +433,25 @@ SELECT is(
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 32: No Clinic patient creation
+-- ITEM 32: Domain Isolation — No clinic_patient_profiles creation
 -- ----------------------------------------------------------------------------
 SELECT is(
-    (SELECT count(*) FROM public.patients WHERE email = 'hans@example.de'),
+    (SELECT count(*) FROM public.clinic_patient_profiles WHERE tenant_id = 'a1111111-1111-1111-1111-111111111111'),
     0::bigint,
-    '32. Zero Clinic patients created'
+    '32. Zero Clinic patient profiles created'
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 33: No Clinic encounter creation
+-- ITEM 33: Domain Isolation — No clinic_encounters creation
 -- ----------------------------------------------------------------------------
 SELECT is(
-    (SELECT count(*) FROM public.encounters WHERE tenant_id = 'a1111111-1111-1111-1111-111111111111'),
+    (SELECT count(*) FROM public.clinic_encounters WHERE tenant_id = 'a1111111-1111-1111-1111-111111111111'),
     0::bigint,
     '33. Zero Clinic encounters created'
 );
 
 -- ----------------------------------------------------------------------------
--- ITEM 34: No Core appointment creation
+-- ITEM 34: Domain Isolation — No Core appointments creation
 -- ----------------------------------------------------------------------------
 SELECT is(
     (SELECT count(*) FROM public.appointments WHERE tenant_id = 'a1111111-1111-1111-1111-111111111111'),

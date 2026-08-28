@@ -41,11 +41,16 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
   const [sending, setSending] = useState(false);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [handoffTriggered, setHandoffTriggered] = useState(false);
+  const [showContactForm, setShowContactForm] = useState(false);
+  const [contactName, setContactName] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+  const [contactError, setContactError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, showContactForm]);
 
   const addMessage = (role: 'user' | 'assistant', content: string) => {
     setMessages(prev => [...prev, {
@@ -79,7 +84,9 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
         if (response.reply) {
           addMessage('assistant', response.reply);
         }
-        if (response.handoff_triggered) {
+        if (response.requires_contact) {
+          setShowContactForm(true);
+        } else if (response.handoff_triggered) {
           setHandoffTriggered(true);
         }
       } else {
@@ -98,12 +105,59 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
 
     try {
       const response = await aiService.requestHumanHandoff(sessionToken, tenantSlug, 'user_requested');
-      if (response.success && response.reply) {
-        addMessage('assistant', response.reply);
+      if (response.success) {
+        if (response.reply) {
+          addMessage('assistant', response.reply);
+        }
+        if (response.requires_contact) {
+          setShowContactForm(true);
+        } else if (response.handoff_triggered) {
+          setHandoffTriggered(true);
+        }
       }
-      setHandoffTriggered(true);
     } catch {
       addMessage('assistant', 'Bağlantı hatası.');
+    }
+
+    setSending(false);
+  };
+
+  const handleContactSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!contactName.trim()) {
+      setContactError('Lütfen adınızı ve soyadınızı girin.');
+      return;
+    }
+    if (!contactEmail.trim() && !contactPhone.trim()) {
+      setContactError('Lütfen e-posta veya telefon numarası girin.');
+      return;
+    }
+
+    setSending(true);
+    setContactError(null);
+
+    try {
+      const response = await aiService.sendMessage({
+        session_token: sessionToken || undefined,
+        message: '__HANDOFF_REQUEST__:user_provided_contact',
+        tenant_slug: tenantSlug,
+        preferred_language: preferredLanguage,
+        full_name: contactName.trim(),
+        email: contactEmail.trim() || undefined,
+        phone: contactPhone.trim() || undefined,
+      });
+
+      if (response.success) {
+        setShowContactForm(false);
+        setHandoffTriggered(true);
+        if (response.reply) {
+          addMessage('assistant', response.reply);
+        }
+      } else {
+        setContactError(response.error?.message || 'Kayıt başarısız.');
+      }
+    } catch {
+      setContactError('Bağlantı hatası.');
     }
 
     setSending(false);
@@ -129,7 +183,7 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
   }
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 w-[360px] max-h-[520px] flex flex-col bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+    <div className="fixed bottom-6 right-6 z-50 w-[360px] max-h-[540px] flex flex-col bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-teal-500 to-emerald-600 text-white">
         <div className="flex items-center space-x-2">
@@ -177,6 +231,47 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
             </div>
           </div>
         ))}
+
+        {/* Contact capture form inside chat window */}
+        {showContactForm && (
+          <div className="bg-teal-50/80 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800 p-3 rounded-xl space-y-2">
+            <p className="text-xs font-semibold text-teal-900 dark:text-teal-200">
+              Koordinatör iletişimi için bilgilerinizi girin:
+            </p>
+            {contactError && <p className="text-[10px] text-red-600 font-medium">{contactError}</p>}
+            <form onSubmit={handleContactSubmit} className="space-y-2">
+              <input
+                type="text"
+                placeholder="Ad Soyad *"
+                value={contactName}
+                onChange={e => setContactName(e.target.value)}
+                className="w-full text-xs px-2.5 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700"
+              />
+              <input
+                type="email"
+                placeholder="E-posta"
+                value={contactEmail}
+                onChange={e => setContactEmail(e.target.value)}
+                className="w-full text-xs px-2.5 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700"
+              />
+              <input
+                type="tel"
+                placeholder="Telefon"
+                value={contactPhone}
+                onChange={e => setContactPhone(e.target.value)}
+                className="w-full text-xs px-2.5 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700"
+              />
+              <button
+                type="submit"
+                disabled={sending}
+                className="w-full py-1.5 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 rounded transition-colors"
+              >
+                Koordinatöre Gönder
+              </button>
+            </form>
+          </div>
+        )}
+
         {sending && (
           <div className="flex items-start space-x-2">
             <div className="h-6 w-6 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
@@ -218,12 +313,12 @@ export const HtAiChatWidget: React.FC<Props> = ({ tenantSlug, preferredLanguage,
               onChange={e => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={translations.chatPlaceholder}
-              disabled={sending}
+              disabled={sending || showContactForm}
               className="flex-1 text-xs px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-teal-500 disabled:opacity-50"
             />
             <button
               onClick={handleSend}
-              disabled={!inputValue.trim() || sending}
+              disabled={!inputValue.trim() || sending || showContactForm}
               className="flex-shrink-0 p-2 rounded-lg bg-teal-500 text-white hover:bg-teal-600 transition-colors disabled:opacity-30"
             >
               <Send className="h-4 w-4" />

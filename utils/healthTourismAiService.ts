@@ -40,6 +40,12 @@ export class HealthTourismAiService {
           message: request.message,
           tenant_slug: request.tenant_slug,
           preferred_language: request.preferred_language || 'en',
+          full_name: request.full_name || null,
+          email: request.email || null,
+          phone: request.phone || null,
+          country_code: request.country_code || null,
+          source_channel: request.source_channel || null,
+          referring_agency_id: request.referring_agency_id || null,
         }),
       });
 
