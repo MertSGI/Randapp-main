@@ -308,11 +308,11 @@ BEGIN
     INSERT INTO public.ht_ai_messages (
         id, conversation_id, role, content, expires_at
     ) VALUES (
-        'm1111111-1111-1111-1111-111111111111', 'e1111111-1111-1111-1111-111111111111', 'user', 'Expired message', now() - INTERVAL '1 day'
+        'd1111111-1111-4111-8111-111111111111', 'e1111111-1111-1111-1111-111111111111', 'user', 'Expired message', now() - INTERVAL '1 day'
     );
 
     -- Assert fixture existence before cleanup
-    SELECT count(*) INTO v_msg_count_before FROM public.ht_ai_messages WHERE id = 'm1111111-1111-1111-1111-111111111111';
+    SELECT count(*) INTO v_msg_count_before FROM public.ht_ai_messages WHERE id = 'd1111111-1111-4111-8111-111111111111';
     SELECT count(*) INTO v_conv_count_before FROM public.ht_ai_conversations WHERE id = 'e1111111-1111-1111-1111-111111111111';
 
     IF v_msg_count_before <> 1 OR v_conv_count_before <> 1 THEN
@@ -323,7 +323,7 @@ BEGIN
     PERFORM public.ht_cleanup_expired_ai_data();
 
     -- Post-cleanup checks
-    SELECT count(*) INTO v_msg_count_after FROM public.ht_ai_messages WHERE id = 'm1111111-1111-1111-1111-111111111111';
+    SELECT count(*) INTO v_msg_count_after FROM public.ht_ai_messages WHERE id = 'd1111111-1111-4111-8111-111111111111';
     SELECT count(*) INTO v_conv_count_after FROM public.ht_ai_conversations WHERE id = 'e1111111-1111-1111-1111-111111111111';
     SELECT count(*) INTO v_lead_count_after FROM public.ht_leads WHERE id = 'c1111111-1111-1111-1111-111111111111';
 
