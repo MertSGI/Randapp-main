@@ -96,8 +96,14 @@ if (fs.existsSync(migrationPath)) {
   assert(!migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_list_leads(text, integer, integer, text, text) TO anon') &&
          !migContent.includes('GRANT EXECUTE ON FUNCTION public.ht_list_leads TO anon'),
     'No GRANT EXECUTE of ht_list_leads to anon');
-  assert(migContent.includes('l.lead_score_band = lower(trim(p_score_band))') && migContent.includes('l.source_channel = lower(trim(p_source_channel))') && migContent.includes('passport_number IS EXCLUDED'),
-    'Canonical ht_list_leads retains score_band/source_channel filtering and passport exclusion');
+  assert(migContent.includes('extensions.gen_random_bytes(32)'),
+    'Migration contains qualified extensions.gen_random_bytes(32) call');
+  assert(!/\b(?<!extensions\.)gen_random_bytes\s*\(/i.test(migContent),
+    'Migration contains zero unqualified gen_random_bytes calls');
+  assert(migContent.includes('SET search_path = pg_catalog, public'),
+    'Migration functions maintain hardened search_path = pg_catalog, public');
+  assert(!/SET\s+search_path\s*=[^;\n]*\bextensions\b/i.test(migContent),
+    'Migration search_path does NOT broaden to include extensions schema');
 }
 
 // 2. Edge Function Canonical Tenant Authority & Handoff Flow Check

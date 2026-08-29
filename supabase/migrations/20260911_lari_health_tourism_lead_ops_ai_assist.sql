@@ -907,7 +907,7 @@ BEGIN
     END IF;
 
     -- Generate opaque session token (cryptographically random)
-    v_session_token := encode(gen_random_bytes(32), 'hex');
+    v_session_token := encode(extensions.gen_random_bytes(32), 'hex');
 
     INSERT INTO public.ht_ai_conversations (
         tenant_id, lead_id, session_token,
