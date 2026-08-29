@@ -166,6 +166,17 @@ if (fs.existsSync(edgeFnPath)) {
   assert(fnContent.includes('MEDICAL_SAFETY_BOUNDARY'), 'Edge Function returns MEDICAL_SAFETY_BOUNDARY outcome code for medical queries');
   assert(!fnContent.includes('safetyResponse = "I\'m an intake assistant'), 'Edge Function does NOT return hard-coded English medical safety text');
   assert(fnContent.includes('ht_request_handoff'), 'Edge Function triggers handoff for medical queries');
+
+  // R19 Product Capability Grounding assertions
+  assert(fnContent.includes('PRODUCT CAPABILITY GROUNDING — DO NOT CLAIM OR INVENT'), 'Edge Function prompt contains PRODUCT CAPABILITY GROUNDING section heading');
+  assert(fnContent.includes('CURRENTLY AVAILABLE THROUGH THIS ASSISTANT'), 'Edge Function prompt contains CURRENTLY AVAILABLE THROUGH THIS ASSISTANT section');
+  assert(fnContent.includes('Do not invent platform features, operational processes, integrations, communications, logistics, prices, timelines, or workflows'), 'Edge Function prompt forbids inventing platform features or workflows');
+  assert(fnContent.includes('Accepts passport, ID, or medical document/report uploads'), 'Edge Function prompt explicitly guards against passport/ID/document upload claims');
+  assert(fnContent.includes('Processes visas or handles visa documentation') && fnContent.includes('Books flights, hotels, accommodations, or airport transfers/transportation'), 'Edge Function prompt explicitly guards against visa/flight/hotel/transfer claims');
+  assert(fnContent.includes('Takes payments, deposits, or provides payment plans'), 'Edge Function prompt explicitly guards against payment/deposit claims');
+  assert(fnContent.includes('Sends automatic confirmation emails or automatic SMS messages') && fnContent.includes('Performs real WhatsApp delivery or automated external messaging'), 'Edge Function prompt explicitly guards against auto-email/SMS/WhatsApp claims');
+  assert(fnContent.includes('Performs appointment booking or Lead -> Booking -> Clinic conversion'), 'Edge Function prompt explicitly guards against booking/clinic conversion claims');
+  assert(fnContent.includes('UNKNOWN OR UNSUPPORTED CAPABILITIES') && fnContent.includes('Offer to collect their inquiry or connect them with a human coordinator instead'), 'Edge Function prompt includes unknown-capability rule directing callers to human coordination');
 }
 
 // 2B. Supabase Client Export & Coordinator Workspace Import Check
