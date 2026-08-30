@@ -98,26 +98,27 @@ Keep responses concise, warm, and professional. Focus on helping the user naviga
 function containsUnsupportedCapabilityQuery(message: string): boolean {
   const lower = message.toLowerCase();
 
-  // Direct action phrases that inherently ask the platform to execute an unsupported capability
-  const directActionPhrases = [
-    'book my appointment', 'randevu al', 'randevu oluştur', 'записаться', 'حجز موعد', 'termin buchen',
-    'upload my passport', 'pasaportumu yükle', 'загрузить паспорт', 'تحميل جواز', 'reisepass hochladen',
-    'upload passport', 'pasaport yükle', 'upload id', 'upload document', 'upload report', 'upload file',
-    'process my visa', 'vize işle', 'оформить визу', 'معالجة التأشيرة', 'visum bearbeiten',
-    'arrange my transfer', 'transferimi ayarla', 'организовать трансфер', 'ترتيب المواصلات', 'transfer arrangieren',
-    'book my flight', 'book my hotel', 'uçak bileti al', 'otel ayarla', 'забронировать отель', 'حجز فندق'
+  // Bounded direct action regex patterns (imperative requests) with word/end boundaries to avoid morphology false positives
+  const directActionPatterns = [
+    /\bbook\s+my\s+appointment\b/, /\brandevu\s+al\b/, /\brandevu\s+oluştur\b/, /\bзаписаться\b/, /\bحجز\s+موعد\b/, /\btermin\s+buchen\b/,
+    /\bupload\s+my\s+passport\b/, /\bpasaportumu\s+yükle\b/, /\bзагрузить\s+паспорт\b/, /\bتحميل\s+جواز\b/, /\breisepass\s+hochladen\b/,
+    /\bupload\s+passport\b/, /\bpasaport\s+yükle\b/, /\bupload\s+id\b/, /\bupload\s+document\b/, /\bupload\s+report\b/, /\bupload\s+file\b/,
+    /\bprocess\s+my\s+visa\b/, /\bvize\s+işle\b/, /\bоформить\s+визу\b/, /\bمعالجة\s+التأشيرة\b/, /\bvisum\s+bearbeiten\b/,
+    /\barrange\s+my\s+transfer\b/, /\btransferimi\s+ayarla\b/, /\bорганизовать\s+трансфер\b/, /\bترتيب\s+المواصلات\b/, /\btransfer\s+arrangieren\b/,
+    /\bbook\s+my\s+flight\b/, /\bbook\s+my\s+hotel\b/, /\buçak\s+bileti\s+al\b/, /\botel\s+ayarla\b/, /\bзабронировать\s+отель\b/, /\bحجز\s+فندق\b/
   ];
-  if (directActionPhrases.some(phrase => lower.includes(phrase))) {
+  if (directActionPatterns.some(pattern => pattern.test(lower))) {
     return true;
   }
 
   // Capability Intent Indicator: checks if caller is asking WHETHER/IF the platform supports or performs an action
+  // Bare generic "what" and "which" are strictly excluded from global intent.
   const hasCapabilityIntent = (
     lower.includes('can i') || lower.includes('can you') || lower.includes('do you') || lower.includes('does this platform') ||
     lower.includes('does the platform') || lower.includes('is it available') || lower.includes('is this available') ||
     lower.includes('do you support') || lower.includes('do you offer') || lower.includes('will you send') ||
-    lower.includes('will i receive') || lower.includes('can I upload') || lower.includes('can you arrange') ||
-    lower.includes('can you book') || lower.includes('can i pay') || lower.includes('which') || lower.includes('what') ||
+    lower.includes('will i receive') || lower.includes('can i upload') || lower.includes('can you arrange') ||
+    lower.includes('can you book') || lower.includes('can i pay') ||
     lower.includes('yapabilir miyim') || lower.includes('yapıyor musunuz') || lower.includes('var mı') || lower.includes('mevcut mu') ||
     lower.includes('sunuyor musunuz') || lower.includes('yükleyebilir miyim') || lower.includes('ayarlıyor musunuz') || lower.includes('rezervasyon yapıyor musunuz') ||
     lower.includes('kann ich') || lower.includes('können sie') || lower.includes('bieten sie') || lower.includes('gibt es') ||
@@ -144,13 +145,16 @@ function containsUnsupportedCapabilityQuery(message: string): boolean {
   const isBookingMatchingTopic = (lower.includes('appointment') || lower.includes('randevu') || lower.includes('termin') || lower.includes('запись') || lower.includes('موعد')) &&
     (lower.includes('book') || lower.includes('al') || lower.includes('oluştur') || lower.includes('buchen') || lower.includes('حجز'));
 
-  const hasUnsupportedTopic = isDocTopic || isTravelTopic || isPaymentTopic || isAutoCommTopic || isBookingMatchingTopic;
+  const isClinicMatchingTopic = (lower.includes('match') || lower.includes('matching') || lower.includes('eşleş') || lower.includes('eşleştir') || lower.includes('zuordnen') || lower.includes('подбор') || lower.includes('مطابقة')) &&
+    (lower.includes('clinic') || lower.includes('clinics') || lower.includes('klinik') || lower.includes('klinikler') || lower.includes('provider') || lower.includes('hospital') || lower.includes('клиник') || lower.includes('عياد'));
+
+  const hasUnsupportedTopic = isDocTopic || isTravelTopic || isPaymentTopic || isAutoCommTopic || isBookingMatchingTopic || isClinicMatchingTopic;
 
   if (hasCapabilityIntent && hasUnsupportedTopic) {
     return true;
   }
 
-  // Catalog / Offering Authority Questions
+  // Catalog / Offering Authority Questions (dedicated intent for platform availability inquiries)
   const isCatalogOfferingQuery = (
     (lower.includes('which') || lower.includes('what') || lower.includes('hangi') || lower.includes('какие') || lower.includes('какой') || lower.includes('أي') || lower.includes('welche')) &&
     (lower.includes('platform') || lower.includes('system') || lower.includes('available') || lower.includes('mevcut') || lower.includes('offer') || lower.includes('доступн') || lower.includes('متاح') || lower.includes('verfügbar')) &&

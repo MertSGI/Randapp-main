@@ -178,14 +178,33 @@ if (fs.existsSync(edgeFnPath)) {
   assert(fnContent.includes('Performs appointment booking or Lead -> Booking -> Clinic conversion'), 'Edge Function prompt explicitly guards against booking/clinic conversion claims');
   assert(fnContent.includes('UNKNOWN OR UNSUPPORTED CAPABILITIES') && fnContent.includes('Offer to collect their inquiry or connect them with a human coordinator instead'), 'Edge Function prompt includes unknown-capability rule directing callers to human coordination');
 
-  // R20/R21 Deterministic Public-AI Capability Boundary Assertions
+  // R20/R21/R22 Deterministic Public-AI Capability Boundary Assertions
   assert(fnContent.includes('function containsUnsupportedCapabilityQuery'), 'A. Deterministic capability classifier exists');
+
+  // R22 Specific structural guards
+  assert(!/hasCapabilityIntent\s*=[^;]*['"]which['"]/i.test(fnContent) && !/hasCapabilityIntent\s*=[^;]*['"]what['"]/i.test(fnContent),
+    'GLOBAL_CAPABILITY_INTENT_HAS_NO_BARE_WHAT_WHICH: Global hasCapabilityIntent strictly excludes bare what/which');
+  assert(fnContent.includes('isCatalogOfferingQuery') && (fnContent.includes('which') || fnContent.includes('what')),
+    'CATALOG_QUERY_HAS_DEDICATED_QUESTION_INTENT: Catalog offering query contains dedicated question intent');
+
+  assert(fnContent.includes('isClinicMatchingTopic'),
+    'CLINIC_MATCHING_TOPIC_PRESENT: Dedicated isClinicMatchingTopic exists');
+  assert(fnContent.includes('hasUnsupportedTopic') && fnContent.includes('isClinicMatchingTopic'),
+    'CLINIC_MATCHING_TOPIC_INCLUDED_IN_UNSUPPORTED_TOPIC: Clinic matching topic is included in hasUnsupportedTopic');
+  assert(fnContent.includes('hasCapabilityIntent && hasUnsupportedTopic'),
+    'CLINIC_MATCHING_REQUIRES_CAPABILITY_INTENT: Clinic matching topic requires capability intent');
+
+  assert(fnContent.includes('directActionPatterns') && fnContent.includes('pattern.test'),
+    'DIRECT_ACTION_BOUNDED_MATCH_RESULT: Direct action phrases use bounded regex patterns with word boundaries');
+  assert(!fnContent.includes('directActionPhrases.some'),
+    'LOOSE_DIRECT_ACTION_SUBSTRING_LIST_REMOVED: Loose directActionPhrases substring list is removed');
+
   assert(fnContent.includes('hasCapabilityIntent') && fnContent.includes('hasUnsupportedTopic'), 'CAPABILITY_INTENT_GUARD_EXISTS: Classifier structural guard requires capability intent indicator');
   assert(fnContent.includes('isDocTopic') && fnContent.includes('passport'), 'DOCUMENT_TOPIC_REQUIRES_CAPABILITY_INTENT: Document topic requires capability intent');
   assert(fnContent.includes('isTravelTopic') && fnContent.includes('visa') && fnContent.includes('flight') && fnContent.includes('hotel'), 'TRAVEL_TOPIC_REQUIRES_CAPABILITY_INTENT: Travel topic requires capability intent');
   assert(fnContent.includes('isPaymentTopic') && fnContent.includes('deposit') && fnContent.includes('payment'), 'PAYMENT_TOPIC_REQUIRES_CAPABILITY_INTENT: Payment topic requires capability intent');
   assert(fnContent.includes('isAutoCommTopic') && (fnContent.includes('sms') || fnContent.includes('email')), 'AUTO_COMM_TOPIC_REQUIRES_CAPABILITY_INTENT: Automatic communication topic requires capability intent');
-  assert(fnContent.includes('isBookingMatchingTopic') && (fnContent.includes('appointment') || fnContent.includes('randevu') || fnContent.includes('termin')), 'BOOKING_MATCHING_INTENT_GUARD_RESULT: Booking/matching topic requires capability intent');
+  assert(fnContent.includes('isBookingMatchingTopic') && (fnContent.includes('appointment') || fnContent.includes('randevu') || fnContent.includes('termin')), 'APPOINTMENT_BOOKING_INTENT_GUARD_RESULT: Booking topic requires capability intent');
   assert(fnContent.includes('isCatalogOfferingQuery') && (fnContent.includes('country') || fnContent.includes('treatment') || fnContent.includes('tedavi')), 'CATALOG_CAPABILITY_INTENT_PRESERVED: Catalog offering query capability intent preserved');
 
   assert(fnContent.includes('buildUnsupportedCapabilityResponse'), 'H. Localized TR/EN/DE/RU/AR capability-boundary response helper exists');
