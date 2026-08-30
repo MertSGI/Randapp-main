@@ -178,26 +178,52 @@ if (fs.existsSync(edgeFnPath)) {
   assert(fnContent.includes('Performs appointment booking or Lead -> Booking -> Clinic conversion'), 'Edge Function prompt explicitly guards against booking/clinic conversion claims');
   assert(fnContent.includes('UNKNOWN OR UNSUPPORTED CAPABILITIES') && fnContent.includes('Offer to collect their inquiry or connect them with a human coordinator instead'), 'Edge Function prompt includes unknown-capability rule directing callers to human coordination');
 
-  // R20/R21/R22 Deterministic Public-AI Capability Boundary Assertions
+  // R20-R24 Deterministic Public-AI Capability Boundary Assertions
   assert(fnContent.includes('function containsUnsupportedCapabilityQuery'), 'A. Deterministic capability classifier exists');
 
-  // R23 Specific structural & multilingual guards
+  // R24 Action-Specific Coupling & Generic Modal Removal Guards
+  assert(!fnContent.includes('hasCapabilityIntent && hasUnsupportedTopic'),
+    'GENERIC_MODAL_GLOBAL_AUTHORITY_REMOVED_RESULT: Uncoupled generic modal intent is removed as global classifier authority');
+  assert(!/hasCapabilityIntent\s*=[^;]*['"]can you['"]/i.test(fnContent) && !/hasCapabilityIntent\s*=[^;]*['"]can i['"]/i.test(fnContent),
+    'GENERIC_CAN_YOU_NOT_GLOBAL_CAPABILITY_AUTHORITY: Generic "can you" / "can i" are not global uncoupled capability authority');
+
+  assert(fnContent.includes('isDocumentCapabilityQuery') && fnContent.includes('passport'),
+    'DOCUMENT_INTENT_TOPIC_COUPLING_RESULT: Document intent is explicitly coupled to document topic');
+  assert(fnContent.includes('isTravelCapabilityQuery') && (fnContent.includes('visa') || fnContent.includes('hotel')),
+    'TRAVEL_INTENT_TOPIC_COUPLING_RESULT: Travel intent is explicitly coupled to travel topic');
+  assert(fnContent.includes('isPaymentCapabilityQuery') && (fnContent.includes('deposit') || fnContent.includes('payment')),
+    'PAYMENT_INTENT_TOPIC_COUPLING_RESULT: Payment intent is explicitly coupled to payment topic');
+  assert(fnContent.includes('isAutoCommunicationCapabilityQuery') && (fnContent.includes('sms') || fnContent.includes('email')),
+    'AUTO_COMM_INTENT_TOPIC_COUPLING_RESULT: Auto-communication intent is explicitly coupled to communication topic');
+  assert(fnContent.includes('isAppointmentCapabilityQuery') && (fnContent.includes('appointment') || fnContent.includes('randevu')),
+    'APPOINTMENT_INTENT_TOPIC_COUPLING_RESULT: Appointment intent is explicitly coupled to appointment topic');
+  assert(fnContent.includes('isClinicMatchingCapabilityQuery') && (fnContent.includes('match') || fnContent.includes('eşleştir')),
+    'CLINIC_MATCHING_INTENT_TOPIC_COUPLING_RESULT: Clinic matching intent is explicitly coupled to clinic matching topic');
+
+  assert(fnContent.includes('isCatalogOfferingQuery') && (fnContent.includes('which') || fnContent.includes('what')),
+    'CATALOG_DEDICATED_AUTHORITY_RESULT: Catalog offering authority remains a dedicated separate predicate');
+
+  // Restored R22 Guards
+  assert(!/hasCapabilityIntent\s*=[^;]*['"]which['"]/i.test(fnContent) && !/hasCapabilityIntent\s*=[^;]*['"]what['"]/i.test(fnContent),
+    'GLOBAL_BARE_WHAT_WHICH_GUARD_RESTORED: Bare what/which excluded from global capability intent');
+  assert(fnContent.includes('isCatalogOfferingQuery') && (fnContent.includes('country') || fnContent.includes('treatment') || fnContent.includes('tedavi')),
+    'CATALOG_DEDICATED_INTENT_GUARD_RESTORED: Dedicated catalog offering intent preserved');
+  assert(fnContent.includes('isClinicMatchingCapabilityQuery') && fnContent.includes('clinic'),
+    'CLINIC_MATCHING_GUARDS_RESTORED: Clinic matching predicate and topic coverage restored');
+  assert(fnContent.includes('directActionPatterns') && fnContent.includes('pattern.test'),
+    'DIRECT_ACTION_BOUNDED_MATCH_RESULT: Direct action phrases use bounded regex patterns with word boundaries');
+  assert(!fnContent.includes('directActionPhrases.some'),
+    'LOOSE_DIRECT_ACTION_SUBSTRING_LIST_REMOVED: Loose directActionPhrases substring list is removed');
+
+  // Preserved R23 Multilingual & Boundary Guards
   assert(fnContent.includes('vizemi') && fnContent.includes('işle'),
     'TURKISH_VIZEMI_DIRECT_ACTION_GUARD: Bounded Turkish vizemi işle direct action exists');
-  assert(fnContent.includes('eşleştiriyor musunuz') || fnContent.includes('klinikle eşleştiriyor musunuz'),
+  assert(fnContent.includes('eşleştiriyor musunuz') || fnContent.includes('eşleştirme yapıyor musunuz'),
     'TURKISH_CLINIC_MATCHING_INTENT_GUARD: Turkish clinic matching capability intent indicator exists');
   assert(fnContent.includes('\\p{L}') && fnContent.includes('/u'),
     'UNICODE_SAFE_DIRECT_ACTION_BOUNDARY_GUARD: Direct action patterns use Unicode-aware property escape boundaries');
-  assert(!/\b(записаться|паспорт|визу)\b/.test(fnContent.slice(fnContent.indexOf('directActionPatterns'), fnContent.indexOf('hasCapabilityIntent'))),
+  assert(!/\b(записаться|паспорт|визу)\b/.test(fnContent.slice(fnContent.indexOf('directActionPatterns'), fnContent.indexOf('isDocumentCapabilityQuery'))),
     'LOOSE_NON_LATIN_WORD_BOUNDARY_DEPENDENCY_REMOVED: ASCII-only word boundary \\b is avoided for Cyrillic/Arabic direct action phrases');
-
-  assert(fnContent.includes('hasCapabilityIntent') && fnContent.includes('hasUnsupportedTopic'), 'CAPABILITY_INTENT_GUARD_EXISTS: Classifier structural guard requires capability intent indicator');
-  assert(fnContent.includes('isDocTopic') && fnContent.includes('passport'), 'DOCUMENT_TOPIC_REQUIRES_CAPABILITY_INTENT: Document topic requires capability intent');
-  assert(fnContent.includes('isTravelTopic') && fnContent.includes('visa') && fnContent.includes('flight') && fnContent.includes('hotel'), 'TRAVEL_TOPIC_REQUIRES_CAPABILITY_INTENT: Travel topic requires capability intent');
-  assert(fnContent.includes('isPaymentTopic') && fnContent.includes('deposit') && fnContent.includes('payment'), 'PAYMENT_TOPIC_REQUIRES_CAPABILITY_INTENT: Payment topic requires capability intent');
-  assert(fnContent.includes('isAutoCommTopic') && (fnContent.includes('sms') || fnContent.includes('email')), 'AUTO_COMM_TOPIC_REQUIRES_CAPABILITY_INTENT: Automatic communication topic requires capability intent');
-  assert(fnContent.includes('isBookingMatchingTopic') && (fnContent.includes('appointment') || fnContent.includes('randevu') || fnContent.includes('termin')), 'APPOINTMENT_BOOKING_INTENT_GUARD_RESULT: Booking topic requires capability intent');
-  assert(fnContent.includes('isCatalogOfferingQuery') && (fnContent.includes('country') || fnContent.includes('treatment') || fnContent.includes('tedavi')), 'CATALOG_CAPABILITY_INTENT_PRESERVED: Catalog offering query capability intent preserved');
 
   assert(fnContent.includes('buildUnsupportedCapabilityResponse'), 'H. Localized TR/EN/DE/RU/AR capability-boundary response helper exists');
   assert(fnContent.includes('case "tr"') && fnContent.includes('case "de"') && fnContent.includes('case "ru"') && fnContent.includes('case "ar"'), 'H2. TR/EN/DE/RU/AR language cases present');
