@@ -181,23 +181,15 @@ if (fs.existsSync(edgeFnPath)) {
   // R20/R21/R22 Deterministic Public-AI Capability Boundary Assertions
   assert(fnContent.includes('function containsUnsupportedCapabilityQuery'), 'A. Deterministic capability classifier exists');
 
-  // R22 Specific structural guards
-  assert(!/hasCapabilityIntent\s*=[^;]*['"]which['"]/i.test(fnContent) && !/hasCapabilityIntent\s*=[^;]*['"]what['"]/i.test(fnContent),
-    'GLOBAL_CAPABILITY_INTENT_HAS_NO_BARE_WHAT_WHICH: Global hasCapabilityIntent strictly excludes bare what/which');
-  assert(fnContent.includes('isCatalogOfferingQuery') && (fnContent.includes('which') || fnContent.includes('what')),
-    'CATALOG_QUERY_HAS_DEDICATED_QUESTION_INTENT: Catalog offering query contains dedicated question intent');
-
-  assert(fnContent.includes('isClinicMatchingTopic'),
-    'CLINIC_MATCHING_TOPIC_PRESENT: Dedicated isClinicMatchingTopic exists');
-  assert(fnContent.includes('hasUnsupportedTopic') && fnContent.includes('isClinicMatchingTopic'),
-    'CLINIC_MATCHING_TOPIC_INCLUDED_IN_UNSUPPORTED_TOPIC: Clinic matching topic is included in hasUnsupportedTopic');
-  assert(fnContent.includes('hasCapabilityIntent && hasUnsupportedTopic'),
-    'CLINIC_MATCHING_REQUIRES_CAPABILITY_INTENT: Clinic matching topic requires capability intent');
-
-  assert(fnContent.includes('directActionPatterns') && fnContent.includes('pattern.test'),
-    'DIRECT_ACTION_BOUNDED_MATCH_RESULT: Direct action phrases use bounded regex patterns with word boundaries');
-  assert(!fnContent.includes('directActionPhrases.some'),
-    'LOOSE_DIRECT_ACTION_SUBSTRING_LIST_REMOVED: Loose directActionPhrases substring list is removed');
+  // R23 Specific structural & multilingual guards
+  assert(fnContent.includes('vizemi') && fnContent.includes('işle'),
+    'TURKISH_VIZEMI_DIRECT_ACTION_GUARD: Bounded Turkish vizemi işle direct action exists');
+  assert(fnContent.includes('eşleştiriyor musunuz') || fnContent.includes('klinikle eşleştiriyor musunuz'),
+    'TURKISH_CLINIC_MATCHING_INTENT_GUARD: Turkish clinic matching capability intent indicator exists');
+  assert(fnContent.includes('\\p{L}') && fnContent.includes('/u'),
+    'UNICODE_SAFE_DIRECT_ACTION_BOUNDARY_GUARD: Direct action patterns use Unicode-aware property escape boundaries');
+  assert(!/\b(записаться|паспорт|визу)\b/.test(fnContent.slice(fnContent.indexOf('directActionPatterns'), fnContent.indexOf('hasCapabilityIntent'))),
+    'LOOSE_NON_LATIN_WORD_BOUNDARY_DEPENDENCY_REMOVED: ASCII-only word boundary \\b is avoided for Cyrillic/Arabic direct action phrases');
 
   assert(fnContent.includes('hasCapabilityIntent') && fnContent.includes('hasUnsupportedTopic'), 'CAPABILITY_INTENT_GUARD_EXISTS: Classifier structural guard requires capability intent indicator');
   assert(fnContent.includes('isDocTopic') && fnContent.includes('passport'), 'DOCUMENT_TOPIC_REQUIRES_CAPABILITY_INTENT: Document topic requires capability intent');

@@ -98,14 +98,47 @@ Keep responses concise, warm, and professional. Focus on helping the user naviga
 function containsUnsupportedCapabilityQuery(message: string): boolean {
   const lower = message.toLowerCase();
 
-  // Bounded direct action regex patterns (imperative requests) with word/end boundaries to avoid morphology false positives
+  // Bounded direct action regex patterns (imperative requests) with Unicode-aware boundaries (e.g. (?<!\p{L}) and (?!\p{L}))
   const directActionPatterns = [
-    /\bbook\s+my\s+appointment\b/, /\brandevu\s+al\b/, /\brandevu\s+oluştur\b/, /\bзаписаться\b/, /\bحجز\s+موعد\b/, /\btermin\s+buchen\b/,
-    /\bupload\s+my\s+passport\b/, /\bpasaportumu\s+yükle\b/, /\bзагрузить\s+паспорт\b/, /\bتحميل\s+جواز\b/, /\breisepass\s+hochladen\b/,
-    /\bupload\s+passport\b/, /\bpasaport\s+yükle\b/, /\bupload\s+id\b/, /\bupload\s+document\b/, /\bupload\s+report\b/, /\bupload\s+file\b/,
-    /\bprocess\s+my\s+visa\b/, /\bvize\s+işle\b/, /\bоформить\s+визу\b/, /\bمعالجة\s+التأشيرة\b/, /\bvisum\s+bearbeiten\b/,
-    /\barrange\s+my\s+transfer\b/, /\btransferimi\s+ayarla\b/, /\bорганизовать\s+трансфер\b/, /\bترتيب\s+المواصلات\b/, /\btransfer\s+arrangieren\b/,
-    /\bbook\s+my\s+flight\b/, /\bbook\s+my\s+hotel\b/, /\buçak\s+bileti\s+al\b/, /\botel\s+ayarla\b/, /\bзабронировать\s+отель\b/, /\bحجز\s+فندق\b/
+    /(?<!\p{L})book\s+my\s+appointment(?!\p{L})/u,
+    /(?<!\p{L})randevu\s+al(?!\p{L})/u,
+    /(?<!\p{L})randevu\s+oluştur(?!\p{L})/u,
+    /(?<!\p{L})записаться(?!\p{L})/u,
+    /(?<!\p{L})حجز\s+موعد(?!\p{L})/u,
+    /(?<!\p{L})termin\s+buchen(?!\p{L})/u,
+
+    /(?<!\p{L})upload\s+my\s+passport(?!\p{L})/u,
+    /(?<!\p{L})pasaportumu\s+yükle(?!\p{L})/u,
+    /(?<!\p{L})загрузить\s+паспорт(?!\p{L})/u,
+    /(?<!\p{L})تحميل\s+جواز(?!\p{L})/u,
+    /(?<!\p{L})reisepass\s+hochladen(?!\p{L})/u,
+
+    /(?<!\p{L})upload\s+passport(?!\p{L})/u,
+    /(?<!\p{L})pasaport\s+yükle(?!\p{L})/u,
+    /(?<!\p{L})upload\s+id(?!\p{L})/u,
+    /(?<!\p{L})upload\s+document(?!\p{L})/u,
+    /(?<!\p{L})upload\s+report(?!\p{L})/u,
+    /(?<!\p{L})upload\s+file(?!\p{L})/u,
+
+    /(?<!\p{L})process\s+my\s+visa(?!\p{L})/u,
+    /(?<!\p{L})vizemi\s+işle(?!\p{L})/u,
+    /(?<!\p{L})vize\s+işle(?!\p{L})/u,
+    /(?<!\p{L})оформить\s+визу(?!\p{L})/u,
+    /(?<!\p{L})معالجة\s+التأشيرة(?!\p{L})/u,
+    /(?<!\p{L})visum\s+bearbeiten(?!\p{L})/u,
+
+    /(?<!\p{L})arrange\s+my\s+transfer(?!\p{L})/u,
+    /(?<!\p{L})transferimi\s+ayarla(?!\p{L})/u,
+    /(?<!\p{L})организовать\s+трансфер(?!\p{L})/u,
+    /(?<!\p{L})ترتيب\s+المواصلات(?!\p{L})/u,
+    /(?<!\p{L})transfer\s+arrangieren(?!\p{L})/u,
+
+    /(?<!\p{L})book\s+my\s+flight(?!\p{L})/u,
+    /(?<!\p{L})book\s+my\s+hotel(?!\p{L})/u,
+    /(?<!\p{L})uçak\s+bileti\s+al(?!\p{L})/u,
+    /(?<!\p{L})otel\s+ayarla(?!\p{L})/u,
+    /(?<!\p{L})забронировать\s+отель(?!\p{L})/u,
+    /(?<!\p{L})حجز\s+فندق(?!\p{L})/u
   ];
   if (directActionPatterns.some(pattern => pattern.test(lower))) {
     return true;
@@ -121,6 +154,7 @@ function containsUnsupportedCapabilityQuery(message: string): boolean {
     lower.includes('can you book') || lower.includes('can i pay') ||
     lower.includes('yapabilir miyim') || lower.includes('yapıyor musunuz') || lower.includes('var mı') || lower.includes('mevcut mu') ||
     lower.includes('sunuyor musunuz') || lower.includes('yükleyebilir miyim') || lower.includes('ayarlıyor musunuz') || lower.includes('rezervasyon yapıyor musunuz') ||
+    lower.includes('eşleştiriyor musunuz') || lower.includes('eşleştirme yapıyor musunuz') || lower.includes('klinikle eşleştiriyor musunuz') ||
     lower.includes('kann ich') || lower.includes('können sie') || lower.includes('bieten sie') || lower.includes('gibt es') ||
     lower.includes('могу ли я') || lower.includes('можете ли вы') || lower.includes('есть ли') || lower.includes('предоставляете ли') ||
     lower.includes('هل يمكنني') || lower.includes('هل يمكنك') || lower.includes('هل توفرون') || lower.includes('هل يوجد')
