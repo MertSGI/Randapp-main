@@ -159,7 +159,7 @@ function containsUnsupportedCapabilityQuery(message: string): boolean {
 
   // 2. Travel & Logistics Capability Query
   const isTravelCapabilityQuery = (
-    lower.includes('process my visa') || lower.includes('vize işliyor musunuz') || lower.includes('vize alıyor musunuz') || lower.includes('can you process') || lower.includes('can you arrange') || lower.includes('can you book') ||
+    lower.includes('process my visa') || lower.includes('vize işliyor musunuz') || lower.includes('vize alıyor musunuz') ||
     lower.includes('visum bearbeiten') || lower.includes('оформить визу') || lower.includes('معالجة التأشيرة') ||
     (
       (lower.includes('visa') || lower.includes('vize') || lower.includes('виз') || lower.includes('تأشيرة') || lower.includes('flight') || lower.includes('uçak') || lower.includes('hotel') || lower.includes('otel') || lower.includes('отель') || lower.includes('فندق') || lower.includes('transfer') || lower.includes('трансфер') || lower.includes('konaklama') || lower.includes('unterkunft')) &&

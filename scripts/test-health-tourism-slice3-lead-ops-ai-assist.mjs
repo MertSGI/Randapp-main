@@ -178,8 +178,72 @@ if (fs.existsSync(edgeFnPath)) {
   assert(fnContent.includes('Performs appointment booking or Lead -> Booking -> Clinic conversion'), 'Edge Function prompt explicitly guards against booking/clinic conversion claims');
   assert(fnContent.includes('UNKNOWN OR UNSUPPORTED CAPABILITIES') && fnContent.includes('Offer to collect their inquiry or connect them with a human coordinator instead'), 'Edge Function prompt includes unknown-capability rule directing callers to human coordination');
 
-  // R20-R24 Deterministic Public-AI Capability Boundary Assertions
-  assert(fnContent.includes('function containsUnsupportedCapabilityQuery'), 'A. Deterministic capability classifier exists');
+  // R20-R25 Executable Classifier Extraction & Matrix Testing
+  const match = fnContent.match(/function containsUnsupportedCapabilityQuery\([\s\S]*?\n\}/);
+  assert(match !== null, 'A. Deterministic capability classifier exists');
+
+  let containsUnsupportedCapabilityQuery = null;
+  if (match) {
+    let code = match[0];
+    // Convert TypeScript annotations for Node execution
+    code = code.replace(/message:\s*string/g, 'message');
+    code = code.replace(/:\s*boolean/g, '');
+    try {
+      containsUnsupportedCapabilityQuery = eval('(' + code + ')');
+      assert(typeof containsUnsupportedCapabilityQuery === 'function', 'Literal classifier extracted and instantiated successfully');
+    } catch (e) {
+      assert(false, `Failed to instantiate literal classifier: ${e.message}`);
+    }
+  }
+
+  if (containsUnsupportedCapabilityQuery) {
+    const positiveCases = [
+      "Can I upload my passport here?",
+      "Can you process my visa?",
+      "Can you book my flight?",
+      "Can you arrange my hotel or airport transfer?",
+      "Can I pay a deposit here?",
+      "Do you provide payment plans?",
+      "Will I receive an automatic SMS confirmation?",
+      "Do you send WhatsApp messages automatically?",
+      "Can you book my appointment?",
+      "Does the platform automatically match me with a clinic?",
+      "Which countries are available on this platform?",
+      "Which clinics are available?",
+      "What treatment types are offered on this platform?",
+      "Pasaportumu yükle.",
+      "Randevu oluştur.",
+      "Transferimi ayarla.",
+      "Vizemi işle.",
+      "Beni otomatik olarak bir klinikle eşleştiriyor musunuz?",
+      "Visum bearbeiten",
+      "оформить визу",
+      "معالجة التأشيرة"
+    ];
+
+    const negativeCases = [
+      "Can you process my inquiry?",
+      "Can you arrange a human coordinator handoff?",
+      "My passport is ready. How can I submit my inquiry?",
+      "My hotel is already booked. Can you summarize my inquiry?",
+      "I already have a visa. Can you continue in German?",
+      "I paid a deposit elsewhere. Can you summarize my inquiry?",
+      "My flight arrives tomorrow. Can you collect my contact information?",
+      "Randevu aldım. Şimdi talebime nasıl devam ederim?",
+      "Otelimi ayarladım. İletişim bilgilerimi verebilir miyim?",
+      "Vize işlemlerim hazır. Talebimi özetler misin?",
+      "Uçak biletimi aldım. Almanca devam edebilir miyiz?",
+      "Seçtiğim klinikle görüşüyorum. Talebimi özetler misin?"
+    ];
+
+    positiveCases.forEach(input => {
+      assert(containsUnsupportedCapabilityQuery(input) === true, `Classifier POSITIVE check: "${input}" -> true`);
+    });
+
+    negativeCases.forEach(input => {
+      assert(containsUnsupportedCapabilityQuery(input) === false, `Classifier NEGATIVE check: "${input}" -> false`);
+    });
+  }
 
   // R24 Action-Specific Coupling & Generic Modal Removal Guards
   assert(!fnContent.includes('hasCapabilityIntent && hasUnsupportedTopic'),
@@ -218,8 +282,6 @@ if (fs.existsSync(edgeFnPath)) {
   // Preserved R23 Multilingual & Boundary Guards
   assert(fnContent.includes('vizemi') && fnContent.includes('işle'),
     'TURKISH_VIZEMI_DIRECT_ACTION_GUARD: Bounded Turkish vizemi işle direct action exists');
-  assert(fnContent.includes('eşleştiriyor musunuz') || fnContent.includes('eşleştirme yapıyor musunuz'),
-    'TURKISH_CLINIC_MATCHING_INTENT_GUARD: Turkish clinic matching capability intent indicator exists');
   assert(fnContent.includes('\\p{L}') && fnContent.includes('/u'),
     'UNICODE_SAFE_DIRECT_ACTION_BOUNDARY_GUARD: Direct action patterns use Unicode-aware property escape boundaries');
   assert(!/\b(записаться|паспорт|визу)\b/.test(fnContent.slice(fnContent.indexOf('directActionPatterns'), fnContent.indexOf('isDocumentCapabilityQuery'))),
