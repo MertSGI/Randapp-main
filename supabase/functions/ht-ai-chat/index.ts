@@ -94,6 +94,70 @@ Respond in ${language === 'tr' ? 'Turkish' : language === 'de' ? 'German' : lang
 Keep responses concise, warm, and professional. Focus on helping the user navigate the health tourism inquiry process.`;
 }
 
+/** Deterministic Unsupported Product Capability Classifier */
+function containsUnsupportedCapabilityQuery(message: string): boolean {
+  const lower = message.toLowerCase();
+
+  // Pattern categories identifying platform capability / offering inquiries
+  // 1. Documents: upload passport, ID, report, medical files
+  const docPatterns = [
+    /passport/, /pasaport/, /паспорт/, /جواز/, /reisepass/,
+    /upload/i, /yükle/i, /загруз/i, /تحميل/i, /hochladen/i,
+    /send (my|a) (doc|file|report|pdf|id)/i, /belge/i, /dosya/i, /документ/i, /ملف/i, /dokument/i
+  ];
+  const isDocQuery = (lower.includes('passport') || lower.includes('pasaport') || lower.includes('паспорт') || lower.includes('جواز') || lower.includes('reisepass')) ||
+    ((lower.includes('upload') || lower.includes('yükle') || lower.includes('загруз') || lower.includes('تحميل') || lower.includes('hochladen')) &&
+     (lower.includes('doc') || lower.includes('file') || lower.includes('report') || lower.includes('pdf') || lower.includes('id') || lower.includes('belge') || lower.includes('dosya') || lower.includes('документ') || lower.includes('ملف') || lower.includes('dokument')));
+
+  // 2. Travel & Logistics: visa, flight, hotel, accommodation, airport transfer
+  const isTravelQuery = lower.includes('visa') || lower.includes('vize') || lower.includes('виз') || lower.includes('تأشيرة') ||
+    lower.includes('flight') || lower.includes('uçak') || lower.includes('flughafen') || lower.includes('перелет') || lower.includes('طيران') ||
+    lower.includes('hotel') || lower.includes('otel') || lower.includes('отель') || lower.includes('فندق') ||
+    lower.includes('transfer') || lower.includes('трансфер') || lower.includes('konaklama') || lower.includes('unterkunft') || lower.includes('إقامة');
+
+  // 3. Commercial & Payments: payment, deposit, price guarantee, payment plan
+  const isPaymentQuery = lower.includes('deposit') || lower.includes('depozito') || lower.includes('депозит') || lower.includes('عربون') ||
+    lower.includes('pay ') || lower.includes('payment') || lower.includes('ödeme') || lower.includes('öde ') || lower.includes('оплат') || lower.includes('دفع') || lower.includes('bezahl') ||
+    lower.includes('price guarantee') || lower.includes('fiyat garantisi') || lower.includes('гарантия цены');
+
+  // 4. Automated Communication: SMS, email, auto messaging, real WhatsApp sending
+  const isAutoCommQuery = (lower.includes('sms') || lower.includes('email') || lower.includes('eposta') || lower.includes('e-posta') || lower.includes('whatsapp') || lower.includes('mail')) &&
+    (lower.includes('automatic') || lower.includes('otomatik') || lower.includes('автомат') || lower.includes('تلقائي') || lower.includes('automatisch') || lower.includes('confirm') || lower.includes('onay') || lower.includes('подтвержд'));
+
+  // 5. Workflow: appointment booking, automatic clinic matching, Lead -> Booking -> Clinic conversion
+  const isBookingMatchingQuery = lower.includes('book my appointment') || lower.includes('randevu al') || lower.includes('randevu oluştur') || lower.includes('записаться') || lower.includes('حجز موعد') || lower.includes('termin buchen') ||
+    ((lower.includes('automatic') || lower.includes('otomatik') || lower.includes('автомат') || lower.includes('تلقائي') || lower.includes('match') || lower.includes('eşleş')) &&
+     (lower.includes('clinic') || lower.includes('klinik') || lower.includes('клиник') || lower.includes('عيادة')));
+
+  // 6. Catalog / Offering Authority / Platform Capability Questions:
+  // Distinguishes "which countries/treatments/clinics are available on this platform" from medical symptom questions.
+  const isCatalogOfferingQuery = (
+    (lower.includes('which') || lower.includes('what') || lower.includes('hangi') || lower.includes('какие') || lower.includes('какой') || lower.includes('أي') || lower.includes('welche')) &&
+    (lower.includes('platform') || lower.includes('system') || lower.includes('available') || lower.includes('mevcut') || lower.includes('offer') || lower.includes('доступн') || lower.includes('متاح') || lower.includes('verfügbar')) &&
+    (lower.includes('country') || lower.includes('countries') || lower.includes('ülke') || lower.includes('страны') || lower.includes('دول') || lower.includes('länder') ||
+     lower.includes('clinic') || lower.includes('clinics') || lower.includes('klinik') || lower.includes('клиники') || lower.includes('عيادات') || lower.includes('kliniken') ||
+     lower.includes('treatment') || lower.includes('treatments') || lower.includes('procedure') || lower.includes('tedavi') || lower.includes('процедур') || lower.includes('علاج') || lower.includes('behandlung'))
+  ) || lower.includes('available on this platform') || lower.includes('bu platformda mevcut') || lower.includes('доступны на этой платформе') || lower.includes('المتاحة على هذه المنصة');
+
+  return isDocQuery || isTravelQuery || isPaymentQuery || isAutoCommQuery || isBookingMatchingQuery || isCatalogOfferingQuery;
+}
+
+/** Localized Safe Product-Capability Response Helper */
+function buildUnsupportedCapabilityResponse(language: string): string {
+  switch (language) {
+    case "tr":
+      return "Bu asistan üzerinden talep ettiğiniz özelliğin veya seçeneğin şu anda aktif olarak sunulduğunu doğrudan teyit edemiyorum. İhtiyacınızı kayıt altına alabilir ve detaylı bilgi için sizi uzman hasta koordinatörümüze yönlendirebilirim.";
+    case "de":
+      return "Ich kann über diesen Assistenten nicht direkt bestätigen, dass diese Funktion oder Option derzeit verfügbar ist. Ich kann Ihre Anfrage gerne aufnehmen und Sie für weitere Details an unseren Koordinatoren weiterleiten.";
+    case "ru":
+      return "Я не могу напрямую подтвердить через этого ассистента, доступна ли эта функция или опция в настоящее время. Я могу зафиксировать ваш запрос и передать его нашему координатору для уточнения деталей.";
+    case "ar":
+      return "لا يمكنني التأكيد مباشرة من خلال هذا المساعد ما إذا كانت هذه الميزة أو الخيار متاحًا حاليًا. يمكنني تسجيل استفسارك وتوصيلك بـ منسق المرضى للحصول على التفاصيل الكاملة.";
+    default:
+      return "I cannot directly confirm through this assistant whether that specific capability or option is currently available on the platform. I can record your inquiry details and connect you with a human coordinator to assist you further.";
+  }
+}
+
 function containsMedicalQuery(message: string): boolean {
   const lower = message.toLowerCase();
   return MEDICAL_KEYWORDS.some(kw => lower.includes(kw));
@@ -493,6 +557,38 @@ serve(async (req: Request) => {
     if (userMsgErr || !userMsgRes?.success) {
       console.error("ht_add_ai_message (user) error:", userMsgErr || userMsgRes);
       return jsonError("MESSAGE_PERSIST_FAILED", "Unable to record message. Please try again.", 500);
+    }
+
+    // -----------------------------------------------------------------------
+    // 7B. Check deterministic unsupported product capability boundary
+    // -----------------------------------------------------------------------
+    const isUnsupportedCapabilityQuery = containsUnsupportedCapabilityQuery(message);
+
+    if (isUnsupportedCapabilityQuery) {
+      const capabilityResponse = buildUnsupportedCapabilityResponse(preferred_language || "en");
+
+      // Persist assistant capability-boundary response
+      const { data: capMsgRes, error: capMsgErr } = await supabase.rpc("ht_add_ai_message", {
+        p_session_token: currentSessionToken,
+        p_role: "assistant",
+        p_content: capabilityResponse,
+      });
+
+      if (capMsgErr || !capMsgRes?.success) {
+        console.error("ht_add_ai_message (capability assistant) error:", capMsgErr || capMsgRes);
+        return jsonError("MESSAGE_PERSIST_FAILED", "Unable to record response. Please try again.", 500);
+      }
+
+      const requiresContact = !activeLeadId;
+
+      return jsonSuccess({
+        session_token: currentSessionToken,
+        reply: capabilityResponse,
+        conversation_id: conversationId,
+        handoff_triggered: false,
+        requires_contact: requiresContact,
+        outcome_code: "UNSUPPORTED_CAPABILITY",
+      });
     }
 
     // -----------------------------------------------------------------------

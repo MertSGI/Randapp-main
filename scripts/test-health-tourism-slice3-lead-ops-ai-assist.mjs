@@ -177,6 +177,29 @@ if (fs.existsSync(edgeFnPath)) {
   assert(fnContent.includes('Sends automatic confirmation emails or automatic SMS messages') && fnContent.includes('Performs real WhatsApp delivery or automated external messaging'), 'Edge Function prompt explicitly guards against auto-email/SMS/WhatsApp claims');
   assert(fnContent.includes('Performs appointment booking or Lead -> Booking -> Clinic conversion'), 'Edge Function prompt explicitly guards against booking/clinic conversion claims');
   assert(fnContent.includes('UNKNOWN OR UNSUPPORTED CAPABILITIES') && fnContent.includes('Offer to collect their inquiry or connect them with a human coordinator instead'), 'Edge Function prompt includes unknown-capability rule directing callers to human coordination');
+
+  // R20 Deterministic Public-AI Capability Boundary Assertions
+  assert(fnContent.includes('function containsUnsupportedCapabilityQuery'), 'A. Deterministic capability classifier exists');
+  assert(fnContent.includes('isDocQuery') && fnContent.includes('passport'), 'B. Document capability coverage exists');
+  assert(fnContent.includes('isTravelQuery') && fnContent.includes('visa') && fnContent.includes('flight') && fnContent.includes('hotel'), 'C. Visa/travel/logistics coverage exists');
+  assert(fnContent.includes('isPaymentQuery') && fnContent.includes('deposit') && fnContent.includes('payment'), 'D. Payment coverage exists');
+  assert(fnContent.includes('isAutoCommQuery') && (fnContent.includes('sms') || fnContent.includes('email')), 'E. Automatic communications coverage exists');
+  assert(fnContent.includes('isBookingMatchingQuery') && (fnContent.includes('booking') || fnContent.includes('randevu') || fnContent.includes('termin')), 'F. Booking / clinic matching coverage exists');
+  assert(fnContent.includes('isCatalogOfferingQuery') && (fnContent.includes('country') || fnContent.includes('treatment') || fnContent.includes('tedavi')), 'G. Country/catalog/treatment-offering capability coverage exists');
+
+  assert(fnContent.includes('buildUnsupportedCapabilityResponse'), 'H. Localized TR/EN/DE/RU/AR capability-boundary response helper exists');
+  assert(fnContent.includes('case "tr"') && fnContent.includes('case "de"') && fnContent.includes('case "ru"') && fnContent.includes('case "ar"'), 'H2. TR/EN/DE/RU/AR language cases present');
+
+  assert(fnContent.includes('outcome_code: "UNSUPPORTED_CAPABILITY"') || fnContent.includes('outcome_code: \n        "UNSUPPORTED_CAPABILITY"'), 'I. Explicit UNSUPPORTED_CAPABILITY outcome code exists');
+
+  const capIndex = fnContent.indexOf('containsUnsupportedCapabilityQuery(');
+  const medIndex = fnContent.indexOf('containsMedicalQuery(');
+  const aiFetchIndex = fnContent.indexOf('fetch(');
+
+  assert(capIndex !== -1 && medIndex !== -1 && capIndex < medIndex, 'J. Capability boundary executes BEFORE medical boundary');
+  assert(capIndex !== -1 && aiFetchIndex !== -1 && capIndex < aiFetchIndex, 'K. Capability boundary executes BEFORE AI provider fetch');
+
+  assert(fnContent.includes('ht_add_ai_message') && fnContent.includes('capability assistant'), 'L. Deterministic response is persisted via ht_add_ai_message');
 }
 
 // 2B. Supabase Client Export & Coordinator Workspace Import Check
