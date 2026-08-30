@@ -178,26 +178,29 @@ if (fs.existsSync(edgeFnPath)) {
   assert(fnContent.includes('Performs appointment booking or Lead -> Booking -> Clinic conversion'), 'Edge Function prompt explicitly guards against booking/clinic conversion claims');
   assert(fnContent.includes('UNKNOWN OR UNSUPPORTED CAPABILITIES') && fnContent.includes('Offer to collect their inquiry or connect them with a human coordinator instead'), 'Edge Function prompt includes unknown-capability rule directing callers to human coordination');
 
-  // R20 Deterministic Public-AI Capability Boundary Assertions
+  // R20/R21 Deterministic Public-AI Capability Boundary Assertions
   assert(fnContent.includes('function containsUnsupportedCapabilityQuery'), 'A. Deterministic capability classifier exists');
-  assert(fnContent.includes('isDocQuery') && fnContent.includes('passport'), 'B. Document capability coverage exists');
-  assert(fnContent.includes('isTravelQuery') && fnContent.includes('visa') && fnContent.includes('flight') && fnContent.includes('hotel'), 'C. Visa/travel/logistics coverage exists');
-  assert(fnContent.includes('isPaymentQuery') && fnContent.includes('deposit') && fnContent.includes('payment'), 'D. Payment coverage exists');
-  assert(fnContent.includes('isAutoCommQuery') && (fnContent.includes('sms') || fnContent.includes('email')), 'E. Automatic communications coverage exists');
-  assert(fnContent.includes('isBookingMatchingQuery') && (fnContent.includes('booking') || fnContent.includes('randevu') || fnContent.includes('termin')), 'F. Booking / clinic matching coverage exists');
-  assert(fnContent.includes('isCatalogOfferingQuery') && (fnContent.includes('country') || fnContent.includes('treatment') || fnContent.includes('tedavi')), 'G. Country/catalog/treatment-offering capability coverage exists');
+  assert(fnContent.includes('hasCapabilityIntent') && fnContent.includes('hasUnsupportedTopic'), 'CAPABILITY_INTENT_GUARD_EXISTS: Classifier structural guard requires capability intent indicator');
+  assert(fnContent.includes('isDocTopic') && fnContent.includes('passport'), 'DOCUMENT_TOPIC_REQUIRES_CAPABILITY_INTENT: Document topic requires capability intent');
+  assert(fnContent.includes('isTravelTopic') && fnContent.includes('visa') && fnContent.includes('flight') && fnContent.includes('hotel'), 'TRAVEL_TOPIC_REQUIRES_CAPABILITY_INTENT: Travel topic requires capability intent');
+  assert(fnContent.includes('isPaymentTopic') && fnContent.includes('deposit') && fnContent.includes('payment'), 'PAYMENT_TOPIC_REQUIRES_CAPABILITY_INTENT: Payment topic requires capability intent');
+  assert(fnContent.includes('isAutoCommTopic') && (fnContent.includes('sms') || fnContent.includes('email')), 'AUTO_COMM_TOPIC_REQUIRES_CAPABILITY_INTENT: Automatic communication topic requires capability intent');
+  assert(fnContent.includes('isBookingMatchingTopic') && (fnContent.includes('appointment') || fnContent.includes('randevu') || fnContent.includes('termin')), 'BOOKING_MATCHING_INTENT_GUARD_RESULT: Booking/matching topic requires capability intent');
+  assert(fnContent.includes('isCatalogOfferingQuery') && (fnContent.includes('country') || fnContent.includes('treatment') || fnContent.includes('tedavi')), 'CATALOG_CAPABILITY_INTENT_PRESERVED: Catalog offering query capability intent preserved');
 
   assert(fnContent.includes('buildUnsupportedCapabilityResponse'), 'H. Localized TR/EN/DE/RU/AR capability-boundary response helper exists');
   assert(fnContent.includes('case "tr"') && fnContent.includes('case "de"') && fnContent.includes('case "ru"') && fnContent.includes('case "ar"'), 'H2. TR/EN/DE/RU/AR language cases present');
 
   assert(fnContent.includes('outcome_code: "UNSUPPORTED_CAPABILITY"') || fnContent.includes('outcome_code: \n        "UNSUPPORTED_CAPABILITY"'), 'I. Explicit UNSUPPORTED_CAPABILITY outcome code exists');
 
-  const capIndex = fnContent.indexOf('containsUnsupportedCapabilityQuery(');
-  const medIndex = fnContent.indexOf('containsMedicalQuery(');
-  const aiFetchIndex = fnContent.indexOf('fetch(');
+  // Runtime call-site order anchors (ensures execution order checks call-sites, NOT function definitions)
+  const capCallSiteIndex = fnContent.indexOf('const isUnsupportedCapabilityQuery = containsUnsupportedCapabilityQuery(message);');
+  const medCallSiteIndex = fnContent.indexOf('const isMedicalQuery = containsMedicalQuery(message);');
+  const providerFetchCallSiteIndex = fnContent.indexOf('const aiResponse = await fetch(apiUrl,');
 
-  assert(capIndex !== -1 && medIndex !== -1 && capIndex < medIndex, 'J. Capability boundary executes BEFORE medical boundary');
-  assert(capIndex !== -1 && aiFetchIndex !== -1 && capIndex < aiFetchIndex, 'K. Capability boundary executes BEFORE AI provider fetch');
+  assert(capCallSiteIndex !== -1 && medCallSiteIndex !== -1 && capCallSiteIndex < medCallSiteIndex, 'CAPABILITY_BOUNDARY_BEFORE_MEDICAL_RESULT: Capability boundary call site executes BEFORE medical boundary call site');
+  assert(capCallSiteIndex !== -1 && providerFetchCallSiteIndex !== -1 && capCallSiteIndex < providerFetchCallSiteIndex, 'CAPABILITY_BOUNDARY_BEFORE_PROVIDER_RESULT: Capability boundary call site executes BEFORE AI provider fetch call site');
+  assert(medCallSiteIndex !== -1 && providerFetchCallSiteIndex !== -1 && medCallSiteIndex < providerFetchCallSiteIndex, 'MEDICAL_BOUNDARY_BEFORE_PROVIDER_RESULT: Medical boundary call site executes BEFORE AI provider fetch call site');
 
   assert(fnContent.includes('ht_add_ai_message') && fnContent.includes('capability assistant'), 'L. Deterministic response is persisted via ht_add_ai_message');
 }

@@ -98,39 +98,59 @@ Keep responses concise, warm, and professional. Focus on helping the user naviga
 function containsUnsupportedCapabilityQuery(message: string): boolean {
   const lower = message.toLowerCase();
 
-  // Pattern categories identifying platform capability / offering inquiries
-  // 1. Documents: upload passport, ID, report, medical files
-  const docPatterns = [
-    /passport/, /pasaport/, /паспорт/, /جواز/, /reisepass/,
-    /upload/i, /yükle/i, /загруз/i, /تحميل/i, /hochladen/i,
-    /send (my|a) (doc|file|report|pdf|id)/i, /belge/i, /dosya/i, /документ/i, /ملف/i, /dokument/i
+  // Direct action phrases that inherently ask the platform to execute an unsupported capability
+  const directActionPhrases = [
+    'book my appointment', 'randevu al', 'randevu oluştur', 'записаться', 'حجز موعد', 'termin buchen',
+    'upload my passport', 'pasaportumu yükle', 'загрузить паспорт', 'تحميل جواز', 'reisepass hochladen',
+    'upload passport', 'pasaport yükle', 'upload id', 'upload document', 'upload report', 'upload file',
+    'process my visa', 'vize işle', 'оформить визу', 'معالجة التأشيرة', 'visum bearbeiten',
+    'arrange my transfer', 'transferimi ayarla', 'организовать трансфер', 'ترتيب المواصلات', 'transfer arrangieren',
+    'book my flight', 'book my hotel', 'uçak bileti al', 'otel ayarla', 'забронировать отель', 'حجز فندق'
   ];
-  const isDocQuery = (lower.includes('passport') || lower.includes('pasaport') || lower.includes('паспорт') || lower.includes('جواز') || lower.includes('reisepass')) ||
-    ((lower.includes('upload') || lower.includes('yükle') || lower.includes('загруз') || lower.includes('تحميل') || lower.includes('hochladen')) &&
-     (lower.includes('doc') || lower.includes('file') || lower.includes('report') || lower.includes('pdf') || lower.includes('id') || lower.includes('belge') || lower.includes('dosya') || lower.includes('документ') || lower.includes('ملف') || lower.includes('dokument')));
+  if (directActionPhrases.some(phrase => lower.includes(phrase))) {
+    return true;
+  }
 
-  // 2. Travel & Logistics: visa, flight, hotel, accommodation, airport transfer
-  const isTravelQuery = lower.includes('visa') || lower.includes('vize') || lower.includes('виз') || lower.includes('تأشيرة') ||
+  // Capability Intent Indicator: checks if caller is asking WHETHER/IF the platform supports or performs an action
+  const hasCapabilityIntent = (
+    lower.includes('can i') || lower.includes('can you') || lower.includes('do you') || lower.includes('does this platform') ||
+    lower.includes('does the platform') || lower.includes('is it available') || lower.includes('is this available') ||
+    lower.includes('do you support') || lower.includes('do you offer') || lower.includes('will you send') ||
+    lower.includes('will i receive') || lower.includes('can I upload') || lower.includes('can you arrange') ||
+    lower.includes('can you book') || lower.includes('can i pay') || lower.includes('which') || lower.includes('what') ||
+    lower.includes('yapabilir miyim') || lower.includes('yapıyor musunuz') || lower.includes('var mı') || lower.includes('mevcut mu') ||
+    lower.includes('sunuyor musunuz') || lower.includes('yükleyebilir miyim') || lower.includes('ayarlıyor musunuz') || lower.includes('rezervasyon yapıyor musunuz') ||
+    lower.includes('kann ich') || lower.includes('können sie') || lower.includes('bieten sie') || lower.includes('gibt es') ||
+    lower.includes('могу ли я') || lower.includes('можете ли вы') || lower.includes('есть ли') || lower.includes('предоставляете ли') ||
+    lower.includes('هل يمكنني') || lower.includes('هل يمكنك') || lower.includes('هل توفرون') || lower.includes('هل يوجد')
+  );
+
+  // Unsupported Capability Topic Indicators
+  const isDocTopic = lower.includes('passport') || lower.includes('pasaport') || lower.includes('паспорт') || lower.includes('جواز') || lower.includes('reisepass') ||
+    lower.includes('upload') || lower.includes('yükle') || lower.includes('загруз') || lower.includes('تحميل') || lower.includes('hochladen');
+
+  const isTravelTopic = lower.includes('visa') || lower.includes('vize') || lower.includes('виз') || lower.includes('تأشيرة') ||
     lower.includes('flight') || lower.includes('uçak') || lower.includes('flughafen') || lower.includes('перелет') || lower.includes('طيران') ||
     lower.includes('hotel') || lower.includes('otel') || lower.includes('отель') || lower.includes('فندق') ||
     lower.includes('transfer') || lower.includes('трансфер') || lower.includes('konaklama') || lower.includes('unterkunft') || lower.includes('إقامة');
 
-  // 3. Commercial & Payments: payment, deposit, price guarantee, payment plan
-  const isPaymentQuery = lower.includes('deposit') || lower.includes('depozito') || lower.includes('депозит') || lower.includes('عربون') ||
-    lower.includes('pay ') || lower.includes('payment') || lower.includes('ödeme') || lower.includes('öde ') || lower.includes('оплат') || lower.includes('دفع') || lower.includes('bezahl') ||
+  const isPaymentTopic = lower.includes('deposit') || lower.includes('depozito') || lower.includes('депозит') || lower.includes('عربون') ||
+    lower.includes('payment') || lower.includes('ödeme') || lower.includes('оплат') || lower.includes('bezahl') ||
     lower.includes('price guarantee') || lower.includes('fiyat garantisi') || lower.includes('гарантия цены');
 
-  // 4. Automated Communication: SMS, email, auto messaging, real WhatsApp sending
-  const isAutoCommQuery = (lower.includes('sms') || lower.includes('email') || lower.includes('eposta') || lower.includes('e-posta') || lower.includes('whatsapp') || lower.includes('mail')) &&
+  const isAutoCommTopic = (lower.includes('sms') || lower.includes('email') || lower.includes('eposta') || lower.includes('e-posta') || lower.includes('whatsapp') || lower.includes('mail')) &&
     (lower.includes('automatic') || lower.includes('otomatik') || lower.includes('автомат') || lower.includes('تلقائي') || lower.includes('automatisch') || lower.includes('confirm') || lower.includes('onay') || lower.includes('подтвержд'));
 
-  // 5. Workflow: appointment booking, automatic clinic matching, Lead -> Booking -> Clinic conversion
-  const isBookingMatchingQuery = lower.includes('book my appointment') || lower.includes('randevu al') || lower.includes('randevu oluştur') || lower.includes('записаться') || lower.includes('حجز موعد') || lower.includes('termin buchen') ||
-    ((lower.includes('automatic') || lower.includes('otomatik') || lower.includes('автомат') || lower.includes('تلقائي') || lower.includes('match') || lower.includes('eşleş')) &&
-     (lower.includes('clinic') || lower.includes('klinik') || lower.includes('клиник') || lower.includes('عيادة')));
+  const isBookingMatchingTopic = (lower.includes('appointment') || lower.includes('randevu') || lower.includes('termin') || lower.includes('запись') || lower.includes('موعد')) &&
+    (lower.includes('book') || lower.includes('al') || lower.includes('oluştur') || lower.includes('buchen') || lower.includes('حجز'));
 
-  // 6. Catalog / Offering Authority / Platform Capability Questions:
-  // Distinguishes "which countries/treatments/clinics are available on this platform" from medical symptom questions.
+  const hasUnsupportedTopic = isDocTopic || isTravelTopic || isPaymentTopic || isAutoCommTopic || isBookingMatchingTopic;
+
+  if (hasCapabilityIntent && hasUnsupportedTopic) {
+    return true;
+  }
+
+  // Catalog / Offering Authority Questions
   const isCatalogOfferingQuery = (
     (lower.includes('which') || lower.includes('what') || lower.includes('hangi') || lower.includes('какие') || lower.includes('какой') || lower.includes('أي') || lower.includes('welche')) &&
     (lower.includes('platform') || lower.includes('system') || lower.includes('available') || lower.includes('mevcut') || lower.includes('offer') || lower.includes('доступн') || lower.includes('متاح') || lower.includes('verfügbar')) &&
@@ -139,7 +159,7 @@ function containsUnsupportedCapabilityQuery(message: string): boolean {
      lower.includes('treatment') || lower.includes('treatments') || lower.includes('procedure') || lower.includes('tedavi') || lower.includes('процедур') || lower.includes('علاج') || lower.includes('behandlung'))
   ) || lower.includes('available on this platform') || lower.includes('bu platformda mevcut') || lower.includes('доступны на этой платформе') || lower.includes('المتاحة على هذه المنصة');
 
-  return isDocQuery || isTravelQuery || isPaymentQuery || isAutoCommQuery || isBookingMatchingQuery || isCatalogOfferingQuery;
+  return isCatalogOfferingQuery;
 }
 
 /** Localized Safe Product-Capability Response Helper */
