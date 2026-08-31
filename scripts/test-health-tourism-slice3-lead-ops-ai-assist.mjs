@@ -83,7 +83,7 @@ if (fs.existsSync(migrationPath)) {
     'Migration 67 explicitly drops legacy 3-argument ht_list_leads overload');
   assert(!migContent.includes('DROP FUNCTION IF EXISTS public.ht_list_leads(text, integer, integer) CASCADE;'),
     'Drop legacy ht_list_leads overload does NOT use CASCADE');
-  assert(migContent.includes('CREATE OR REPLACE FUNCTION public.ht_list_leads(\n    p_status TEXT DEFAULT NULL,\n    p_limit INT DEFAULT 50,\n    p_offset INT DEFAULT 0,\n    p_score_band TEXT DEFAULT NULL,\n    p_source_channel TEXT DEFAULT NULL\n)'),
+  assert(migContent.replace(/\r\n/g, '\n').includes('CREATE OR REPLACE FUNCTION public.ht_list_leads(\n    p_status TEXT DEFAULT NULL,\n    p_limit INT DEFAULT 50,\n    p_offset INT DEFAULT 0,\n    p_score_band TEXT DEFAULT NULL,\n    p_source_channel TEXT DEFAULT NULL\n)'),
     'Canonical 5-argument ht_list_leads exists with p_status, p_limit, p_offset, p_score_band, p_source_channel');
   assert(migContent.includes('REVOKE ALL ON FUNCTION public.ht_list_leads(text, integer, integer, text, text) FROM PUBLIC, anon;'),
     'ACL statements use exact 5-argument ht_list_leads REVOKE signature');
@@ -204,6 +204,19 @@ if (fs.existsSync(edgeFnPath)) {
       "Can you arrange my hotel or airport transfer?",
       "Can I pay a deposit here?",
       "Do you provide payment plans?",
+      "Do you accept insurance?",
+      "Do you accept wire transfer?",
+      "Can I pay by bank transfer?",
+      "Do you accept insurance or wire transfer?",
+      "Sigorta kabul ediyor musunuz?",
+      "Havale kabul ediyor musunuz?",
+      "Banka havalesi ile ödeme yapabilir miyim?",
+      "Akzeptieren Sie Versicherungen?",
+      "Kann ich per Banküberweisung bezahlen?",
+      "Вы принимаете страховку?",
+      "Можно оплатить банковским переводом?",
+      "هل تقبلون التأمين؟",
+      "هل يمكن الدفع عن طريق التحويل البنكي؟",
       "Will I receive an automatic SMS confirmation?",
       "Do you send WhatsApp messages automatically?",
       "Can you book my appointment?",
@@ -228,6 +241,11 @@ if (fs.existsSync(edgeFnPath)) {
       "My hotel is already booked. Can you summarize my inquiry?",
       "I already have a visa. Can you continue in German?",
       "I paid a deposit elsewhere. Can you summarize my inquiry?",
+      "I already paid by bank transfer elsewhere.",
+      "My insurance paperwork is complete.",
+      "Sigortamı önceden yaptırdım. İletişim bilgilerimi alabilir misin?",
+      "Havale işlemini tamamladım. Talebimi özetler misin?",
+      "Ich habe die Versicherung bereits abgeschlossen.",
       "My flight arrives tomorrow. Can you collect my contact information?",
       "Randevu aldım. Şimdi talebime nasıl devam ederim?",
       "Otelimi ayarladım. İletişim bilgilerimi verebilir miyim?",
@@ -458,7 +476,7 @@ if (fs.existsSync(edgeFnPath) && fs.existsSync(providerPolicyPath)) {
   // A. Observed-Runtime Hallucination Regressions (10 cases: EN>=2, TR>=2, DE>=2, RU>=2, AR>=2)
   const observedUnsafeCases = [
     // EN (4 cases)
-    { lang: 'en', text: 'I can forward it for you.' },
+    { lang: 'en', text: 'I can forward it for you to our team.' },
     { lang: 'en', text: 'A coordinator will review your request and reach out—usually by email or phone.' },
     { lang: 'en', text: 'We assist by providing information packets and guiding you through the formal request process.' },
     { lang: 'en', text: 'Additional documents may be needed before partner clinics plan logistics and transfer.' },

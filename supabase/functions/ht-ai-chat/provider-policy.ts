@@ -6,13 +6,18 @@
 export function isProviderReplyGrounded(reply: string): boolean {
   const lower = reply.toLowerCase();
 
-  // Affirmative/predictive coordinator contact promises or timeline/channel promises
+  // Affirmative/predictive coordinator contact promises or timeline/channel promises & unexecuted forwarding claims
   const coordinatorContactPromises = [
     /coordinator\s+(will|shall|is\s+going\s+to)\s+(contact|reach\s+out|review|call|email)/u,
     /our\s+team\s+will\s+(contact|reach\s+out|review|call|email)/u,
     /will\s+reach\s+out(?:\s+to\s+you)?\s+usually\s+by/u,
     /usually\s+by\s+(email|phone|whatsapp)/u,
     /reach\s+out(?:\s+to\s+you)?\s+by\s+(email|phone|whatsapp)/u,
+    /forward\s+it\s+to\s+a\s+(human\s+)?coordinator/u,
+    /forward\s+your\s+(request|inquiry|question)\s+to\s+a\s+(human\s+)?coordinator/u,
+    /forwarded\s+to\s+a\s+(human\s+)?coordinator/u,
+    /forwarding\s+your\s+(request|inquiry|question)/u,
+    /sent\s+your\s+(inquiry|request)\s+to\s+our\s+coordinator/u,
     /koordinasyon\s+ekibimize\s+ileteceğim/u,
     /koordinasyon\s+ekibi\s+sizinle\s+iletişime\s+geçecek/u,
     /genellikle\s+e-posta\s+veya\s+telefon/u,

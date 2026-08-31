@@ -42,10 +42,29 @@ Deno.test("isProviderReplyGrounded — Observed Runtime Unsafe Regressions", () 
   }
 });
 
-// 2. Allowed Coordinator Language Tests (Must remain grounded)
+// 2. Unexecuted Forwarding Claim Grounding Tests (Unsafe & Safe)
+Deno.test("isProviderReplyGrounded — Unexecuted Forwarding Claim Regressions (Unsafe)", () => {
+  const unsafeForwardingCases = [
+    { lang: 'en', reply: "I can capture your question and forward it to a human coordinator who can provide details." },
+    { lang: 'en', reply: "I will forward your request to a coordinator right away." },
+    { lang: 'en', reply: "I've sent your inquiry to our coordinator for further assistance." },
+    { lang: 'en', reply: "I'm forwarding your request now to the team." },
+    { lang: 'tr', reply: "Talebinizi koordinasyon ekibimize ileteceğim." },
+    { lang: 'de', reply: "Wir werden Ihre Anfrage an unser Koordinationsteam weiterleiten." }
+  ];
+
+  for (const c of unsafeForwardingCases) {
+    const grounded = isProviderReplyGrounded(c.reply);
+    assert(!grounded, `Unsafe forwarding claim [${c.lang}] must be rejected: ${c.reply}`);
+  }
+});
+
 Deno.test("isProviderReplyGrounded — Safe Allowed Coordinator Language", () => {
   const safeCases = [
     { lang: 'en', reply: "I can help summarize your inquiry, collect your contact and language preferences, and request a human coordinator handoff." },
+    { lang: 'en', reply: "I can request a human coordinator handoff." },
+    { lang: 'en', reply: "I can help you request a human coordinator." },
+    { lang: 'en', reply: "I can collect your details for a handoff request." },
     { lang: 'en', reply: "I can prepare an assistive summary for human coordinator review if you wish." },
     { lang: 'tr', reply: "Talebinizi özetlememe ve bir insan koordinatör yönlendirmesi talep etmenize yardımcı olabilirim." },
     { lang: 'de', reply: "Ich kann Ihre Anfrage zusammenfassen und eine Weiterleitung an einen Koordinator anzufragen." },
