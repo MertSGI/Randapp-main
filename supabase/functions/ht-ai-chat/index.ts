@@ -234,6 +234,128 @@ function containsMedicalQuery(message: string): boolean {
   return MEDICAL_KEYWORDS.some(kw => lower.includes(kw));
 }
 
+/** Deterministic Grounding Guard Helper */
+function isProviderReplyGrounded(reply: string): boolean {
+  const lower = reply.toLowerCase();
+
+  // Bounded regex patterns for forbidden provider assertions with Unicode-aware boundaries
+  const forbiddenPatterns = [
+    // 1. Passport / ID / Document processing or requirements assertions
+    /(?<!\p{L})passport(?!\p{L})/u,
+    /(?<!\p{L})pasaport(?!\p{L})/u,
+    /(?<!\p{L})паспорт(?!\p{L})/u,
+    /(?<!\p{L})جواز(?!\p{L})/u,
+    /(?<!\p{L})reisepass(?!\p{L})/u,
+    /(?<!\p{L})upload\s+document(?!\p{L})/u,
+    /(?<!\p{L})upload\s+report(?!\p{L})/u,
+    /(?<!\p{L})upload\s+file(?!\p{L})/u,
+    /(?<!\p{L})send\s+your\s+reports(?!\p{L})/u,
+    /(?<!\p{L})send\s+your\s+documents(?!\p{L})/u,
+
+    // 2. Visa processing assertions
+    /(?<!\p{L})visa\s+processing(?!\p{L})/u,
+    /(?<!\p{L})process\s+your\s+visa(?!\p{L})/u,
+    /(?<!\p{L})vize\s+işle(?!\p{L})/u,
+    /(?<!\p{L})оформим\s+визу(?!\p{L})/u,
+    /(?<!\p{L})معالجة\s+التأشيرة(?!\p{L})/u,
+    /(?<!\p{L})visum\s+bearbeiten(?!\p{L})/u,
+
+    // 3. Flight / Hotel / Accommodation booking assertions
+    /(?<!\p{L})book\s+your\s+flight(?!\p{L})/u,
+    /(?<!\p{L})book\s+your\s+hotel(?!\p{L})/u,
+    /(?<!\p{L})uçak\s+biletiniz(?!\p{L})/u,
+    /(?<!\p{L})oteliniz(?!\p{L})/u,
+    /(?<!\p{L})забронируем\s+отель(?!\p{L})/u,
+    /(?<!\p{L})حجز\s+فندق(?!\p{L})/u,
+
+    // 4. Airport transfer / logistics arrangement assertions
+    /(?<!\p{L})arrange\s+your\s+transfer(?!\p{L})/u,
+    /(?<!\p{L})arrange\s+transfer(?!\p{L})/u,
+    /(?<!\p{L})transferinizi\s+ayarla(?!\p{L})/u,
+    /(?<!\p{L})организуем\s+трансфер(?!\p{L})/u,
+    /(?<!\p{L})ترتيب\s+المواصلات(?!\p{L})/u,
+    /(?<!\p{L})transfer\s+arrangieren(?!\p{L})/u,
+
+    // 5. Payment / Deposit / Financial plan assertions
+    /(?<!\p{L})deposit(?!\p{L})/u,
+    /(?<!\p{L})depozito(?!\p{L})/u,
+    /(?<!\p{L})депозит(?!\p{L})/u,
+    /(?<!\p{L})عربون(?!\p{L})/u,
+    /(?<!\p{L})payment\s+plan(?!\p{L})/u,
+    /(?<!\p{L})ödeme\s+planı(?!\p{L})/u,
+
+    // 6. Automatic SMS / WhatsApp / Email confirmation assertions
+    /(?<!\p{L})automatic\s+sms(?!\p{L})/u,
+    /(?<!\p{L})automatic\s+whatsapp(?!\p{L})/u,
+    /(?<!\p{L})automatic\s+email(?!\p{L})/u,
+    /(?<!\p{L})otomatik\s+sms(?!\p{L})/u,
+    /(?<!\p{L})otomatik\s+whatsapp(?!\p{L})/u,
+    /(?<!\p{L})otomatik\s+e-posta(?!\p{L})/u,
+
+    // 7. Automatic clinic matching assertions
+    /(?<!\p{L})automatically\s+match(?!\p{L})/u,
+    /(?<!\p{L})otomatik\s+eşleştir(?!\p{L})/u,
+
+    // 8. Partner clinic forwarding / sending assertions
+    /(?<!\p{L})partner\s+clinic(?!\p{L})/u,
+    /(?<!\p{L})partner\s+klinik(?!\p{L})/u,
+    /(?<!\p{L})partnerklinik(?!\p{L})/u,
+    /(?<!\p{L})клиники-партнёры(?!\p{L})/u,
+    /(?<!\p{L})клиникам-партнёрам(?!\p{L})/u,
+    /(?<!\p{L})العيادات\s+الشريكة(?!\p{L})/u,
+    /send\s+your\s+inquiry\s+to\s+our\s+partner/u,
+    /forward\s+your\s+inquiry\s+to\s+our\s+partner/u,
+    /talebinizi\s+partner\s+klinik/u,
+    /направим\s+ваш\s+запрос/u,
+    /سنرسل\s+طلبك/u,
+
+    // 9. Appointment / Consultation booking or scheduling assertions
+    /schedule\s+a\s+consultation/u,
+    /schedule\s+your\s+appointment/u,
+    /book\s+a\s+consultation/u,
+    /book\s+your\s+appointment/u,
+    /randevunuzu\s+ayarla/u,
+    /randevu\s+oluştur/u,
+    /назначим\s+консультацию/u,
+    /запишем\s+на\s+приём/u,
+    /نحدد\s+لك\s+موعد/u,
+    /vereinbaren\s+einen\s+termin/u,
+
+    // 10. Guaranteed response time, concrete logistics plan, or quote guarantees
+    /guarantee\s+response/u,
+    /guaranteed\s+quote/u,
+    /guaranteed\s+price/u,
+    /logistics\s+plan\s+will\s+be\s+created/u
+  ];
+
+  if (forbiddenPatterns.some(pattern => pattern.test(lower))) {
+    return false;
+  }
+
+  // General phrase checks for unsupported operational claims
+  if (lower.includes('partner clinic') || lower.includes('partner-klinik') || lower.includes('partnerklinik')) return false;
+  if (lower.includes('schedule a consultation') || lower.includes('randevunuzu ayarlayacağız') || lower.includes('vereinbaren einen termin')) return false;
+  if (lower.includes('направим ваш запрос в клиники') || lower.includes('سنرسل طلبك إلى العيادات')) return false;
+
+  return true;
+}
+
+/** Localized Grounded Replacement Helper */
+function buildGroundedReplacementResponse(language: string): string {
+  switch (language) {
+    case "tr":
+      return "Talebinizi özetlememe, iletişim ve dil tercihlerinizi almanıza ve bir insan koordinatör yönlendirmesi talep etmenize yardımcı olabilirim. Desteklenmeyen operasyonel hizmetleri bu asistan üzerinden doğrudan teyit edemiyorum.";
+    case "de":
+      return "Ich kann Ihnen helfen, Ihre Anfrage zusammenzufassen, Ihre Kontakt- und Sprachpräferenzen aufzunehmen und eine Weiterleitung an einen Koordinator anzufragen. Nicht unterstützte operative Dienstleistungen kann ich über diesen Assistenten nicht direkt bestätigen.";
+    case "ru":
+      return "Я могу помочь вам составить описание запроса, зафиксировать ваши контактные данные и языковые предпочтения, а также запросить передачу координатору. Неподдерживаемые операционные услуги не могут быть подтверждены через этого ассистента.";
+    case "ar":
+      return "يمكنني مساعدتك في تلخيص طلبك وتسجيل تفضيلات التواصل واللغة وطلب التوصيل بمنسق الخدمة. لا يمكنني تأكيد الخدمات التشغيلية غير المدعومة من خلال هذا المساعد مباشرة.";
+    default:
+      return "I can help summarize your inquiry, collect your contact and language preferences, and request a human coordinator handoff. I cannot confirm unsupported operational capabilities directly through this assistant.";
+  }
+}
+
 function jsonError(code: string, message: string, status: number): Response {
   return new Response(
     JSON.stringify({ success: false, error: { code, message } }),
@@ -630,6 +752,19 @@ serve(async (req: Request) => {
       return jsonError("MESSAGE_PERSIST_FAILED", "Unable to record message. Please try again.", 500);
     }
 
+    const insertedUserMessageId = userMsgRes.message_id;
+
+    // Helper to clean up user message if provider call fails
+    const cleanupUserMessageOnFailure = async () => {
+      if (insertedUserMessageId && conversationId) {
+        try {
+          await supabase.from("ht_ai_messages").delete().eq("id", insertedUserMessageId);
+        } catch (delErr) {
+          console.error("Failed to delete user message on AI failure:", delErr);
+        }
+      }
+    };
+
     // -----------------------------------------------------------------------
     // 7B. Check deterministic unsupported product capability boundary
     // -----------------------------------------------------------------------
@@ -708,47 +843,72 @@ serve(async (req: Request) => {
     }
 
     // -----------------------------------------------------------------------
-    // 9. Generate AI response
+    // 9. Generate AI response (Fail-closed 503 if provider unavailable)
     // -----------------------------------------------------------------------
-    let aiReply = "I'm here to help you with your health tourism inquiry. Could you tell me more about what you're looking for?";
+    if (!aiApiKey) {
+      await cleanupUserMessageOnFailure();
+      return jsonError("AI_PROVIDER_UNAVAILABLE", "AI provider service is currently unavailable.", 503);
+    }
 
-    if (aiApiKey) {
-      try {
-        const systemPrompt = buildSystemPrompt(preferred_language || "en");
-        const chatMessages = [
-          { role: "system", content: systemPrompt },
-          ...conversationMessages.filter(m => m.role !== "system").slice(-10),
-          { role: "user", content: message.trim() },
-        ];
+    let rawProviderReply = "";
 
-        const apiUrl = aiProvider === "openai"
-          ? "https://api.openai.com/v1/chat/completions"
-          : "https://api.groq.com/openai/v1/chat/completions";
+    try {
+      const systemPrompt = buildSystemPrompt(preferred_language || "en");
+      const chatMessages = [
+        { role: "system", content: systemPrompt },
+        ...conversationMessages.filter(m => m.role !== "system").slice(-10),
+        { role: "user", content: message.trim() },
+      ];
 
-        const aiResponse = await fetch(apiUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${aiApiKey}`,
-          },
-          body: JSON.stringify({
-            model: aiModel,
-            messages: chatMessages,
-            max_tokens: 500,
-            temperature: 0.7,
-          }),
-        });
+      const apiUrl = aiProvider === "openai"
+        ? "https://api.openai.com/v1/chat/completions"
+        : "https://api.groq.com/openai/v1/chat/completions";
 
-        if (aiResponse.ok) {
-          const aiData = await aiResponse.json();
-          const choice = aiData?.choices?.[0]?.message?.content;
-          if (choice && typeof choice === "string" && choice.trim().length > 0) {
-            aiReply = choice.trim();
-          }
-        }
-      } catch {
-        // Fallback to default response on provider error
+      const aiResponse = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${aiApiKey}`,
+        },
+        body: JSON.stringify({
+          model: aiModel,
+          messages: chatMessages,
+          max_tokens: 500,
+          temperature: 0.7,
+        }),
+      });
+
+      if (!aiResponse.ok) {
+        await cleanupUserMessageOnFailure();
+        return jsonError("AI_PROVIDER_UNAVAILABLE", "AI provider service returned an error.", 503);
       }
+
+      const aiData = await aiResponse.json();
+      const choice = aiData?.choices?.[0]?.message?.content;
+      if (choice && typeof choice === "string" && choice.trim().length > 0) {
+        rawProviderReply = choice.trim();
+      } else {
+        await cleanupUserMessageOnFailure();
+        return jsonError("AI_PROVIDER_UNAVAILABLE", "AI provider returned empty content.", 503);
+      }
+    } catch {
+      await cleanupUserMessageOnFailure();
+      return jsonError("AI_PROVIDER_UNAVAILABLE", "AI provider fetch failed.", 503);
+    }
+
+    // -----------------------------------------------------------------------
+    // 9B. Deterministic Server-Side Provider Grounding Guard
+    // -----------------------------------------------------------------------
+    let finalAiReply = rawProviderReply;
+    let providerResponseSanitized = false;
+    let outcomeCode = "SUCCESS";
+
+    const groundedPass = isProviderReplyGrounded(rawProviderReply);
+
+    if (!groundedPass) {
+      providerResponseSanitized = true;
+      outcomeCode = "PROVIDER_RESPONSE_GROUNDED";
+      finalAiReply = buildGroundedReplacementResponse(preferred_language || "en");
     }
 
     // -----------------------------------------------------------------------
@@ -757,7 +917,7 @@ serve(async (req: Request) => {
     const { data: aiMsgRes, error: aiMsgErr } = await supabase.rpc("ht_add_ai_message", {
       p_session_token: currentSessionToken,
       p_role: "assistant",
-      p_content: aiReply,
+      p_content: finalAiReply,
     });
 
     if (aiMsgErr || !aiMsgRes?.success) {
@@ -788,10 +948,12 @@ serve(async (req: Request) => {
 
     return jsonSuccess({
       session_token: currentSessionToken,
-      reply: aiReply,
+      reply: finalAiReply,
       conversation_id: conversationId,
       handoff_triggered: false,
       summary,
+      outcome_code: outcomeCode,
+      provider_response_sanitized: providerResponseSanitized,
     });
 
   } catch (err) {

@@ -424,6 +424,72 @@ if (fs.existsSync(translationsPath)) {
   assert(rateMatches === 5, `rateLimitedErr present in all 5 languages (found ${rateMatches}/5)`);
 }
 
+// 9. R26 Provider Grounding & Fail-Closed 503 Assertions
+if (fs.existsSync(edgeFnPath)) {
+  const fnContent = fs.readFileSync(edgeFnPath, 'utf8');
+
+  assert(fnContent.includes('function isProviderReplyGrounded'), 'Edge Function contains isProviderReplyGrounded helper');
+  assert(fnContent.includes('function buildGroundedReplacementResponse'), 'Edge Function contains buildGroundedReplacementResponse helper');
+  assert(fnContent.includes('PROVIDER_RESPONSE_GROUNDED'), 'Edge Function contains PROVIDER_RESPONSE_GROUNDED outcome code');
+  assert(fnContent.includes('provider_response_sanitized'), 'Edge Function returns provider_response_sanitized flag');
+
+  // Verify 503 AI_PROVIDER_UNAVAILABLE handling
+  assert(fnContent.includes('AI_PROVIDER_UNAVAILABLE') && fnContent.includes('503'), 'Edge Function returns 503 AI_PROVIDER_UNAVAILABLE on provider failure');
+  assert(fnContent.includes('cleanupUserMessageOnFailure'), 'Edge Function includes user message cleanup on provider failure');
+  assert(!fnContent.includes('aiReply = "I\'m here to help you with your health tourism inquiry'), 'Silent generic fallback as SUCCESS is removed');
+
+  // Extract isProviderReplyGrounded for static unit verification
+  const groundingMatch = fnContent.match(/function isProviderReplyGrounded\([\s\S]*?\n\}/);
+  assert(groundingMatch !== null, 'isProviderReplyGrounded function extracted successfully');
+
+  let isProviderReplyGrounded = null;
+  if (groundingMatch) {
+    let code = groundingMatch[0];
+    code = code.replace(/reply:\s*string/g, 'reply');
+    code = code.replace(/:\s*boolean/g, '');
+    try {
+      isProviderReplyGrounded = eval('(' + code + ')');
+    } catch (e) {
+      assert(false, `Failed to instantiate isProviderReplyGrounded: ${e.message}`);
+    }
+  }
+
+  if (isProviderReplyGrounded) {
+    // Unsafe test cases (must be rejected)
+    const unsafeCases = [
+      { lang: 'en', text: 'We will send your inquiry to our partner clinics and schedule a consultation.' },
+      { lang: 'tr', text: 'Talebinizi partner kliniklerimize iletip randevunuzu ayarlayacağız.' },
+      { lang: 'de', text: 'Wir leiten Ihre Anfrage an unsere Partnerkliniken weiter und vereinbaren einen Termin.' },
+      { lang: 'ru', text: 'Мы направим ваш запрос в клиники-партнёры и назначим консультацию.' },
+      { lang: 'ar', text: 'سنرسل طلبك إلى العيادات الشريكة ونحدد لك موعد استشارة.' },
+      { lang: 'en', text: 'We will arrange your transfer and book your hotel.' },
+      { lang: 'en', text: 'Please upload your passport here for processing.' },
+      { lang: 'tr', text: 'Depozito ödemesi yapabilirsiniz.' },
+      { lang: 'en', text: 'You will receive automatic SMS updates.' },
+      { lang: 'en', text: 'Our platform will automatically match you with a clinic.' }
+    ];
+
+    for (const c of unsafeCases) {
+      const isGrounded = isProviderReplyGrounded(c.text);
+      assert(!isGrounded, `Unsafe provider text properly rejected [${c.lang}]: "${c.text.substring(0, 45)}..."`);
+    }
+
+    // Safe test cases (must be accepted)
+    const safeCases = [
+      { lang: 'en', text: 'I can help summarize your inquiry and collect your preferred contact details for human coordinator review.' },
+      { lang: 'tr', text: 'Talebinizi özetlemenize yardımcı olabilir ve insan koordinatör incelemesi için iletişim tercihlerinizi alabilirim.' },
+      { lang: 'de', text: 'Ich kann Ihre Anfrage zusammenfassen und Ihre Kontaktdaten aufnehmen.' },
+      { lang: 'ru', text: 'Я могу составить описание вашего запроса и записать контактные данные.' },
+      { lang: 'ar', text: 'يمكنني مساعدتك في تلخيص طلبك وتسجيل تفاصيل التواصل.' }
+    ];
+
+    for (const c of safeCases) {
+      const isGrounded = isProviderReplyGrounded(c.text);
+      assert(isGrounded, `Safe provider text accepted [${c.lang}]: "${c.text.substring(0, 45)}..."`);
+    }
+  }
+}
+
 if (failures > 0) {
   console.error(`\n❌ Total Failures: ${failures}`);
   process.exit(1);
