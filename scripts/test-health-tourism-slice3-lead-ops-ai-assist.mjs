@@ -295,7 +295,7 @@ if (fs.existsSync(edgeFnPath)) {
   // Runtime call-site order anchors (ensures execution order checks call-sites, NOT function definitions)
   const capCallSiteIndex = fnContent.indexOf('const isUnsupportedCapabilityQuery = containsUnsupportedCapabilityQuery(message);');
   const medCallSiteIndex = fnContent.indexOf('const isMedicalQuery = containsMedicalQuery(message);');
-  const providerFetchCallSiteIndex = fnContent.indexOf('const aiResponse = await fetch(apiUrl,');
+  const providerFetchCallSiteIndex = fnContent.indexOf('const providerResult = await executeProviderCall(');
 
   assert(capCallSiteIndex !== -1 && medCallSiteIndex !== -1 && capCallSiteIndex < medCallSiteIndex, 'CAPABILITY_BOUNDARY_BEFORE_MEDICAL_RESULT: Capability boundary call site executes BEFORE medical boundary call site');
   assert(capCallSiteIndex !== -1 && providerFetchCallSiteIndex !== -1 && capCallSiteIndex < providerFetchCallSiteIndex, 'CAPABILITY_BOUNDARY_BEFORE_PROVIDER_RESULT: Capability boundary call site executes BEFORE AI provider fetch call site');
@@ -424,70 +424,130 @@ if (fs.existsSync(translationsPath)) {
   assert(rateMatches === 5, `rateLimitedErr present in all 5 languages (found ${rateMatches}/5)`);
 }
 
-// 9. R26 Provider Grounding & Fail-Closed 503 Assertions
-if (fs.existsSync(edgeFnPath)) {
-  const fnContent = fs.readFileSync(edgeFnPath, 'utf8');
+// 9. R27 Provider Grounding & Executable Provider Failure Assertions
+const providerPolicyPath = path.join(rootDir, 'supabase', 'functions', 'ht-ai-chat', 'provider-policy.ts');
+assert(fs.existsSync(providerPolicyPath), 'provider-policy.ts module exists');
 
-  assert(fnContent.includes('function isProviderReplyGrounded'), 'Edge Function contains isProviderReplyGrounded helper');
-  assert(fnContent.includes('function buildGroundedReplacementResponse'), 'Edge Function contains buildGroundedReplacementResponse helper');
+if (fs.existsSync(edgeFnPath) && fs.existsSync(providerPolicyPath)) {
+  const fnContent = fs.readFileSync(edgeFnPath, 'utf8');
+  const policyContent = fs.readFileSync(providerPolicyPath, 'utf8');
+
+  // Architecture & Import checks
+  assert(fnContent.includes('from "./provider-policy.ts"') || fnContent.includes('from \'./provider-policy.ts\''), 'Edge Function imports provider-policy.ts');
   assert(fnContent.includes('PROVIDER_RESPONSE_GROUNDED'), 'Edge Function contains PROVIDER_RESPONSE_GROUNDED outcome code');
   assert(fnContent.includes('provider_response_sanitized'), 'Edge Function returns provider_response_sanitized flag');
 
-  // Verify 503 AI_PROVIDER_UNAVAILABLE handling
-  assert(fnContent.includes('AI_PROVIDER_UNAVAILABLE') && fnContent.includes('503'), 'Edge Function returns 503 AI_PROVIDER_UNAVAILABLE on provider failure');
-  assert(fnContent.includes('cleanupUserMessageOnFailure'), 'Edge Function includes user message cleanup on provider failure');
-  assert(!fnContent.includes('aiReply = "I\'m here to help you with your health tourism inquiry'), 'Silent generic fallback as SUCCESS is removed');
+  // Persistence Order Invariants: executeProviderCall must run BEFORE ht_add_ai_message for user message on normal path
+  const providerCallIndex = fnContent.indexOf('executeProviderCall(');
+  const userMessagePersistIndex = fnContent.indexOf('10. Store User Message AFTER Provider Success');
+  assert(providerCallIndex !== -1 && userMessagePersistIndex !== -1 && providerCallIndex < userMessagePersistIndex,
+    'SUPPORTED_PROVIDER_PERSISTENCE_ORDER: executeProviderCall runs BEFORE user message persistence');
 
-  // Extract isProviderReplyGrounded for static unit verification
-  const groundingMatch = fnContent.match(/function isProviderReplyGrounded\([\s\S]*?\n\}/);
-  assert(groundingMatch !== null, 'isProviderReplyGrounded function extracted successfully');
+  // Exact Supabase delete error inspection check
+  assert(fnContent.includes('const { error: cleanupError } = await supabase') && fnContent.includes('if (cleanupError)'),
+    'SUPABASE_DELETE_ERROR_CHECKED: Supabase delete cleanup error is explicitly checked');
 
-  let isProviderReplyGrounded = null;
-  if (groundingMatch) {
-    let code = groundingMatch[0];
-    code = code.replace(/reply:\s*string/g, 'reply');
-    code = code.replace(/:\s*boolean/g, '');
-    try {
-      isProviderReplyGrounded = eval('(' + code + ')');
-    } catch (e) {
-      assert(false, `Failed to instantiate isProviderReplyGrounded: ${e.message}`);
-    }
+  // Import functions from provider-policy.ts dynamically for Node testing
+  const policyModuleUrl = new URL('../supabase/functions/ht-ai-chat/provider-policy.ts', import.meta.url).href;
+  const { isProviderReplyGrounded, buildGroundedReplacementResponse, executeProviderCall } = await import(policyModuleUrl);
+
+  assert(typeof isProviderReplyGrounded === 'function', 'isProviderReplyGrounded function imported');
+  assert(typeof buildGroundedReplacementResponse === 'function', 'buildGroundedReplacementResponse function imported');
+  assert(typeof executeProviderCall === 'function', 'executeProviderCall function imported');
+
+  // A. Observed-Runtime Hallucination Regressions (10 cases: EN>=2, TR>=2, DE>=2, RU>=2, AR>=2)
+  const observedUnsafeCases = [
+    // EN (4 cases)
+    { lang: 'en', text: 'I can forward it for you.' },
+    { lang: 'en', text: 'A coordinator will review your request and reach out—usually by email or phone.' },
+    { lang: 'en', text: 'We assist by providing information packets and guiding you through the formal request process.' },
+    { lang: 'en', text: 'Additional documents may be needed before partner clinics plan logistics and transfer.' },
+
+    // TR (3 cases)
+    { lang: 'tr', text: 'Talebinizi koordinasyon ekibimize ileteceğim ve ekibimiz sizinle iletişime geçecek.' },
+    { lang: 'tr', text: 'Genellikle e-posta veya telefonla iletişim kurarak gerekli belgeler ve konaklama ve ulaşım lojistik planı sunacaktır.' },
+    { lang: 'tr', text: 'Hizmet sağlayıcılarla iletişim için randevu talebi formu doldurmanız gerekmektedir.' },
+
+    // DE (2 cases)
+    { lang: 'de', text: 'Wir werden Ihre Anfrage an unser Koordinationsteam weiterleiten. Das Koordinationsteam kontaktiert Sie in Kürze.' },
+    { lang: 'de', text: 'Zusätzliche Unterlagen werden für Partnerkliniken benötigt für Logistik, Transfers und Reiseplanungen.' },
+
+    // RU (2 cases)
+    { lang: 'ru', text: 'Я передам ваше обращение координатору. Координаторы свяжутся с вами в ближайшее время.' },
+    { lang: 'ru', text: 'Наши клиники-партнёры требуют дополнительные сведения/документы потребуются для организации трансфера и логистики.' },
+
+    // AR (2 cases)
+    { lang: 'ar', text: 'سنقوم بـ إرسال الطلب وتمرير الطلب وسيتواصل معك المنسق من العيادات الشريكة.' },
+    { lang: 'ar', text: 'يتطلب تحديد حجز موعد استشارة وتوفير النقل الخدمات اللوجستية وتجهيز المستندات المطلوبة.' }
+  ];
+
+  let observedCount = 0;
+  for (const c of observedUnsafeCases) {
+    const isGrounded = isProviderReplyGrounded(c.text);
+    assert(!isGrounded, `Observed-runtime unsafe text rejected [${c.lang}]: "${c.text.substring(0, 45)}..."`);
+    if (!isGrounded) observedCount++;
+  }
+  assert(observedCount >= 10, `Observed runtime regression test count >= 10 (found ${observedCount})`);
+
+  // B. Safe Grounding & Coordinator Language Cases
+  const safeCoordinatorCases = [
+    { lang: 'en', text: 'I can request a human coordinator handoff for your inquiry.' },
+    { lang: 'tr', text: 'Talebiniz için bir insan koordinatör yönlendirmesi talep edebilirim.' },
+    { lang: 'de', text: 'Ich kann eine Weiterleitung an einen Koordinator anzufragen.' },
+    { lang: 'ru', text: 'Я могу запросить передачу вашего обращения координатору.' },
+    { lang: 'ar', text: 'يمكنني طلب التوصيل بمنسق الخدمة لطلبك.' },
+    { lang: 'en', text: 'I can help summarize your inquiry and collect your preferred contact details for human coordinator review.' }
+  ];
+
+  for (const c of safeCoordinatorCases) {
+    const isGrounded = isProviderReplyGrounded(c.text);
+    assert(isGrounded, `Safe coordinator language accepted [${c.lang}]: "${c.text.substring(0, 45)}..."`);
   }
 
-  if (isProviderReplyGrounded) {
-    // Unsafe test cases (must be rejected)
-    const unsafeCases = [
-      { lang: 'en', text: 'We will send your inquiry to our partner clinics and schedule a consultation.' },
-      { lang: 'tr', text: 'Talebinizi partner kliniklerimize iletip randevunuzu ayarlayacağız.' },
-      { lang: 'de', text: 'Wir leiten Ihre Anfrage an unsere Partnerkliniken weiter und vereinbaren einen Termin.' },
-      { lang: 'ru', text: 'Мы направим ваш запрос в клиники-партнёры и назначим консультацию.' },
-      { lang: 'ar', text: 'سنرسل طلبك إلى العيادات الشريكة ونحدد لك موعد استشارة.' },
-      { lang: 'en', text: 'We will arrange your transfer and book your hotel.' },
-      { lang: 'en', text: 'Please upload your passport here for processing.' },
-      { lang: 'tr', text: 'Depozito ödemesi yapabilirsiniz.' },
-      { lang: 'en', text: 'You will receive automatic SMS updates.' },
-      { lang: 'en', text: 'Our platform will automatically match you with a clinic.' }
-    ];
+  // C. Executable Provider Failure Path Tests (PF01, PF02, PF03, PF04)
+  const dummySystemPrompt = (lang) => `Prompt ${lang}`;
 
-    for (const c of unsafeCases) {
-      const isGrounded = isProviderReplyGrounded(c.text);
-      assert(!isGrounded, `Unsafe provider text properly rejected [${c.lang}]: "${c.text.substring(0, 45)}..."`);
-    }
+  // PF01: Missing API Key
+  const pf01Res = await executeProviderCall({
+    aiApiKey: undefined,
+    message: "Hello",
+    buildSystemPrompt: dummySystemPrompt
+  });
+  assert(!pf01Res.success && pf01Res.statusCode === 503 && pf01Res.errorCode === "AI_PROVIDER_UNAVAILABLE",
+    "PF01_RESULT: Missing API key returns 503 AI_PROVIDER_UNAVAILABLE");
 
-    // Safe test cases (must be accepted)
-    const safeCases = [
-      { lang: 'en', text: 'I can help summarize your inquiry and collect your preferred contact details for human coordinator review.' },
-      { lang: 'tr', text: 'Talebinizi özetlemenize yardımcı olabilir ve insan koordinatör incelemesi için iletişim tercihlerinizi alabilirim.' },
-      { lang: 'de', text: 'Ich kann Ihre Anfrage zusammenfassen und Ihre Kontaktdaten aufnehmen.' },
-      { lang: 'ru', text: 'Я могу составить описание вашего запроса и записать контактные данные.' },
-      { lang: 'ar', text: 'يمكنني مساعدتك في تلخيص طلبك وتسجيل تفاصيل التواصل.' }
-    ];
+  // PF02: Fetch Throws Exception
+  const mockFetchThrows = () => { throw new Error("Connection reset"); };
+  const pf02Res = await executeProviderCall({
+    aiApiKey: "mock-key",
+    message: "Hello",
+    fetchImpl: mockFetchThrows,
+    buildSystemPrompt: dummySystemPrompt
+  });
+  assert(!pf02Res.success && pf02Res.statusCode === 503 && pf02Res.errorCode === "AI_PROVIDER_UNAVAILABLE",
+    "PF02_RESULT: Fetch exception returns 503 AI_PROVIDER_UNAVAILABLE");
 
-    for (const c of safeCases) {
-      const isGrounded = isProviderReplyGrounded(c.text);
-      assert(isGrounded, `Safe provider text accepted [${c.lang}]: "${c.text.substring(0, 45)}..."`);
-    }
-  }
+  // PF03: Provider HTTP Non-2xx (HTTP 500)
+  const mockFetch500 = async () => new Response(JSON.stringify({ error: "Internal Error" }), { status: 500 });
+  const pf03Res = await executeProviderCall({
+    aiApiKey: "mock-key",
+    message: "Hello",
+    fetchImpl: mockFetch500,
+    buildSystemPrompt: dummySystemPrompt
+  });
+  assert(!pf03Res.success && pf03Res.statusCode === 503 && pf03Res.errorCode === "AI_PROVIDER_UNAVAILABLE",
+    "PF03_RESULT: Provider HTTP 500 returns 503 AI_PROVIDER_UNAVAILABLE");
+
+  // PF04: Provider Returns Empty Content
+  const mockFetchEmpty = async () => new Response(JSON.stringify({ choices: [{ message: { content: "  " } }] }), { status: 200 });
+  const pf04Res = await executeProviderCall({
+    aiApiKey: "mock-key",
+    message: "Hello",
+    fetchImpl: mockFetchEmpty,
+    buildSystemPrompt: dummySystemPrompt
+  });
+  assert(!pf04Res.success && pf04Res.statusCode === 503 && pf04Res.errorCode === "AI_PROVIDER_UNAVAILABLE",
+    "PF04_RESULT: Provider empty content returns 503 AI_PROVIDER_UNAVAILABLE");
 }
 
 if (failures > 0) {
