@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-08-28T11:42:00+03:00",
+  "updated_at": "2026-08-31T10:00:00+03:00",
   "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
@@ -16,8 +16,43 @@
     "LARİ Health Tourism",
     "Final Delivery"
   ],
-  "current_milestone": "LARİ Health Tourism",
-  "current_status": "HEALTH_TOURISM_SLICE2_CLOSED_PROVEN",
+  "current_milestone": "LARI Health Tourism Slice 3 - Lead Ops + Multilingual AI Assist + Handoff",
+  "current_status": "HEALTH_TOURISM_SLICE3_IN_PROGRESS",
+  "production_status": "NO_GO",
+  "candidate_release": {
+    "branch": "feature/lari-health-tourism-slice3-lead-ops-ai-assist",
+    "sha": "1ab0dc43753983b5fb0851e0b4a05b2da1cc2d5b",
+    "candidate_execution_authority": false,
+    "e2_status": "ACCEPTED",
+    "e2_evidence": {
+      "product_sha": "1ab0dc43753983b5fb0851e0b4a05b2da1cc2d5b",
+      "evidence_sha": "f17cfcb2d019bc07d5ce8652560d79ba96abc8d9",
+      "run_id": "33325152765",
+      "job_id": "99293856240",
+      "artifact_id": "9736015977",
+      "artifact_digest": "sha256:6fdb485c9552c057f84b23393beb890e5410abf1f961b3ce9c8bbfbe2ffa1b37"
+    },
+    "e3_state": {
+      "e3_status": "CORRECTION_IN_PROGRESS",
+      "latest_e3_review": "REJECTED",
+      "failure_classification": "FIXTURE_HARNESS_DEFECT",
+      "product_runtime_defect": "NOT_PROVEN",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "ht_ai_chat_version": "7",
+      "r26_authorized": false,
+      "redeployment_authorized": false,
+      "migration_replay_authorized": false
+    }
+  },
+  "aos6_authority": {
+    "read_only_shadow_reconciliation_authorized": true,
+    "controlled_pilot_authorized": false,
+    "stage12c_authorized": false,
+    "candidate_execution_authority": false,
+    "allowed_exact_source_sha_for_read_only": "1ab0dc43753983b5fb0851e0b4a05b2da1cc2d5b",
+    "canonical_reconciliation_sufficient_for_pilot": false,
+    "next_authority_event": "CONTROLLER_ACCEPTED_SLICE3_RUNTIME_STATE_OR_SEPARATE_EXPLICIT_ISOLATED_PILOT_AUTHORIZATION"
+  },
   "scope_matrix": "docs/project-control/HEALTH_TOURISM_SCOPE_MATRIX.md",
   "canonical_refs": {
     "main_pilot": {
@@ -483,8 +518,15 @@
     "dependency_audit_risk": "OBSERVED_DEPENDENCY_AUDIT_RISK / REVIEW_REQUIRED_BEFORE_PRODUCTION (6 vulnerabilities: 1 low, 5 high reported by npm ci during R7 CI gate)",
     "arabic_copy_polish": "OPEN_NON_BLOCKING_COPY_POLISH (Arabic back-button copy polish deferred to pre-release polish)"
   },
-  "current_blockers": [],
-  "next_action": "Wait for Controller authorization for next cohesive Health Tourism customer-value slice: Coordinator Lead Workflow, Scoring, AI Assist, and Handoff to Clinic",
+  "current_blockers": [
+    "Slice 3 E3 runtime evidence is not Controller-accepted.",
+    "Latest E3 runtime claims were rejected due to evidence correlation / fixture-harness defects.",
+    "Corrected harness preflight is accepted.",
+    "Final clean E3 runtime evidence remains pending.",
+    "Synthetic fixture cleanup/rate-bucket reset must be verified before final run.",
+    "Migration-history provenance anomaly remains separate and must not be repaired during E3."
+  ],
+  "next_action": "Complete narrow isolated synthetic fixture cleanup and rate-bucket reset, verify clean baseline, then execute one Controller-authorized corrected E3 run with real per-case Edge/DB/message-UUID correlation. Keep AOS-6 controlled pilot HOLD.",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true
