@@ -237,7 +237,7 @@ export async function executeProviderCall(config: ProviderFetchConfig): Promise<
       return {
         success: false,
         errorCode: "AI_PROVIDER_UNAVAILABLE",
-        errorMessage: "AI provider service returned an error.",
+        errorMessage: "AI provider service is currently unavailable.",
         statusCode: 503
       };
     }
@@ -254,15 +254,15 @@ export async function executeProviderCall(config: ProviderFetchConfig): Promise<
       return {
         success: false,
         errorCode: "AI_PROVIDER_UNAVAILABLE",
-        errorMessage: "AI provider returned empty content.",
+        errorMessage: "AI provider service is currently unavailable.",
         statusCode: 503
       };
     }
-  } catch (e: any) {
+  } catch {
     return {
       success: false,
       errorCode: "AI_PROVIDER_UNAVAILABLE",
-      errorMessage: e?.message || "AI provider fetch failed.",
+      errorMessage: "AI provider service is currently unavailable.",
       statusCode: 503
     };
   }

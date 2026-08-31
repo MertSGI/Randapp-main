@@ -504,8 +504,15 @@ if (fs.existsSync(edgeFnPath) && fs.existsSync(providerPolicyPath)) {
     assert(isGrounded, `Safe coordinator language accepted [${c.lang}]: "${c.text.substring(0, 45)}..."`);
   }
 
+  // Static Public Boundary Assertions
+  assert(!fnContent.includes('providerResult.errorMessage'),
+    'PUBLIC_PROVIDER_ERROR_USES_FIXED_MESSAGE: index.ts does NOT pass providerResult.errorMessage to jsonError on provider failure path');
+  assert(fnContent.includes('jsonError(') && fnContent.includes('"AI_PROVIDER_UNAVAILABLE"') && fnContent.includes('"AI provider service is currently unavailable."'),
+    'RAW_PROVIDER_EXCEPTION_PUBLIC_PROPAGATION: index.ts returns fixed opaque message for provider failures');
+
   // C. Executable Provider Failure Path Tests (PF01, PF02, PF03, PF04)
   const dummySystemPrompt = (lang) => `Prompt ${lang}`;
+  const EXPECTED_PUBLIC_MSG = "AI provider service is currently unavailable.";
 
   // PF01: Missing API Key
   const pf01Res = await executeProviderCall({
@@ -515,17 +522,24 @@ if (fs.existsSync(edgeFnPath) && fs.existsSync(providerPolicyPath)) {
   });
   assert(!pf01Res.success && pf01Res.statusCode === 503 && pf01Res.errorCode === "AI_PROVIDER_UNAVAILABLE",
     "PF01_RESULT: Missing API key returns 503 AI_PROVIDER_UNAVAILABLE");
+  assert(pf01Res.errorMessage === EXPECTED_PUBLIC_MSG,
+    "PF01_PUBLIC_MESSAGE_RESULT: Public error message is exact fixed string");
 
-  // PF02: Fetch Throws Exception
-  const mockFetchThrows = () => { throw new Error("Connection reset"); };
+  // PF02: Fetch Throws Exception with Sentinel Leak Protection
+  const sentinelLeakString = "LARI_INTERNAL_PROVIDER_DETAIL_MUST_NOT_LEAK";
+  const mockFetchThrowsSentinel = () => { throw new Error(sentinelLeakString); };
   const pf02Res = await executeProviderCall({
     aiApiKey: "mock-key",
     message: "Hello",
-    fetchImpl: mockFetchThrows,
+    fetchImpl: mockFetchThrowsSentinel,
     buildSystemPrompt: dummySystemPrompt
   });
   assert(!pf02Res.success && pf02Res.statusCode === 503 && pf02Res.errorCode === "AI_PROVIDER_UNAVAILABLE",
     "PF02_RESULT: Fetch exception returns 503 AI_PROVIDER_UNAVAILABLE");
+  assert(!pf02Res.errorMessage?.includes(sentinelLeakString),
+    "PF02_SENTINEL_LEAK_COUNT=0: Internal exception string does NOT leak");
+  assert(pf02Res.errorMessage === EXPECTED_PUBLIC_MSG,
+    "PF02_PUBLIC_MESSAGE_RESULT: Public error message is exact fixed string");
 
   // PF03: Provider HTTP Non-2xx (HTTP 500)
   const mockFetch500 = async () => new Response(JSON.stringify({ error: "Internal Error" }), { status: 500 });
@@ -537,6 +551,8 @@ if (fs.existsSync(edgeFnPath) && fs.existsSync(providerPolicyPath)) {
   });
   assert(!pf03Res.success && pf03Res.statusCode === 503 && pf03Res.errorCode === "AI_PROVIDER_UNAVAILABLE",
     "PF03_RESULT: Provider HTTP 500 returns 503 AI_PROVIDER_UNAVAILABLE");
+  assert(pf03Res.errorMessage === EXPECTED_PUBLIC_MSG,
+    "PF03_PUBLIC_MESSAGE_RESULT: Public error message is exact fixed string");
 
   // PF04: Provider Returns Empty Content
   const mockFetchEmpty = async () => new Response(JSON.stringify({ choices: [{ message: { content: "  " } }] }), { status: 200 });
@@ -548,6 +564,8 @@ if (fs.existsSync(edgeFnPath) && fs.existsSync(providerPolicyPath)) {
   });
   assert(!pf04Res.success && pf04Res.statusCode === 503 && pf04Res.errorCode === "AI_PROVIDER_UNAVAILABLE",
     "PF04_RESULT: Provider empty content returns 503 AI_PROVIDER_UNAVAILABLE");
+  assert(pf04Res.errorMessage === EXPECTED_PUBLIC_MSG,
+    "PF04_PUBLIC_MESSAGE_RESULT: Public error message is exact fixed string");
 }
 
 if (failures > 0) {

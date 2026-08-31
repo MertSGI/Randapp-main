@@ -69,11 +69,13 @@ Deno.test("executeProviderCall — PF01: Missing API Key", async () => {
   assert(!res.success);
   assert(res.statusCode === 503);
   assert(res.errorCode === "AI_PROVIDER_UNAVAILABLE");
+  assert(res.errorMessage === "AI provider service is currently unavailable.");
 });
 
-Deno.test("executeProviderCall — PF02: Fetch Exception", async () => {
+Deno.test("executeProviderCall — PF02: Fetch Exception with Sentinel Leak Assertion", async () => {
+  const sentinelError = "LARI_INTERNAL_PROVIDER_DETAIL_MUST_NOT_LEAK";
   const mockFetch = (): Promise<Response> => {
-    throw new Error("Network error simulation");
+    throw new Error(sentinelError);
   };
 
   const res = await executeProviderCall({
@@ -85,6 +87,8 @@ Deno.test("executeProviderCall — PF02: Fetch Exception", async () => {
   assert(!res.success);
   assert(res.statusCode === 503);
   assert(res.errorCode === "AI_PROVIDER_UNAVAILABLE");
+  assert(!res.errorMessage?.includes(sentinelError), "Sentinel exception detail must not leak");
+  assert(res.errorMessage === "AI provider service is currently unavailable.");
 });
 
 Deno.test("executeProviderCall — PF03: Provider HTTP Non-2xx (500)", async () => {
@@ -101,6 +105,7 @@ Deno.test("executeProviderCall — PF03: Provider HTTP Non-2xx (500)", async () 
   assert(!res.success);
   assert(res.statusCode === 503);
   assert(res.errorCode === "AI_PROVIDER_UNAVAILABLE");
+  assert(res.errorMessage === "AI provider service is currently unavailable.");
 });
 
 Deno.test("executeProviderCall — PF04: Empty Assistant Content", async () => {
@@ -117,4 +122,5 @@ Deno.test("executeProviderCall — PF04: Empty Assistant Content", async () => {
   assert(!res.success);
   assert(res.statusCode === 503);
   assert(res.errorCode === "AI_PROVIDER_UNAVAILABLE");
+  assert(res.errorMessage === "AI provider service is currently unavailable.");
 });

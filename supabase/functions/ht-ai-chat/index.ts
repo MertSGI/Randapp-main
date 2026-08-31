@@ -738,9 +738,9 @@ serve(async (req: Request) => {
 
     if (!providerResult.success || !providerResult.rawReply) {
       return jsonError(
-        providerResult.errorCode || "AI_PROVIDER_UNAVAILABLE",
-        providerResult.errorMessage || "AI provider service is currently unavailable.",
-        providerResult.statusCode || 503
+        "AI_PROVIDER_UNAVAILABLE",
+        "AI provider service is currently unavailable.",
+        503
       );
     }
 
