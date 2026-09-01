@@ -28,6 +28,7 @@ DECLARE
     v_branches JSONB;
     v_services JSONB;
     v_practitioners JSONB;
+    v_branch_permitted BOOLEAN;
 BEGIN
     -- 1. Authentication Check
     IF v_caller_uid IS NULL THEN
@@ -69,7 +70,23 @@ BEGIN
         RAISE EXCEPTION 'FORBIDDEN: Staff member lacks can_manage_patient_profiles permission.';
     END IF;
 
-    -- 5. Branches Query: Active same-tenant branches
+    -- 5. Branch Authority Check: If p_branch_id supplied, caller MUST be permitted for it
+    IF p_branch_id IS NOT NULL THEN
+        SELECT EXISTS (
+            SELECT 1 FROM public.branches b
+            JOIN public.staff_branches sb ON sb.branch_id = b.id
+            WHERE b.id = p_branch_id
+              AND b.tenant_id = v_lead.tenant_id
+              AND b.is_active = true
+              AND sb.staff_id = v_caller_staff.id
+        ) INTO v_branch_permitted;
+
+        IF NOT v_branch_permitted THEN
+            RAISE EXCEPTION 'FORBIDDEN: Caller is not permitted for the requested branch.';
+        END IF;
+    END IF;
+
+    -- 6. Branches Query: Active same-tenant branches permitted for caller
     SELECT jsonb_agg(
         jsonb_build_object(
             'id', b.id,
@@ -77,30 +94,37 @@ BEGIN
         ) ORDER BY b.name
     ) INTO v_branches
     FROM public.branches b
+    JOIN public.staff_branches sb ON sb.branch_id = b.id
     WHERE b.tenant_id = v_lead.tenant_id
-      AND b.active = true;
+      AND b.is_active = true
+      AND sb.staff_id = v_caller_staff.id;
 
-    -- 6. Services Query: Active same-tenant services, optionally mapped to p_branch_id
+    -- 7. Services Query: Active same-tenant services, mapped in service_branches
     SELECT jsonb_agg(
         jsonb_build_object(
             'id', s.id,
             'name', s.name,
-            'duration_minutes', COALESCE(s.duration_minutes, 30)
+            'duration_minutes', COALESCE(s.duration, 30)
         ) ORDER BY s.name
     ) INTO v_services
     FROM public.services s
     WHERE s.tenant_id = v_lead.tenant_id
       AND s.active = true
-      AND (
-        p_branch_id IS NULL
-        OR EXISTS (
-            SELECT 1 FROM public.branch_services bs
-            WHERE bs.branch_id = p_branch_id
-              AND bs.service_id = s.id
-        )
+      AND EXISTS (
+        SELECT 1 FROM public.service_branches sb
+        WHERE sb.service_id = s.id
+          AND (
+            (p_branch_id IS NOT NULL AND sb.branch_id = p_branch_id)
+            OR
+            (p_branch_id IS NULL AND EXISTS (
+                SELECT 1 FROM public.staff_branches caller_sb
+                WHERE caller_sb.branch_id = sb.branch_id
+                  AND caller_sb.staff_id = v_caller_staff.id
+            ))
+          )
       );
 
-    -- 7. Practitioners Query: Active same-tenant staff with Clinic profile, mapped to branch and service if provided
+    -- 8. Practitioners Query: Active same-tenant staff with Clinic profile, mapped to branch and service if provided
     SELECT jsonb_agg(
         jsonb_build_object(
             'staff_id', st.id,
@@ -114,12 +138,18 @@ BEGIN
     WHERE st.tenant_id = v_lead.tenant_id
       AND st.active = true
       AND (
-        p_branch_id IS NULL
-        OR EXISTS (
+        (p_branch_id IS NOT NULL AND EXISTS (
             SELECT 1 FROM public.staff_branches sb
             WHERE sb.staff_id = st.id
               AND sb.branch_id = p_branch_id
-        )
+        ))
+        OR
+        (p_branch_id IS NULL AND EXISTS (
+            SELECT 1 FROM public.staff_branches sb
+            JOIN public.staff_branches caller_sb ON caller_sb.branch_id = sb.branch_id
+            WHERE sb.staff_id = st.id
+              AND caller_sb.staff_id = v_caller_staff.id
+        ))
       )
       AND (
         p_service_id IS NULL
@@ -164,11 +194,11 @@ DECLARE
     v_csp RECORD;
     v_service_duration INT;
     v_slots JSONB := '[]'::jsonb;
-
+    v_branch_permitted BOOLEAN;
+    v_weekday INT;
+    v_rule RECORD;
     v_current_time TIME;
     v_eval_res JSONB;
-    v_hour INT;
-    v_minute INT;
 BEGIN
     -- 1. Authentication Check
     IF v_caller_uid IS NULL THEN
@@ -209,21 +239,47 @@ BEGIN
         RAISE EXCEPTION 'FORBIDDEN: Staff member lacks can_manage_patient_profiles permission.';
     END IF;
 
-    -- 5. Service Duration Lookup
-    SELECT COALESCE(duration_minutes, 30) INTO v_service_duration
+    -- 5. Branch Authority Check: Caller MUST be permitted for p_branch_id
+    SELECT EXISTS (
+        SELECT 1 FROM public.branches b
+        JOIN public.staff_branches sb ON sb.branch_id = b.id
+        WHERE b.id = p_branch_id
+          AND b.tenant_id = v_lead.tenant_id
+          AND b.is_active = true
+          AND sb.staff_id = v_caller_staff.id
+    ) INTO v_branch_permitted;
+
+    IF NOT v_branch_permitted THEN
+        RAISE EXCEPTION 'FORBIDDEN: Caller is not permitted for the requested branch.';
+    END IF;
+
+    -- 6. Service Duration Lookup
+    SELECT COALESCE(duration, 30) INTO v_service_duration
     FROM public.services
     WHERE id = p_service_id
-      AND tenant_id = v_lead.tenant_id;
+      AND tenant_id = v_lead.tenant_id
+      AND active = true;
 
     IF v_service_duration IS NULL THEN
         RAISE EXCEPTION 'INVALID_SERVICE: Service not found or inactive.';
     END IF;
 
-    -- 6. Slot Grid Generation & Canonical Evaluation (15-minute intervals from 08:00 to 19:45)
-    FOR v_hour IN 8..19 LOOP
-        FOR v_minute IN 0..3 LOOP
-            v_current_time := make_time(v_hour, v_minute * 15, 0);
+    -- 7. Determine ISO Weekday (1=Mon .. 7=Sun)
+    v_weekday := EXTRACT(DOW FROM p_date)::INTEGER;
+    IF v_weekday = 0 THEN v_weekday := 7; END IF;
 
+    -- 8. Generate Candidates from ACTIVE availability_rules for Practitioner
+    FOR v_rule IN
+        SELECT start_time, end_time
+        FROM public.availability_rules
+        WHERE staff_id = p_practitioner_staff_id
+          AND tenant_id = v_lead.tenant_id
+          AND weekday = v_weekday
+          AND is_active = true
+        ORDER BY start_time ASC
+    LOOP
+        v_current_time := v_rule.start_time;
+        WHILE v_current_time < v_rule.end_time LOOP
             -- Delegate to canonical Core slot evaluator
             SELECT public.evaluate_booking_slot(
                 p_tenant_id => v_lead.tenant_id,
@@ -242,6 +298,8 @@ BEGIN
                     'allowed', true
                 );
             END IF;
+
+            v_current_time := v_current_time + interval '15 minutes';
         END LOOP;
     END FOR;
 

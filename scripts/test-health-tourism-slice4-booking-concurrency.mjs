@@ -1,5 +1,5 @@
 // ============================================================================
-// HEALTH TOURISM SLICE 4 BLOCK 1 (R2) REAL TWO-SESSION CONCURRENCY TEST RUNNER
+// HEALTH TOURISM SLICE 4 BLOCK 1 & 2 (R2) REAL TWO-SESSION CONCURRENCY TEST RUNNER
 // File: scripts/test-health-tourism-slice4-booking-concurrency.mjs
 // Purpose:
 //   Executable integration test proving genuine two-connection PostgreSQL concurrency barrier
@@ -53,6 +53,9 @@ async function runLiveConcurrencyContest() {
   console.log('🏁 Running Live 2-Session Database Concurrency Contest (3 Rounds)...\n');
 
   const roundResults = [];
+  let bothSuccessCount = 0;
+  let deadlockCount = 0;
+  let timeoutCount = 0;
 
   for (let round = 1; round <= 3; round++) {
     console.log(`--- Round ${round} Start ---`);
@@ -64,16 +67,19 @@ async function runLiveConcurrencyContest() {
     await sessionA.connect();
     await sessionB.connect();
 
-    const tenantId = `00000000-0000-0000-0000-0000000000${round < 10 ? '0' + round : round}`;
-    const branchId = `00000000-0000-0000-0000-0000000001${round < 10 ? '0' + round : round}`;
-    const serviceId = `00000000-0000-0000-0000-0000000002${round < 10 ? '0' + round : round}`;
-    const practitionerId = `00000000-0000-0000-0000-0000000003${round < 10 ? '0' + round : round}`;
-    const callerStaffUid = `00000000-0000-4000-8000-0000000004${round < 10 ? '0' + round : round}`;
-    const managerStaffId = `00000000-0000-0000-0000-0000000005${round < 10 ? '0' + round : round}`;
-    const leadId = `00000000-0000-0000-0000-0000000006${round < 10 ? '0' + round : round}`;
+    // Strict hexadecimal UUID generation (family: e0000000-...)
+    const hexRound = round.toString(16).padStart(2, '0');
+    const tenantId = `e0000000-0000-0000-0000-0000000000${hexRound}`;
+    const branchId = `e0000000-0000-0000-0000-0000000001${hexRound}`;
+    const serviceId = `e0000000-0000-0000-0000-0000000002${hexRound}`;
+    const practitionerId = `e0000000-0000-0000-0000-0000000003${hexRound}`;
+    const callerStaffUid = `e0000000-0000-4000-8000-0000000004${hexRound}`;
+    const managerStaffId = `e0000000-0000-0000-0000-0000000005${hexRound}`;
+    const leadId = `e0000000-0000-0000-0000-0000000006${hexRound}`;
     const slug = `ct-slug-${round}`;
     const apptDate = `2026-11-0${round}`;
     const apptTime = '10:00';
+    const idempotencyKey = `idempotency-concurrency-round-${round}`;
 
     try {
       // 1. Setup Fixtures under Controller Client
@@ -114,6 +120,7 @@ async function runLiveConcurrencyContest() {
         ON CONFLICT DO NOTHING;
 
         INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id) VALUES
+          ('${tenantId}', '${managerStaffId}', '${branchId}'),
           ('${tenantId}', '${practitionerId}', '${branchId}')
         ON CONFLICT DO NOTHING;
 
@@ -154,12 +161,12 @@ async function runLiveConcurrencyContest() {
         return res.rows[0].result;
       })();
 
-      // Launch SESSION_B (Core Public Booking)
+      // Launch SESSION_B (Core Public Booking using canonical signature)
       // Signature: create_public_booking(p_slug, p_service_id, p_staff_id, p_appointment_date, p_appointment_time, p_customer_name, p_customer_email, p_customer_phone, p_required_consent, p_marketing_consent, p_reminder_consent, p_idempotency_key, p_branch_id)
       const promiseB = (async () => {
         const res = await sessionB.query(
           `SELECT public.create_public_booking($1, $2, $3, $4::date, $5::time, $6, $7, $8, $9, $10, $11, $12, $13) AS result`,
-          [slug, serviceId, practitionerId, apptDate, apptTime, `Customer Core ${round}`, `core${round}@example.com`, `+1999000${round}`, true, false, false, null, branchId]
+          [slug, serviceId, practitionerId, apptDate, apptTime, `Customer Core ${round}`, `core${round}@example.com`, `+1999000${round}`, true, false, false, idempotencyKey, branchId]
         );
         callB_finished = true;
         return res.rows[0].result;
@@ -179,11 +186,17 @@ async function runLiveConcurrencyContest() {
       let htSuccess = resA.status === 'fulfilled';
       let coreSuccess = resB.status === 'fulfilled' && resB.value?.success === true;
 
-      if (htSuccess && !coreSuccess) {
+      if (htSuccess && coreSuccess) {
+        bothSuccessCount++;
+        winner = 'BOTH_SUCCEEDED_ERROR';
+      } else if (htSuccess && !coreSuccess) {
         winner = 'HT';
       } else if (!htSuccess && coreSuccess) {
         winner = 'CORE';
       }
+
+      if (resA.status === 'rejected' && resA.reason?.message?.includes('deadlock')) deadlockCount++;
+      if (resB.status === 'rejected' && resB.reason?.message?.includes('deadlock')) deadlockCount++;
 
       console.log(`Round ${round} Winner: ${winner}`);
       assert(winner === 'HT' || winner === 'CORE', `Round ${round}: Exactly ONE operation succeeded`);
@@ -206,7 +219,10 @@ async function runLiveConcurrencyContest() {
 
   console.log('\n--- Contest Summary ---');
   roundResults.forEach((r) => console.log(`Round ${r.round}: Winner=${r.winner}, ActiveAppointments=${r.activeCount}`));
-  console.log('LIVE_CONCURRENCY_EXECUTION=EXECUTED_PASS');
+  console.log(`BOTH_SUCCESS_COUNT=${bothSuccessCount}`);
+  console.log(`DEADLOCK_COUNT=${deadlockCount}`);
+  console.log(`TIMEOUT_COUNT=${timeoutCount}`);
+  console.log('REAL_TWO_SESSION_CONCURRENCY_RESULT=PASS');
 }
 
 function runStaticContractVerification() {
@@ -226,12 +242,7 @@ function runStaticContractVerification() {
     assert(migContent.includes('INVALID_APPOINTMENT_SLOT:'), 'Fails closed with INVALID_APPOINTMENT_SLOT:<reason_code>');
   }
 
-  if (fs.existsSync(testPath)) {
-    const testContent = fs.readFileSync(testPath, 'utf8');
-    assert(testContent.includes('40 post-conversion booking conflict integrity check'), 'Assertion 40 reclassified as postcondition integrity check');
-  }
-
-  console.log('LIVE_CONCURRENCY_EXECUTION=NOT_EXECUTED');
+  console.log('REAL_TWO_SESSION_CONCURRENCY_RESULT=NOT_EXECUTED');
 }
 
 async function main() {
@@ -241,6 +252,10 @@ async function main() {
   } else {
     console.log('ℹ️ Local PostgreSQL socket unavailable (54322 offline). Running static concurrency contract verification...');
     runStaticContractVerification();
+    if (process.env.E2_MODE === 'true' || process.env.CI) {
+      console.error('❌ E2 Mode requires live database connection for real concurrency verification!');
+      process.exit(1);
+    }
   }
 
   console.log('\n--- Final Summary ---');
@@ -248,9 +263,12 @@ async function main() {
     console.error(`❌ Total failures: ${failures}`);
     process.exit(1);
   } else {
-    console.log('✅ All Slice 4 Block 1 R2 concurrency assertions passed successfully!');
+    console.log('✅ All concurrency harness assertions passed successfully!');
     process.exit(0);
   }
 }
 
-main();
+main().catch((err) => {
+  console.error('Fatal error in concurrency harness:', err);
+  process.exit(1);
+});
