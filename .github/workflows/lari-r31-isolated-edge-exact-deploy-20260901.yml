@@ -1,0 +1,135 @@
+name: LARI R31 Isolated Edge Exact Deploy 20260901
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: "Exact target Git commit SHA to execute against"
+        required: true
+        type: string
+        default: "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-r31-edge:
+    name: Deploy R31 ht-ai-chat Edge Function
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_PROJECT_ID: "miuecvkkmyvaciticwtm"
+      EXPECTED_TARGET_SHA: "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.expected_sha }}
+
+      - name: Verify Exact SHA Match
+        run: |
+          HEAD_SHA=$(git rev-parse HEAD)
+          INPUT_SHA="${{ github.event.inputs.expected_sha }}"
+          echo "HEAD SHA:      ${HEAD_SHA}"
+          echo "Input SHA:     ${INPUT_SHA}"
+          echo "Expected SHA:  ${EXPECTED_TARGET_SHA}"
+
+          if [ "${HEAD_SHA}" != "${EXPECTED_TARGET_SHA}" ]; then
+            echo "ERROR: HEAD SHA (${HEAD_SHA}) does not match required target SHA (${EXPECTED_TARGET_SHA})"
+            exit 1
+          fi
+
+          if [ "${INPUT_SHA}" != "${EXPECTED_TARGET_SHA}" ]; then
+            echo "ERROR: Input SHA (${INPUT_SHA}) does not match required target SHA (${EXPECTED_TARGET_SHA})"
+            exit 1
+          fi
+
+      - name: Secret Preflight
+        run: |
+          if [ -z "${{ secrets.SUPABASE_ACCESS_TOKEN }}" ]; then
+            echo "ERROR: secrets.SUPABASE_ACCESS_TOKEN is missing or empty!"
+            exit 1
+          fi
+          echo "SUPABASE_ACCESS_TOKEN_PRESENT=YES"
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: "1.200.0"
+
+      - name: Print Supabase CLI Version
+        run: |
+          supabase --version
+
+      - name: Read-Only Connectivity Preflight
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          echo "Running connectivity preflight..."
+          LIST_OUT=$(supabase functions list --project-ref "$SUPABASE_PROJECT_ID")
+          echo "$LIST_OUT"
+          if echo "$LIST_OUT" | grep -q "ht-ai-chat" && echo "$LIST_OUT" | grep -q "11"; then
+            echo "GH_CONNECTIVITY_PREFLIGHT=PASS"
+            echo "PRE_DEPLOY_VERSION=11"
+          else
+            echo "ERROR: Pre-deploy connectivity preflight did not observe ht-ai-chat version 11"
+            exit 1
+          fi
+
+      - name: Source Byte Proof Before Deploy
+        run: |
+          INDEX_HASH=$(sha256sum supabase/functions/ht-ai-chat/index.ts | awk '{print $1}')
+          PROVIDER_HASH=$(sha256sum supabase/functions/ht-ai-chat/provider-policy.ts | awk '{print $1}')
+
+          EXPECTED_INDEX="432de14764f5aa902a37af02771a16f026110eab82e00bbc72fa8041af665d0f"
+          EXPECTED_PROVIDER="8edb4386e9f43a62769dc05a14fdf50645caf17ad38bf4b1f92c5259b6f62bbb"
+
+          echo "INDEX_HASH:    $INDEX_HASH"
+          echo "EXPECTED:      $EXPECTED_INDEX"
+          echo "PROVIDER_HASH: $PROVIDER_HASH"
+          echo "EXPECTED:      $EXPECTED_PROVIDER"
+
+          if [ "$INDEX_HASH" != "$EXPECTED_INDEX" ]; then
+            echo "ERROR: Index hash mismatch!"
+            exit 1
+          fi
+          echo "SOURCE_INDEX_HASH_MATCH=YES"
+
+          if [ "$PROVIDER_HASH" != "$EXPECTED_PROVIDER" ]; then
+            echo "ERROR: Provider policy hash mismatch!"
+            exit 1
+          fi
+          echo "SOURCE_PROVIDER_POLICY_HASH_MATCH=YES"
+
+          if grep -q "\./provider-policy\.ts" supabase/functions/ht-ai-chat/index.ts; then
+            echo "RELATIVE_IMPORT_RESULT=PASS"
+          else
+            echo "ERROR: Relative import search failed in index.ts"
+            exit 1
+          fi
+
+      - name: Exact Deployment
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          echo "Deploying ht-ai-chat to project $SUPABASE_PROJECT_ID..."
+          supabase functions deploy ht-ai-chat \
+            --project-ref "$SUPABASE_PROJECT_ID" \
+            --no-verify-jwt
+          echo "DEPLOYMENT_CALL_COUNT=1"
+          echo "DEPLOYMENT_RESULT=PASS"
+
+      - name: Post-Deploy Readback
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          echo "Reading back function list post-deployment..."
+          POST_LIST=$(supabase functions list --project-ref "$SUPABASE_PROJECT_ID")
+          echo "$POST_LIST"
+          if echo "$POST_LIST" | grep -q "ht-ai-chat" && echo "$POST_LIST" | grep -q "12"; then
+            echo "POST_DEPLOY_LIST_RESULT=PASS"
+            echo "POST_DEPLOY_VERSION=12"
+          else
+            echo "ERROR: Post-deploy readback did not show version 12!"
+            exit 1
+          fi
