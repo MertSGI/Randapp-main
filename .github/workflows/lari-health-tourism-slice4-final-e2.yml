@@ -16,7 +16,7 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
         with:
-          ref: 'f532774a77f1a1ee6c9abd4699a3b99b768a15eb'
+          ref: 'e74d097b2ba1160bc852e84503aa6368b23d43eb'
 
       - name: Initialize Evidence Directory
         id: init_artifacts
@@ -291,7 +291,7 @@ jobs:
           CHECKED_SHA=$(git rev-parse HEAD)
           cat << EOF > /tmp/e2-artifacts/provenance.json
           {
-            "candidate_sha": "f532774a77f1a1ee6c9abd4699a3b99b768a15eb",
+            "candidate_sha": "e74d097b2ba1160bc852e84503aa6368b23d43eb",
             "evidence_workflow_sha": "${GITHUB_SHA}",
             "checked_out_sha": "${CHECKED_SHA}",
             "run_id": "${GITHUB_RUN_ID}",
@@ -311,7 +311,7 @@ jobs:
              grep -q "TYPECHECK_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "LINT_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "BUILD_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             [ "${CHECKED_SHA}" = "f532774a77f1a1ee6c9abd4699a3b99b768a15eb" ]; then
+             [ "${CHECKED_SHA}" = "e74d097b2ba1160bc852e84503aa6368b23d43eb" ]; then
 
             sed -i 's/SLICE4_E2_RESULT=FAIL/SLICE4_E2_RESULT=PASS_CANDIDATE/g' /tmp/e2-artifacts/results.env
           else
@@ -333,7 +333,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lari-health-tourism-slice4-final-e2-r1-evidence
+          name: lari-health-tourism-slice4-final-e2-r2-evidence
           path: /tmp/e2-artifacts/*
 
       - name: Enforce Slice 4 E2 Authority Result
