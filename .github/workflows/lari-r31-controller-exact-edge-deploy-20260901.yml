@@ -55,28 +55,44 @@ jobs:
 
       - name: Source Byte Proof Before Deploy
         run: |
-          INDEX_HASH=$(sha256sum supabase/functions/ht-ai-chat/index.ts | awk '{print $1}')
-          PROVIDER_HASH=$(sha256sum supabase/functions/ht-ai-chat/provider-policy.ts | awk '{print $1}')
+          CANONICAL_INDEX_HASH=$(git show "${EXPECTED_TARGET_SHA}:supabase/functions/ht-ai-chat/index.ts" | sha256sum | awk '{print $1}')
+          CANONICAL_POLICY_HASH=$(git show "${EXPECTED_TARGET_SHA}:supabase/functions/ht-ai-chat/provider-policy.ts" | sha256sum | awk '{print $1}')
 
-          EXPECTED_INDEX="432de14764f5aa902a37af02771a16f026110eab82e00bbc72fa8041af665d0f"
+          WORKTREE_INDEX_HASH=$(sha256sum supabase/functions/ht-ai-chat/index.ts | awk '{print $1}')
+          WORKTREE_POLICY_HASH=$(sha256sum supabase/functions/ht-ai-chat/provider-policy.ts | awk '{print $1}')
+
+          EXPECTED_INDEX="30498779f7a87c6c0e8669dfafd6eaf44cdcf478904b4390493c50b00409e810"
           EXPECTED_PROVIDER="8edb4386e9f43a62769dc05a14fdf50645caf17ad38bf4b1f92c5259b6f62bbb"
 
-          echo "INDEX_HASH:    $INDEX_HASH"
-          echo "EXPECTED:      $EXPECTED_INDEX"
-          echo "PROVIDER_HASH: $PROVIDER_HASH"
-          echo "EXPECTED:      $EXPECTED_PROVIDER"
+          echo "CANONICAL_INDEX_SHA256:         $CANONICAL_INDEX_HASH"
+          echo "EXPECTED CANONICAL INDEX:       $EXPECTED_INDEX"
+          echo "CANONICAL_PROVIDER_POLICY_SHA256: $CANONICAL_POLICY_HASH"
+          echo "EXPECTED CANONICAL PROVIDER:    $EXPECTED_PROVIDER"
+          echo "WORKTREE_INDEX_SHA256:          $WORKTREE_INDEX_HASH"
+          echo "WORKTREE_PROVIDER_POLICY_SHA256:  $WORKTREE_POLICY_HASH"
 
-          if [ "$INDEX_HASH" != "$EXPECTED_INDEX" ]; then
-            echo "ERROR: Index hash mismatch!"
+          if [ "$CANONICAL_INDEX_HASH" != "$EXPECTED_INDEX" ]; then
+            echo "ERROR: Canonical index hash mismatch!"
             exit 1
           fi
-          echo "SOURCE_INDEX_HASH_MATCH=YES"
+          echo "GIT_BLOB_INDEX_HASH_RESULT=PASS"
 
-          if [ "$PROVIDER_HASH" != "$EXPECTED_PROVIDER" ]; then
-            echo "ERROR: Provider policy hash mismatch!"
+          if [ "$CANONICAL_POLICY_HASH" != "$EXPECTED_PROVIDER" ]; then
+            echo "ERROR: Canonical provider policy hash mismatch!"
             exit 1
           fi
-          echo "SOURCE_PROVIDER_POLICY_HASH_MATCH=YES"
+          echo "GIT_BLOB_POLICY_HASH_RESULT=PASS"
+
+          if [ "$WORKTREE_INDEX_HASH" != "$CANONICAL_INDEX_HASH" ]; then
+            echo "ERROR: Worktree index hash does not match canonical Git blob hash!"
+            exit 1
+          fi
+
+          if [ "$WORKTREE_POLICY_HASH" != "$CANONICAL_POLICY_HASH" ]; then
+            echo "ERROR: Worktree provider policy hash does not match canonical Git blob hash!"
+            exit 1
+          fi
+          echo "WORKTREE_GIT_BLOB_BYTE_MATCH=PASS"
 
           if grep -q "\./provider-policy\.ts" supabase/functions/ht-ai-chat/index.ts; then
             echo "RELATIVE_IMPORT_RESULT=PASS"
