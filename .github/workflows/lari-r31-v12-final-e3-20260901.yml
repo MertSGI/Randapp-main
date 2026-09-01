@@ -679,6 +679,10 @@ jobs:
             exit 1
           fi
 
+          echo "=== RESULTS.ENV CONTENT ==="
+          cat "$ENV_FILE"
+          echo "==========================="
+
           E3_RESULT="$(grep '^E3_RESULT=' "$ENV_FILE" | cut -d'=' -f2)"
           echo "E3_RESULT evaluated as: $E3_RESULT"
 
