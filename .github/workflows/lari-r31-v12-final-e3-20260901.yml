@@ -624,9 +624,13 @@ jobs:
                     report.SURVIVING_E3_RATE_BUCKET_COUNT !== 0) {
                   report.E3_RESULT = 'FAIL';
                 }
+                console.log(`[HARNESS_EVAL] FINAL E3_RESULT evaluated as: ${report.E3_RESULT}`);
               } catch (cleanupErr) {
                 console.error('Error during cleanup:', cleanupErr.message);
+                report.E3_RESULT = 'FAIL';
               }
+
+              console.log(`[HARNESS_EVAL] WRITING results.env with E3_RESULT=${report.E3_RESULT}`);
 
               // Output safe artifact evidence files
               const artifactDir = path.join(process.cwd(), 'lari-r31-v12-final-e3-evidence');
