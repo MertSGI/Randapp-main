@@ -505,13 +505,13 @@ SELECT is(
 );
 
 -- ----------------------------------------------------------------------------
--- ASSERTION 40: Advisory lock & slot engine concurrency protection: contested slot permits exactly 1 appointment
+-- ASSERTION 40: Post-conversion booking conflict integrity check: exactly 1 active appointment exists for contested slot
 -- ----------------------------------------------------------------------------
 -- Count appointments at 2026-10-15 11:00 (active only, excluding cancelled)
 SELECT is(
     (SELECT count(*)::integer FROM public.appointments WHERE staff_id = 'st555555-5555-5555-5555-555555555555' AND appointment_date = '2026-10-15'::date AND appointment_time = '11:00'::time AND status <> 'cancelled'),
     1,
-    '40 concurrent Core booking and HT conversion for the same staff/date/time cannot both succeed'
+    '40 post-conversion booking conflict integrity check: exactly 1 active appointment exists for contested slot'
 );
 
 SELECT * FROM finish();
