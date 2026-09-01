@@ -301,7 +301,7 @@ BEGIN
 
             v_current_time := v_current_time + interval '15 minutes';
         END LOOP;
-    END FOR;
+    END LOOP;
 
     RETURN jsonb_build_object(
         'lead_id', p_lead_id,
