@@ -622,6 +622,7 @@ jobs:
                     report.SURVIVING_SYNTHETIC_MESSAGE_COUNT !== 0 ||
                     report.SURVIVING_SYNTHETIC_OUTBOX_COUNT !== 0 ||
                     report.SURVIVING_E3_RATE_BUCKET_COUNT !== 0) {
+                  console.error(`[HARNESS_FAIL] Cleanup check failed! restore=${report.FINAL_FIXTURE_RESTORE_RESULT}, leads=${report.SURVIVING_SYNTHETIC_LEAD_COUNT}, convs=${report.SURVIVING_SYNTHETIC_CONVERSATION_COUNT}, msgs=${report.SURVIVING_SYNTHETIC_MESSAGE_COUNT}, outbox=${report.SURVIVING_SYNTHETIC_OUTBOX_COUNT}, buckets=${report.SURVIVING_E3_RATE_BUCKET_COUNT}`);
                   report.E3_RESULT = 'FAIL';
                 }
                 console.log(`[HARNESS_EVAL] FINAL E3_RESULT evaluated as: ${report.E3_RESULT}`);
