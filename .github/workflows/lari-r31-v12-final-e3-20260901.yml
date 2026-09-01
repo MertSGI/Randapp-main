@@ -588,15 +588,26 @@ jobs:
                 }
 
                 // Verify surviving synthetic counts
-                const [survLeads, survConvs, survMsgs] = await Promise.all([
+                const [survLeads, survConvs, survMsgs, survOutbox] = await Promise.all([
                   restQuery('/ht_leads?select=id'),
                   restQuery('/ht_ai_conversations?select=id'),
-                  restQuery('/ht_ai_messages?select=id')
+                  restQuery('/ht_ai_messages?select=id'),
+                  restQuery('/communication_outbox?select=id')
                 ]);
-                report.SURVIVING_SYNTHETIC_LEAD_COUNT = survLeads.json?.length ?? 0;
-                report.SURVIVING_SYNTHETIC_CONVERSATION_COUNT = survConvs.json?.length ?? 0;
-                report.SURVIVING_SYNTHETIC_MESSAGE_COUNT = survMsgs.json?.length ?? 0;
-                report.FINAL_CLINIC_BASELINE = '1 patient profile, 3 encounters, 5 appointments, 3 outbox';
+                report.SURVIVING_SYNTHETIC_LEAD_COUNT = (survLeads.json || []).filter(x => !preLeads.has(x.id)).length;
+                report.SURVIVING_SYNTHETIC_CONVERSATION_COUNT = (survConvs.json || []).filter(x => !preConvs.has(x.id)).length;
+                report.SURVIVING_SYNTHETIC_MESSAGE_COUNT = (survMsgs.json || []).filter(x => !preMsgs.has(x.id)).length;
+                report.SURVIVING_SYNTHETIC_OUTBOX_COUNT = (survOutbox.json || []).filter(x => !preOutbox.has(x.id)).length;
+                report.FINAL_CLINIC_BASELINE = `1 patient profile, 3 encounters, 5 appointments, ${survOutbox.json?.length ?? 0} outbox`;
+
+                if (report.FINAL_FIXTURE_RESTORE_RESULT !== 'PASS' ||
+                    report.SURVIVING_SYNTHETIC_LEAD_COUNT !== 0 ||
+                    report.SURVIVING_SYNTHETIC_CONVERSATION_COUNT !== 0 ||
+                    report.SURVIVING_SYNTHETIC_MESSAGE_COUNT !== 0 ||
+                    report.SURVIVING_SYNTHETIC_OUTBOX_COUNT !== 0 ||
+                    report.SURVIVING_E3_RATE_BUCKET_COUNT !== 0) {
+                  report.E3_RESULT = 'FAIL';
+                }
               } catch (cleanupErr) {
                 console.error('Error during cleanup:', cleanupErr.message);
               }
