@@ -1,7 +1,7 @@
 -- =========================================================================
 -- MIGRATION 20260912_lari_health_tourism_clinic_acceptance.sql
--- Description: Health Tourism Slice 4 (Block 1) — Server-Authoritative
---              Clinic Acceptance Foundation & Lead Conversion
+-- Description: Health Tourism Slice 4 (Block 1 R1) — Server-Authoritative
+--              Clinic Acceptance Foundation & Canonical Slot Authority Alignment
 -- Target: Disposable PostgreSQL database / Supabase
 -- Canonical Migration Number: 68
 -- =========================================================================
@@ -98,17 +98,18 @@ CREATE OR REPLACE FUNCTION public.ht_accept_lead_into_clinic(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, extensions
 AS $$
 DECLARE
     v_caller_uid UUID := auth.uid();
     v_lead RECORD;
     v_caller_staff RECORD;
     v_csp RECORD;
-    v_branch RECORD;
-    v_service RECORD;
-    v_practitioner RECORD;
     v_prac_csp RECORD;
+    v_lock_key BIGINT;
+    v_eval_res JSONB;
+    v_reason_code TEXT;
+    v_duration_minutes INT;
 
     v_existing_app RECORD;
     v_customer_id UUID;
@@ -151,7 +152,7 @@ BEGIN
         RAISE EXCEPTION 'FORBIDDEN: Staff member lacks can_manage_patient_profiles permission.';
     END IF;
 
-    -- 5. Idempotency & State Validation Check
+    -- 5. Idempotency & Lead State Validation Check
     IF v_lead.status = 'converted' THEN
         IF v_lead.converted_appointment_id IS NOT NULL THEN
             SELECT * INTO v_existing_app
@@ -183,55 +184,47 @@ BEGIN
         RAISE EXCEPTION 'INVALID_LEAD_STATE: Lead must be in handoff_pending status with handoff_state requested.';
     END IF;
 
-    -- 6. Validate Branch (Same Tenant, Active)
-    SELECT b.* INTO v_branch
-    FROM public.branches b
-    WHERE b.id = p_branch_id
-      AND b.tenant_id = v_lead.tenant_id
-      AND b.is_active = true;
+    -- 6. Acquire Scheduling Advisory Lock (SAME lock family as create_public_booking)
+    v_lock_key := hashtextextended(
+        v_lead.tenant_id::text
+        || ':'
+        || p_practitioner_staff_id::text
+        || ':'
+        || p_appointment_date::text,
+        0
+    );
+    PERFORM pg_advisory_xact_lock(v_lock_key);
 
-    IF v_branch.id IS NULL THEN
-        RAISE EXCEPTION 'INVALID_BRANCH: Branch not found, inactive, or belongs to another tenant.';
+    -- 7. Call Canonical Core Booking Slot Evaluator Engine
+    SELECT public.evaluate_booking_slot(
+        p_tenant_id => v_lead.tenant_id,
+        p_branch_id => p_branch_id,
+        p_service_id => p_service_id,
+        p_staff_id => p_practitioner_staff_id,
+        p_date => p_appointment_date,
+        p_time => p_appointment_time,
+        p_exclude_appointment_id => NULL
+    ) INTO v_eval_res;
+
+    IF (v_eval_res->>'allowed')::boolean IS NOT TRUE THEN
+        v_reason_code := COALESCE(v_eval_res->>'reason_code', 'slot_unavailable');
+        RAISE EXCEPTION 'INVALID_APPOINTMENT_SLOT:%', v_reason_code;
     END IF;
 
-    -- 7. Validate Service (Same Tenant, Active)
-    SELECT s.* INTO v_service
-    FROM public.services s
-    WHERE s.id = p_service_id
-      AND s.tenant_id = v_lead.tenant_id
-      AND s.active = true;
-
-    IF v_service.id IS NULL THEN
-        RAISE EXCEPTION 'INVALID_SERVICE: Service not found, inactive, or belongs to another tenant.';
-    END IF;
-
-    -- 8. Validate Practitioner Staff (Same Tenant, Active, has Clinic staff profile)
-    SELECT s.* INTO v_practitioner
-    FROM public.staff s
-    WHERE s.id = p_practitioner_staff_id
-      AND s.tenant_id = v_lead.tenant_id
-      AND s.active = true;
-
-    IF v_practitioner.id IS NULL THEN
-        RAISE EXCEPTION 'INVALID_PRACTITIONER: Practitioner staff not found, inactive, or belongs to another tenant.';
-    END IF;
-
+    -- 8. Practitioner Clinic Profile Authority Check
     SELECT csp.* INTO v_prac_csp
     FROM public.clinic_staff_profiles csp
-    WHERE csp.staff_id = v_practitioner.id
+    WHERE csp.staff_id = p_practitioner_staff_id
       AND csp.tenant_id = v_lead.tenant_id;
 
     IF v_prac_csp.staff_id IS NULL THEN
         RAISE EXCEPTION 'INVALID_PRACTITIONER: Practitioner staff lacks Clinic profile.';
     END IF;
 
-    -- 9. Validate Appointment Date / Time (Must not be past)
-    IF p_appointment_date < CURRENT_DATE
-       OR (p_appointment_date = CURRENT_DATE AND p_appointment_time < CURRENT_TIME) THEN
-        RAISE EXCEPTION 'INVALID_APPOINTMENT_TIME: Appointment date and time cannot be in the past.';
-    END IF;
+    -- Extract duration from Core slot evaluator result
+    v_duration_minutes := (v_eval_res->>'duration_minutes')::integer;
 
-    -- 10. Atomic Execution
+    -- 9. Atomic Execution
     -- A. Create Customer (One Lead -> One Customer)
     INSERT INTO public.customers (
         tenant_id,
@@ -258,7 +251,7 @@ BEGIN
         v_caller_uid
     ) RETURNING id INTO v_patient_profile_id;
 
-    -- C. Create Appointment (duration derived from service.duration; source = health_tourism; 0 encounters created)
+    -- C. Create Appointment (duration derived from Core slot evaluator; source = health_tourism; 0 encounters created)
     INSERT INTO public.appointments (
         tenant_id,
         customer_id,
@@ -286,7 +279,7 @@ BEGIN
         v_lead.notes,
         p_appointment_date,
         p_appointment_time,
-        v_service.duration,
+        v_duration_minutes,
         'pending',
         'health_tourism'
     ) RETURNING id INTO v_appointment_id;

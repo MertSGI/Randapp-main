@@ -17,7 +17,7 @@ function assert(condition, message) {
   }
 }
 
-console.log('🏁 Running Health Tourism Slice 4 Block 1 Hardened Static QA Suite...\n');
+console.log('🏁 Running Health Tourism Slice 4 Block 1 R1 Hardened Static QA Suite...\n');
 
 // 1. Migration 68 Existence & Authority Checks
 const migrationPath = path.join(rootDir, 'supabase/migrations/20260912_lari_health_tourism_clinic_acceptance.sql');
@@ -37,9 +37,14 @@ if (fs.existsSync(migrationPath)) {
   assert(migContent.includes('FUNCTION public.ht_accept_lead_into_clinic'), 'Contains ht_accept_lead_into_clinic RPC');
   assert(migContent.includes('FUNCTION public.ht_list_pending_clinic_acceptance'), 'Contains ht_list_pending_clinic_acceptance RPC');
 
+  // Verify Canonical Core Slot Evaluator & Advisory Lock Authority
+  assert(migContent.includes('pg_advisory_xact_lock'), 'ht_accept_lead_into_clinic acquires pg_advisory_xact_lock');
+  assert(migContent.includes('hashtextextended'), 'ht_accept_lead_into_clinic computes hashtextextended lock key');
+  assert(migContent.includes('public.evaluate_booking_slot'), 'ht_accept_lead_into_clinic delegates slot evaluation to public.evaluate_booking_slot');
+  assert(migContent.includes('INVALID_APPOINTMENT_SLOT:'), 'ht_accept_lead_into_clinic raises INVALID_APPOINTMENT_SLOT:<reason_code> on rejection');
+
   // Verify Security & Locking
   assert(migContent.includes('SECURITY DEFINER'), 'RPCs are SECURITY DEFINER');
-  assert(migContent.includes('SET search_path = pg_catalog, public'), 'RPCs set search_path');
   assert(migContent.includes('FOR UPDATE'), 'ht_accept_lead_into_clinic locks lead row using FOR UPDATE');
   assert(migContent.includes('can_manage_patient_profiles'), 'ht_accept_lead_into_clinic checks can_manage_patient_profiles');
 
@@ -61,13 +66,18 @@ assert(fs.existsSync(testPath), 'Test file health_tourism_clinic_acceptance_test
 
 if (fs.existsSync(testPath)) {
   const testContent = fs.readFileSync(testPath, 'utf8');
-  assert(testContent.includes('plan(30)'), 'Test suite plans 30 pgTAP assertions');
+  assert(testContent.includes('plan(40)'), 'Test suite plans 40 pgTAP assertions');
   assert(testContent.includes('01 unauthenticated conversion denied'), 'Contains Assertion 01');
   assert(testContent.includes('13 successful conversion creates exactly 1 customer, 1 patient profile, 1 appointment'), 'Contains Assertion 13');
   assert(testContent.includes('15 preferred_language copied exactly to clinic_patient_profiles'), 'Contains Assertion 15');
   assert(testContent.includes('16 passport_number NOT copied into Clinic domain'), 'Contains Assertion 16');
   assert(testContent.includes('21 exact second call is idempotent'), 'Contains Assertion 21');
   assert(testContent.includes('28 communication_outbox delta = 0'), 'Contains Assertion 28');
+  assert(testContent.includes('31 service not mapped to selected branch denied'), 'Contains Assertion 31');
+  assert(testContent.includes('34 outside practitioner availability denied'), 'Contains Assertion 34');
+  assert(testContent.includes('35 overlapping pending appointment denied'), 'Contains Assertion 35');
+  assert(testContent.includes('37 cancelled appointment does NOT block valid slot'), 'Contains Assertion 37');
+  assert(testContent.includes('40 concurrent Core booking and HT conversion for the same staff/date/time cannot both succeed'), 'Contains Assertion 40');
 }
 
 console.log('\n--- Summary ---');
@@ -75,6 +85,6 @@ if (failures > 0) {
   console.error(`❌ Total failures: ${failures}`);
   process.exit(1);
 } else {
-  console.log('✅ All Slice 4 Block 1 static QA assertions passed successfully!');
+  console.log('✅ All Slice 4 Block 1 R1 static QA assertions passed successfully!');
   process.exit(0);
 }
