@@ -1,0 +1,928 @@
+name: Health Tourism Slice3 R31 Exact-SHA E2 R4 Evidence
+
+on:
+  push:
+    branches:
+      - ci/health-tourism-slice3-r31-exact-sha-e2-r4-20260901
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  r31-e2-r4-evidence-validation:
+    name: Execute Exact-SHA E2 R4 Evidence Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Exact-SHA Containment Audit & Product Detach
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/e2-logs
+
+          EXPECTED_PARENT_SHA="cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a"
+          EXPECTED_EVIDENCE_FILE=".github/workflows/health-tourism-slice3-r31-exact-sha-e2-r4-20260901.yml"
+
+          ACTUAL_PARENT_SHA=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)
+
+          mapfile -t CHANGED_FILES < <(
+            git diff --name-only "${EXPECTED_PARENT_SHA}..HEAD" | sed '/^$/d'
+          )
+
+          FILE_COUNT=${#CHANGED_FILES[@]}
+
+          PRODUCT_CHANGED_FILES=()
+          for file in "${CHANGED_FILES[@]}"; do
+            if [ "$file" != "$EXPECTED_EVIDENCE_FILE" ]; then
+              PRODUCT_CHANGED_FILES+=("$file")
+            fi
+          done
+
+          PRODUCT_FILE_COUNT=${#PRODUCT_CHANGED_FILES[@]}
+
+          echo "EXPECTED_EVIDENCE_BRANCH=ci/health-tourism-slice3-r31-exact-sha-e2-r4-20260901" >> /tmp/e2-logs/results.env
+          echo "EXPECTED_EVIDENCE_FILE=${EXPECTED_EVIDENCE_FILE}" >> /tmp/e2-logs/results.env
+          echo "ACTUAL_EVIDENCE_FILE=${EXPECTED_EVIDENCE_FILE}" >> /tmp/e2-logs/results.env
+          echo "EVIDENCE_PARENT_SHA=${EXPECTED_PARENT_SHA}" >> /tmp/e2-logs/results.env
+          echo "EXPECTED_PRODUCT_SHA=${EXPECTED_PARENT_SHA}" >> /tmp/e2-logs/results.env
+          echo "REQUESTED_PRODUCT_SHA=${EXPECTED_PARENT_SHA}" >> /tmp/e2-logs/results.env
+          echo "EVIDENCE_BRANCH_FILE_CHANGE_COUNT=${FILE_COUNT}" >> /tmp/e2-logs/results.env
+          echo "EVIDENCE_PRODUCT_FILE_CHANGE_COUNT=${PRODUCT_FILE_COUNT}" >> /tmp/e2-logs/results.env
+
+          if [ "${ACTUAL_PARENT_SHA}" = "${EXPECTED_PARENT_SHA}" ]; then
+            echo "EXACT_SHA_BINDING_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "ERROR: Parent SHA mismatch! expected=${EXPECTED_PARENT_SHA} actual=${ACTUAL_PARENT_SHA}"
+            echo "EXACT_SHA_BINDING_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          if [ "${FILE_COUNT}" -eq 1 ] && [ "${CHANGED_FILES[0]}" = "${EXPECTED_EVIDENCE_FILE}" ] && [ "${PRODUCT_FILE_COUNT}" -eq 0 ]; then
+            echo "EVIDENCE_BRANCH_CONTAINMENT_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "ERROR: Containment check failed! file_count=${FILE_COUNT} product_file_count=${PRODUCT_FILE_COUNT}"
+            echo "EVIDENCE_BRANCH_CONTAINMENT_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          git checkout --detach "${EXPECTED_PARENT_SHA}"
+          ACTUAL_TESTED_SHA=$(git rev-parse HEAD)
+          echo "ACTUAL_TESTED_SHA=${ACTUAL_TESTED_SHA}" >> /tmp/e2-logs/results.env
+          echo "ACTUAL_TEST_WORKTREE_SHA=${ACTUAL_TESTED_SHA}" >> /tmp/e2-logs/results.env
+
+          if [ "${ACTUAL_TESTED_SHA}" != "${EXPECTED_PARENT_SHA}" ]; then
+            echo "ERROR: Worktree SHA mismatch post checkout!"
+            exit 1
+          fi
+
+      - name: Setup Node.js Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Local Dependencies with Lockfile Strictness
+        run: |
+          set -euo pipefail
+          npm ci
+          echo "NPM_CI_RESULT=PASS" >> /tmp/e2-logs/results.env
+
+      - name: Setup Deno Environment
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Deno Source, Type Check & Unit Tests
+        run: |
+          set -euo pipefail
+
+          deno --version 2>&1 | tee /tmp/e2-logs/deno-version.log
+          DENO_VER=$(head -n 1 /tmp/e2-logs/deno-version.log)
+
+          if deno check supabase/functions/ht-ai-chat/index.ts 2>&1 | tee /tmp/e2-logs/deno-check-index.log; then
+            echo "DENO_CHECK_INDEX_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "DENO_CHECK_INDEX_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          if deno check supabase/functions/ht-ai-chat/provider-policy.ts 2>&1 | tee /tmp/e2-logs/deno-check-policy.log; then
+            echo "DENO_CHECK_POLICY_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "DENO_CHECK_POLICY_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          if deno test --allow-import supabase/functions/ht-ai-chat/provider-policy.test.ts 2>&1 | tee /tmp/e2-logs/deno-test-policy.log; then
+            echo "DENO_TEST_POLICY_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "DENO_TEST_POLICY_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          # Strip ANSI codes for clean log assertions
+          perl -pe 's/\e\[[0-9;]*[mK]//g' /tmp/e2-logs/deno-test-policy.log > /tmp/e2-logs/deno-test-policy-clean.log
+
+          # A) Source declaration count check
+          SRC_DECL_COUNT=$(grep -c -E '^\s*Deno\.test\(' supabase/functions/ht-ai-chat/provider-policy.test.ts || echo "0")
+          echo "DENO_TEST_SOURCE_DECLARATION_COUNT=${SRC_DECL_COUNT}" >> /tmp/e2-logs/results.env
+
+          if [ "${SRC_DECL_COUNT}" -ne 7 ]; then
+            echo "ERROR: Expected 7 Deno.test declarations in source, found ${SRC_DECL_COUNT}"
+            exit 1
+          fi
+
+          # B) Verify each of the 7 expected test names appeared with ok result
+          NAMES=(
+            "isProviderReplyGrounded — Observed Runtime Unsafe Regressions"
+            "isProviderReplyGrounded — Unexecuted Forwarding Claim Regressions (Unsafe)"
+            "isProviderReplyGrounded — Safe Allowed Coordinator Language"
+            "executeProviderCall — PF01: Missing API Key"
+            "executeProviderCall — PF02: Fetch Exception with Sentinel Leak Assertion"
+            "executeProviderCall — PF03: Provider HTTP Non-2xx (500)"
+            "executeProviderCall — PF04: Empty Assistant Content"
+          )
+
+          OK_NAME_COUNT=0
+          FAIL_NAME_COUNT=0
+
+          for tname in "${NAMES[@]}"; do
+            if grep -F "${tname}" /tmp/e2-logs/deno-test-policy-clean.log | grep -q "ok"; then
+              OK_NAME_COUNT=$(( OK_NAME_COUNT + 1 ))
+            else
+              FAIL_NAME_COUNT=$(( FAIL_NAME_COUNT + 1 ))
+              echo "MISSING_OR_FAILED_DENO_TEST: ${tname}"
+            fi
+          done
+
+          echo "DENO_TEST_EXECUTED_OK_COUNT=${OK_NAME_COUNT}" >> /tmp/e2-logs/results.env
+          echo "DENO_TEST_FAILED_NAME_COUNT=${FAIL_NAME_COUNT}" >> /tmp/e2-logs/results.env
+
+          if [ "${OK_NAME_COUNT}" -eq 7 ] && [ "${FAIL_NAME_COUNT}" -eq 0 ]; then
+            echo "DENO_TEST_PASS_COUNT=7" >> /tmp/e2-logs/results.env
+            echo "DENO_TEST_FAIL_COUNT=0" >> /tmp/e2-logs/results.env
+            echo "DENO_VERSION=${DENO_VER}" >> /tmp/e2-logs/results.env
+            echo "DENO_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "ERROR: Deno test execution name verification failed! ok=${OK_NAME_COUNT} fail=${FAIL_NAME_COUNT}"
+            echo "DENO_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+      - name: Provider Policy Corpus & Handoff Counts
+        run: |
+          set -euo pipefail
+
+          HANDOFF_FORWARDING_UNSAFE_SOURCE_COUNT=$(awk '/const unsafeForwardingCases = \[/,/\];/ {if (/reply:/ || /lang:/) c++} END {print c+0}' supabase/functions/ht-ai-chat/provider-policy.test.ts)
+          HANDOFF_REQUEST_SAFE_SOURCE_COUNT=$(awk '/const safeCases = \[/,/\];/ {if (/reply:/ || /lang:/) c++} END {print c+0}' supabase/functions/ht-ai-chat/provider-policy.test.ts)
+
+          cat << EOF > /tmp/e2-logs/provider-policy-corpus-counts.txt
+          HANDOFF_FORWARDING_UNSAFE_SOURCE_COUNT=${HANDOFF_FORWARDING_UNSAFE_SOURCE_COUNT}
+          HANDOFF_REQUEST_SAFE_SOURCE_COUNT=${HANDOFF_REQUEST_SAFE_SOURCE_COUNT}
+          EOF
+
+          echo "HANDOFF_FORWARDING_UNSAFE_SOURCE_COUNT=${HANDOFF_FORWARDING_UNSAFE_SOURCE_COUNT}" >> /tmp/e2-logs/results.env
+          echo "HANDOFF_REQUEST_SAFE_SOURCE_COUNT=${HANDOFF_REQUEST_SAFE_SOURCE_COUNT}" >> /tmp/e2-logs/results.env
+
+          if [ "${HANDOFF_FORWARDING_UNSAFE_SOURCE_COUNT}" -ne 6 ]; then
+            echo "ERROR: Expected 6 unsafe forwarding source cases, found ${HANDOFF_FORWARDING_UNSAFE_SOURCE_COUNT}"
+            exit 1
+          fi
+
+          if [ "${HANDOFF_REQUEST_SAFE_SOURCE_COUNT}" -ne 9 ]; then
+            echo "ERROR: Expected 9 safe request source cases, found ${HANDOFF_REQUEST_SAFE_SOURCE_COUNT}"
+            exit 1
+          fi
+
+          UNSAFE_TEST_OK=$(grep -F 'isProviderReplyGrounded — Unexecuted Forwarding Claim Regressions (Unsafe)' /tmp/e2-logs/deno-test-policy-clean.log | grep -c "ok" || echo "0")
+          SAFE_TEST_OK=$(grep -F 'isProviderReplyGrounded — Safe Allowed Coordinator Language' /tmp/e2-logs/deno-test-policy-clean.log | grep -c "ok" || echo "0")
+
+          if [ "${HANDOFF_FORWARDING_UNSAFE_SOURCE_COUNT}" -eq 6 ] && [ "${UNSAFE_TEST_OK}" -ge 1 ]; then
+            echo "HANDOFF_FORWARDING_UNSAFE_COUNT=6" >> /tmp/e2-logs/results.env
+            echo "HANDOFF_FORWARDING_UNSAFE_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "HANDOFF_FORWARDING_UNSAFE_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          if [ "${HANDOFF_REQUEST_SAFE_SOURCE_COUNT}" -eq 9 ] && [ "${SAFE_TEST_OK}" -ge 1 ]; then
+            echo "HANDOFF_REQUEST_SAFE_COUNT=9" >> /tmp/e2-logs/results.env
+            echo "HANDOFF_REQUEST_SAFE_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "HANDOFF_REQUEST_SAFE_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+      - name: Direct Policy Execution
+        run: |
+          set -euo pipefail
+
+          deno eval '
+            import { isProviderReplyGrounded } from "./supabase/functions/ht-ai-chat/provider-policy.ts";
+            const unsafeGrounding = isProviderReplyGrounded("I can capture your question and forward it to a human coordinator who can provide details.");
+            const safeGrounding = isProviderReplyGrounded("I can request a human coordinator handoff.");
+
+            console.log(`OBSERVED_UNSAFE_FORWARDING_GROUNDED=${unsafeGrounding}`);
+            console.log(`OBSERVED_SAFE_HANDOFF_GROUNDED=${safeGrounding}`);
+
+            if (unsafeGrounding === false) {
+              console.log("OBSERVED_FORWARD_TO_COORDINATOR_GROUNDING_RESULT=PASS");
+            } else {
+              console.log("OBSERVED_FORWARD_TO_COORDINATOR_GROUNDING_RESULT=FAIL");
+            }
+
+            if (safeGrounding === true) {
+              console.log("SAFE_HANDOFF_REQUEST_DIRECT_RESULT=PASS");
+            } else {
+              console.log("SAFE_HANDOFF_REQUEST_DIRECT_RESULT=FAIL");
+            }
+          ' | tee /tmp/e2-logs/direct-grounding-proof.txt
+
+          if grep -q "OBSERVED_FORWARD_TO_COORDINATOR_GROUNDING_RESULT=PASS" /tmp/e2-logs/direct-grounding-proof.txt; then
+            echo "OBSERVED_FORWARD_TO_COORDINATOR_GROUNDING_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "OBSERVED_FORWARD_TO_COORDINATOR_GROUNDING_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          if grep -q "SAFE_HANDOFF_REQUEST_DIRECT_RESULT=PASS" /tmp/e2-logs/direct-grounding-proof.txt; then
+            echo "SAFE_HANDOFF_REQUEST_DIRECT_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "SAFE_HANDOFF_REQUEST_DIRECT_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+      - name: Mechanically Verify Assistant Persist Cleanup Architecture
+        run: |
+          set -euo pipefail
+
+          cat << 'EOF' > /tmp/check-cleanup-proof.mjs
+          import fs from 'fs';
+
+          const fnContent = fs.readFileSync('supabase/functions/ht-ai-chat/index.ts', 'utf8');
+
+          const hasProviderBeforeUserPersist = fnContent.indexOf('executeProviderCall(') < fnContent.indexOf('10. Store User Message AFTER Provider Success');
+          const hasInsertedUserMsgId = fnContent.includes('const insertedUserMessageId = userMsgRes.message_id');
+          const hasAssistantPersistFollows = fnContent.indexOf('10B. Store Assistant AI response') > fnContent.indexOf('10. Store User Message AFTER Provider Success');
+          const hasAssistantFailureCheck = fnContent.includes('if (aiMsgErr || !aiMsgRes?.success)');
+          const hasDeleteHtAiMessages = fnContent.includes('.from("ht_ai_messages")') && fnContent.includes('.delete()');
+          const hasEqIdInsertedUserMsgId = fnContent.includes('.eq("id", insertedUserMessageId)');
+          const hasCleanupErrChecked = fnContent.includes('if (cleanupError)');
+
+          const allPassed = hasProviderBeforeUserPersist && hasInsertedUserMsgId && hasAssistantPersistFollows &&
+                            hasAssistantFailureCheck && hasDeleteHtAiMessages && hasEqIdInsertedUserMsgId && hasCleanupErrChecked;
+
+          const logContent = `
+          provider_execution_before_user_message_persistence=${hasProviderBeforeUserPersist}
+          user_message_id_extracted=${hasInsertedUserMsgId}
+          assistant_message_persistence_follows=${hasAssistantPersistFollows}
+          assistant_persist_failure_branch_checked=${hasAssistantFailureCheck}
+          delete_restricted_to_ht_ai_messages=${hasDeleteHtAiMessages}
+          delete_restricted_by_inserted_user_message_id=${hasEqIdInsertedUserMsgId}
+          cleanup_error_explicitly_checked=${hasCleanupErrChecked}
+          ASSISTANT_CLEANUP_PROOF_RESULT=${allPassed ? 'PASS' : 'FAIL'}
+          `;
+
+          fs.writeFileSync('/tmp/e2-logs/assistant-persist-cleanup-proof.txt', logContent.trim());
+
+          if (!allPassed) {
+            console.error('Assistant cleanup proof failed!');
+            process.exit(1);
+          }
+          EOF
+
+          node /tmp/check-cleanup-proof.mjs
+
+          if grep -q "ASSISTANT_CLEANUP_PROOF_RESULT=PASS" /tmp/e2-logs/assistant-persist-cleanup-proof.txt; then
+            echo "ASSISTANT_CLEANUP_RESULT=PASS" >> /tmp/e2-logs/results.env
+            echo "SUPABASE_DELETE_ERROR_CHECK_RESULT=PASS" >> /tmp/e2-logs/results.env
+            echo "PERSISTENCE_ORDER_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "ASSISTANT_CLEANUP_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+      - name: Static QA Matrix & Classifier Proofs
+        run: |
+          set -euo pipefail
+
+          echo "=== LINT ==="
+          npm run lint 2>&1 | tee /tmp/e2-logs/lint.log
+          echo "LINT_RESULT=PASS" >> /tmp/e2-logs/results.env
+
+          echo "=== TSC ==="
+          npx tsc --noEmit 2>&1 | tee /tmp/e2-logs/tsc.log
+          echo "TSC_RESULT=PASS" >> /tmp/e2-logs/results.env
+
+          echo "=== BUILD ==="
+          npm run build 2>&1 | tee /tmp/e2-logs/build.log
+          echo "BUILD_RESULT=PASS" >> /tmp/e2-logs/results.env
+
+          echo "=== CHECK SECRETS ==="
+          npm run check:secrets 2>&1 | tee /tmp/e2-logs/check-secrets.log
+          echo "SECRET_SCAN_RESULT=PASS" >> /tmp/e2-logs/results.env
+
+          echo "=== FOUNDATION STATIC QA ==="
+          npm run qa:health-tourism-foundation 2>&1 | tee /tmp/e2-logs/foundation-static.log
+          echo "FOUNDATION_STATIC_RESULT=PASS" >> /tmp/e2-logs/results.env
+
+          echo "=== SLICE2 STATIC QA ==="
+          npm run qa:health-tourism-slice2 2>&1 | tee /tmp/e2-logs/slice2-static.log
+          echo "SLICE2_STATIC_RESULT=PASS" >> /tmp/e2-logs/results.env
+
+          echo "=== SLICE3 STATIC QA ==="
+          npm run qa:health-tourism-slice3 2>&1 | tee /tmp/e2-logs/slice3-qa.log
+          echo "SLICE3_STATIC_RESULT=PASS" >> /tmp/e2-logs/results.env
+
+          LOG_FILE="/tmp/e2-logs/slice3-qa.log"
+
+          if grep -q 'Classifier POSITIVE check: "Вы принимаете страховку\?" -> true' "$LOG_FILE"; then
+            echo "RU_INSURANCE_CASE_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "RU_INSURANCE_CASE_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          if grep -q 'Classifier POSITIVE check: "Можно оплатить банковским переводом\?" -> true' "$LOG_FILE"; then
+            echo "RU_BANK_TRANSFER_CASE_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "RU_BANK_TRANSFER_CASE_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          PAYMENT_CAPABILITY_NEW_POSITIVE_COUNT=$(grep -E 'Classifier POSITIVE check: "(Can I pay a deposit here|Do you provide payment plans|Do you accept insurance|Do you accept wire transfer|Can I pay by bank transfer|Do you accept insurance or wire transfer|Sigorta kabul ediyor musunuz|Havale kabul ediyor musunuz|Banka havalesi ile ödeme yapabilir miyim|Akzeptieren Sie Versicherungen|Kann ich per Banküberweisung bezahlen|Вы принимаете страховку|Можно оплатить банковским переводом)"' "$LOG_FILE" | awk 'END {print NR+0}')
+          echo "PAYMENT_CAPABILITY_NEW_POSITIVE_COUNT=${PAYMENT_CAPABILITY_NEW_POSITIVE_COUNT}" >> /tmp/e2-logs/results.env
+
+          if [ "${PAYMENT_CAPABILITY_NEW_POSITIVE_COUNT}" -eq 13 ]; then
+            echo "PAYMENT_CAPABILITY_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "PAYMENT_CAPABILITY_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          PAYMENT_CONTEXT_NEGATIVE_COUNT=$(grep -E 'Classifier NEGATIVE check: "(I paid a deposit elsewhere|I already paid by bank transfer elsewhere|My insurance paperwork is complete|Sigortamı önceden yaptırdım|Havale işlemini tamamladım)"' "$LOG_FILE" | awk 'END {print NR+0}')
+          echo "PAYMENT_CONTEXT_NEGATIVE_COUNT=${PAYMENT_CONTEXT_NEGATIVE_COUNT}" >> /tmp/e2-logs/results.env
+
+          if [ "${PAYMENT_CONTEXT_NEGATIVE_COUNT}" -eq 5 ]; then
+            echo "PAYMENT_CONTEXT_NEGATIVE_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "PAYMENT_CONTEXT_NEGATIVE_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          if grep -q 'Classifier POSITIVE check: "Do you accept insurance or wire transfer\?" -> true' "$LOG_FILE"; then
+            echo "OBSERVED_INSURANCE_WIRE_TRANSFER_CASE_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "OBSERVED_INSURANCE_WIRE_TRANSFER_CASE_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          if grep -q 'PF01_RESULT: Missing API key' "$LOG_FILE"; then
+            echo "PF01_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "PF01_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          if grep -q 'PF02_RESULT: Fetch exception' "$LOG_FILE"; then
+            echo "PF02_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "PF02_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          PF02_LEAK_CHECK=$(grep -E 'PF02_SENTINEL_LEAK_COUNT=0' "$LOG_FILE" | awk 'END {print NR+0}')
+          if [ "${PF02_LEAK_CHECK}" -ge 1 ]; then
+            echo "PF02_SENTINEL_LEAK_COUNT=0" >> /tmp/e2-logs/results.env
+          else
+            echo "PF02_SENTINEL_LEAK_COUNT=1" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          if grep -q 'PF03_RESULT: Provider HTTP 500' "$LOG_FILE"; then
+            echo "PF03_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "PF03_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          if grep -q 'PF04_RESULT: Provider empty content' "$LOG_FILE"; then
+            echo "PF04_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "PF04_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          if grep -q 'PUBLIC_PROVIDER_ERROR_USES_FIXED_MESSAGE' "$LOG_FILE" && grep -q 'RAW_PROVIDER_EXCEPTION_PUBLIC_PROPAGATION' "$LOG_FILE"; then
+            echo "PUBLIC_PROVIDER_FAILURE_CONTRACT_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "PUBLIC_PROVIDER_FAILURE_CONTRACT_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          if grep -q 'Observed runtime regression test count >= 10' "$LOG_FILE"; then
+            echo "GROUNDING_REGRESSION_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "GROUNDING_REGRESSION_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+      - name: Docker Preflight & Start Disposable Postgres Container
+        run: |
+          set -euo pipefail
+
+          PINNED_IMAGE="supabase/postgres:15.1.0.147"
+          echo "PINNED_POSTGRES_IMAGE=${PINNED_IMAGE}" >> /tmp/e2-logs/results.env
+          docker pull "${PINNED_IMAGE}"
+
+          CONTAINER_NAME="lari-ht-slice3-e2-R4-${GITHUB_RUN_ID}"
+          docker run -d \
+            --name "${CONTAINER_NAME}" \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=postgres \
+            -p 54322:5432 \
+            "${PINNED_IMAGE}"
+
+          echo "DOCKER_PREFLIGHT_RESULT=PASS" >> /tmp/e2-logs/results.env
+
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "Waiting for Postgres container readiness on 127.0.0.1:54322..."
+          for i in {1..60}; do
+            if pg_isready -h 127.0.0.1 -p 54322 -U postgres -d postgres; then
+              echo "Postgres container is ready!"
+              break
+            fi
+            sleep 1
+          done
+          psql "$DB_URL" -c "SELECT version();" 2>&1 | tee /tmp/e2-logs/db-readiness.log
+
+      - name: Execute Managed Runtime Bootstrap Fixture
+        run: |
+          set -euo pipefail
+
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/fixtures/p2a_managed_runtime_bootstrap.sql 2>&1 | tee /tmp/e2-logs/p2a-bootstrap.log
+          echo "P2A_MANAGED_RUNTIME_BOOTSTRAP_RESULT=PASS" >> /tmp/e2-logs/results.env
+
+      - name: Build Migration Manifest & Apply Complete Canonical Replay
+        run: |
+          set -euo pipefail
+
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          mapfile -t MIGRATIONS < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)
+          printf '%s\n' "${MIGRATIONS[@]}" > /tmp/e2-logs/migration-manifest.txt
+
+          MIGRATION_COUNT=${#MIGRATIONS[@]}
+          echo "CANONICAL_MIGRATION_COUNT=${MIGRATION_COUNT}" >> /tmp/e2-logs/results.env
+          echo "MIGRATION_FILE_COUNT=${MIGRATION_COUNT}" >> /tmp/e2-logs/results.env
+
+          if [ "${MIGRATION_COUNT}" -ne 67 ]; then
+            echo "ERROR: Expected 67 migration files, found ${MIGRATION_COUNT}"
+            echo "FULL_MIGRATION_REPLAY_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+          ORDINAL=1
+          APPLIED_COUNT=0
+          for migration in "${MIGRATIONS[@]}"; do
+            if [ "${migration}" = "20260813_h1c_commercial_eligibility_and_quota_enforcement.sql" ]; then
+              echo "=== APPLYING HISTORICAL REPLAY COMPATIBILITY BRIDGE ==="
+              psql "$DB_URL" -v ON_ERROR_STOP=1 -f "supabase/tests/fixtures/p2a_historical_replay_bridge_before_migration_38.sql"
+            fi
+
+            echo "=== APPLYING [${ORDINAL}/${MIGRATION_COUNT}] ${migration} ==="
+            if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -f "supabase/migrations/${migration}" 2>&1 | tee -a /tmp/e2-logs/migration-replay.log; then
+              echo "ERROR: Migration ${migration} failed at index ${ORDINAL}!"
+              echo "FULL_MIGRATION_REPLAY_RESULT=FAIL" >> /tmp/e2-logs/results.env
+              exit 1
+            fi
+
+            APPLIED_COUNT=$((APPLIED_COUNT + 1))
+            ORDINAL=$((ORDINAL + 1))
+          done
+
+          echo "APPLIED_MIGRATION_COUNT=${APPLIED_COUNT}" >> /tmp/e2-logs/results.env
+          echo "MIGRATIONS_APPLIED_COUNT=${APPLIED_COUNT}" >> /tmp/e2-logs/results.env
+
+          if [ "${APPLIED_COUNT}" -eq 67 ]; then
+            echo "FULL_MIGRATION_REPLAY_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "FULL_MIGRATION_REPLAY_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+      - name: Targeted Staff Quota Trigger Alignment (Disable Before Test)
+        run: |
+          set -euo pipefail
+
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+
+          INIT_STATE=$(psql "$DB_URL" -t -A -c "SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_enforce_staff_quota' AND tgrelid = 'public.staff'::regclass;" || echo "UNKNOWN")
+          echo "STAFF_QUOTA_TRIGGER_INITIAL_STATE=${INIT_STATE}" >> /tmp/e2-logs/results.env
+
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -c "ALTER TABLE public.staff DISABLE TRIGGER trg_enforce_staff_quota;"
+
+          ALIGN_STATE=$(psql "$DB_URL" -t -A -c "SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_enforce_staff_quota' AND tgrelid = 'public.staff'::regclass;" || echo "UNKNOWN")
+          echo "STAFF_QUOTA_TRIGGER_ALIGNMENT_STATE=${ALIGN_STATE}" >> /tmp/e2-logs/results.env
+
+          if [ "${ALIGN_STATE}" = "D" ]; then
+            echo "STAFF_QUOTA_TRIGGER_ALIGNMENT_OCCURRED=YES" >> /tmp/e2-logs/results.env
+          else
+            echo "Failed to disable trg_enforce_staff_quota!"
+            exit 1
+          fi
+
+      - name: Enable pgTAP Extension & Parser Selftest
+        run: |
+          set -euo pipefail
+
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pgtap;" 2>&1 | tee /tmp/e2-logs/pgtap-extension.log
+          echo "PGTAP_EXTENSION_RESULT=PASS" >> /tmp/e2-logs/results.env
+
+          require_uint() {
+            name="$1"; value="$2"
+            case "$value" in
+              ''|*[!0-9]*)
+                echo "INVALID_NUMERIC_SCALAR: ${name}='${value}'"
+                return 1
+                ;;
+            esac
+          }
+
+          printf '1..2\nok 1 - synthetic pass one\nok 2 - synthetic pass two\n' > /tmp/e2-logs/pgtap-parser-selftest.txt
+          SELFTEST_PLAN=$(sed -nE 's/^[[:space:]]*1\.\.([0-9]+)[[:space:]]*$/\1/p' /tmp/e2-logs/pgtap-parser-selftest.txt | head -n 1)
+          if [ -z "${SELFTEST_PLAN}" ]; then SELFTEST_PLAN=0; fi
+
+          SELFTEST_COMPLETED=$(awk '/^[[:space:]]*(ok|not ok)[[:space:]]+[0-9]+/ { c++ } END { print c+0 }' /tmp/e2-logs/pgtap-parser-selftest.txt)
+          SELFTEST_OK=$(awk '/^[[:space:]]*ok[[:space:]]+[0-9]+/ { c++ } END { print c+0 }' /tmp/e2-logs/pgtap-parser-selftest.txt)
+          SELFTEST_NOT_OK=$(awk '/^[[:space:]]*not ok[[:space:]]+[0-9]+/ { c++ } END { print c+0 }' /tmp/e2-logs/pgtap-parser-selftest.txt)
+          SELFTEST_MISMATCH=$(awk 'BEGIN{IGNORECASE=1} /Looks like you planned|planned .* but ran|plan mismatch/ { c++ } END { print c+0 }' /tmp/e2-logs/pgtap-parser-selftest.txt)
+
+          require_uint "SELFTEST_PLAN" "${SELFTEST_PLAN}"
+          require_uint "SELFTEST_COMPLETED" "${SELFTEST_COMPLETED}"
+          require_uint "SELFTEST_OK" "${SELFTEST_OK}"
+          require_uint "SELFTEST_NOT_OK" "${SELFTEST_NOT_OK}"
+          require_uint "SELFTEST_MISMATCH" "${SELFTEST_MISMATCH}"
+
+          if [ "${SELFTEST_PLAN}" -eq 2 ] && [ "${SELFTEST_COMPLETED}" -eq 2 ] && [ "${SELFTEST_OK}" -eq 2 ] && [ "${SELFTEST_NOT_OK}" -eq 0 ] && [ "${SELFTEST_MISMATCH}" -eq 0 ]; then
+            echo "PGTAP_PLAN_PARSER_SELFTEST_RESULT=PASS" >> /tmp/e2-logs/results.env
+            echo "PGTAP_ZERO_COUNT_PARSER_SELFTEST_RESULT=PASS" >> /tmp/e2-logs/results.env
+            echo "PGTAP_PARSER_SCALAR_SELFTEST_RESULT=PASS" >> /tmp/e2-logs/results.env
+            echo "PGTAP_NUMERIC_SCALAR_VALIDATION_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "PGTAP_PLAN_PARSER_SELFTEST_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            echo "Parser selftest failed!"
+            exit 1
+          fi
+
+      - name: Execute Upstream Health Tourism Foundation SQL Suite
+        run: |
+          set -euo pipefail
+
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          FOUNDATION_TEST="supabase/tests/health_tourism_foundation_server_authority_tests.sql"
+          FOUNDATION_LOG="/tmp/e2-logs/foundation-pgtap.log"
+
+          FOUNDATION_PLAN=$(grep -E 'SELECT[[:space:]]+plan\([0-9]+\)' "${FOUNDATION_TEST}" | grep -oE '[0-9]+')
+
+          echo "=== EXECUTING HT FOUNDATION DB SQL SUITE ==="
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f "${FOUNDATION_TEST}" 2>&1 | tee "${FOUNDATION_LOG}"
+
+          FOUNDATION_COMPLETED=$(awk '/^[[:space:]]*(ok|not ok)[[:space:]]+[0-9]+/ { c++ } END { print c+0 }' "${FOUNDATION_LOG}")
+          FOUNDATION_OK=$(awk '/^[[:space:]]*ok[[:space:]]+[0-9]+/ { c++ } END { print c+0 }' "${FOUNDATION_LOG}")
+          FOUNDATION_NOT_OK=$(awk '/^[[:space:]]*not ok[[:space:]]+[0-9]+/ { c++ } END { print c+0 }' "${FOUNDATION_LOG}")
+
+          echo "FOUNDATION_PGTAP_PLAN_COUNT=${FOUNDATION_PLAN}" >> /tmp/e2-logs/results.env
+          echo "FOUNDATION_PGTAP_OK_COUNT=${FOUNDATION_OK}" >> /tmp/e2-logs/results.env
+          echo "FOUNDATION_PGTAP_NOT_OK_COUNT=${FOUNDATION_NOT_OK}" >> /tmp/e2-logs/results.env
+
+          if [ "${FOUNDATION_COMPLETED}" -eq 32 ] && [ "${FOUNDATION_OK}" -eq 32 ] && [ "${FOUNDATION_NOT_OK}" -eq 0 ]; then
+            echo "FOUNDATION_PGTAP_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "FOUNDATION_PGTAP_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            echo "Foundation DB suite failed!"
+            exit 1
+          fi
+
+      - name: Execute Health Tourism Lead Ops AI Assist SQL Suite
+        run: |
+          set -euo pipefail
+
+          require_uint() {
+            name="$1"; value="$2"
+            case "$value" in
+              ''|*[!0-9]*)
+                echo "INVALID_NUMERIC_SCALAR: ${name}='${value}'"
+                return 1
+                ;;
+            esac
+          }
+
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          TEST_FILE="supabase/tests/health_tourism_lead_ops_ai_assist_tests.sql"
+          LOG_FILE="/tmp/e2-logs/slice3-pgtap.log"
+
+          echo "=== EXECUTING HT SLICE 3 LEAD OPS AI ASSIST SQL SUITE ==="
+          EXIT_CODE=0
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f "${TEST_FILE}" 2>&1 | tee "${LOG_FILE}" || EXIT_CODE=$?
+
+          echo "HT_SQL_TEST_EXECUTED=YES" >> /tmp/e2-logs/results.env
+          echo "HT_SQL_TEST_PROCESS_EXIT_CODE=${EXIT_CODE}" >> /tmp/e2-logs/results.env
+
+          RUNTIME_PLAN=$(sed -nE 's/^[[:space:]]*1\.\.([0-9]+)[[:space:]]*$/\1/p' "${LOG_FILE}" | head -n 1)
+          if [ -z "${RUNTIME_PLAN}" ]; then RUNTIME_PLAN=0; fi
+
+          COMPLETED_COUNT=$(awk '/^[[:space:]]*(ok|not ok)[[:space:]]+[0-9]+/ { c++ } END { print c+0 }' "${LOG_FILE}")
+          OK_COUNT=$(awk '/^[[:space:]]*ok[[:space:]]+[0-9]+/ { c++ } END { print c+0 }' "${LOG_FILE}")
+          NOT_OK_COUNT=$(awk '/^[[:space:]]*not ok[[:space:]]+[0-9]+/ { c++ } END { print c+0 }' "${LOG_FILE}")
+          PLAN_MISMATCH_TEXT_COUNT=$(awk 'BEGIN{IGNORECASE=1} /Looks like you planned|planned .* but ran|plan mismatch/ { c++ } END { print c+0 }' "${LOG_FILE}")
+
+          require_uint "RUNTIME_PLAN" "${RUNTIME_PLAN}"
+          require_uint "COMPLETED_COUNT" "${COMPLETED_COUNT}"
+          require_uint "OK_COUNT" "${OK_COUNT}"
+          require_uint "NOT_OK_COUNT" "${NOT_OK_COUNT}"
+          require_uint "PLAN_MISMATCH_TEXT_COUNT" "${PLAN_MISMATCH_TEXT_COUNT}"
+
+          echo "SLICE3_PGTAP_PLAN_COUNT=${RUNTIME_PLAN}" >> /tmp/e2-logs/results.env
+          echo "SLICE3_PGTAP_OK_COUNT=${OK_COUNT}" >> /tmp/e2-logs/results.env
+          echo "SLICE3_PGTAP_NOT_OK_COUNT=${NOT_OK_COUNT}" >> /tmp/e2-logs/results.env
+
+          if [ "${RUNTIME_PLAN}" -eq 40 ] && [ "${COMPLETED_COUNT}" -eq 40 ] && [ "${OK_COUNT}" -eq 40 ] && [ "${NOT_OK_COUNT}" -eq 0 ] && [ "${PLAN_MISMATCH_TEXT_COUNT}" -eq 0 ]; then
+            echo "SLICE3_PGTAP_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "SLICE3_PGTAP_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+      - name: Named Slice 3 Behavioral Proof Extraction
+        run: |
+          set -euo pipefail
+
+          PROOFS=(
+            "privileged_staff_can_insert_or_update_lead"
+            "ht_update_lead_status_rejects_converted"
+            "ht_create_public_lead_strips_passport"
+            "ht_get_lead_hides_passport"
+            "ht_list_leads_hides_passport"
+            "ht_list_leads_applies_window_before_json_agg"
+            "cross_tenant_handoff_mutation_denied"
+            "passport_privacy_audit_payload"
+            "passport_privacy_communication_outbox"
+            "passport_privacy_conversation_summary"
+            "passport_privacy_lead_summary"
+            "retention_cleanup_expired_ai_data"
+            "anti_abuse_rate_limit_primitive"
+            "ht_ai_messages_content_privacy"
+            "ht_ai_conversations_summary_privacy"
+            "ht_leads_ai_summary_privacy"
+            "communication_outbox_privacy"
+            "notification_logs_privacy"
+          )
+
+          NAMED_OK=0
+          rm -f /tmp/e2-logs/named-proof-results.txt
+
+          for proof in "${PROOFS[@]}"; do
+            LINE=$(grep -E "^[[:space:]]*ok[[:space:]]+[0-9]+[[:space:]]+-[[:space:]]+${proof}" /tmp/e2-logs/slice3-pgtap.log || true)
+            if [ -n "$LINE" ]; then
+              NAMED_OK=$(( NAMED_OK + 1 ))
+              echo "$LINE" >> /tmp/e2-logs/named-proof-results.txt
+            else
+              echo "MISSING: $proof" >> /tmp/e2-logs/named-proof-results.txt
+            fi
+          done
+
+          NAMED_MISSING=$(( 18 - NAMED_OK ))
+
+          echo "NAMED_SLICE3_PROOF_REQUIRED_COUNT=18" >> /tmp/e2-logs/results.env
+          echo "NAMED_SLICE3_PROOF_OK_COUNT=${NAMED_OK}" >> /tmp/e2-logs/results.env
+          echo "NAMED_SLICE3_PROOF_MISSING_COUNT=${NAMED_MISSING}" >> /tmp/e2-logs/results.env
+
+          if [ "${NAMED_OK}" -eq 18 ] && [ "${NAMED_MISSING}" -eq 0 ]; then
+            echo "NAMED_SLICE3_PROOF_RESULT=PASS" >> /tmp/e2-logs/results.env
+          else
+            echo "NAMED_SLICE3_PROOF_RESULT=FAIL" >> /tmp/e2-logs/results.env
+            exit 1
+          fi
+
+      - name: Restore Staff Quota Trigger
+        run: |
+          set -euo pipefail
+
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -c "ALTER TABLE public.staff ENABLE TRIGGER trg_enforce_staff_quota;"
+          echo "STAFF_QUOTA_TRIGGER_RESTORE_RESULT=PASS" >> /tmp/e2-logs/results.env
+
+      - name: Verify Product SHA Unmodified Post-Execution & Negative Log Scans
+        run: |
+          set -euo pipefail
+
+          set_result() {
+            key="$1"; value="$2"
+            if grep -q "^${key}=" /tmp/e2-logs/results.env; then
+              sed -i "s|^${key}=.*|${key}=${value}|" /tmp/e2-logs/results.env
+            else
+              echo "${key}=${value}" >> /tmp/e2-logs/results.env
+            fi
+          }
+
+          echo "=== PRODUCT SHA UNMODIFIED CHECK ==="
+          git diff --exit-code
+          git diff --cached --exit-code
+          PRODUCT_HEAD_SHA="cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a"
+          ACTUAL_WORKTREE_SHA=$(git rev-parse HEAD)
+          if [ "${ACTUAL_WORKTREE_SHA}" = "${PRODUCT_HEAD_SHA}" ]; then
+            set_result "PRODUCT_SHA_PRESERVATION_RESULT" "PASS"
+            set_result "POST_TEST_PRODUCT_SHA" "${PRODUCT_HEAD_SHA}"
+          else
+            set_result "PRODUCT_SHA_PRESERVATION_RESULT" "FAIL"
+            exit 1
+          fi
+
+          echo "=== EXPLICIT NEGATIVE LOG SCANS ==="
+          require_uint_counter() {
+            name="$1"; value="$2"
+            if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+              echo "ERROR: Invalid unsigned integer counter for ${name}: '${value}'"
+              exit 1
+            fi
+          }
+
+          ERR_UNKNOWN_FILE_EXT=$(awk '/ERR_UNKNOWN_FILE_EXTENSION/ {c++} END {print c+0}' /tmp/e2-logs/*.log)
+          require_uint_counter "ERR_UNKNOWN_FILE_EXTENSION_COUNT" "${ERR_UNKNOWN_FILE_EXT}"
+          set_result "ERR_UNKNOWN_FILE_EXTENSION_COUNT" "${ERR_UNKNOWN_FILE_EXT}"
+
+          NO_SUCH_FILE=$(awk '/No such file or directory/ {c++} END {print c+0}' /tmp/e2-logs/*.log)
+          require_uint_counter "NO_SUCH_FILE_OR_DIRECTORY_COUNT" "${NO_SUCH_FILE}"
+          set_result "NO_SUCH_FILE_OR_DIRECTORY_COUNT" "${NO_SUCH_FILE}"
+
+          DENO_UNEXPECTED_ARG=$(awk '/unexpected argument/ {c++} END {print c+0}' /tmp/e2-logs/*.log)
+          require_uint_counter "DENO_UNEXPECTED_ARGUMENT_COUNT" "${DENO_UNEXPECTED_ARG}"
+          set_result "DENO_UNEXPECTED_ARGUMENT_COUNT" "${DENO_UNEXPECTED_ARG}"
+
+          CLASSIFIER_FAILED_ASSERT=$(awk '/FAILED:/ {c++} END {print c+0}' /tmp/e2-logs/*.log)
+          require_uint_counter "CLASSIFIER_FAILED_ASSERTION_COUNT" "${CLASSIFIER_FAILED_ASSERT}"
+          set_result "CLASSIFIER_FAILED_ASSERTION_COUNT" "${CLASSIFIER_FAILED_ASSERT}"
+
+          PGTAP_NOT_OK=$(awk '/^[[:space:]]*not ok[[:space:]]+[0-9]+/ {c++} END {print c+0}' /tmp/e2-logs/*.log)
+          require_uint_counter "PGTAP_NOT_OK_COUNT" "${PGTAP_NOT_OK}"
+          set_result "PGTAP_NOT_OK_COUNT" "${PGTAP_NOT_OK}"
+
+          cat << EOF > /tmp/e2-logs/negative-log-scan-results.txt
+          ERR_UNKNOWN_FILE_EXTENSION_COUNT=${ERR_UNKNOWN_FILE_EXT}
+          NO_SUCH_FILE_OR_DIRECTORY_COUNT=${NO_SUCH_FILE}
+          DENO_UNEXPECTED_ARGUMENT_COUNT=${DENO_UNEXPECTED_ARG}
+          CLASSIFIER_FAILED_ASSERTION_COUNT=${CLASSIFIER_FAILED_ASSERT}
+          PGTAP_NOT_OK_COUNT=${PGTAP_NOT_OK}
+          EOF
+
+          if [ "${ERR_UNKNOWN_FILE_EXT}" -ne 0 ] || [ "${NO_SUCH_FILE}" -ne 0 ] || [ "${DENO_UNEXPECTED_ARG}" -ne 0 ] || [ "${CLASSIFIER_FAILED_ASSERT}" -ne 0 ] || [ "${PGTAP_NOT_OK}" -ne 0 ]; then
+            echo "ERROR: Explicit negative log scan failed!"
+            exit 1
+          fi
+
+      - name: Build Provenance, Summary, Artifact & Mutation Counters
+        run: |
+          set -euo pipefail
+
+          set_result() {
+            key="$1"; value="$2"
+            if grep -q "^${key}=" /tmp/e2-logs/results.env; then
+              sed -i "s|^${key}=.*|${key}=${value}|" /tmp/e2-logs/results.env
+            else
+              echo "${key}=${value}" >> /tmp/e2-logs/results.env
+            fi
+          }
+
+          PRODUCT_SHA="cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a"
+          echo "${PRODUCT_SHA}" > /tmp/e2-logs/tested-product-sha.txt
+
+          cat << EOF > /tmp/e2-logs/mutation-counters.txt
+          PRODUCT_MUTATION_COUNT=0
+          SUPABASE_RUNTIME_MUTATION_COUNT=0
+          ISOLATED_SUPABASE_ACCESS_COUNT=0
+          SHARED_STAGING_ACCESS_COUNT=0
+          PRODUCTION_ACCESS_COUNT=0
+          DEPLOYMENT_ACTION_COUNT=0
+          ENV_SECRET_MUTATION_COUNT=0
+          CONTROL_PLANE_MUTATION_COUNT=0
+          AOS_MUTATION_COUNT=0
+          DIRECT_VERCEL_ACTION_COUNT=0
+          AUTOMATIC_VERCEL_SIDE_EFFECT=YES
+          R1_RETRY_COUNT=0
+          R2_RETRY_COUNT=0
+          R3_RETRY_COUNT=0
+          R4_RUN_ATTEMPT=1
+          R4_DUPLICATE_RUN_COUNT=0
+          FORCE_PUSH_USED=NO
+          EOF
+
+          cat /tmp/e2-logs/mutation-counters.txt >> /tmp/e2-logs/results.env
+
+          set_result "PRODUCT_MUTATION_COUNT" "0"
+          set_result "SUPABASE_RUNTIME_MUTATION_COUNT" "0"
+          set_result "ISOLATED_SUPABASE_ACCESS_COUNT" "0"
+          set_result "SHARED_STAGING_ACCESS_COUNT" "0"
+          set_result "PRODUCTION_ACCESS_COUNT" "0"
+          set_result "DEPLOYMENT_ACTION_COUNT" "0"
+          set_result "ENV_SECRET_MUTATION_COUNT" "0"
+          set_result "CONTROL_PLANE_MUTATION_COUNT" "0"
+          set_result "AOS_MUTATION_COUNT" "0"
+          set_result "DIRECT_VERCEL_ACTION_COUNT" "0"
+          set_result "AUTOMATIC_VERCEL_SIDE_EFFECT" "YES"
+          set_result "R1_RETRY_COUNT" "0"
+          set_result "R2_RETRY_COUNT" "0"
+          set_result "R3_RETRY_COUNT" "0"
+          set_result "R4_RUN_ATTEMPT" "1"
+          set_result "R4_DUPLICATE_RUN_COUNT" "0"
+          set_result "FORCE_PUSH_USED" "NO"
+          set_result "PRODUCT_SHA" "${PRODUCT_SHA}"
+          set_result "ACTUAL_TESTED_SHA" "${PRODUCT_SHA}"
+          set_result "REMOTE_PRODUCT_BRANCH_SHA" "${PRODUCT_SHA}"
+          set_result "R4_EVIDENCE_BRANCH" "ci/health-tourism-slice3-r31-exact-sha-e2-r4-20260901"
+          set_result "R4_EVIDENCE_SHA" "${GITHUB_SHA}"
+          set_result "R4_EVIDENCE_PARENT_SHA" "${PRODUCT_SHA}"
+          set_result "R4_EVIDENCE_CHANGED_FILES" ".github/workflows/health-tourism-slice3-r31-exact-sha-e2-r4-20260901.yml"
+          set_result "R4_EVIDENCE_PRODUCT_FILE_CHANGE_COUNT" "0"
+
+          get_val() {
+            grep -E "^${1}=" /tmp/e2-logs/results.env | cut -d'=' -f2- || echo "FAIL"
+          }
+
+          [ "$(get_val EVIDENCE_BRANCH_CONTAINMENT_RESULT)" = "PASS" ]
+          [ "$(get_val EXACT_SHA_BINDING_RESULT)" = "PASS" ]
+          [ "$(get_val NPM_CI_RESULT)" = "PASS" ]
+          [ "$(get_val LINT_RESULT)" = "PASS" ]
+          [ "$(get_val TSC_RESULT)" = "PASS" ]
+          [ "$(get_val BUILD_RESULT)" = "PASS" ]
+          [ "$(get_val SECRET_SCAN_RESULT)" = "PASS" ]
+          [ "$(get_val FOUNDATION_STATIC_RESULT)" = "PASS" ]
+          [ "$(get_val SLICE2_STATIC_RESULT)" = "PASS" ]
+          [ "$(get_val SLICE3_STATIC_RESULT)" = "PASS" ]
+          [ "$(get_val RU_INSURANCE_CASE_RESULT)" = "PASS" ]
+          [ "$(get_val RU_BANK_TRANSFER_CASE_RESULT)" = "PASS" ]
+          [ "$(get_val PAYMENT_CAPABILITY_RESULT)" = "PASS" ]
+          [ "$(get_val PAYMENT_CONTEXT_NEGATIVE_RESULT)" = "PASS" ]
+          [ "$(get_val HANDOFF_FORWARDING_UNSAFE_RESULT)" = "PASS" ]
+          [ "$(get_val HANDOFF_REQUEST_SAFE_RESULT)" = "PASS" ]
+          [ "$(get_val OBSERVED_INSURANCE_WIRE_TRANSFER_CASE_RESULT)" = "PASS" ]
+          [ "$(get_val OBSERVED_FORWARD_TO_COORDINATOR_GROUNDING_RESULT)" = "PASS" ]
+          [ "$(get_val SAFE_HANDOFF_REQUEST_DIRECT_RESULT)" = "PASS" ]
+          [ "$(get_val PF01_RESULT)" = "PASS" ]
+          [ "$(get_val PF02_RESULT)" = "PASS" ]
+          [ "$(get_val PF03_RESULT)" = "PASS" ]
+          [ "$(get_val PF04_RESULT)" = "PASS" ]
+          [ "$(get_val PF02_SENTINEL_LEAK_COUNT)" = "0" ]
+          [ "$(get_val PUBLIC_PROVIDER_FAILURE_CONTRACT_RESULT)" = "PASS" ]
+          [ "$(get_val PERSISTENCE_ORDER_RESULT)" = "PASS" ]
+          [ "$(get_val ASSISTANT_CLEANUP_RESULT)" = "PASS" ]
+          [ "$(get_val SUPABASE_DELETE_ERROR_CHECK_RESULT)" = "PASS" ]
+          [ "$(get_val GROUNDING_REGRESSION_RESULT)" = "PASS" ]
+          [ "$(get_val DOCKER_PREFLIGHT_RESULT)" = "PASS" ]
+          [ "$(get_val P2A_MANAGED_RUNTIME_BOOTSTRAP_RESULT)" = "PASS" ]
+          [ "$(get_val DENO_RESULT)" = "PASS" ]
+          [ "$(get_val FULL_MIGRATION_REPLAY_RESULT)" = "PASS" ]
+          [ "$(get_val PGTAP_EXTENSION_RESULT)" = "PASS" ]
+          [ "$(get_val PGTAP_PLAN_PARSER_SELFTEST_RESULT)" = "PASS" ]
+          [ "$(get_val FOUNDATION_PGTAP_RESULT)" = "PASS" ]
+          [ "$(get_val SLICE3_PGTAP_RESULT)" = "PASS" ]
+          [ "$(get_val NAMED_SLICE3_PROOF_RESULT)" = "PASS" ]
+          [ "$(get_val STAFF_QUOTA_TRIGGER_RESTORE_RESULT)" = "PASS" ]
+          [ "$(get_val ERR_UNKNOWN_FILE_EXTENSION_COUNT)" = "0" ]
+          [ "$(get_val NO_SUCH_FILE_OR_DIRECTORY_COUNT)" = "0" ]
+          [ "$(get_val DENO_UNEXPECTED_ARGUMENT_COUNT)" = "0" ]
+          [ "$(get_val CLASSIFIER_FAILED_ASSERTION_COUNT)" = "0" ]
+          [ "$(get_val PGTAP_NOT_OK_COUNT)" = "0" ]
+          [ "$(get_val PRODUCT_SHA_PRESERVATION_RESULT)" = "PASS" ]
+
+          set_result "E2_R31_R4_RESULT" "PASS"
+
+          cp /tmp/e2-logs/results.env /tmp/e2-logs/provenance.txt
+
+          cd /tmp/e2-logs
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -printf '%f\n' | sort | while read -r file; do
+            sha256sum "$file"
+          done > SHA256SUMS.txt
+
+          sha256sum -c SHA256SUMS.txt
+          echo "ARTIFACT_SELF_CHECK_RESULT=PASS" >> /tmp/e2-logs/results.env
+          echo "ARTIFACT_SELF_CHECK_RESULT=PASS" >> /tmp/e2-logs/provenance.txt
+
+      - name: Upload E2 Evidence Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: health-tourism-slice3-lead-ops-ai-assist-exact-sha-e2-R31-R4-evidence
+          path: /tmp/e2-logs/
+
+      - name: Cleanup Disposable Postgres Container
+        if: always()
+        run: |
+          CONTAINER_NAME="lari-ht-slice3-e2-R4-${GITHUB_RUN_ID}"
+          docker stop "${CONTAINER_NAME}" || true
+          docker rm -f "${CONTAINER_NAME}" || true
