@@ -638,6 +638,12 @@ jobs:
               }
               fs.writeFileSync(path.join(artifactDir, 'results.env'), envContent);
 
+              if (process.env.GITHUB_STEP_SUMMARY) {
+                try {
+                  fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '### E3 Execution Results\n```env\n' + envContent + '```\n');
+                } catch (e) {}
+              }
+
               let ledgerLines = '';
               for (const item of caseLedger) {
                 ledgerLines += JSON.stringify(item) + '\n';
