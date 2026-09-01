@@ -9,6 +9,10 @@ import {
   ClinicPatientProfileReadResult,
   ClinicStaffSetupProfilesResult,
   ClinicServiceResult,
+  HtPendingClinicAcceptanceLead,
+  HtAcceptanceOptionsResult,
+  HtAcceptanceSlotsResult,
+  HtAcceptanceConversionResult,
   NoteStatus
 } from '../types/clinic';
 import { supabaseClinicRepository } from './repositories/supabaseClinicRepository';
@@ -127,5 +131,50 @@ export const clinicService = {
       return supabaseClinicRepository.getOperationalDay(date, branch_id);
     }
     return createClinicUnavailableResult<ClinicOperationalDay>();
+  },
+
+  async getHtPendingLeads(): Promise<ClinicServiceResult<HtPendingClinicAcceptanceLead[]>> {
+    if (getDataSourceMode() === 'supabase') {
+      return supabaseClinicRepository.getHtPendingLeads();
+    }
+    return createClinicUnavailableResult<HtPendingClinicAcceptanceLead[]>();
+  },
+
+  async getHtAcceptanceOptions(params: {
+    lead_id: string;
+    branch_id?: string;
+    service_id?: string;
+  }): Promise<ClinicServiceResult<HtAcceptanceOptionsResult>> {
+    if (getDataSourceMode() === 'supabase') {
+      return supabaseClinicRepository.getHtAcceptanceOptions(params);
+    }
+    return createClinicUnavailableResult<HtAcceptanceOptionsResult>();
+  },
+
+  async getHtAcceptanceSlots(params: {
+    lead_id: string;
+    branch_id: string;
+    service_id: string;
+    practitioner_staff_id: string;
+    date: string;
+  }): Promise<ClinicServiceResult<HtAcceptanceSlotsResult>> {
+    if (getDataSourceMode() === 'supabase') {
+      return supabaseClinicRepository.getHtAcceptanceSlots(params);
+    }
+    return createClinicUnavailableResult<HtAcceptanceSlotsResult>();
+  },
+
+  async acceptHtLead(params: {
+    lead_id: string;
+    branch_id: string;
+    service_id: string;
+    practitioner_staff_id: string;
+    appointment_date: string;
+    appointment_time: string;
+  }): Promise<ClinicServiceResult<HtAcceptanceConversionResult>> {
+    if (getDataSourceMode() === 'supabase') {
+      return supabaseClinicRepository.acceptHtLead(params);
+    }
+    return createClinicUnavailableResult<HtAcceptanceConversionResult>();
   }
 };

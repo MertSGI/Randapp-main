@@ -189,6 +189,68 @@ export interface ClinicStaffSetupProfilesResult {
   profiles: ClinicStaffSetupProfile[];
 }
 
+export interface HtPendingClinicAcceptanceLead {
+  lead_id: string;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  preferred_language: string | null;
+  country_code: string | null;
+  source_channel: string | null;
+  ai_summary: string | null;
+  handoff_reason: string | null;
+  handoff_requested_at: string;
+  created_at: string;
+}
+
+export interface HtAcceptanceBranchOption {
+  id: string;
+  name: string;
+}
+
+export interface HtAcceptanceServiceOption {
+  id: string;
+  name: string;
+  duration_minutes: number;
+}
+
+export interface HtAcceptancePractitionerOption {
+  staff_id: string;
+  staff_name: string;
+  practitioner_type: PractitionerType | null;
+  specialty: string | null;
+}
+
+export interface HtAcceptanceOptionsResult {
+  lead_id: string;
+  tenant_id: string;
+  branches: HtAcceptanceBranchOption[];
+  services: HtAcceptanceServiceOption[];
+  practitioners: HtAcceptancePractitionerOption[];
+}
+
+export interface HtAcceptanceSlotOption {
+  time: string;
+  duration_minutes: number;
+  allowed: boolean;
+}
+
+export interface HtAcceptanceSlotsResult {
+  lead_id: string;
+  branch_id: string;
+  service_id: string;
+  practitioner_staff_id: string;
+  date: string;
+  available_slots: HtAcceptanceSlotOption[];
+}
+
+export interface HtAcceptanceConversionResult {
+  already_converted?: boolean;
+  customer_id: string;
+  patient_profile_id: string;
+  appointment_id: string;
+}
+
 export interface ClinicServiceResult<T = unknown> {
   success: boolean;
   data?: T;
@@ -198,3 +260,4 @@ export interface ClinicServiceResult<T = unknown> {
     message: string;
   };
 }
+

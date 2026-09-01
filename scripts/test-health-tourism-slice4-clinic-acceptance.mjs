@@ -77,7 +77,7 @@ if (fs.existsSync(testPath)) {
   assert(testContent.includes('34 outside practitioner availability denied'), 'Contains Assertion 34');
   assert(testContent.includes('35 overlapping pending appointment denied'), 'Contains Assertion 35');
   assert(testContent.includes('37 cancelled appointment does NOT block valid slot'), 'Contains Assertion 37');
-  assert(testContent.includes('40 concurrent Core booking and HT conversion for the same staff/date/time cannot both succeed'), 'Contains Assertion 40');
+  assert(testContent.includes('40 post-conversion booking conflict integrity check'), 'Contains Assertion 40');
 }
 
 console.log('\n--- Summary ---');

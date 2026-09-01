@@ -7,6 +7,7 @@ import { ClinicStaffSetupPanel } from '../../components/clinic/ClinicStaffSetupP
 import { ClinicOperationalDayView } from '../../components/clinic/ClinicOperationalDayView';
 import { ClinicPatientPanel } from '../../components/clinic/ClinicPatientPanel';
 import { ClinicEncounterPanel } from '../../components/clinic/ClinicEncounterPanel';
+import { ClinicHtAcceptancePanel } from '../../components/clinic/ClinicHtAcceptancePanel';
 import { ShieldAlert, AlertCircle, RefreshCw, UserX, ServerOff } from 'lucide-react';
 
 export const ClinicWorkspacePage: React.FC = () => {
@@ -143,39 +144,72 @@ export const ClinicWorkspacePage: React.FC = () => {
     );
   }
 
-  // STATE READY: OPERATIONAL WORKSPACE
+  // STATE READY: OPERATIONAL WORKSPACE & HT ACCEPTANCE WORKSPACE
   const context = contextResult.data;
+  const [activeTab, setActiveTab] = useState<'operations' | 'ht_acceptance'>('operations');
+
   return (
     <div className="space-y-6">
-      {/* Main Grid: Operational Schedule on Left (5 cols), Details & Encounter on Right (7 cols) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <div className="lg:col-span-5">
-          <ClinicOperationalDayView
-            context={context!}
-            selectedAppointmentId={selectedAppointment?.appointment_id || null}
-            onSelectAppointment={(appt) => setSelectedAppointment(appt)}
-            refreshTrigger={refreshOperationalTrigger}
-          />
-        </div>
+      {/* Workspace Selector Tabs */}
+      <div className="flex items-center space-x-1 border-b border-slate-200 dark:border-slate-700 pb-2">
+        <button
+          onClick={() => setActiveTab('operations')}
+          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all ${
+            activeTab === 'operations'
+              ? 'bg-indigo-600 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          Klinik Operasyonlar
+        </button>
+        <button
+          onClick={() => setActiveTab('ht_acceptance')}
+          className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 ${
+            activeTab === 'ht_acceptance'
+              ? 'bg-indigo-600 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          Sağlık Turizmi Kabul
+        </button>
+      </div>
 
-        <div className="lg:col-span-7 space-y-6">
-          {selectedAppointment && (
-            <ClinicEncounterPanel
+      {activeTab === 'ht_acceptance' ? (
+        <ClinicHtAcceptancePanel
+          context={context!}
+          onAcceptanceSuccess={() => setRefreshOperationalTrigger((prev) => prev + 1)}
+        />
+      ) : (
+        /* Main Grid: Operational Schedule on Left (5 cols), Details & Encounter on Right (7 cols) */
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          <div className="lg:col-span-5">
+            <ClinicOperationalDayView
+              context={context!}
+              selectedAppointmentId={selectedAppointment?.appointment_id || null}
+              onSelectAppointment={(appt) => setSelectedAppointment(appt)}
+              refreshTrigger={refreshOperationalTrigger}
+            />
+          </div>
+
+          <div className="lg:col-span-7 space-y-6">
+            {selectedAppointment && (
+              <ClinicEncounterPanel
+                context={context!}
+                selectedAppointment={selectedAppointment}
+                onEncounterStateChanged={() => {
+                  setRefreshOperationalTrigger((prev) => prev + 1);
+                }}
+              />
+            )}
+
+            <ClinicPatientPanel
               context={context!}
               selectedAppointment={selectedAppointment}
-              onEncounterStateChanged={() => {
-                setRefreshOperationalTrigger((prev) => prev + 1);
-              }}
+              onRefreshOperationalDay={() => setRefreshOperationalTrigger((prev) => prev + 1)}
             />
-          )}
-
-          <ClinicPatientPanel
-            context={context!}
-            selectedAppointment={selectedAppointment}
-            onRefreshOperationalDay={() => setRefreshOperationalTrigger((prev) => prev + 1)}
-          />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

@@ -12,6 +12,10 @@ import {
   ClinicEncounterNote,
   ClinicServiceResult,
   ClinicServiceErrorCode,
+  HtPendingClinicAcceptanceLead,
+  HtAcceptanceOptionsResult,
+  HtAcceptanceSlotsResult,
+  HtAcceptanceConversionResult,
   NoteStatus,
   EncounterStatus,
   PractitionerType,
@@ -25,13 +29,25 @@ import { fetchSupabase } from './supabaseClient';
 // Error Normalization
 // =========================================================================
 
-export function normalizeClinicError(status: number, rawText: string): { code: ClinicServiceErrorCode; message: string } {
+export function normalizeClinicError(status: number, rawText: string): { code: ClinicServiceErrorCode; message: string; reason_code?: string } {
   const messageLower = (rawText || '').toLowerCase();
 
   let code: ClinicServiceErrorCode = 'UNKNOWN';
   let safeMessage = 'An unexpected clinic operational error occurred.';
+  let reason_code: string | undefined = undefined;
 
-  if (status === 401 || messageLower.includes('unauthenticated')) {
+  if (messageLower.includes('invalid_appointment_slot:')) {
+    code = 'INVALID_STATE';
+    const parts = rawText.split('INVALID_APPOINTMENT_SLOT:');
+    reason_code = parts[1]?.trim() || 'slot_unavailable';
+    safeMessage = `Selected appointment slot is not available (${reason_code}).`;
+  } else if (messageLower.includes('already_converted')) {
+    code = 'ALREADY_EXISTS';
+    safeMessage = 'Lead has already been converted into a clinic patient.';
+  } else if (messageLower.includes('invalid_lead_state')) {
+    code = 'INVALID_STATE';
+    safeMessage = 'Lead is no longer awaiting clinic acceptance.';
+  } else if (status === 401 || messageLower.includes('unauthenticated')) {
     code = 'UNAUTHENTICATED';
     safeMessage = 'Authentication required to access clinic services.';
   } else if (messageLower.includes('appointment_not_confirmed')) {
@@ -57,7 +73,7 @@ export function normalizeClinicError(status: number, rawText: string): { code: C
     safeMessage = 'Insufficient clinic permissions to perform this operation.';
   }
 
-  return { code, message: safeMessage };
+  return { code, message: safeMessage, reason_code };
 }
 
 // =========================================================================
@@ -625,6 +641,158 @@ export class SupabaseClinicRepository {
       return {
         success: true,
         data: mapClinicStaffSetupProfilesResponse(data)
+      };
+    } catch {
+      return {
+        success: false,
+        error: { code: 'UNKNOWN', message: 'Network error communicating with clinic service.' }
+      };
+    }
+  }
+
+  async getHtPendingLeads(): Promise<ClinicServiceResult<HtPendingClinicAcceptanceLead[]>> {
+    try {
+      const res = await fetchSupabase('/rest/v1/rpc/ht_list_pending_clinic_acceptance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        return {
+          success: false,
+          error: normalizeClinicError(res.status, errText)
+        };
+      }
+
+      const data = await res.json();
+      return {
+        success: true,
+        data: (Array.isArray(data) ? data : []) as HtPendingClinicAcceptanceLead[]
+      };
+    } catch {
+      return {
+        success: false,
+        error: { code: 'UNKNOWN', message: 'Network error communicating with clinic service.' }
+      };
+    }
+  }
+
+  async getHtAcceptanceOptions(params: {
+    lead_id: string;
+    branch_id?: string;
+    service_id?: string;
+  }): Promise<ClinicServiceResult<HtAcceptanceOptionsResult>> {
+    try {
+      const res = await fetchSupabase('/rest/v1/rpc/ht_get_clinic_acceptance_options', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          p_lead_id: params.lead_id,
+          p_branch_id: params.branch_id || null,
+          p_service_id: params.service_id || null
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        return {
+          success: false,
+          error: normalizeClinicError(res.status, errText)
+        };
+      }
+
+      const data = await res.json();
+      return {
+        success: true,
+        data: data as HtAcceptanceOptionsResult
+      };
+    } catch {
+      return {
+        success: false,
+        error: { code: 'UNKNOWN', message: 'Network error communicating with clinic service.' }
+      };
+    }
+  }
+
+  async getHtAcceptanceSlots(params: {
+    lead_id: string;
+    branch_id: string;
+    service_id: string;
+    practitioner_staff_id: string;
+    date: string;
+  }): Promise<ClinicServiceResult<HtAcceptanceSlotsResult>> {
+    try {
+      const res = await fetchSupabase('/rest/v1/rpc/ht_get_clinic_acceptance_slots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          p_lead_id: params.lead_id,
+          p_branch_id: params.branch_id,
+          p_service_id: params.service_id,
+          p_practitioner_staff_id: params.practitioner_staff_id,
+          p_date: params.date
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        return {
+          success: false,
+          error: normalizeClinicError(res.status, errText)
+        };
+      }
+
+      const data = await res.json();
+      return {
+        success: true,
+        data: data as HtAcceptanceSlotsResult
+      };
+    } catch {
+      return {
+        success: false,
+        error: { code: 'UNKNOWN', message: 'Network error communicating with clinic service.' }
+      };
+    }
+  }
+
+  async acceptHtLead(params: {
+    lead_id: string;
+    branch_id: string;
+    service_id: string;
+    practitioner_staff_id: string;
+    appointment_date: string;
+    appointment_time: string;
+  }): Promise<ClinicServiceResult<HtAcceptanceConversionResult>> {
+    try {
+      const res = await fetchSupabase('/rest/v1/rpc/ht_accept_lead_into_clinic', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          p_lead_id: params.lead_id,
+          p_branch_id: params.branch_id,
+          p_service_id: params.service_id,
+          p_practitioner_staff_id: params.practitioner_staff_id,
+          p_appointment_date: params.appointment_date,
+          p_appointment_time: params.appointment_time
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        const norm = normalizeClinicError(res.status, errText);
+        return {
+          success: false,
+          reason_code: norm.reason_code,
+          error: norm
+        };
+      }
+
+      const data = await res.json();
+      return {
+        success: true,
+        data: data as HtAcceptanceConversionResult
       };
     } catch {
       return {

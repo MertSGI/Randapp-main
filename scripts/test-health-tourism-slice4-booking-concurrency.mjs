@@ -64,12 +64,14 @@ async function runLiveConcurrencyContest() {
     await sessionA.connect();
     await sessionB.connect();
 
-    const tenantId = `a1111111-1111-1111-1111-11111111111${round}`;
-    const branchId = `br111111-1111-1111-1111-11111111111${round}`;
-    const serviceId = `sv111111-1111-1111-1111-11111111111${round}`;
-    const practitionerId = `st555555-5555-5555-5555-55555555555${round}`;
-    const callerStaffUid = `u1111111-1111-4111-8111-11111111111${round}`;
-    const leadId = `l1000000-0000-0000-0000-00000000000${round}`;
+    const tenantId = `00000000-0000-0000-0000-0000000000${round < 10 ? '0' + round : round}`;
+    const branchId = `00000000-0000-0000-0000-0000000001${round < 10 ? '0' + round : round}`;
+    const serviceId = `00000000-0000-0000-0000-0000000002${round < 10 ? '0' + round : round}`;
+    const practitionerId = `00000000-0000-0000-0000-0000000003${round < 10 ? '0' + round : round}`;
+    const callerStaffUid = `00000000-0000-4000-8000-0000000004${round < 10 ? '0' + round : round}`;
+    const managerStaffId = `00000000-0000-0000-0000-0000000005${round < 10 ? '0' + round : round}`;
+    const leadId = `00000000-0000-0000-0000-0000000006${round < 10 ? '0' + round : round}`;
+    const slug = `ct-slug-${round}`;
     const apptDate = `2026-11-0${round}`;
     const apptTime = '10:00';
 
@@ -78,7 +80,7 @@ async function runLiveConcurrencyContest() {
       await controllerClient.query('BEGIN');
       await controllerClient.query(`
         INSERT INTO public.tenants (id, name, slug, status, onboarding_status, public_site_status)
-        VALUES ('${tenantId}', 'Contest Tenant ${round}', 'ct-${round}', 'active', 'completed', 'published')
+        VALUES ('${tenantId}', 'Contest Tenant ${round}', '${slug}', 'active', 'completed', 'published')
         ON CONFLICT DO NOTHING;
 
         INSERT INTO auth.users (id, email) VALUES
@@ -90,12 +92,12 @@ async function runLiveConcurrencyContest() {
         ON CONFLICT DO NOTHING;
 
         INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active) VALUES
-          ('st_mgr_${round}', '${tenantId}', '${callerStaffUid}', 'Manager ${round}', true),
+          ('${managerStaffId}', '${tenantId}', '${callerStaffUid}', 'Manager ${round}', true),
           ('${practitionerId}', '${tenantId}', NULL, 'Dr. Practitioner ${round}', true)
         ON CONFLICT DO NOTHING;
 
         INSERT INTO public.clinic_staff_profiles (tenant_id, staff_id, can_manage_patient_profiles) VALUES
-          ('${tenantId}', 'st_mgr_${round}', true),
+          ('${tenantId}', '${managerStaffId}', true),
           ('${tenantId}', '${practitionerId}', true)
         ON CONFLICT DO NOTHING;
 
@@ -153,10 +155,11 @@ async function runLiveConcurrencyContest() {
       })();
 
       // Launch SESSION_B (Core Public Booking)
+      // Signature: create_public_booking(p_slug, p_service_id, p_staff_id, p_appointment_date, p_appointment_time, p_customer_name, p_customer_email, p_customer_phone, p_required_consent, p_marketing_consent, p_reminder_consent, p_idempotency_key, p_branch_id)
       const promiseB = (async () => {
         const res = await sessionB.query(
-          `SELECT public.create_public_booking($1, $2, $3, $4, $5::date, $6::time, $7, $8, $9, $10, $11, $12) AS result`,
-          [tenantId, branchId, serviceId, practitionerId, apptDate, apptTime, `Customer Core ${round}`, `core${round}@example.com`, `+1999000${round}`, 'Notes', true, true]
+          `SELECT public.create_public_booking($1, $2, $3, $4::date, $5::time, $6, $7, $8, $9, $10, $11, $12, $13) AS result`,
+          [slug, serviceId, practitionerId, apptDate, apptTime, `Customer Core ${round}`, `core${round}@example.com`, `+1999000${round}`, true, false, false, null, branchId]
         );
         callB_finished = true;
         return res.rows[0].result;
@@ -203,6 +206,7 @@ async function runLiveConcurrencyContest() {
 
   console.log('\n--- Contest Summary ---');
   roundResults.forEach((r) => console.log(`Round ${r.round}: Winner=${r.winner}, ActiveAppointments=${r.activeCount}`));
+  console.log('LIVE_CONCURRENCY_EXECUTION=EXECUTED_PASS');
 }
 
 function runStaticContractVerification() {
@@ -226,6 +230,8 @@ function runStaticContractVerification() {
     const testContent = fs.readFileSync(testPath, 'utf8');
     assert(testContent.includes('40 post-conversion booking conflict integrity check'), 'Assertion 40 reclassified as postcondition integrity check');
   }
+
+  console.log('LIVE_CONCURRENCY_EXECUTION=NOT_EXECUTED');
 }
 
 async function main() {

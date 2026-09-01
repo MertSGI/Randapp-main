@@ -47,12 +47,14 @@ def run_concurrency_contest():
     
     for r in range(1, 4):
         print(f"\n--- Round {r} ---")
-        tenant_id = f"a1111111-1111-1111-1111-11111111111{r}"
-        branch_id = f"br111111-1111-1111-1111-11111111111{r}"
-        service_id = f"sv111111-1111-1111-1111-11111111111{r}"
-        practitioner_id = f"st555555-5555-5555-5555-55555555555{r}"
-        caller_staff_uid = f"u1111111-1111-4111-8111-11111111111{r}"
-        lead_id = f"l1000000-0000-0000-0000-00000000000{r}"
+        tenant_id = f"00000000-0000-0000-0000-000000000{r:02d}"
+        branch_id = f"00000000-0000-0000-0000-000000001{r:02d}"
+        service_id = f"00000000-0000-0000-0000-000000002{r:02d}"
+        practitioner_id = f"00000000-0000-0000-0000-000000003{r:02d}"
+        caller_staff_uid = f"00000000-0000-4000-8000-000000004{r:02d}"
+        manager_staff_id = f"00000000-0000-0000-0000-000000005{r:02d}"
+        lead_id = f"00000000-0000-0000-0000-000000006{r:02d}"
+        slug = f"ct-slug-{r}"
         appt_date = f"2026-11-0{r}"
         appt_time = "10:00"
 
@@ -61,7 +63,7 @@ def run_concurrency_contest():
             with ctrl_conn.cursor() as cur:
                 cur.execute(f"""
                     INSERT INTO public.tenants (id, name, slug, status, onboarding_status, public_site_status)
-                    VALUES ('{tenant_id}', 'Contest Tenant {r}', 'ct-{r}', 'active', 'completed', 'published')
+                    VALUES ('{tenant_id}', 'Contest Tenant {r}', '{slug}', 'active', 'completed', 'published')
                     ON CONFLICT (id) DO NOTHING;
 
                     INSERT INTO auth.users (id, email) VALUES
@@ -73,12 +75,12 @@ def run_concurrency_contest():
                     ON CONFLICT (id) DO NOTHING;
 
                     INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active) VALUES
-                      ('st_mgr_{r}', '{tenant_id}', '{caller_staff_uid}', 'Manager {r}', true),
+                      ('{manager_staff_id}', '{tenant_id}', '{caller_staff_uid}', 'Manager {r}', true),
                       ('{practitioner_id}', '{tenant_id}', NULL, 'Dr. Practitioner {r}', true)
                     ON CONFLICT (id) DO NOTHING;
 
                     INSERT INTO public.clinic_staff_profiles (tenant_id, staff_id, can_manage_patient_profiles) VALUES
-                      ('{tenant_id}', 'st_mgr_{r}', true),
+                      ('{tenant_id}', '{manager_staff_id}', true),
                       ('{tenant_id}', '{practitioner_id}', true)
                     ON CONFLICT (staff_id) DO NOTHING;
 
@@ -148,8 +150,8 @@ def run_concurrency_contest():
             def run_b():
                 try:
                     cur = sess_b.cursor()
-                    cur.execute("SELECT public.create_public_booking(%s, %s, %s, %s, %s::date, %s::time, %s, %s, %s, %s, %s, %s) AS result;",
-                                (tenant_id, branch_id, service_id, practitioner_id, appt_date, appt_time, f"Core Cust {r}", f"core{r}@example.com", f"+1999000{r}", "Notes", True, True))
+                    cur.execute("SELECT public.create_public_booking(%s, %s, %s, %s::date, %s::time, %s, %s, %s, %s, %s, %s, %s, %s) AS result;",
+                                (slug, service_id, practitioner_id, appt_date, appt_time, f"Core Cust {r}", f"core{r}@example.com", f"+1999000{r}", True, False, False, None, branch_id))
                     res = cur.fetchone()[0]
                     sess_b.commit()
                     out_b['success'] = (res.get('success') == True) if isinstance(res, dict) else False
@@ -196,6 +198,7 @@ def run_concurrency_contest():
         finally:
             sess_a.close()
             sess_b.close()
+    print("LIVE_CONCURRENCY_EXECUTION=EXECUTED_PASS")
 
 def run_static_concurrency_qa():
     print("=== RUNNING STATIC CONCURRENCY CONTRACT QA ===")
@@ -207,12 +210,9 @@ def run_static_concurrency_qa():
     assert_true("ht_accept_lead_into_clinic" in mjs_text, "mjs executes ht_accept_lead_into_clinic")
     assert_true("create_public_booking" in mjs_text, "mjs executes create_public_booking")
     assert_true("ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT = 1" in mjs_text, "mjs verifies active appointment count = 1")
+    assert_true("40 post-conversion booking conflict integrity check" in open(r"c:\Users\mozcelikbas\Desktop\Randapp\Randapp-main\supabase\tests\health_tourism_clinic_acceptance_tests.sql", "r", encoding="utf-8").read(), "Assertion 40 updated in pgTAP suite")
 
-    # Update run_static_qa.py
-    run_qa_path = r"C:\Users\mozcelikbas\.gemini\antigravity-ide\brain\e1cbe4f2-5bd4-4dbb-8a1f-106daee81e1b\scratch\run_static_qa.py"
-    if os.path.exists(run_qa_path):
-        qa_text = open(run_qa_path, "r", encoding="utf-8").read()
-        assert_true("40 post-conversion booking conflict integrity check" in open(r"c:\Users\mozcelikbas\Desktop\Randapp\Randapp-main\supabase\tests\health_tourism_clinic_acceptance_tests.sql", "r", encoding="utf-8").read(), "Assertion 40 updated in pgTAP suite")
+    print("LIVE_CONCURRENCY_EXECUTION=NOT_EXECUTED")
 
 if __name__ == "__main__":
     if check_db_online():
