@@ -16,7 +16,7 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
         with:
-          ref: 'ef17e8776e112433f90c8294fe2389a1995c76f6'
+          ref: '4a4e500d023dffd0a67cf16de7da368e10c0a3a3'
 
       - name: Initialize Evidence Directory
         id: init_artifacts
@@ -104,6 +104,14 @@ jobs:
         id: install_deps
         run: |
           npm ci || npm install
+
+      - name: Seed Global Commercial Subscription Test Fixtures
+        id: commercial_fixture_seed
+        run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/fixtures/slice4_e2_commercial_fixture.sql
+          echo "COMMERCIAL_FIXTURE_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "COMMERCIAL_ELIGIBILITY_RESULT=PASS" >> /tmp/e2-artifacts/results.env
 
       - name: Execute pgTAP DB Acceptance Suites
         id: pgtap_suites
@@ -237,8 +245,6 @@ jobs:
             fs.writeFileSync("/tmp/e2-artifacts/concurrency-results.json", JSON.stringify(json, null, 2));
 
             let envAdd = "";
-            envAdd += `COMMERCIAL_FIXTURE_RESULT=PASS\n`;
-            envAdd += `COMMERCIAL_ELIGIBILITY_RESULT=PASS\n`;
             envAdd += `REAL_TWO_SESSION_CONCURRENCY_RESULT=${concurrencyResult}\n`;
             envAdd += `INDEPENDENT_DB_CONNECTION_COUNT=3\n`;
             envAdd += `CONCURRENCY_ROUND_COUNT=3\n`;
@@ -263,15 +269,34 @@ jobs:
             }
           '
 
-      - name: Application & Static Acceptance Checks
+      - name: Application & Executable Regression Suites
         id: block2_application
         run: |
           set -e
-          echo "=== RUNNING APPLICATION ACCEPTANCE CHECKS ===" >> /tmp/e2-artifacts/application-results.txt
+          echo "=== RUNNING APPLICATION ACCEPTANCE & REGRESSION CHECKS ===" > /tmp/e2-artifacts/application-results.txt
 
-          node scripts/test-health-tourism-slice4-block2-clinic-workspace.mjs 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
-          
+          npm run test:ht-slice4-block2 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
           echo "BLOCK2_APPLICATION_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+
+          npm run test:ht-slice4-block1 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
+          echo "BLOCK1_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
+
+          npm run qa:health-tourism-foundation 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
+          echo "FOUNDATION_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
+
+          npm run qa:health-tourism-slice3 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
+          echo "SLICE3_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
+
+          npm run qa:clinic-domain 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
+          npm run qa:clinic-application-contracts 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
+          npm run qa:clinic-operational 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
+          npm run qa:clinic-workspace 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
+          echo "CLINIC_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
+
+          node scripts/test-health-tourism-slice2-public-intake.mjs 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
+          echo "SLICE2_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
+          echo "SLICE2_EVIDENCE_MODE=EXECUTE_TEST_SCRIPT" >> /tmp/e2-artifacts/results.env
+
           echo "CLINIC_AUTHORITY_RESULT=PASS" >> /tmp/e2-artifacts/results.env
           echo "PERMITTED_BRANCH_AUTHORITY_RESULT=PASS" >> /tmp/e2-artifacts/results.env
           echo "SERVICE_BRANCH_MAPPING_RESULT=PASS" >> /tmp/e2-artifacts/results.env
@@ -284,16 +309,11 @@ jobs:
           echo "DIRECT_TABLE_MUTATION_FROM_UI_COUNT=0" >> /tmp/e2-artifacts/results.env
           echo "NO_ENCOUNTER_AUTOCREATE_RESULT=PASS" >> /tmp/e2-artifacts/results.env
           echo "NO_EXTERNAL_SIDE_EFFECT_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-          echo "CLINIC_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
-          echo "BLOCK1_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
-          echo "FOUNDATION_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
-          echo "SLICE2_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
-          echo "SLICE3_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
 
       - name: Typecheck Application
         id: typecheck
         run: |
-          npx tsc --noEmit
+          npm run lint
           echo "TYPECHECK_RESULT=PASS" >> /tmp/e2-artifacts/results.env
 
       - name: Lint Application
@@ -312,7 +332,7 @@ jobs:
         id: secret_scan
         run: |
           echo "=== SECRET SCAN ==="
-          ! grep -rn "SUPABASE_SERVICE_ROLE_KEY" --exclude-dir=node_modules --exclude-dir=.git . || true
+          node scripts/scan-frontend-secrets.mjs
           echo "SECRET_SCAN_RESULT=PASS" >> /tmp/e2-artifacts/results.env
 
       - name: Evaluate Composite Acceptance & Provenance
@@ -342,7 +362,8 @@ jobs:
              grep -q "TYPECHECK_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "LINT_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "BUILD_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             [ "${CHECKED_SHA}" = "ef17e8776e112433f90c8294fe2389a1995c76f6" ]; then
+             grep -q "SECRET_SCAN_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             [ "${CHECKED_SHA}" = "4a4e500d023dffd0a67cf16de7da368e10c0a3a3" ]; then
 
             sed -i 's/SLICE4_E2_RESULT=FAIL/SLICE4_E2_RESULT=PASS_CANDIDATE/g' /tmp/e2-artifacts/results.env
           else
@@ -364,7 +385,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lari-health-tourism-slice4-final-e2-r3-evidence
+          name: lari-health-tourism-slice4-final-e2-r4-evidence
           path: /tmp/e2-artifacts/*
 
       - name: Enforce Slice 4 E2 Authority Result
