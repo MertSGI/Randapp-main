@@ -1,5 +1,5 @@
 // ============================================================================
-// HEALTH TOURISM SLICE 4 BLOCK 1 & 2 (R2) REAL TWO-SESSION CONCURRENCY TEST RUNNER
+// HEALTH TOURISM SLICE 4 BLOCK 1 & 2 (R3) REAL TWO-SESSION CONCURRENCY TEST RUNNER
 // File: scripts/test-health-tourism-slice4-booking-concurrency.mjs
 // Purpose:
 //   Executable integration test proving genuine two-connection PostgreSQL concurrency barrier
@@ -57,6 +57,10 @@ async function runLiveConcurrencyContest() {
   let deadlockCount = 0;
   let timeoutCount = 0;
 
+  let losingHtPartialCustomerCount = 0;
+  let losingHtPartialPatientProfileCount = 0;
+  let losingHtPartialAppointmentCount = 0;
+
   for (let round = 1; round <= 3; round++) {
     console.log(`--- Round ${round} Start ---`);
     const controllerClient = new Client(dbConfig);
@@ -83,12 +87,62 @@ async function runLiveConcurrencyContest() {
 
     try {
       // 1. Setup Fixtures under Controller Client
+      // A. Create Tenant
       await controllerClient.query('BEGIN');
       await controllerClient.query(`
         INSERT INTO public.tenants (id, name, slug, status, onboarding_status, public_site_status)
         VALUES ('${tenantId}', 'Contest Tenant ${round}', '${slug}', 'active', 'completed', 'published')
         ON CONFLICT DO NOTHING;
+      `);
 
+      // B. Resolve existing published canonical plan version that satisfies commercial entitlements
+      const planRes = await controllerClient.query(`
+        SELECT pv.id AS plan_version_id, pv.plan_id
+        FROM public.plan_versions pv
+        JOIN public.plans p ON p.id = pv.plan_id
+        WHERE pv.lifecycle_status = 'published'
+        ORDER BY pv.created_at DESC
+        LIMIT 1;
+      `);
+
+      if (planRes.rows.length === 0) {
+        throw new Error('COMMERCIAL_FIXTURE_ERROR: No published plan_version found in DB!');
+      }
+
+      const { plan_id: planId, plan_version_id: planVersionId } = planRes.rows[0];
+
+      // C. Insert Active Subscription BEFORE adding quota-controlled staff/service/branch
+      await controllerClient.query(`
+        INSERT INTO public.subscriptions (
+          tenant_id,
+          plan_id,
+          plan_version_id,
+          status,
+          billing_mode,
+          current_period_start,
+          current_period_end
+        ) VALUES (
+          '${tenantId}',
+          '${planId}',
+          '${planVersionId}',
+          'manual_active',
+          'manual',
+          now() - interval '1 day',
+          now() + interval '1 year'
+        ) ON CONFLICT (tenant_id) DO UPDATE SET
+          status = 'manual_active',
+          plan_version_id = EXCLUDED.plan_version_id;
+      `);
+
+      // D. Prove Commercial Eligibility
+      const eligRes = await controllerClient.query(
+        `SELECT public.resolve_tenant_commercial_eligibility($1) AS res;`,
+        [tenantId]
+      );
+      assert(eligRes.rows[0].res?.eligible === true, `Round ${round}: Tenant commercial eligibility resolved eligible=true`);
+
+      // Insert remaining quota-controlled test fixtures
+      await controllerClient.query(`
         INSERT INTO auth.users (id, email) VALUES
           ('${callerStaffUid}', 'manager_${round}@example.invalid')
         ON CONFLICT DO NOTHING;
@@ -150,26 +204,38 @@ async function runLiveConcurrencyContest() {
       let callA_finished = false;
       let callB_finished = false;
 
-      // Launch SESSION_A (HT Conversion)
+      // Launch SESSION_A (HT Conversion in explicit transaction with JWT claim set)
       const promiseA = (async () => {
-        await sessionA.query(`SELECT set_config('request.jwt.claim.sub', '${callerStaffUid}', true)`);
-        const res = await sessionA.query(
-          `SELECT public.ht_accept_lead_into_clinic($1, $2, $3, $4, $5::date, $6::time) AS result`,
-          [leadId, branchId, serviceId, practitionerId, apptDate, apptTime]
-        );
-        callA_finished = true;
-        return res.rows[0].result;
+        try {
+          await sessionA.query('BEGIN');
+          await sessionA.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [callerStaffUid]);
+          const res = await sessionA.query(
+            `SELECT public.ht_accept_lead_into_clinic($1, $2, $3, $4, $5::date, $6::time) AS result`,
+            [leadId, branchId, serviceId, practitionerId, apptDate, apptTime]
+          );
+          await sessionA.query('COMMIT');
+          callA_finished = true;
+          return res.rows[0].result;
+        } catch (err) {
+          try { await sessionA.query('ROLLBACK'); } catch {}
+          callA_finished = true;
+          throw err;
+        }
       })();
 
-      // Launch SESSION_B (Core Public Booking using canonical signature)
-      // Signature: create_public_booking(p_slug, p_service_id, p_staff_id, p_appointment_date, p_appointment_time, p_customer_name, p_customer_email, p_customer_phone, p_required_consent, p_marketing_consent, p_reminder_consent, p_idempotency_key, p_branch_id)
+      // Launch SESSION_B (Core Public Booking)
       const promiseB = (async () => {
-        const res = await sessionB.query(
-          `SELECT public.create_public_booking($1, $2, $3, $4::date, $5::time, $6, $7, $8, $9, $10, $11, $12, $13) AS result`,
-          [slug, serviceId, practitionerId, apptDate, apptTime, `Customer Core ${round}`, `core${round}@example.com`, `+1999000${round}`, true, false, false, idempotencyKey, branchId]
-        );
-        callB_finished = true;
-        return res.rows[0].result;
+        try {
+          const res = await sessionB.query(
+            `SELECT public.create_public_booking($1, $2, $3, $4::date, $5::time, $6, $7, $8, $9, $10, $11, $12, $13) AS result`,
+            [slug, serviceId, practitionerId, apptDate, apptTime, `Customer Core ${round}`, `core${round}@example.com`, `+1999000${round}`, true, false, false, idempotencyKey, branchId]
+          );
+          callB_finished = true;
+          return res.rows[0].result;
+        } catch (err) {
+          callB_finished = true;
+          throw err;
+        }
       })();
 
       // Wait 100ms and verify BOTH calls are BLOCKED by CONTROLLER_SESSION lock
@@ -179,8 +245,25 @@ async function runLiveConcurrencyContest() {
       // 3. Release Lock
       await controllerClient.query('COMMIT');
 
-      // 4. Settle Both Operations
-      const [resA, resB] = await Promise.allSettled([promiseA, promiseB]);
+      // 4. Settle Both Operations with bounded timeout (5 seconds)
+      const roundTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('CONCURRENCY_ROUND_TIMEOUT')), 5000)
+      );
+
+      let resA, resB;
+      try {
+        [resA, resB] = await Promise.race([
+          Promise.allSettled([promiseA, promiseB]),
+          roundTimeout
+        ]);
+      } catch (err) {
+        if (err.message === 'CONCURRENCY_ROUND_TIMEOUT') {
+          timeoutCount++;
+          assert(false, `Round ${round}: Concurrency execution timed out`);
+          continue;
+        }
+        throw err;
+      }
 
       let winner = 'NONE';
       let htSuccess = resA.status === 'fulfilled';
@@ -201,13 +284,60 @@ async function runLiveConcurrencyContest() {
       console.log(`Round ${round} Winner: ${winner}`);
       assert(winner === 'HT' || winner === 'CORE', `Round ${round}: Exactly ONE operation succeeded`);
 
-      // 5. Final DB Verification
+      // 5. Final DB Verification & Partial State Proofs
       const countRes = await controllerClient.query(
         `SELECT count(*)::integer AS cnt FROM public.appointments WHERE tenant_id = $1 AND staff_id = $2 AND appointment_date = $3 AND appointment_time = $4 AND status NOT IN ('cancelled', 'cancelled_by_customer', 'cancelled_by_salon', 'cancelled_by_system', 'completed', 'no_show')`,
         [tenantId, practitionerId, apptDate, apptTime]
       );
       const activeCount = countRes.rows[0].cnt;
       assert(activeCount === 1, `Round ${round}: ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT = 1`);
+
+      const leadRes = await controllerClient.query(
+        `SELECT status, handoff_state, converted_customer_id, converted_patient_profile_id, converted_appointment_id, converted_at FROM public.ht_leads WHERE id = $1`,
+        [leadId]
+      );
+      const leadRow = leadRes.rows[0];
+
+      if (winner === 'CORE') {
+        // HT Lost - Verify zero partial state
+        const custCnt = (await controllerClient.query(`SELECT count(*)::integer AS cnt FROM public.customers WHERE email = $1`, [`lead${round}@example.com`])).rows[0].cnt;
+        const profCnt = (await controllerClient.query(`SELECT count(*)::integer AS cnt FROM public.clinic_patient_profiles WHERE created_by = $1`, [callerStaffUid])).rows[0].cnt;
+        const apptCnt = (await controllerClient.query(`SELECT count(*)::integer AS cnt FROM public.appointments WHERE user_email = $1`, [`lead${round}@example.com`])).rows[0].cnt;
+
+        losingHtPartialCustomerCount += custCnt;
+        losingHtPartialPatientProfileCount += profCnt;
+        losingHtPartialAppointmentCount += apptCnt;
+
+        assert(
+          leadRow.status === 'handoff_pending' &&
+          leadRow.handoff_state === 'requested' &&
+          leadRow.converted_customer_id === null &&
+          leadRow.converted_patient_profile_id === null &&
+          leadRow.converted_appointment_id === null &&
+          leadRow.converted_at === null,
+          `Round ${round}: Losing HT lead state remains handoff_pending/requested with null conversion provenance`
+        );
+        assert(custCnt === 0, `Round ${round}: Surviving HT-created customer count = 0`);
+        assert(profCnt === 0, `Round ${round}: Surviving HT-created patient profile count = 0`);
+        assert(apptCnt === 0, `Round ${round}: Surviving HT-created appointment count = 0`);
+      } else if (winner === 'HT') {
+        // HT Won - Verify conversion provenance
+        assert(
+          leadRow.status === 'converted' &&
+          leadRow.handoff_state === 'acknowledged' &&
+          leadRow.converted_customer_id !== null &&
+          leadRow.converted_patient_profile_id !== null &&
+          leadRow.converted_appointment_id !== null &&
+          leadRow.converted_at !== null,
+          `Round ${round}: Winning HT lead converted with exact customer, patient profile, and appointment provenance`
+        );
+      }
+
+      // Check zero auto-create encounters and zero outbox side effects
+      const encCount = (await controllerClient.query(`SELECT count(*)::integer AS cnt FROM public.clinic_encounters WHERE tenant_id = $1`, [tenantId])).rows[0].cnt;
+      const outCount = (await controllerClient.query(`SELECT count(*)::integer AS cnt FROM public.communication_outbox WHERE tenant_id = $1`, [tenantId])).rows[0].cnt;
+      assert(encCount === 0, `Round ${round}: NO_ENCOUNTER_AUTOCREATE_RESULT = PASS`);
+      assert(outCount === 0, `Round ${round}: NO_EXTERNAL_SIDE_EFFECT_RESULT = PASS`);
 
       roundResults.push({ round, winner, activeCount });
     } finally {
@@ -222,6 +352,9 @@ async function runLiveConcurrencyContest() {
   console.log(`BOTH_SUCCESS_COUNT=${bothSuccessCount}`);
   console.log(`DEADLOCK_COUNT=${deadlockCount}`);
   console.log(`TIMEOUT_COUNT=${timeoutCount}`);
+  console.log(`LOSING_HT_PARTIAL_CUSTOMER_COUNT=${losingHtPartialCustomerCount}`);
+  console.log(`LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=${losingHtPartialPatientProfileCount}`);
+  console.log(`LOSING_HT_PARTIAL_APPOINTMENT_COUNT=${losingHtPartialAppointmentCount}`);
   console.log('REAL_TWO_SESSION_CONCURRENCY_RESULT=PASS');
 }
 
