@@ -225,18 +225,36 @@ jobs:
               }
 
               // Baseline clinic & communication outbox counts
-              const [pRes, eRes, aRes, oRes, bucketsRes] = await Promise.all([
+              const [pRes, eRes, aRes, oRes, bucketsRes, leadsRes, convsRes, msgsRes, auditsRes, auditLogsRes, notifsRes, waRes] = await Promise.all([
                 restQuery('/clinic_patient_profiles?select=id'),
                 restQuery('/clinic_encounters?select=id'),
                 restQuery('/appointments?select=id'),
                 restQuery('/communication_outbox?select=id'),
-                restQuery('/ht_rate_limit_buckets?select=bucket_key')
+                restQuery('/ht_rate_limit_buckets?select=bucket_key'),
+                restQuery('/ht_leads?select=id'),
+                restQuery('/ht_ai_conversations?select=id'),
+                restQuery('/ht_ai_messages?select=id'),
+                restQuery('/audit_events?select=id'),
+                restQuery('/audit_logs?select=id'),
+                restQuery('/notification_logs?select=id'),
+                restQuery('/whatsapp_logs?select=id')
               ]);
 
               const initialPCount = pRes.json?.length ?? 0;
               const initialECount = eRes.json?.length ?? 0;
               const initialACount = aRes.json?.length ?? 0;
               const initialOCount = oRes.json?.length ?? 0;
+
+              if (leadsRes.json) leadsRes.json.forEach(x => createdLeadIds.add(x.id));
+              if (convsRes.json) convsRes.json.forEach(x => createdConvIds.add(x.id)); // track existing to avoid counting pre-existing
+              const preLeads = new Set(leadsRes.json?.map(x => x.id) || []);
+              const preConvs = new Set(convsRes.json?.map(x => x.id) || []);
+              const preMsgs = new Set(msgsRes.json?.map(x => x.id) || []);
+              const preOutbox = new Set(oRes.json?.map(x => x.id) || []);
+              const preAudits = new Set(auditsRes.json?.map(x => x.id) || []);
+              const preAuditLogs = new Set(auditLogsRes.json?.map(x => x.id) || []);
+              const preNotifs = new Set(notifsRes.json?.map(x => x.id) || []);
+              const preWa = new Set(waRes.json?.map(x => x.id) || []);
 
               if (bucketsRes.status === 200 && Array.isArray(bucketsRes.json)) {
                 preBucketKeys = new Set(bucketsRes.json.map(b => b.bucket_key));
