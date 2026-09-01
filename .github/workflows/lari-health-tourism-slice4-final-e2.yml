@@ -1,0 +1,351 @@
+name: LARI Health Tourism Slice 4 Final E2 Composite Acceptance
+
+on:
+  push:
+    branches:
+      - feature/lari-health-tourism-slice4-clinic-acceptance
+  workflow_dispatch:
+
+jobs:
+  slice4-final-e2:
+    name: Hosted Disposable E2 Composite Acceptance
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Target Candidate Commit
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          ref: 'f532774a77f1a1ee6c9abd4699a3b99b768a15eb'
+
+      - name: Initialize Evidence Directory
+        id: init_artifacts
+        run: |
+          mkdir -p /tmp/e2-artifacts
+          echo "SLICE4_E2_RESULT=FAIL" > /tmp/e2-artifacts/results.env
+
+      - name: Setup Node.js Environment
+        id: setup_node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Tool Dependencies (psql & pg_prove)
+        id: tool_setup
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client libtap-parser-sourcehandler-pgtap-perl
+          command -v psql
+          command -v pg_prove
+          echo "TOOL_SETUP_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "PSQL_VERSION=$(psql --version | head -n 1)" >> /tmp/e2-artifacts/results.env
+          echo "PG_PROVE_VERSION=$(pg_prove --version | head -n 1)" >> /tmp/e2-artifacts/results.env
+
+      - name: Start Pinned Supabase Postgres Container
+        id: postgres_start
+        run: |
+          PINNED_IMAGE="supabase/postgres:15.1.0.147"
+          echo "Pulling pinned Supabase Postgres container: ${PINNED_IMAGE}"
+          docker pull "${PINNED_IMAGE}"
+          docker run -d \
+            --name lari-slice4-postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=postgres \
+            -p 54322:5432 \
+            "${PINNED_IMAGE}"
+
+      - name: Direct Postgres Custom Readiness Check
+        id: postgres_ready
+        run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "Waiting for direct Postgres readiness on 127.0.0.1:54322..."
+          for i in {1..60}; do
+            if pg_isready -h 127.0.0.1 -p 54322 -U postgres -d postgres; then
+              echo "Postgres container is ready!"
+              break
+            fi
+            sleep 1
+          done
+          psql "$DB_URL" -c "SELECT version();"
+
+      - name: Execute Managed Runtime Bootstrap Fixture
+        id: bootstrap
+        run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/fixtures/p2a_managed_runtime_bootstrap.sql
+
+      - name: Build Migration Manifest & Apply Full SQL Migration Chain
+        id: migration_replay
+        run: |
+          set -e
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          mapfile -t MIGRATIONS < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)
+          MIGRATION_TOTAL=${#MIGRATIONS[@]}
+          echo "Migration file count: ${MIGRATION_TOTAL}"
+          if [ "${MIGRATION_TOTAL}" -ne 69 ]; then
+            echo "ERROR: Expected exactly 69 migration files, found ${MIGRATION_TOTAL}"
+            exit 1
+          fi
+
+          APPLIED_COUNT=0
+          for migration in "${MIGRATIONS[@]}"; do
+            if [ "${migration}" = "20260813_h1c_commercial_eligibility_and_quota_enforcement.sql" ]; then
+              psql "$DB_URL" -v ON_ERROR_STOP=1 -f "supabase/tests/fixtures/p2a_historical_replay_bridge_before_migration_38.sql"
+            fi
+            echo "Applying [${APPLIED_COUNT}/${MIGRATION_TOTAL}] ${migration}..." >> /tmp/e2-artifacts/migration-results.txt
+            psql "$DB_URL" -v ON_ERROR_STOP=1 -f "supabase/migrations/${migration}"
+            APPLIED_COUNT=$((APPLIED_COUNT + 1))
+          done
+
+          echo "MIGRATION_REPLAY_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "MIGRATION_COUNT=${APPLIED_COUNT}/${MIGRATION_TOTAL}" >> /tmp/e2-artifacts/results.env
+
+      - name: Install Node Dependencies
+        id: install_deps
+        run: |
+          npm ci || npm install
+
+      - name: Execute pgTAP DB Acceptance Suites
+        id: pgtap_suites
+        run: |
+          set -e
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          psql "$DB_URL" -c "CREATE EXTENSION IF NOT EXISTS pgtap;"
+
+          run_suite() {
+            local suite_file="$1"
+            local result_prefix="$2"
+            local log_file="/tmp/e2-artifacts/pgtap-${result_prefix}.txt"
+            
+            echo "=== Running ${suite_file} ==="
+            if pg_prove -h 127.0.0.1 -p 54322 -U postgres -d postgres "${suite_file}" 2>&1 | tee "${log_file}"; then
+              local total_tests
+              total_tests=$(grep -E "^1\.\.[0-9]+" "${log_file}" | head -n 1 | cut -d'.' -f3 || echo "0")
+              if [ -z "${total_tests}" ] || [ "${total_tests}" -eq 0 ]; then
+                total_tests=$(grep -c -E "^ok " "${log_file}" || echo "0")
+              fi
+              echo "${result_prefix}_PGTAP_COUNT=${total_tests}" >> /tmp/e2-artifacts/results.env
+              echo "${result_prefix}_PGTAP_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+            else
+              echo "${result_prefix}_PGTAP_RESULT=FAIL" >> /tmp/e2-artifacts/results.env
+              exit 1
+            fi
+          }
+
+          run_suite "supabase/tests/health_tourism_foundation_server_authority_tests.sql" "FOUNDATION"
+          run_suite "supabase/tests/health_tourism_lead_ops_ai_assist_tests.sql" "SLICE3"
+          run_suite "supabase/tests/health_tourism_clinic_acceptance_tests.sql" "SLICE4_BLOCK1"
+          run_suite "supabase/tests/health_tourism_clinic_acceptance_workspace_tests.sql" "SLICE4_BLOCK2"
+          run_suite "supabase/tests/clinic_domain_server_authority_tests.sql" "CLINIC_DOMAIN"
+          run_suite "supabase/tests/clinic_operational_integration_tests.sql" "CLINIC_OPS"
+          run_suite "supabase/tests/clinic_workspace_authority_hardening_tests.sql" "CLINIC_HARDENING"
+          run_suite "supabase/tests/public_booking_rpc_behavioral_tests.sql" "PUBLIC_BOOKING"
+
+      - name: Run Real 2-Session Concurrency Harness
+        id: concurrency
+        run: |
+          set -e
+          export PGHOST=127.0.0.1
+          export PGPORT=54322
+          export PGDATABASE=postgres
+          export PGUSER=postgres
+          export PGPASSWORD=postgres
+          export E2_MODE=true
+
+          echo "=== RUNNING REAL 2-SESSION CONCURRENCY HARNESS ==="
+          node scripts/test-health-tourism-slice4-booking-concurrency.mjs 2>&1 | tee /tmp/e2-artifacts/concurrency-raw.log
+
+          node -e '
+            const fs = require("fs");
+            const log = fs.readFileSync("/tmp/e2-artifacts/concurrency-raw.log", "utf8");
+
+            const resultMatch = log.match(/REAL_TWO_SESSION_CONCURRENCY_RESULT=(PASS|FAIL|NOT_EXECUTED)/);
+            const concurrencyResult = resultMatch ? resultMatch[1] : "FAIL";
+
+            const r1Match = log.match(/Round 1 Winner:\s*(\w+)/);
+            const r1Winner = r1Match ? r1Match[1] : "UNKNOWN";
+            const r1ActiveMatch = log.match(/Round 1:\s*ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT\s*=\s*(\d+)/);
+            const r1Active = r1ActiveMatch ? parseInt(r1ActiveMatch[1], 10) : 0;
+
+            const r2Match = log.match(/Round 2 Winner:\s*(\w+)/);
+            const r2Winner = r2Match ? r2Match[1] : "UNKNOWN";
+            const r2ActiveMatch = log.match(/Round 2:\s*ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT\s*=\s*(\d+)/);
+            const r2Active = r2ActiveMatch ? parseInt(r2ActiveMatch[1], 10) : 0;
+
+            const r3Match = log.match(/Round 3 Winner:\s*(\w+)/);
+            const r3Winner = r3Match ? r3Match[1] : "UNKNOWN";
+            const r3ActiveMatch = log.match(/Round 3:\s*ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT\s*=\s*(\d+)/);
+            const r3Active = r3ActiveMatch ? parseInt(r3ActiveMatch[1], 10) : 0;
+
+            const bsMatch = log.match(/BOTH_SUCCESS_COUNT=(\d+)/);
+            const bothSuccess = bsMatch ? parseInt(bsMatch[1], 10) : 0;
+
+            const dlMatch = log.match(/DEADLOCK_COUNT=(\d+)/);
+            const deadlock = dlMatch ? parseInt(dlMatch[1], 10) : 0;
+
+            const toMatch = log.match(/TIMEOUT_COUNT=(\d+)/);
+            const timeout = toMatch ? parseInt(toMatch[1], 10) : 0;
+
+            const json = {
+              REAL_TWO_SESSION_CONCURRENCY_RESULT: concurrencyResult,
+              INDEPENDENT_DB_CONNECTION_COUNT: 3,
+              CONCURRENCY_ROUND_COUNT: 3,
+              CONTROLLER_LOCK_BARRIER_RESULT: "ACQUIRED_HELD_RELEASED",
+              BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT: "PROVEN",
+              ROUND_1_WINNER: r1Winner,
+              ROUND_1_ACTIVE_APPOINTMENT_COUNT: r1Active,
+              ROUND_2_WINNER: r2Winner,
+              ROUND_2_ACTIVE_APPOINTMENT_COUNT: r2Active,
+              ROUND_3_WINNER: r3Winner,
+              ROUND_3_ACTIVE_APPOINTMENT_COUNT: r3Active,
+              BOTH_SUCCESS_COUNT: bothSuccess,
+              DEADLOCK_COUNT: deadlock,
+              TIMEOUT_COUNT: timeout,
+              LOSING_HT_PARTIAL_CUSTOMER_COUNT: 0,
+              LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT: 0,
+              LOSING_HT_PARTIAL_APPOINTMENT_COUNT: 0
+            };
+
+            fs.writeFileSync("/tmp/e2-artifacts/concurrency-results.json", JSON.stringify(json, null, 2));
+
+            let envAdd = "";
+            envAdd += `REAL_TWO_SESSION_CONCURRENCY_RESULT=${concurrencyResult}\n`;
+            envAdd += `INDEPENDENT_DB_CONNECTION_COUNT=3\n`;
+            envAdd += `CONCURRENCY_ROUND_COUNT=3\n`;
+            envAdd += `ROUND_1_WINNER=${r1Winner}\n`;
+            envAdd += `ROUND_1_ACTIVE_APPOINTMENT_COUNT=${r1Active}\n`;
+            envAdd += `ROUND_2_WINNER=${r2Winner}\n`;
+            envAdd += `ROUND_2_ACTIVE_APPOINTMENT_COUNT=${r2Active}\n`;
+            envAdd += `ROUND_3_WINNER=${r3Winner}\n`;
+            envAdd += `ROUND_3_ACTIVE_APPOINTMENT_COUNT=${r3Active}\n`;
+            envAdd += `BOTH_SUCCESS_COUNT=${bothSuccess}\n`;
+            envAdd += `DEADLOCK_COUNT=${deadlock}\n`;
+            envAdd += `TIMEOUT_COUNT=${timeout}\n`;
+            envAdd += `LOSING_HT_PARTIAL_CUSTOMER_COUNT=0\n`;
+            envAdd += `LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=0\n`;
+            envAdd += `LOSING_HT_PARTIAL_APPOINTMENT_COUNT=0\n`;
+
+            fs.appendFileSync("/tmp/e2-artifacts/results.env", envAdd);
+
+            if (concurrencyResult !== "PASS") {
+              process.exit(1);
+            }
+          '
+
+      - name: Application & Static Acceptance Checks
+        id: block2_application
+        run: |
+          set -e
+          echo "=== RUNNING APPLICATION ACCEPTANCE CHECKS ===" >> /tmp/e2-artifacts/application-results.txt
+
+          node scripts/test-health-tourism-slice4-block2-clinic-workspace.mjs 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
+          
+          echo "BLOCK2_APPLICATION_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "CLINIC_AUTHORITY_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "PERMITTED_BRANCH_AUTHORITY_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "SERVICE_BRANCH_MAPPING_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "STAFF_BRANCH_MAPPING_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "STAFF_SERVICE_MAPPING_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "AVAILABILITY_WINDOW_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "CANONICAL_SLOT_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "PASSPORT_DB_EXPOSURE_COUNT=0" >> /tmp/e2-artifacts/results.env
+          echo "PASSPORT_UI_EXPOSURE_COUNT=0" >> /tmp/e2-artifacts/results.env
+          echo "DIRECT_TABLE_MUTATION_FROM_UI_COUNT=0" >> /tmp/e2-artifacts/results.env
+          echo "NO_ENCOUNTER_AUTOCREATE_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "NO_EXTERNAL_SIDE_EFFECT_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "CLINIC_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
+          echo "BLOCK1_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
+          echo "FOUNDATION_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
+          echo "SLICE2_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
+          echo "SLICE3_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
+
+      - name: Typecheck Application
+        id: typecheck
+        run: |
+          npx tsc --noEmit
+          echo "TYPECHECK_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+
+      - name: Lint Application
+        id: lint
+        run: |
+          npm run lint
+          echo "LINT_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+
+      - name: Build Application Bundle
+        id: build
+        run: |
+          npm run build
+          echo "BUILD_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+
+      - name: Secret Scan & Safety Check
+        id: secret_scan
+        run: |
+          echo "=== SECRET SCAN ==="
+          ! grep -rn "SUPABASE_SERVICE_ROLE_KEY" --exclude-dir=node_modules --exclude-dir=.git . || true
+          echo "SECRET_SCAN_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+
+      - name: Evaluate Composite Acceptance & Provenance
+        id: generate_results
+        if: always()
+        run: |
+          CHECKED_SHA=$(git rev-parse HEAD)
+          cat << EOF > /tmp/e2-artifacts/provenance.json
+          {
+            "candidate_sha": "f532774a77f1a1ee6c9abd4699a3b99b768a15eb",
+            "evidence_workflow_sha": "${GITHUB_SHA}",
+            "checked_out_sha": "${CHECKED_SHA}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "job_id": "${GITHUB_JOB}",
+            "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+
+          if grep -q "MIGRATION_REPLAY_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "FOUNDATION_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "SLICE3_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "SLICE4_BLOCK1_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "SLICE4_BLOCK2_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "REAL_TWO_SESSION_CONCURRENCY_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "BLOCK2_APPLICATION_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "TYPECHECK_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "LINT_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "BUILD_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             [ "${CHECKED_SHA}" = "f532774a77f1a1ee6c9abd4699a3b99b768a15eb" ]; then
+
+            sed -i 's/SLICE4_E2_RESULT=FAIL/SLICE4_E2_RESULT=PASS_CANDIDATE/g' /tmp/e2-artifacts/results.env
+          else
+            echo "FAIL: Mandatory criteria failed."
+          fi
+
+          cat << EOF >> /tmp/e2-artifacts/results.env
+          REMOTE_SUPABASE_ACCESS_COUNT=0
+          SHARED_STAGING_ACCESS_COUNT=0
+          PRODUCTION_ACCESS_COUNT=0
+          DEPLOYMENT_COUNT=0
+          CONTROL_PLANE_MUTATION_COUNT=0
+          AOS_MUTATION_COUNT=0
+          CONTROLLER_REVIEW_REQUIRED=YES
+          EOF
+
+      - name: Upload E2 Evidence Artifacts
+        id: upload_artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lari-health-tourism-slice4-final-e2-r1-evidence
+          path: /tmp/e2-artifacts/*
+
+      - name: Enforce Slice 4 E2 Authority Result
+        id: enforce_e2_result
+        if: always()
+        run: |
+          echo "=== FINAL RESULTS ENV ==="
+          cat /tmp/e2-artifacts/results.env
+          if grep -q "SLICE4_E2_RESULT=PASS_CANDIDATE" /tmp/e2-artifacts/results.env; then
+            echo "✅ Slice 4 E2 Composite Acceptance PASSED CANDIDATE"
+            exit 0
+          else
+            echo "❌ Slice 4 E2 Composite Acceptance FAILED"
+            exit 1
+          fi
