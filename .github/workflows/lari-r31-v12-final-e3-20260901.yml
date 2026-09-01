@@ -430,8 +430,8 @@ jobs:
                 ]);
 
                 // Record newly created IDs for cleanup
-                if (allMsgs.json) allMsgs.json.forEach(m => createdMsgIds.add(m.id));
-                if (allOutbox.json) allOutbox.json.forEach(o => createdOutboxIds.add(o.id));
+                if (allMsgs.json) allMsgs.json.filter(m => !preMsgs.has(m.id)).forEach(m => createdMsgIds.add(m.id));
+                if (allOutbox.json) allOutbox.json.filter(o => !preOutbox.has(o.id)).forEach(o => createdOutboxIds.add(o.id));
 
                 let markerTranscriptCount = 0;
                 if (allMsgs.json) {
