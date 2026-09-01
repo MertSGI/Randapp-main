@@ -635,3 +635,21 @@ jobs:
         with:
           name: lari-r31-v12-final-e3-evidence
           path: lari-r31-v12-final-e3-evidence/
+
+      - name: Enforce E3 Authority Result
+        if: always()
+        run: |
+          set -euo pipefail
+          ENV_FILE="lari-r31-v12-final-e3-evidence/results.env"
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "::error::results.env file not found!"
+            exit 1
+          fi
+
+          E3_RESULT="$(grep '^E3_RESULT=' "$ENV_FILE" | cut -d'=' -f2)"
+          echo "E3_RESULT evaluated as: $E3_RESULT"
+
+          if [ "$E3_RESULT" != "PASS_CANDIDATE" ]; then
+            echo "::error::E3 execution did not produce PASS_CANDIDATE. Failing workflow step."
+            exit 1
+          fi
