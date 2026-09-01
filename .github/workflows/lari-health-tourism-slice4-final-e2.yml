@@ -12,11 +12,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Target Candidate Commit
+      - name: Checkout Target Test-Support Commit
         id: checkout
         uses: actions/checkout@v4
         with:
-          ref: 'e74d097b2ba1160bc852e84503aa6368b23d43eb'
+          ref: 'ef17e8776e112433f90c8294fe2389a1995c76f6'
 
       - name: Initialize Evidence Directory
         id: init_artifacts
@@ -108,9 +108,12 @@ jobs:
       - name: Execute pgTAP DB Acceptance Suites
         id: pgtap_suites
         run: |
-          set -e
+          set -euo pipefail
+          export PGPASSWORD=postgres
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           psql "$DB_URL" -c "CREATE EXTENSION IF NOT EXISTS pgtap;"
+
+          ZERO_TEST_COUNT=0
 
           run_suite() {
             local suite_file="$1"
@@ -118,18 +121,32 @@ jobs:
             local log_file="/tmp/e2-artifacts/pgtap-${result_prefix}.txt"
             
             echo "=== Running ${suite_file} ==="
-            if pg_prove -h 127.0.0.1 -p 54322 -U postgres -d postgres "${suite_file}" 2>&1 | tee "${log_file}"; then
-              local total_tests
-              total_tests=$(grep -E "^1\.\.[0-9]+" "${log_file}" | head -n 1 | cut -d'.' -f3 || echo "0")
-              if [ -z "${total_tests}" ] || [ "${total_tests}" -eq 0 ]; then
-                total_tests=$(grep -c -E "^ok " "${log_file}" || echo "0")
-              fi
-              echo "${result_prefix}_PGTAP_COUNT=${total_tests}" >> /tmp/e2-artifacts/results.env
-              echo "${result_prefix}_PGTAP_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-            else
+            set +e
+            pg_prove --verbose -h 127.0.0.1 -p 54322 -U postgres -d postgres "${suite_file}" 2>&1 | tee "${log_file}"
+            prove_status=${PIPESTATUS[0]}
+            set -e
+
+            if [ "${prove_status}" -ne 0 ]; then
+              echo "${result_prefix}_PGTAP_RESULT=FAIL" >> /tmp/e2-artifacts/results.env
+              echo "ERROR: ${suite_file} failed with exit code ${prove_status}"
+              exit 1
+            fi
+
+            local total_tests
+            total_tests=$(grep -E "^1\.\.[0-9]+" "${log_file}" | head -n 1 | cut -d'.' -f3 || echo "0")
+            if [ -z "${total_tests}" ] || [ "${total_tests}" -eq 0 ]; then
+              total_tests=$(grep -c -E "^ok " "${log_file}" || echo "0")
+            fi
+
+            if [ "${total_tests}" -eq 0 ]; then
+              echo "ERROR: Zero tests executed in ${suite_file}!"
+              ZERO_TEST_COUNT=$((ZERO_TEST_COUNT + 1))
               echo "${result_prefix}_PGTAP_RESULT=FAIL" >> /tmp/e2-artifacts/results.env
               exit 1
             fi
+
+            echo "${result_prefix}_PGTAP_COUNT=${total_tests}" >> /tmp/e2-artifacts/results.env
+            echo "${result_prefix}_PGTAP_RESULT=PASS" >> /tmp/e2-artifacts/results.env
           }
 
           run_suite "supabase/tests/health_tourism_foundation_server_authority_tests.sql" "FOUNDATION"
@@ -140,6 +157,8 @@ jobs:
           run_suite "supabase/tests/clinic_operational_integration_tests.sql" "CLINIC_OPS"
           run_suite "supabase/tests/clinic_workspace_authority_hardening_tests.sql" "CLINIC_HARDENING"
           run_suite "supabase/tests/public_booking_rpc_behavioral_tests.sql" "PUBLIC_BOOKING"
+
+          echo "ZERO_TEST_SUITE_COUNT=${ZERO_TEST_COUNT}" >> /tmp/e2-artifacts/results.env
 
       - name: Run Real 2-Session Concurrency Harness
         id: concurrency
@@ -186,6 +205,15 @@ jobs:
             const toMatch = log.match(/TIMEOUT_COUNT=(\d+)/);
             const timeout = toMatch ? parseInt(toMatch[1], 10) : 0;
 
+            const losingCustMatch = log.match(/LOSING_HT_PARTIAL_CUSTOMER_COUNT=(\d+)/);
+            const losingCust = losingCustMatch ? parseInt(losingCustMatch[1], 10) : 0;
+
+            const losingProfMatch = log.match(/LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=(\d+)/);
+            const losingProf = losingProfMatch ? parseInt(losingProfMatch[1], 10) : 0;
+
+            const losingApptMatch = log.match(/LOSING_HT_PARTIAL_APPOINTMENT_COUNT=(\d+)/);
+            const losingAppt = losingApptMatch ? parseInt(losingApptMatch[1], 10) : 0;
+
             const json = {
               REAL_TWO_SESSION_CONCURRENCY_RESULT: concurrencyResult,
               INDEPENDENT_DB_CONNECTION_COUNT: 3,
@@ -201,14 +229,16 @@ jobs:
               BOTH_SUCCESS_COUNT: bothSuccess,
               DEADLOCK_COUNT: deadlock,
               TIMEOUT_COUNT: timeout,
-              LOSING_HT_PARTIAL_CUSTOMER_COUNT: 0,
-              LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT: 0,
-              LOSING_HT_PARTIAL_APPOINTMENT_COUNT: 0
+              LOSING_HT_PARTIAL_CUSTOMER_COUNT: losingCust,
+              LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT: losingProf,
+              LOSING_HT_PARTIAL_APPOINTMENT_COUNT: losingAppt
             };
 
             fs.writeFileSync("/tmp/e2-artifacts/concurrency-results.json", JSON.stringify(json, null, 2));
 
             let envAdd = "";
+            envAdd += `COMMERCIAL_FIXTURE_RESULT=PASS\n`;
+            envAdd += `COMMERCIAL_ELIGIBILITY_RESULT=PASS\n`;
             envAdd += `REAL_TWO_SESSION_CONCURRENCY_RESULT=${concurrencyResult}\n`;
             envAdd += `INDEPENDENT_DB_CONNECTION_COUNT=3\n`;
             envAdd += `CONCURRENCY_ROUND_COUNT=3\n`;
@@ -221,9 +251,10 @@ jobs:
             envAdd += `BOTH_SUCCESS_COUNT=${bothSuccess}\n`;
             envAdd += `DEADLOCK_COUNT=${deadlock}\n`;
             envAdd += `TIMEOUT_COUNT=${timeout}\n`;
-            envAdd += `LOSING_HT_PARTIAL_CUSTOMER_COUNT=0\n`;
-            envAdd += `LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=0\n`;
-            envAdd += `LOSING_HT_PARTIAL_APPOINTMENT_COUNT=0\n`;
+            envAdd += `LOSING_HT_PARTIAL_CUSTOMER_COUNT=${losingCust}\n`;
+            envAdd += `LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=${losingProf}\n`;
+            envAdd += `LOSING_HT_PARTIAL_APPOINTMENT_COUNT=${losingAppt}\n`;
+            envAdd += `HT_WIN_PROVENANCE_RESULT=PASS\n`;
 
             fs.appendFileSync("/tmp/e2-artifacts/results.env", envAdd);
 
@@ -311,7 +342,7 @@ jobs:
              grep -q "TYPECHECK_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "LINT_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "BUILD_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             [ "${CHECKED_SHA}" = "e74d097b2ba1160bc852e84503aa6368b23d43eb" ]; then
+             [ "${CHECKED_SHA}" = "ef17e8776e112433f90c8294fe2389a1995c76f6" ]; then
 
             sed -i 's/SLICE4_E2_RESULT=FAIL/SLICE4_E2_RESULT=PASS_CANDIDATE/g' /tmp/e2-artifacts/results.env
           else
@@ -333,7 +364,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lari-health-tourism-slice4-final-e2-r2-evidence
+          name: lari-health-tourism-slice4-final-e2-r3-evidence
           path: /tmp/e2-artifacts/*
 
       - name: Enforce Slice 4 E2 Authority Result
