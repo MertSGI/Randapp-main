@@ -639,6 +639,7 @@ jobs:
               let envContent = '';
               for (const [k, v] of Object.entries(report)) {
                 envContent += `${k}=${v}\n`;
+                console.log(`::notice title=E3_EVIDENCE::${k}=${v}`);
               }
               fs.writeFileSync(path.join(artifactDir, 'results.env'), envContent);
 
