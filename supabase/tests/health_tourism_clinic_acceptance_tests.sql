@@ -17,6 +17,8 @@ VALUES
   ('b2222222-2222-2222-2222-222222222222', 'Slice 4 Beta Tenant', 's4-beta', 'active', 'completed', 'published')
 ON CONFLICT (id) DO NOTHING;
 
+\i supabase/tests/fixtures/slice4_e2_commercial_fixture.sql
+
 INSERT INTO auth.users (id, email) VALUES
   ('u1111111-1111-4111-8111-111111111111', 'clinic_manage@s4-alpha.example.invalid'),
   ('u2222222-2222-4222-8222-222222222222', 'ht_only@s4-alpha.example.invalid'),

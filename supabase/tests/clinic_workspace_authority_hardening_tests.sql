@@ -143,7 +143,7 @@ BEGIN
     )
     SELECT
         v_tenant_id,
-        p.id,
+        p.code,
         pv.id,
         'manual_active',
         'manual'

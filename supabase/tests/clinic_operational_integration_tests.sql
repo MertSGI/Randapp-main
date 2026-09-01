@@ -83,14 +83,14 @@ BEGIN
            (v_tenant2_id, 'clinic-op-t2', 'Clinic Operational Tenant 2', 'active');
 
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
-    SELECT v_tenant1_id, p.id, pv.id, 'active', 'manual'
+    SELECT v_tenant1_id, p.code, pv.id, 'active', 'manual'
     FROM public.plans p
     JOIN public.plan_versions pv ON pv.plan_id = p.id
     WHERE p.code = 'kurumsal' AND pv.lifecycle_status = 'published'
     ORDER BY pv.created_at DESC LIMIT 1;
 
     INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode)
-    SELECT v_tenant2_id, p.id, pv.id, 'active', 'manual'
+    SELECT v_tenant2_id, p.code, pv.id, 'active', 'manual'
     FROM public.plans p
     JOIN public.plan_versions pv ON pv.plan_id = p.id
     WHERE p.code = 'kurumsal' AND pv.lifecycle_status = 'published'

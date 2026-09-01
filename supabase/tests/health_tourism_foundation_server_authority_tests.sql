@@ -34,6 +34,8 @@ VALUES
   ('b2222222-2222-2222-2222-222222222222', 'HT Tenant Beta', 'ht-beta', 'active', 'completed', 'published')
 ON CONFLICT (id) DO NOTHING;
 
+\i supabase/tests/fixtures/slice4_e2_commercial_fixture.sql
+
 -- Materialize Synthetic Auth Users (auth.users)
 INSERT INTO auth.users (id, email) VALUES
   ('a1111111-1111-4111-8111-111111111111', 'owner@ht-alpha.example.invalid'),

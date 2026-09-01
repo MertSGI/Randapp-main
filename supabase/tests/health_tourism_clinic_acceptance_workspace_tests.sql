@@ -19,6 +19,8 @@ VALUES
   ('b0000000-0000-0000-0000-000000000002', 'Workspace Beta Tenant', 'ws-beta', 'active', 'completed', 'published')
 ON CONFLICT (id) DO NOTHING;
 
+\i supabase/tests/fixtures/slice4_e2_commercial_fixture.sql
+
 -- Auth Users
 INSERT INTO auth.users (id, email) VALUES
   ('a0000000-0000-4000-8000-000000000101', 'ws_manager@alpha.example.invalid'),
