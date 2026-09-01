@@ -352,6 +352,7 @@ jobs:
                 }
 
                 const caseResult = pass ? 'PASS' : 'FAIL';
+                console.log(`[CASE_EVAL] ${caseId}: http=${actualHttp}(exp ${expHttp}), outcome=${actualOutcome}(exp ${expOutcome}), pass=${pass}`);
                 caseLedger.push({
                   CASE_ID: caseId,
                   HTTP_STATUS: actualHttp,
@@ -365,6 +366,7 @@ jobs:
                 });
 
                 if (!pass) {
+                  console.error(`[CASE_FAIL] Case ${caseId} failed! actualHttp=${actualHttp}, actualOutcome=${actualOutcome}`);
                   report.FIRST_FAILED_CASE_IF_ANY = caseId;
                   report.FIRST_FAILED_REASON_IF_ANY = `HTTP ${actualHttp} (expected ${expHttp}), outcome ${actualOutcome} (expected ${expOutcome})`;
                   fatalStop = true;
