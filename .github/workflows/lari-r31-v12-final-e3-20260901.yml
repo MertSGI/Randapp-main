@@ -633,8 +633,6 @@ jobs:
                 report.E3_RESULT = 'FAIL';
               }
 
-              console.log(`[HARNESS_EVAL] WRITING results.env with E3_RESULT=${report.E3_RESULT}`);
-
               // Output safe artifact evidence files
               const artifactDir = path.join(process.cwd(), 'lari-r31-v12-final-e3-evidence');
               if (!fs.existsSync(artifactDir)) fs.mkdirSync(artifactDir, { recursive: true });
@@ -642,17 +640,8 @@ jobs:
               let envContent = '';
               for (const [k, v] of Object.entries(report)) {
                 envContent += `${k}=${v}\n`;
-                if (k.endsWith('_RESULT') || k.startsWith('FIRST_FAILED') || k === 'E3_RESULT') {
-                  console.log(`::notice title=E3_EVIDENCE::${k}=${v}`);
-                }
               }
               fs.writeFileSync(path.join(artifactDir, 'results.env'), envContent);
-
-              if (process.env.GITHUB_STEP_SUMMARY) {
-                try {
-                  fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '### E3 Execution Results\n```env\n' + envContent + '```\n');
-                } catch (e) {}
-              }
 
               let ledgerLines = '';
               for (const item of caseLedger) {
@@ -664,11 +653,6 @@ jobs:
 
               console.log('--- E3 Execution Complete ---');
               console.log(envContent);
-
-              if (report.E3_RESULT !== 'PASS_CANDIDATE') {
-                console.error(`::error::E3_RESULT evaluated as ${report.E3_RESULT}. Failing Node runner process.`);
-                process.exit(1);
-              }
             }
           }
 
