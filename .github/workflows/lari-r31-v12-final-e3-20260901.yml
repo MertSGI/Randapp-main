@@ -632,11 +632,6 @@ jobs:
 
               console.log(`[HARNESS_EVAL] WRITING results.env with E3_RESULT=${report.E3_RESULT}`);
 
-              if (report.E3_RESULT !== 'PASS_CANDIDATE') {
-                console.error(`::error::E3_RESULT evaluated as ${report.E3_RESULT}. Failing Node runner process.`);
-                process.exit(1);
-              }
-
               // Output safe artifact evidence files
               const artifactDir = path.join(process.cwd(), 'lari-r31-v12-final-e3-evidence');
               if (!fs.existsSync(artifactDir)) fs.mkdirSync(artifactDir, { recursive: true });
@@ -663,6 +658,11 @@ jobs:
 
               console.log('--- E3 Execution Complete ---');
               console.log(envContent);
+
+              if (report.E3_RESULT !== 'PASS_CANDIDATE') {
+                console.error(`::error::E3_RESULT evaluated as ${report.E3_RESULT}. Failing Node runner process.`);
+                process.exit(1);
+              }
             }
           }
 
