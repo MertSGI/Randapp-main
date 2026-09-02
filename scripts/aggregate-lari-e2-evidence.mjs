@@ -245,42 +245,6 @@ export function aggregateEvidence(targetDir = artifactsDir) {
     ...phaseFragmentOwners['27-secret-scan.env']
   ];
 
-  // 2. Validate explicit reasons for ALL FAIL / NOT_EXECUTED status keys and derive FIRST_FATAL
-  let firstFatalStep = '';
-  let firstFatalReason = '';
-
-  const executionOrderKeys = [
-    ...phaseFragmentOwners['01-migration.env'],
-    ...phaseFragmentOwners['02-commercial.env'],
-    ...phaseFragmentOwners['03-r9-selftest.env'],
-    ...phaseFragmentOwners['04-uuid-static.env'],
-    ...phaseFragmentOwners['05-arity-static.env'],
-    ...phaseFragmentOwners['06-pgtap-foundation.env'],
-    ...phaseFragmentOwners['07-pgtap-slice3.env'],
-    ...phaseFragmentOwners['08-pgtap-slice4-block1.env'],
-    ...phaseFragmentOwners['09-pgtap-slice4-block2.env'],
-    ...phaseFragmentOwners['10-pgtap-clinic-domain.env'],
-    ...phaseFragmentOwners['11-pgtap-clinic-ops.env'],
-    ...phaseFragmentOwners['12-pgtap-clinic-hardening.env'],
-    ...phaseFragmentOwners['13-pgtap-public-booking.env'],
-    ...phaseFragmentOwners['13b-pgtap-summary.env'],
-    ...phaseFragmentOwners['14-concurrency.env'],
-    ...phaseFragmentOwners['15-app-ht-slice4-block2.env'],
-    ...phaseFragmentOwners['16-app-ht-slice4-block1.env'],
-    ...phaseFragmentOwners['17-app-ht-foundation.env'],
-    ...phaseFragmentOwners['18-app-ht-slice3.env'],
-    ...phaseFragmentOwners['19-app-clinic-domain.env'],
-    ...phaseFragmentOwners['20-app-clinic-contracts.env'],
-    ...phaseFragmentOwners['21-app-clinic-operational.env'],
-    ...phaseFragmentOwners['22-app-clinic-workspace.env'],
-    ...phaseFragmentOwners['22b-app-clinic-summary.env'],
-    ...phaseFragmentOwners['23-app-ht-slice2.env'],
-    ...phaseFragmentOwners['24-typecheck.env'],
-    ...phaseFragmentOwners['25-lint.env'],
-    ...phaseFragmentOwners['26-build.env'],
-    ...phaseFragmentOwners['27-secret-scan.env']
-  ];
-
   for (const k of executionOrderKeys) {
     if (!explicitStatusKeys.has(k)) continue;
     const v = kv.get(k);
