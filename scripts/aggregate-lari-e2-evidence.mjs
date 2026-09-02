@@ -1,10 +1,11 @@
 // ============================================================================
-// CANONICAL EVIDENCE AGGREGATOR & SCHEMA VALIDATOR (R9-R1.2 CONSISTENT)
+// CANONICAL EVIDENCE AGGREGATOR & SCHEMA VALIDATOR (R9-R1.3 LITERAL)
 // File: scripts/aggregate-lari-e2-evidence.mjs
 // Purpose:
 //   Consumes exactly 30 separate phase-owned evidence fragments under /tmp/e2-artifacts/,
-//   validates strict 1:1 key-to-owner mappings, enforces explicit failure reasons,
-//   derives FIRST_FATAL causally from actual FAIL phases, and outputs results.env.
+//   validates strict 1:1 key ownership including conditional reason keys,
+//   enforces explicit *_FAILURE_REASON for all FAIL steps, re-reads results.env from disk,
+//   and evaluates composite acceptance.
 // ============================================================================
 
 import fs from 'fs';
@@ -33,7 +34,7 @@ export const phaseFragmentOwners = {
   '06-pgtap-foundation.env': ['FOUNDATION_PGTAP_PLANNED_COUNT', 'FOUNDATION_PGTAP_EXECUTED_COUNT', 'FOUNDATION_PGTAP_COUNT', 'FOUNDATION_PGTAP_PASSED_COUNT', 'FOUNDATION_PGTAP_FAILED_COUNT', 'FOUNDATION_PGTAP_RESULT', 'FOUNDATION_PGTAP_FAILURE_CLASS'],
   '07-pgtap-slice3.env': ['SLICE3_PGTAP_PLANNED_COUNT', 'SLICE3_PGTAP_EXECUTED_COUNT', 'SLICE3_PGTAP_COUNT', 'SLICE3_PGTAP_PASSED_COUNT', 'SLICE3_PGTAP_FAILED_COUNT', 'SLICE3_PGTAP_RESULT', 'SLICE3_PGTAP_FAILURE_CLASS'],
   '08-pgtap-slice4-block1.env': ['SLICE4_BLOCK1_PGTAP_PLANNED_COUNT', 'SLICE4_BLOCK1_PGTAP_EXECUTED_COUNT', 'SLICE4_BLOCK1_PGTAP_COUNT', 'SLICE4_BLOCK1_PGTAP_PASSED_COUNT', 'SLICE4_BLOCK1_PGTAP_FAILED_COUNT', 'SLICE4_BLOCK1_PGTAP_RESULT', 'SLICE4_BLOCK1_PGTAP_FAILURE_CLASS'],
-  '09-pgtap-slice4-block2.env': ['SLICE4_BLOCK2_PGTAP_PLANNED_COUNT', 'SLICE4_BLOCK2_PGTAP_EXECUTED_COUNT', 'SLICE4_BLOCK2_PGTAP_COUNT', 'SLICE4_BLOCK2_PASSED_COUNT', 'SLICE4_BLOCK2_PGTAP_PASSED_COUNT', 'SLICE4_BLOCK2_PGTAP_FAILED_COUNT', 'SLICE4_BLOCK2_PGTAP_RESULT', 'SLICE4_BLOCK2_PGTAP_FAILURE_CLASS'],
+  '09-pgtap-slice4-block2.env': ['SLICE4_BLOCK2_PGTAP_PLANNED_COUNT', 'SLICE4_BLOCK2_PGTAP_EXECUTED_COUNT', 'SLICE4_BLOCK2_PGTAP_COUNT', 'SLICE4_BLOCK2_PGTAP_PASSED_COUNT', 'SLICE4_BLOCK2_PGTAP_FAILED_COUNT', 'SLICE4_BLOCK2_PGTAP_RESULT', 'SLICE4_BLOCK2_PGTAP_FAILURE_CLASS'],
   '10-pgtap-clinic-domain.env': ['CLINIC_DOMAIN_PGTAP_PLANNED_COUNT', 'CLINIC_DOMAIN_PGTAP_EXECUTED_COUNT', 'CLINIC_DOMAIN_PGTAP_COUNT', 'CLINIC_DOMAIN_PGTAP_PASSED_COUNT', 'CLINIC_DOMAIN_PGTAP_FAILED_COUNT', 'CLINIC_DOMAIN_PGTAP_RESULT', 'CLINIC_DOMAIN_PGTAP_FAILURE_CLASS'],
   '11-pgtap-clinic-ops.env': ['CLINIC_OPS_PGTAP_PLANNED_COUNT', 'CLINIC_OPS_PGTAP_EXECUTED_COUNT', 'CLINIC_OPS_PGTAP_COUNT', 'CLINIC_OPS_PGTAP_PASSED_COUNT', 'CLINIC_OPS_PGTAP_FAILED_COUNT', 'CLINIC_OPS_PGTAP_RESULT', 'CLINIC_OPS_PGTAP_FAILURE_CLASS'],
   '12-pgtap-clinic-hardening.env': ['CLINIC_HARDENING_PGTAP_PLANNED_COUNT', 'CLINIC_HARDENING_PGTAP_EXECUTED_COUNT', 'CLINIC_HARDENING_PGTAP_COUNT', 'CLINIC_HARDENING_PGTAP_PASSED_COUNT', 'CLINIC_HARDENING_PGTAP_FAILED_COUNT', 'CLINIC_HARDENING_PGTAP_RESULT', 'CLINIC_HARDENING_PGTAP_FAILURE_CLASS'],
@@ -63,10 +64,24 @@ export const phaseFragmentOwners = {
 };
 
 export function aggregateEvidence(targetDir = artifactsDir) {
-  console.log('=== CANONICAL EVIDENCE AGGREGATOR RUNNING (R9-R1.2 CONSISTENT) ===');
+  console.log('=== CANONICAL EVIDENCE AGGREGATOR RUNNING (R9-R1.3 LITERAL) ===');
   const kv = new Map();
   const keyOwnerMap = new Map();
   const globalKeyToOwner = new Map();
+
+  // Remove any stale pre-existing results.env to prevent influence
+  const targetResultsPath = path.join(targetDir, 'results.env');
+  if (fs.existsSync(targetResultsPath)) {
+    fs.unlinkSync(targetResultsPath);
+  }
+
+  // Reject unknown fragments in input directory
+  const filesInDir = fs.readdirSync(targetDir);
+  for (const file of filesInDir) {
+    if (file.endsWith('.env') && file !== 'results.env' && !phaseFragmentOwners[file]) {
+      throw new Error(`UNKNOWN_FRAGMENT_REJECTED: Unrecognized fragment file "${file}" found in ${targetDir}`);
+    }
+  }
 
   // Verify manifest count is exactly 30
   const fragCount = Object.keys(phaseFragmentOwners).length;
@@ -74,13 +89,17 @@ export function aggregateEvidence(targetDir = artifactsDir) {
     throw new Error(`MANIFEST_ERROR: Expected exactly 30 fragment files, found ${fragCount}`);
   }
 
-  // Build global reverse lookup map
+  // Build global reverse lookup map for base keys and explicit reason keys
   for (const [fragFile, ownedKeys] of Object.entries(phaseFragmentOwners)) {
     for (const k of ownedKeys) {
       if (globalKeyToOwner.has(k)) {
         throw new Error(`SCHEMA_ERROR: Key "${k}" declared under multiple fragment owners!`);
       }
       globalKeyToOwner.set(k, fragFile);
+
+      // Register explicit conditional reason keys to exact same fragment owner
+      globalKeyToOwner.set(`${k}_FAILURE_REASON`, fragFile);
+      globalKeyToOwner.set(`${k}_NOT_EXECUTED_REASON`, fragFile);
     }
   }
 
@@ -105,9 +124,10 @@ export function aggregateEvidence(targetDir = artifactsDir) {
       const k = line.substring(0, eqIdx).trim();
       const v = line.substring(eqIdx + 1).trim();
 
-      // Check if key is allowed for this fragment
-      if (!ownedKeys.includes(k) && !k.endsWith('_NOT_EXECUTED_REASON') && !k.endsWith('_FAILURE_REASON')) {
-        throw new Error(`WRONG_OWNER_KEY_REJECTED: Key "${k}" in ${fragFile} is not owned by this fragment!`);
+      // Check if key is explicitly owned by this fragment
+      const expectedOwner = globalKeyToOwner.get(k);
+      if (!expectedOwner || expectedOwner !== fragFile) {
+        throw new Error(`WRONG_OWNER_KEY_REJECTED: Key "${k}" in ${fragFile} is not owned by this fragment (expected ${expectedOwner})!`);
       }
 
       // Check for intra-fragment duplicate key
@@ -121,6 +141,22 @@ export function aggregateEvidence(targetDir = artifactsDir) {
         throw new Error(`CROSS_FRAGMENT_DUPLICATE_REJECTED: Key "${k}" found in both ${keyOwnerMap.get(k)} and ${fragFile}`);
       }
       keyOwnerMap.set(k, fragFile);
+
+      // Validate strict result enums
+      if (k.endsWith('_RESULT')) {
+        const allowedEnums = k === 'HT_WIN_PROVENANCE_RESULT' ? ['PASS', 'NOT_OBSERVED'] : ['PASS', 'FAIL', 'NOT_EXECUTED'];
+        if (!allowedEnums.includes(v)) {
+          throw new Error(`STRICT_ENUM_VALIDATION_FAILED: Key "${k}" has invalid enum "${v}" in ${fragFile}`);
+        }
+      }
+
+      // Validate strict integers for count keys
+      if (k.endsWith('_COUNT') && !['MIGRATION_COUNT'].includes(k)) {
+        if (!/^\d+$/.test(v)) {
+          throw new Error(`STRICT_INTEGER_VALIDATION_FAILED: Key "${k}" has invalid integer "${v}" in ${fragFile}`);
+        }
+      }
+
       kv.set(k, v);
     }
 
@@ -141,7 +177,7 @@ export function aggregateEvidence(targetDir = artifactsDir) {
     }
   }
 
-  // 2. Derive FIRST_FATAL strictly from actual FAIL steps (NOT_EXECUTED is NEVER a cause!)
+  // 2. Derive FIRST_FATAL strictly from actual FAIL steps
   let firstFatalStep = '';
   let firstFatalReason = '';
 
@@ -177,6 +213,15 @@ export function aggregateEvidence(targetDir = artifactsDir) {
 
   for (const k of executionOrderKeys) {
     const v = kv.get(k);
+
+    // Validate NOT_EXECUTED requires explicit _NOT_EXECUTED_REASON
+    if (v === 'NOT_EXECUTED' && !['HT_WIN_PROVENANCE_RESULT'].includes(k)) {
+      const notExecReason = kv.get(`${k}_NOT_EXECUTED_REASON`);
+      if (!notExecReason) {
+        throw new Error(`MISSING_NOT_EXECUTED_REASON_REJECTED: Step "${k}" reported NOT_EXECUTED without explicit "${k}_NOT_EXECUTED_REASON"!`);
+      }
+    }
+
     if (v === 'FAIL' && !firstFatalStep) {
       firstFatalStep = k;
       const explicitReason = kv.get(`${k}_FAILURE_REASON`);
@@ -212,16 +257,17 @@ export function aggregateEvidence(targetDir = artifactsDir) {
     const executed = parseInt(kv.get(`${p}_PGTAP_EXECUTED_COUNT`), 10);
     const passed = parseInt(kv.get(`${p}_PGTAP_PASSED_COUNT`), 10);
     const failed = parseInt(kv.get(`${p}_PGTAP_FAILED_COUNT`), 10);
+    const count = parseInt(kv.get(`${p}_PGTAP_COUNT`), 10);
     const result = kv.get(`${p}_PGTAP_RESULT`);
 
-    if (result !== 'PASS' || planned <= 0 || executed !== planned || passed !== planned || failed !== 0) {
+    if (result !== 'PASS' || planned <= 0 || executed !== planned || passed !== planned || failed !== 0 || count !== executed) {
       compositePass = false;
     }
   }
   if (kv.get('ZERO_TEST_SUITE_COUNT') !== '0' || kv.get('PGTAP_PHASE_RESULT') !== 'PASS') compositePass = false;
 
   // 4. Concurrency
-  if (kv.get('REAL_TWO_SESSION_CONCURRENCY_RESULT') !== 'PASS' || kv.get('CONTROLLER_LOCK_BARRIER_RESULT') !== 'PASS' || kv.get('BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT') !== 'PASS' || kv.get('INDEPENDENT_DB_CONNECTION_COUNT') !== '2' || kv.get('CONCURRENCY_ROUND_COUNT') !== '3' || kv.get('BOTH_SUCCESS_COUNT') !== '0' || kv.get('DEADLOCK_COUNT') !== '0' || kv.get('TIMEOUT_COUNT') !== '0' || kv.get('LOSING_HT_PARTIAL_CUSTOMER_COUNT') !== '0' || kv.get('LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT') !== '0' || kv.get('LOSING_HT_PARTIAL_APPOINTMENT_COUNT') !== '0' || kv.get('NO_ENCOUNTER_AUTOCREATE_RESULT') !== 'PASS' || kv.get('NO_EXTERNAL_SIDE_EFFECT_RESULT') !== 'PASS') {
+  if (kv.get('REAL_TWO_SESSION_CONCURRENCY_RESULT') !== 'PASS' || kv.get('CONTROLLER_LOCK_BARRIER_RESULT') !== 'PASS' || kv.get('BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT') !== 'PASS' || kv.get('INDEPENDENT_DB_CONNECTION_COUNT') !== '2' || kv.get('CONCURRENCY_ROUND_COUNT') !== '3' || kv.get('ROUND_1_ACTIVE_APPOINTMENT_COUNT') !== '1' || kv.get('ROUND_2_ACTIVE_APPOINTMENT_COUNT') !== '1' || kv.get('ROUND_3_ACTIVE_APPOINTMENT_COUNT') !== '1' || kv.get('BOTH_SUCCESS_COUNT') !== '0' || kv.get('DEADLOCK_COUNT') !== '0' || kv.get('TIMEOUT_COUNT') !== '0' || kv.get('LOSING_HT_PARTIAL_CUSTOMER_COUNT') !== '0' || kv.get('LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT') !== '0' || kv.get('LOSING_HT_PARTIAL_APPOINTMENT_COUNT') !== '0' || kv.get('NO_ENCOUNTER_AUTOCREATE_RESULT') !== 'PASS' || kv.get('NO_EXTERNAL_SIDE_EFFECT_RESULT') !== 'PASS') {
     compositePass = false;
   }
 
@@ -255,14 +301,34 @@ export function aggregateEvidence(targetDir = artifactsDir) {
   kv.set('SLICE4_E2_RESULT', compositePass ? 'PASS_CANDIDATE' : 'FAIL');
   kv.set('CONTROLLER_REVIEW_REQUIRED', 'YES');
 
-  // Re-read & Validate output string before writing
+  // Write results.env
   let outputStr = '';
   for (const [k, v] of kv.entries()) {
     outputStr += `${k}=${v}\n`;
   }
+  fs.writeFileSync(targetResultsPath, outputStr);
 
-  fs.writeFileSync(path.join(targetDir, 'results.env'), outputStr);
-  console.log('✅ Canonical results.env generated and validated.');
+  // RE-READ & STRICTLY VALIDATE RESULTS.ENV FROM DISK
+  const rereadContent = fs.readFileSync(targetResultsPath, 'utf8');
+  const rereadKv = new Map();
+  const rereadLines = rereadContent.split('\n');
+
+  for (const rLine of rereadLines) {
+    const trimmed = rLine.trim();
+    if (!trimmed) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) throw new Error('REREAD_VALIDATION_FAILED: Bare line in generated results.env');
+    const rK = trimmed.substring(0, eqIdx);
+    const rV = trimmed.substring(eqIdx + 1);
+    if (rereadKv.has(rK)) throw new Error(`REREAD_VALIDATION_FAILED: Duplicate key "${rK}" in results.env`);
+    rereadKv.set(rK, rV);
+  }
+
+  if (rereadKv.get('SLICE4_E2_RESULT') !== (compositePass ? 'PASS_CANDIDATE' : 'FAIL')) {
+    throw new Error('REREAD_VALIDATION_FAILED: SLICE4_E2_RESULT mismatch on disk re-read');
+  }
+
+  console.log('✅ Canonical results.env written and verified via disk re-read.');
   return compositePass;
 }
 

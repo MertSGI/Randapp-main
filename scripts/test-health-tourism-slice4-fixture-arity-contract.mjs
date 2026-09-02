@@ -1,5 +1,5 @@
 // ============================================================================
-// HARDENED LEXICAL ARITY CONTRACT SCANNER (R9-R1)
+// HARDENED LEXICAL ARITY CONTRACT SCANNER (R9-R1.3)
 // File: scripts/test-health-tourism-slice4-fixture-arity-contract.mjs
 // Purpose:
 //   Lexical fail-closed scanner verifying column count vs value tuple count
@@ -72,6 +72,34 @@ export function tokenizeSql(sql, filename = 'test.sql') {
       continue;
     }
 
+    // Double quoted identifier "..."
+    if (char === '"') {
+      const startLine = line;
+      let val = '"';
+      i++;
+      let closed = false;
+      while (i < len) {
+        if (sql[i] === '\n') line++;
+        if (sql[i] === '"' && sql[i + 1] === '"') {
+          val += '""';
+          i += 2;
+        } else if (sql[i] === '"') {
+          val += '"';
+          i++;
+          closed = true;
+          break;
+        } else {
+          val += sql[i];
+          i++;
+        }
+      }
+      if (!closed) {
+        throw new Error(`UNCLOSED_DOUBLE_QUOTE at ${filename}:${startLine}`);
+      }
+      tokens.push({ type: 'IDENT', value: val, line: startLine });
+      continue;
+    }
+
     // Single quoted string '...'
     if (char === "'") {
       const startLine = line;
@@ -112,25 +140,18 @@ export function tokenizeSql(sql, filename = 'test.sql') {
           throw new Error(`UNCLOSED_DOLLAR_QUOTE ${tag} at ${filename}:${startLine}`);
         }
         const body = sql.substring(i, endIdx);
-        // Count lines inside dollar quote
         for (let k = 0; k < body.length; k++) {
           if (body[k] === '\n') line++;
         }
         i = endIdx + tag.length;
 
-        // Inspect body if it contains static INSERT statements!
-        if (/\bINSERT\s+INTO\b/i.test(body)) {
-          // If body contains dynamic EXECUTE with concatenation or variables, mark as UNSUPPORTED!
-          if (/\bEXECUTE\b\s+[^';]+/i.test(body) && !/\bEXECUTE\b\s+'[^']+'/i.test(body)) {
-            tokens.push({ type: 'UNSUPPORTED_DYNAMIC_EXECUTE', value: body, line: startLine });
-          } else {
-            try {
-              const innerTokens = tokenizeSql(body, `${filename}:DO_BLOCK`);
-              tokens.push(...innerTokens);
-            } catch (err) {
-              // Fail closed! Do NOT convert parser failure into opaque success DOLLAR_STRING!
-              throw new Error(`FAIL_CLOSED_DOLLAR_PARSE_ERROR at ${filename}:${startLine}: ${err.message}`);
-            }
+        // Recursively inspect body if it contains static INSERT or EXECUTE
+        if (/\bINSERT\s+INTO\b/i.test(body) || /\bEXECUTE\b/i.test(body)) {
+          try {
+            const innerTokens = tokenizeSql(body, `${filename}:DO_BLOCK`);
+            tokens.push(...innerTokens);
+          } catch (err) {
+            throw new Error(`FAIL_CLOSED_DOLLAR_PARSE_ERROR at ${filename}:${startLine}: ${err.message}`);
           }
         } else {
           tokens.push({ type: 'DOLLAR_STRING', value: body, line: startLine });
@@ -215,22 +236,59 @@ export function parseAndVerifyInsertStatements(tokens, filename) {
   while (idx < len) {
     const t = tokens[idx];
 
-    if (t.type === 'UNSUPPORTED_DYNAMIC_EXECUTE') {
-      unsupportedCount++;
-      console.error(`❌ ARITY UNSUPPORTED [${filename}:${t.line}]: Dynamic SQL EXECUTE statement cannot be deterministically verified.`);
-      idx++;
-      continue;
+    // Handle EXECUTE statements recursively or fail closed if dynamic
+    if (t.type === 'WORD' && t.value.toUpperCase() === 'EXECUTE') {
+      const execLine = t.line;
+      if (idx + 1 < len && tokens[idx + 1].type === 'STRING') {
+        const rawSqlStr = tokens[idx + 1].value;
+        const unquotedSql = rawSqlStr.substring(1, rawSqlStr.length - 1).replace(/''/g, "'");
+
+        // Check if there is concatenation || or variables after string
+        let isDynamic = false;
+        let p = idx + 2;
+        while (p < len && tokens[p].type !== 'PUNCT' || tokens[p]?.value !== ';') {
+          if (tokens[p].type === 'WORD' && tokens[p].value === '||') { isDynamic = true; break; }
+          if (tokens[p].type === 'WORD' && tokens[p].value.toUpperCase() === 'USING') { isDynamic = true; break; }
+          p++;
+        }
+
+        if (isDynamic) {
+          unsupportedCount++;
+          console.error(`❌ ARITY UNSUPPORTED [${filename}:${execLine}]: Dynamic EXECUTE string concatenation/USING cannot be deterministically verified.`);
+        } else {
+          try {
+            const innerTokens = tokenizeSql(unquotedSql, `${filename}:EXECUTE`);
+            const res = parseAndVerifyInsertStatements(innerTokens, `${filename}:EXECUTE`);
+            checkedInserts += res.checkedInserts;
+            nonValuesInserts += res.nonValuesInserts;
+            mismatchOccurrences += res.mismatchOccurrences;
+            unsupportedCount += res.unsupportedCount;
+          } catch {
+            unsupportedCount++;
+          }
+        }
+      } else {
+        // EXECUTE with variable or format(...)
+        unsupportedCount++;
+        console.error(`❌ ARITY UNSUPPORTED [${filename}:${execLine}]: Dynamic EXECUTE expression cannot be statically recovered.`);
+      }
     }
 
     if (t.type === 'WORD' && t.value.toUpperCase() === 'INSERT') {
       const insertLine = t.line;
       if (idx + 1 < len && tokens[idx + 1].type === 'WORD' && tokens[idx + 1].value.toUpperCase() === 'INTO') {
         let cur = idx + 2;
-        if (cur < len && tokens[cur].type === 'WORD') {
+        if (cur < len && (tokens[cur].type === 'WORD' || tokens[cur].type === 'IDENT')) {
           const tableName = tokens[cur].value;
           cur++;
 
-          // Explicit column list (cols...)
+          // Optional schema qualifier public.tablename
+          if (cur < len && tokens[cur].type === 'WORD' && tokens[cur].value === '.') {
+            cur++;
+            if (cur < len && (tokens[cur].type === 'WORD' || tokens[cur].type === 'IDENT')) cur++;
+          }
+
+          // Check if explicit column list (cols...) is present
           if (cur < len && tokens[cur].type === 'PUNCT' && tokens[cur].value === '(') {
             cur++;
             const colTokens = [];
@@ -246,11 +304,11 @@ export function parseAndVerifyInsertStatements(tokens, filename) {
             const expectedArity = declaredCols.length;
 
             // Look for VALUES or SELECT or DEFAULT
-            while (cur < len && tokens[cur].type === 'WORD' && !['VALUES', 'SELECT', 'DEFAULT'].includes(tokens[cur].value.toUpperCase())) {
+            while (cur < len && (tokens[cur].type === 'WORD' || tokens[cur].type === 'IDENT') && !['VALUES', 'SELECT', 'DEFAULT'].includes(tokens[cur].value.toUpperCase())) {
               cur++;
             }
 
-            if (cur < len && tokens[cur].type === 'WORD') {
+            if (cur < len && (tokens[cur].type === 'WORD' || tokens[cur].type === 'IDENT')) {
               const kw = tokens[cur].value.toUpperCase();
               if (kw === 'SELECT' || kw === 'DEFAULT') {
                 nonValuesInserts++;
@@ -297,6 +355,15 @@ export function parseAndVerifyInsertStatements(tokens, filename) {
                   }
                 }
               }
+            }
+          } else {
+            // INSERT INTO table VALUES (...) without column list -> UNSUPPORTED!
+            while (cur < len && tokens[cur].type === 'WORD' && !['VALUES', 'SELECT', 'DEFAULT'].includes(tokens[cur].value.toUpperCase())) {
+              cur++;
+            }
+            if (cur < len && tokens[cur].type === 'WORD' && tokens[cur].value.toUpperCase() === 'VALUES') {
+              unsupportedCount++;
+              console.error(`❌ ARITY UNSUPPORTED [${filename}:${insertLine}] Table ${tableName}: INSERT VALUES without explicit column list.`);
             }
           }
         }
