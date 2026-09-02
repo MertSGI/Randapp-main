@@ -1,0 +1,83 @@
+# Architectural & Product Decision Register
+
+## DECISION-001: Visible Product Brand & Domain Strategy
+- **Status**: ACCEPTED
+- **Decision**: LARİ is the canonical visible product brand for the multi-tenant SaaS platform.
+- **Domain Strategy**: `randevulari.com` is the primary production domain strategy for tenant public links, manage URLs, and customer booking portals.
+- **Legacy Context**: The repository name `MertSGI/Randapp-main` remains the legacy git path identifier.
+
+## DECISION-002: Master Delivery Train Priority
+- **Status**: ACCEPTED
+- **Decision**: All platform engineering strictly follows the master delivery sequence:
+  `LARİ CORE -> PACKAGE / CUSTOMER CUSTOMIZATION -> LARİ CLINIC -> LARİ HEALTH TOURISM -> FINAL DELIVERY`.
+- **Constraint**: Clinic and Health Tourism are downstream package extensions on the same core, NOT separate standalone products. UI V2 is a parallel frontend lane, NOT a separate product roadmap phase.
+
+## DECISION-003: Commercial Payment Isolation & Control State
+- **Status**: ACCEPTED
+- **Decision**: `paymentless_pilot` and `payment-disabled` mode is a temporary operational control state for pilot onboarding and technical acceptance, NOT a final architectural commitment.
+- **Provider Activation**: External payment gateway (Iyzico) activation and subscription charges remain explicitly disabled until production cutover.
+
+## DECISION-004: Real Human Customer UAT Non-Blocking Policy
+- **Status**: ACCEPTED
+- **Decision**: Real external human participant UAT is a deferred, non-blocking field validation step and is NOT on the critical path for technical acceptance of release candidates.
+
+## DECISION-005: External Infrastructure Launch Dependencies
+- **Status**: ACCEPTED
+- **Decision**: External provider activation (SMS/Email providers) and wildcard DNS configuration (`*.randevulari.com`) are tracked external launch dependencies required before final production deployment.
+
+## DECISION-006: AI Agent Roadmap Authority Boundary
+- **Status**: ACCEPTED
+- **Decision**: Coding assistants and AI agents orchestrate execution against the approved project control plane. Agents NEVER synthesize or invent new canonical roadmap phases (e.g., P2B).
+
+## DECISION-007: CORE-RC.4 Closure & Main Delivery Train Advancement
+- **Status**: ACCEPTED
+- **Decision**: Milestone `CORE-RC.4` is closed as proven (`CLOSED_PROVEN` at level `E2_EXECUTABLE_EXACT_SHA_CI`, exact product SHA `e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a`, GitHub Actions Run `32134598853`). Cross-layer `pending_onboarding` subscription status contract alignment is verified and frozen. The main product delivery train is advanced to `Package/Customer Customization`.
+
+## DECISION-008: Package Customization Slice 2 Commercial Source-of-Truth Alignment Closure
+- **Status**: ACCEPTED
+- **Decision**: Milestone `Package Customization Commercial Source-of-Truth Alignment` (Slice 2) is closed as proven (`CLOSED_PROVEN` at level `E2_EXECUTABLE_EXACT_SHA_CI`, exact product SHA `65a53427f52c21e60aa8f92e02a17d693a201601`, evidence branch `ci/package-commercial-source-of-truth-exact-sha-r1-20260820` at `a337d85276728beffbec4a129aefc703328624d2`, GitHub Actions Run `32363490123`). The two-commit evidence lineage is accepted (intermediate `7c14a998` superseded by final exact-SHA product binding `a337d852`). Package / Customer Customization overall status remains `IN_PROGRESS`.
+
+## DECISION-009: Package / Customer Customization Phase Closure & Advancement to LARİ Clinic
+- **Status**: ACCEPTED
+- **Decision**: The integrated Package / Customer Customization phase (Phase 2) is closed as proven (`CLOSED_PROVEN` at level `E2_EXECUTABLE_EXACT_SHA_CI`, exact product SHA `65a53427f52c21e60aa8f92e02a17d693a201601`, GitHub Actions Run `32363490123`). Both defined implementation slices (Branch Server Authority and Commercial Source-of-Truth Alignment) are proven together on the integrated baseline. No additional Package implementation slice is defined. The main product delivery train advances to `LARİ Clinic`. `LARİ Clinic` remains `NOT_STARTED` until its foundation materialization task is separately authorized. The frozen Package baseline must not be casually mutated after phase closure.
+
+## DECISION-010: LARİ Clinic Identity & Core Appointment Model Preservation Policy
+- **Status**: ACCEPTED
+- **Decision**: LARİ Clinic preserves the canonical platform identity-role and Core appointment-status models. Clinical practitioner permissions are represented through clinic_staff_profiles; clinical encounter lifecycle remains separate from Core appointment lifecycle; tenant_owner and super_admin receive no implicit clinical-content bypass.
+
+## DECISION-011: LARİ Clinic Dedicated Application Surface & Clinical Authorization Boundary
+- **Status**: ACCEPTED
+- **Decision**: LARİ Clinic uses a dedicated authenticated application surface separate from the owner Admin and Super Admin routes. tenant_owner and staff may reach the Clinic shell, but clinical-content loading and rendering is authorized by the server-derived clinic_get_my_context contract. super_admin receives no implicit Clinic workspace access. A tenant_owner without an active Clinic staff context is limited to Clinic setup operations and receives no clinical patient content.
+
+## DECISION-012: LARİ Clinic Core Milestone Formal Control-Plane Closure
+- **Status**: ACCEPTED
+- **Decision**: Milestone LARİ Clinic Core is formally closed as proven (`CLINIC_CORE_MILESTONE = CLOSED_PROVEN`, `CLINIC_BLOCK3_E3 = ACCEPTED_CLOSED_PROVEN`). Product SHA `008ebac4496d592d271d612713c437d316c416f0`, isolated Supabase acceptance project `miuecvkkmyvaciticwtm`, remote migrations 64 (`20260908`). All Clinic Blocks 1, 2, and 3 are closed and proven (`E2_EXECUTABLE_EXACT_SHA_CI` Run `32624729632` and `E3_ISOLATED_RUNTIME_E2E` read-only recapture `7E2954A3...`).
+
+## DECISION-013: Clinic AI Assist Speech-to-Text Carry-Forward & Human-in-the-Loop Architecture
+- **Status**: ACCEPTED
+- **Decision**: Speech-to-text assistive dictation is deferred (`CLINIC_AI_ASSIST_SPEECH_TO_TEXT = DEFERRED_CARRY_FORWARD`) as a non-blocking extension into the immediate next product slice `CLINIC_AI_ASSIST_V1`. Architecture hard safety rule: AI/transcription must NEVER directly persist a clinical note without explicit clinician approval (`audio -> transcription -> editable draft -> explicit approve/reject -> canonical clinic_save_encounter_note`). Clinician remains final author; no autonomous diagnosis, treatment, prescribing, or hidden clinical narrative in audit logs.
+
+## DECISION-014: Master Delivery Train Advancement to LARİ Health Tourism
+- **Status**: ACCEPTED
+- **Decision**: Main product delivery train advances to `LARİ Health Tourism` (`HEALTH_TOURISM_FOUNDATION`). Scope includes multilingual public/intake experience, source/agency attribution, Web AI Lead Agent, lead capture & scoring, conversation summary, coordinator workflow, and Clinic integration. AI remains assistive (not a doctor). No autonomous medical diagnosis, e-prescriptions, DICOM/PACS, or split payments unless separately authorized.
+
+## DECISION-015: LARİ Clinic AI Assist V1 Formal Control-Plane Closure
+- **Status**: ACCEPTED
+- **Decision**: Milestone LARİ Clinic AI Assist V1 is formally closed as proven (`CLOSED_PROVEN` at level `E3_ISOLATED_RUNTIME_E2E`). Product SHA `451081f2619f0342df2a8c64ae401dffb7697363`, evidence branch `ci/clinic-ai-assist-v1-groq-exact-sha-r2-20260825` at SHA `332c276b69f5d46524d57302a0ee62336380d8e8`, GitHub Actions Run `32840780417`, isolated Supabase acceptance project `miuecvkkmyvaciticwtm`, remote migrations 65 (`20260909_clinic_ai_assist_commercial_authority.sql`). Real Groq transcription (`whisper-large-v3-turbo`) and SOAP draft (`openai/gpt-oss-120b`) proven under practitioner authority (`can_write_clinical_notes`) with atomic commercial quota metering (+1 STT, +1 SOAP draft, total +2 delta verified), zero raw audio DB persistence, strict human approval boundary, and zero autonomous clinical completions.
+
+## DECISION-016: Health Tourism Canonical 37-Row Historical Scope Reconciliation Matrix Acceptance
+- **Status**: ACCEPTED
+- **Decision**: The canonical 37-row historical scope reconciliation matrix for LARİ Health Tourism, persisted in [HEALTH_TOURISM_SCOPE_MATRIX.md](./HEALTH_TOURISM_SCOPE_MATRIX.md), is formally ACCEPTED by the controller. The controller independently verified all 37 rows: 24 `COMMITTED` (IDs 3-26), 3 `DEFERRED` (IDs 27, 28, 37), 10 `EXPLICITLY_OUT_OF_SCOPE` (IDs 1, 2, 29-36), 0 `SUPERSEDED` within the numbered matrix (`NUMBERED_MATRIX_ROW_COUNT=37`, 0 missing, 0 duplicate, 0 invalid). Separate cross-cutting dispositions: Clinic `in_consultation` status (`SUPERSEDED`), owner-wide implicit clinical access (`SUPERSEDED`), autonomous medical AI (`EXPLICITLY_OUT_OF_SCOPE` safety exclusion). Main product delivery train is authorized for `HEALTH_TOURISM_FOUNDATION` implementation (`IMPLEMENTATION_START_ALLOWED=true`).
+
+## DECISION-017: Health Tourism Foundation Slice 1 Formal Control-Plane Closure & Advancement to Slice 2
+- **Status**: ACCEPTED
+- **Decision**: Milestone LARİ Health Tourism Foundation Slice 1 (Server Authority & Lead Domain Core) is formally closed as proven (`CLOSED_PROVEN` at level `E2_EXECUTABLE_EXACT_SHA_CI`). Exact product SHA `401dbf9a10ffccef594a19c7c1070a256ae279bf`, evidence branch `ci/health-tourism-foundation-slice1-exact-sha-r7-20260826` at SHA `93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7`, GitHub Actions Run `32996883374`, Job `98268377731`, Artifact `9616929855` (digest `sha256:b3cca4afd2620080d3b2237a811f3f99cd281e345a6bfcb90b193aa197e0680d`). Historical iteration lineage preserved (R1-R5 harness/parser/assertion defects, R6 stale checksum timing). R7 verified 66/66 canonical migrations, staff quota trigger alignment O -> D -> O, 32/32 pgTAP assertions, 17/17 named behavioral proofs, exact product SHA preservation, self-excluding SHA256SUMS manifest verification, and zero product file changes. Recorded non-blocking pre-production security follow-up (`OBSERVED_DEPENDENCY_AUDIT_RISK / REVIEW_REQUIRED_BEFORE_PRODUCTION`: 6 npm vulnerabilities reported during npm ci). The next canonical product gate is set to `HEALTH_TOURISM_SLICE2_MULTILINGUAL_PUBLIC_INTAKE_AND_SURFACE`.
+
+## DECISION-018: Health Tourism Multilingual Public Intake & Surface (Slice 2) Formal Closure
+- **Status**: ACCEPTED
+- **Decision**: Milestone LARİ Health Tourism Multilingual Public Intake & Surface (Slice 2) is formally closed as proven (`CLOSED_PROVEN` at level `E3_ISOLATED_RUNTIME_E2E`). Product SHA `6e8d423083d44510c8446c7a858c26d1555cac0c`, E2 evidence SHA `c89dab28e9784d400c8643ac9d57a132701a4d82`, GitHub Actions Run `33145277911`, Job `98764791271`, Artifact `9675517120` (digest `sha256:3cba7ccbf843bdf99995b34e2331a25c6fa2650bb812a7de89231db1dd42396d`), isolated Supabase acceptance project `miuecvkkmyvaciticwtm`. Verified 5-language parity (TR, EN, DE, RU, AR), RTL direction for AR, multi-step public intake UI, passport default OFF, ISO-2 country selection, tenant publication gate (ACTIVE + PUBLISHED allowed, INACTIVE/SUSPENDED/DRAFT blocked), source channel & agency attribution, cross-tenant isolation, post-submit PII form clearing, 20/20 E2 exact-SHA named checks, and direct real-browser lead creation (`d49baafa-c144-4a24-9482-804fcdeca4cb`). Arabic back-button copy polish recorded as `OPEN_NON_BLOCKING_COPY_POLISH`.
+
+## DECISION-019: Health Tourism Slice 3 Formal Control-Plane Closure
+- **Status**: ACCEPTED
+- **Decision**: Milestone LARİ Health Tourism Slice 3 (Lead Ops + Multilingual AI Assist + Handoff) is formally closed as proven (`HEALTH_TOURISM_SLICE3 = CLOSED_PROVEN`). Frozen product SHA `cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a`, E3 run `R31V12E3-20260901-B`, Acceptance Policy `R31-V12-E3-P2`, Manifest `R31-V12-E3-54` (SHA256 `8a8ff19ee507cbf847d8f2eb28d8b2d52ed66fa7f87601199086fb9631eefc81`), GitHub Actions Run `33505689808`, Job `99849061434`, Artifact `9799589930` (digest `sha256:e90ee0badaf3d14aa5118102e7240767fa4175d177b803b975a143a450c99374`), isolated Supabase project `miuecvkkmyvaciticwtm`, Edge Function `ht-ai-chat` v12. 54/54 manifest cases executed with 54 PASS, 0 fatal errors, 0 transient provider 503s, 5-language provider success (EN, TR, DE, RU, AR), transcript marker count=1, 0 prohibited surface leaks, 0 raw synthetic IP persistence, retention proof PASS, zero Clinic patient/encounter/appointment side-effects, safe cleanup (0 surviving synthetic leads/conversations/messages/outbox/rate buckets), and restoration of 3 E3 tenants to draft. Production status remains `NO_GO`. `AOS6_CONTROLLED_PILOT` remains `HOLD`.
+
