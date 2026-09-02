@@ -13,7 +13,7 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
         with:
-          ref: 'ca5cbeb9339314fdd5b94bcba121ba513dd7bace'
+          ref: 'f8036da81b4dda702b8b920a1e017487f69944bd'
 
       - name: Initialize Evidence Directory
         id: init_artifacts
@@ -584,11 +584,11 @@ jobs:
             const connCount = getOptMatch(/INDEPENDENT_DB_CONNECTION_COUNT=(\d+)/);
             const roundCount = getOptMatch(/CONCURRENCY_ROUND_COUNT=(\d+)/);
 
-            const r1Winner = getOptMatch(/Round 1 Winner:\s*(\w+)/);
+            const r1Winner = getOptMatch(/Round 1 Winner:\s*(ht|core)/);
             const r1Active = getOptMatch(/Round 1:\s*ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT\s*=\s*(\d+)/);
-            const r2Winner = getOptMatch(/Round 2 Winner:\s*(\w+)/);
+            const r2Winner = getOptMatch(/Round 2 Winner:\s*(ht|core)/);
             const r2Active = getOptMatch(/Round 2:\s*ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT\s*=\s*(\d+)/);
-            const r3Winner = getOptMatch(/Round 3 Winner:\s*(\w+)/);
+            const r3Winner = getOptMatch(/Round 3 Winner:\s*(ht|core)/);
             const r3Active = getOptMatch(/Round 3:\s*ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT\s*=\s*(\d+)/);
 
             const htWinCount = getOptMatch(/HT_WIN_COUNT=(\d+)/);
@@ -611,7 +611,7 @@ jobs:
             if (exitCode !== 0) {
               concurrencyResult = "FAIL";
               concurrencyFailReason = "HARNESS_EXIT_" + exitCode;
-            } else if (!rawConcRes || !lockBarrierResult || !bothBlockedResult || !connCount || !roundCount || !r1Winner || !r1Active || !r2Winner || !r2Active || !r3Winner || !r3Active || !htWinCount || !bothSuccess || !deadlock || !timeout || !losingCust || !losingProf || !losingAppt || !noEncounter || !noSideEffect) {
+            } else if (!rawConcRes || !lockBarrierResult || !bothBlockedResult || !connCount || !roundCount || !r1Winner || !r1Active || !r2Winner || !r2Active || !r3Winner || !r3Active || !htWinCount || !htWinProvResult || !bothSuccess || !deadlock || !timeout || !losingCust || !losingProf || !losingAppt || !noEncounter || !noSideEffect) {
               concurrencyResult = "FAIL";
               concurrencyFailReason = "CONCURRENCY_EVIDENCE_PARSE_INCOMPLETE";
             } else {
