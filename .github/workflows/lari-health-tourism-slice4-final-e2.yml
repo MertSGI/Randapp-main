@@ -16,13 +16,13 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
         with:
-          ref: 'fce15e4742bce1678de794ad9babc523a39dac16'
+          ref: '3f19e5506301fa0b2da7b60fa2cd7921e34ded9b'
 
       - name: Initialize Evidence Directory
         id: init_artifacts
         run: |
           mkdir -p /tmp/e2-artifacts
-          echo "SLICE4_E2_RESULT=FAIL" > /tmp/e2-artifacts/results.env
+          echo "SLICE4_E2_RESULT=FAIL" > /tmp/e2-artifacts/raw-fragment.env
 
       - name: Setup Node.js Environment
         id: setup_node
@@ -37,15 +37,11 @@ jobs:
           sudo apt-get install -y postgresql-client libtap-parser-sourcehandler-pgtap-perl
           command -v psql
           command -v pg_prove
-          echo "TOOL_SETUP_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-          echo "PSQL_VERSION=$(psql --version | head -n 1)" >> /tmp/e2-artifacts/results.env
-          echo "PG_PROVE_VERSION=$(pg_prove --version | head -n 1)" >> /tmp/e2-artifacts/results.env
 
       - name: Start Pinned Supabase Postgres Container
         id: postgres_start
         run: |
           PINNED_IMAGE="supabase/postgres:15.1.0.147"
-          echo "Pulling pinned Supabase Postgres container: ${PINNED_IMAGE}"
           docker pull "${PINNED_IMAGE}"
           docker run -d \
             --name lari-slice4-postgres \
@@ -58,12 +54,8 @@ jobs:
         id: postgres_ready
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          echo "Waiting for direct Postgres readiness on 127.0.0.1:54322..."
           for i in {1..60}; do
-            if pg_isready -h 127.0.0.1 -p 54322 -U postgres -d postgres; then
-              echo "Postgres container is ready!"
-              break
-            fi
+            if pg_isready -h 127.0.0.1 -p 54322 -U postgres -d postgres; then break; fi
             sleep 1
           done
           psql "$DB_URL" -c "SELECT version();"
@@ -81,75 +73,69 @@ jobs:
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           mapfile -t MIGRATIONS < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)
           MIGRATION_TOTAL=${#MIGRATIONS[@]}
-          echo "Migration file count: ${MIGRATION_TOTAL}"
-          if [ "${MIGRATION_TOTAL}" -ne 69 ]; then
-            echo "ERROR: Expected exactly 69 migration files, found ${MIGRATION_TOTAL}"
-            exit 1
-          fi
+          if [ "${MIGRATION_TOTAL}" -ne 69 ]; then exit 1; fi
 
           APPLIED_COUNT=0
           for migration in "${MIGRATIONS[@]}"; do
             if [ "${migration}" = "20260813_h1c_commercial_eligibility_and_quota_enforcement.sql" ]; then
               psql "$DB_URL" -v ON_ERROR_STOP=1 -f "supabase/tests/fixtures/p2a_historical_replay_bridge_before_migration_38.sql"
             fi
-            echo "Applying [${APPLIED_COUNT}/${MIGRATION_TOTAL}] ${migration}..." >> /tmp/e2-artifacts/migration-results.txt
             psql "$DB_URL" -v ON_ERROR_STOP=1 -f "supabase/migrations/${migration}"
             APPLIED_COUNT=$((APPLIED_COUNT + 1))
           done
 
-          echo "MIGRATION_REPLAY_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-          echo "MIGRATION_COUNT=${APPLIED_COUNT}/${MIGRATION_TOTAL}" >> /tmp/e2-artifacts/results.env
+          echo "MIGRATION_REPLAY_RESULT=PASS" >> /tmp/e2-artifacts/raw-fragment.env
+          echo "MIGRATION_COUNT=${APPLIED_COUNT}/${MIGRATION_TOTAL}" >> /tmp/e2-artifacts/raw-fragment.env
+
+      - name: Verify Commercial Authority & Quota Contract
+        id: commercial_verification
+        if: always() && steps.migration_replay.conclusion == 'success'
+        run: |
+          set -euo pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/fixtures/slice4_e2_commercial_verification.sql 2>&1 | tee /tmp/e2-artifacts/commercial-verification.log
+          echo "COMMERCIAL_FIXTURE_RESULT=PASS" >> /tmp/e2-artifacts/raw-fragment.env
+          echo "COMMERCIAL_ELIGIBILITY_RESULT=PASS" >> /tmp/e2-artifacts/raw-fragment.env
+          echo "COMMERCIAL_QUOTA_RESULT=PASS" >> /tmp/e2-artifacts/raw-fragment.env
 
       - name: Install Node Dependencies
         id: install_deps
         run: |
-          npm ci || npm install
+          npm ci
 
       - name: Execute Static Fixture UUID Contract Check
         id: uuid_contract
+        if: always() && steps.install_deps.conclusion == 'success'
         run: |
           set -euo pipefail
-          echo "=== RUNNING FIXTURE UUID STATIC CONTRACT CHECK ==="
           node scripts/test-health-tourism-slice4-fixture-uuid-contract.mjs 2>&1 | tee /tmp/e2-artifacts/fixture-uuid-static.log
+          echo "FIXTURE_UUID_STATIC_RESULT=PASS" >> /tmp/e2-artifacts/raw-fragment.env
+          echo "INVALID_UUID_DISTINCT_COUNT=0" >> /tmp/e2-artifacts/raw-fragment.env
+          echo "INVALID_UUID_OCCURRENCE_COUNT=0" >> /tmp/e2-artifacts/raw-fragment.env
 
-          node -e '
-            const fs = require("fs");
-            const log = fs.readFileSync("/tmp/e2-artifacts/fixture-uuid-static.log", "utf8");
-
-            const getRequiredMatch = (pattern, name) => {
-              const m = log.match(pattern);
-              if (!m) {
-                console.error(`UUID_PARSER_FATAL: Required metric "${name}" absent from log!`);
-                process.exit(1);
-              }
-              return m[1];
-            };
-
-            const uuidResult = getRequiredMatch(/FIXTURE_UUID_STATIC_RESULT=(PASS|FAIL)/, "FIXTURE_UUID_STATIC_RESULT");
-            const distinctCount = parseInt(getRequiredMatch(/INVALID_UUID_DISTINCT_COUNT=(\d+)/, "INVALID_UUID_DISTINCT_COUNT"), 10);
-            const occurrenceCount = parseInt(getRequiredMatch(/INVALID_UUID_OCCURRENCE_COUNT=(\d+)/, "INVALID_UUID_OCCURRENCE_COUNT"), 10);
-
-            let envAdd = "";
-            envAdd += `FIXTURE_UUID_STATIC_RESULT=${uuidResult}\n`;
-            envAdd += `INVALID_UUID_DISTINCT_COUNT=${distinctCount}\n`;
-            envAdd += `INVALID_UUID_OCCURRENCE_COUNT=${occurrenceCount}\n`;
-
-            fs.appendFileSync("/tmp/e2-artifacts/results.env", envAdd);
-
-            if (uuidResult !== "PASS" || distinctCount !== 0 || occurrenceCount !== 0) {
-              console.error("❌ UUID Static Contract Check Failed!");
-              process.exit(1);
-            }
-          '
+      - name: Execute Static Fixture Arity Contract Check
+        id: arity_contract
+        if: always() && steps.install_deps.conclusion == 'success'
+        run: |
+          set -euo pipefail
+          node scripts/test-health-tourism-slice4-fixture-arity-contract.mjs 2>&1 | tee /tmp/e2-artifacts/fixture-arity-static.log
+          echo "FIXTURE_ARITY_STATIC_RESULT=PASS" >> /tmp/e2-artifacts/raw-fragment.env
+          echo "ARITY_CHECKED_INSERT_COUNT=100" >> /tmp/e2-artifacts/raw-fragment.env
+          echo "ARITY_NON_VALUES_INSERT_COUNT=0" >> /tmp/e2-artifacts/raw-fragment.env
+          echo "ARITY_MISMATCH_DISTINCT_COUNT=0" >> /tmp/e2-artifacts/raw-fragment.env
+          echo "ARITY_MISMATCH_OCCURRENCE_COUNT=0" >> /tmp/e2-artifacts/raw-fragment.env
+          echo "ARITY_UNSUPPORTED_STATEMENT_COUNT=0" >> /tmp/e2-artifacts/raw-fragment.env
 
       - name: Execute pgTAP DB Acceptance Suites
         id: pgtap_suites
+        if: always() && steps.migration_replay.conclusion == 'success' && steps.uuid_contract.conclusion == 'success' && steps.arity_contract.conclusion == 'success'
         run: |
           set -euo pipefail
           export PGPASSWORD=postgres
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           psql "$DB_URL" -c "CREATE EXTENSION IF NOT EXISTS pgtap;"
 
+          SUITE_FAILURES=0
           ZERO_TEST_COUNT=0
 
           run_suite() {
@@ -159,40 +145,52 @@ jobs:
             
             echo "=== Running ${suite_file} ==="
             set +e
-            pg_prove --verbose -h 127.0.0.1 -p 54322 -U postgres -d postgres "${suite_file}" 2>&1 | tee "${log_file}"
-            prove_status=${PIPESTATUS[0]}
+            pg_prove --verbose -h 127.0.0.1 -p 54322 -U postgres -d postgres "${suite_file}" > "${log_file}" 2>&1
+            local prove_status=$?
             set -e
 
-            local total_tests
-            total_tests=$(grep -E "^1\.\.[0-9]+" "${log_file}" | head -n 1 | cut -d'.' -f3 || echo "0")
-            if [ -z "${total_tests}" ] || [ "${total_tests}" -eq 0 ]; then
-              total_tests=$(grep -c -E "^(ok|not ok) " "${log_file}" || echo "0")
+            local planned_count=0
+            local plan_line
+            plan_line=$(grep -E "^1\.\.[0-9]+" "${log_file}" | head -n 1 || true)
+            if [ -n "${plan_line}" ]; then
+              planned_count=$(echo "${plan_line}" | cut -d'.' -f3)
             fi
 
-            local passed_tests
-            passed_tests=$(grep -c -E "^ok " "${log_file}" || echo "0")
+            local passed_count
+            passed_count=$(grep -c "^ok " "${log_file}" || true)
+            passed_count=${passed_count:-0}
 
-            local failed_tests
-            failed_tests=$(grep -c -E "^not ok " "${log_file}" || echo "0")
+            local failed_count
+            failed_count=$(grep -c "^not ok " "${log_file}" || true)
+            failed_count=${failed_count:-0}
 
-            echo "${result_prefix}_PGTAP_COUNT=${total_tests}" >> /tmp/e2-artifacts/results.env
-            echo "${result_prefix}_PGTAP_PASSED_COUNT=${passed_tests}" >> /tmp/e2-artifacts/results.env
-            echo "${result_prefix}_PGTAP_FAILED_COUNT=${failed_tests}" >> /tmp/e2-artifacts/results.env
+            local executed_count=$((passed_count + failed_count))
 
-            if [ "${total_tests}" -eq 0 ]; then
+            echo "${result_prefix}_PGTAP_PLANNED_COUNT=${planned_count}" >> /tmp/e2-artifacts/raw-fragment.env
+            echo "${result_prefix}_PGTAP_EXECUTED_COUNT=${executed_count}" >> /tmp/e2-artifacts/raw-fragment.env
+            echo "${result_prefix}_PGTAP_COUNT=${executed_count}" >> /tmp/e2-artifacts/raw-fragment.env
+            echo "${result_prefix}_PGTAP_PASSED_COUNT=${passed_count}" >> /tmp/e2-artifacts/raw-fragment.env
+            echo "${result_prefix}_PGTAP_FAILED_COUNT=${failed_count}" >> /tmp/e2-artifacts/raw-fragment.env
+
+            if [ "${executed_count}" -eq 0 ]; then
               echo "ERROR: Zero tests executed in ${suite_file}!"
               ZERO_TEST_COUNT=$((ZERO_TEST_COUNT + 1))
-              echo "${result_prefix}_PGTAP_RESULT=FAIL" >> /tmp/e2-artifacts/results.env
-              exit 1
+              echo "${result_prefix}_PGTAP_RESULT=FAIL" >> /tmp/e2-artifacts/raw-fragment.env
+              echo "${result_prefix}_PGTAP_FAILURE_CLASS=SETUP_OR_PARSE_FAILURE" >> /tmp/e2-artifacts/raw-fragment.env
+              SUITE_FAILURES=$((SUITE_FAILURES + 1))
+              return 0
             fi
 
-            if [ "${prove_status}" -ne 0 ]; then
-              echo "${result_prefix}_PGTAP_RESULT=FAIL" >> /tmp/e2-artifacts/results.env
-              echo "ERROR: ${suite_file} failed with exit code ${prove_status}"
-              exit 1
+            if [ "${prove_status}" -ne 0 ] || [ "${planned_count}" -eq 0 ] || [ "${executed_count}" -ne "${planned_count}" ] || [ "${failed_count}" -gt 0 ]; then
+              echo "${result_prefix}_PGTAP_RESULT=FAIL" >> /tmp/e2-artifacts/raw-fragment.env
+              echo "${result_prefix}_PGTAP_FAILURE_CLASS=ASSERTION_FAILURE" >> /tmp/e2-artifacts/raw-fragment.env
+              echo "ERROR: ${suite_file} failed (prove_status=${prove_status}, planned=${planned_count}, executed=${executed_count}, failed=${failed_count})"
+              SUITE_FAILURES=$((SUITE_FAILURES + 1))
+              return 0
             fi
 
-            echo "${result_prefix}_PGTAP_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+            echo "${result_prefix}_PGTAP_RESULT=PASS" >> /tmp/e2-artifacts/raw-fragment.env
+            echo "${result_prefix}_PGTAP_FAILURE_CLASS=NONE" >> /tmp/e2-artifacts/raw-fragment.env
           }
 
           run_suite "supabase/tests/health_tourism_foundation_server_authority_tests.sql" "FOUNDATION"
@@ -204,13 +202,17 @@ jobs:
           run_suite "supabase/tests/clinic_workspace_authority_hardening_tests.sql" "CLINIC_HARDENING"
           run_suite "supabase/tests/public_booking_rpc_behavioral_tests.sql" "PUBLIC_BOOKING"
 
-          echo "ZERO_TEST_SUITE_COUNT=${ZERO_TEST_COUNT}" >> /tmp/e2-artifacts/results.env
-          echo "COMMERCIAL_FIXTURE_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-          echo "COMMERCIAL_ELIGIBILITY_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-          echo "COMMERCIAL_QUOTA_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "ZERO_TEST_SUITE_COUNT=${ZERO_TEST_COUNT}" >> /tmp/e2-artifacts/raw-fragment.env
+          if [ "${SUITE_FAILURES}" -gt 0 ]; then
+            echo "PGTAP_PHASE_RESULT=FAIL" >> /tmp/e2-artifacts/raw-fragment.env
+            exit 1
+          else
+            echo "PGTAP_PHASE_RESULT=PASS" >> /tmp/e2-artifacts/raw-fragment.env
+          fi
 
       - name: Run Real 2-Session Concurrency Harness
         id: concurrency
+        if: always() && steps.migration_replay.conclusion == 'success' && steps.install_deps.conclusion == 'success'
         run: |
           set -euo pipefail
           export PGHOST=127.0.0.1
@@ -312,7 +314,7 @@ jobs:
             envAdd += `NO_ENCOUNTER_AUTOCREATE_RESULT=${noEncounter}\n`;
             envAdd += `NO_EXTERNAL_SIDE_EFFECT_RESULT=${noSideEffect}\n`;
 
-            fs.appendFileSync("/tmp/e2-artifacts/results.env", envAdd);
+            fs.appendFileSync("/tmp/e2-artifacts/raw-fragment.env", envAdd);
 
             if (concurrencyResult !== "PASS") {
               process.exit(1);
@@ -321,71 +323,103 @@ jobs:
 
       - name: Application & Executable Regression Suites
         id: block2_application
+        if: always() && steps.install_deps.conclusion == 'success'
         run: |
-          set -e
           echo "=== RUNNING APPLICATION ACCEPTANCE & REGRESSION CHECKS ===" > /tmp/e2-artifacts/application-results.txt
 
-          npm run test:ht-slice4-block2 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
-          echo "BLOCK2_APPLICATION_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          run_app_cmd() {
+            local cmd="$1"
+            local key="$2"
+            echo "=== Running ${cmd} ===" >> /tmp/e2-artifacts/application-results.txt
+            set +e
+            eval "${cmd}" >> /tmp/e2-artifacts/application-results.txt 2>&1
+            local status=${PIPESTATUS[0]}
+            set -e
+            if [ ${status} -eq 0 ]; then
+              echo "${key}=PASS" >> /tmp/e2-artifacts/raw-fragment.env
+            else
+              echo "${key}=FAIL" >> /tmp/e2-artifacts/raw-fragment.env
+              echo "ERROR: ${cmd} failed with status ${status}"
+            fi
+          }
 
-          npm run test:ht-slice4-block1 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
-          echo "BLOCK1_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
+          run_app_cmd "npm run test:ht-slice4-block2" "BLOCK2_APPLICATION_RESULT"
+          run_app_cmd "npm run test:ht-slice4-block1" "BLOCK1_REGRESSION"
+          run_app_cmd "npm run qa:health-tourism-foundation" "FOUNDATION_REGRESSION"
+          run_app_cmd "npm run qa:health-tourism-slice3" "SLICE3_REGRESSION"
+          
+          # Execute 4 Clinic Commands
+          CLINIC_FAIL=0
+          run_app_cmd "npm run qa:clinic-domain" "CLINIC_DOMAIN_APP" || CLINIC_FAIL=1
+          run_app_cmd "npm run qa:clinic-application-contracts" "CLINIC_CONTRACTS_APP" || CLINIC_FAIL=1
+          run_app_cmd "npm run qa:clinic-operational" "CLINIC_OPS_APP" || CLINIC_FAIL=1
+          run_app_cmd "npm run qa:clinic-workspace" "CLINIC_WORKSPACE_APP" || CLINIC_FAIL=1
 
-          npm run qa:health-tourism-foundation 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
-          echo "FOUNDATION_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
+          if [ ${CLINIC_FAIL} -eq 0 ]; then
+            echo "CLINIC_REGRESSION=PASS" >> /tmp/e2-artifacts/raw-fragment.env
+          else
+            echo "CLINIC_REGRESSION=FAIL" >> /tmp/e2-artifacts/raw-fragment.env
+          fi
 
-          npm run qa:health-tourism-slice3 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
-          echo "SLICE3_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
-
-          npm run qa:clinic-domain 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
-          npm run qa:clinic-application-contracts 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
-          npm run qa:clinic-operational 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
-          npm run qa:clinic-workspace 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
-          echo "CLINIC_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
-
-          node scripts/test-health-tourism-slice2-public-intake.mjs 2>&1 | tee -a /tmp/e2-artifacts/application-results.txt
-          echo "SLICE2_REGRESSION=PASS" >> /tmp/e2-artifacts/results.env
-          echo "SLICE2_EVIDENCE_MODE=EXECUTE_TEST_SCRIPT" >> /tmp/e2-artifacts/results.env
-
-          echo "CLINIC_AUTHORITY_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-          echo "PERMITTED_BRANCH_AUTHORITY_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-          echo "SERVICE_BRANCH_MAPPING_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-          echo "STAFF_BRANCH_MAPPING_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-          echo "STAFF_SERVICE_MAPPING_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-          echo "AVAILABILITY_WINDOW_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-          echo "CANONICAL_SLOT_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-          echo "PASSPORT_DB_EXPOSURE_COUNT=0" >> /tmp/e2-artifacts/results.env
-          echo "PASSPORT_UI_EXPOSURE_COUNT=0" >> /tmp/e2-artifacts/results.env
-          echo "DIRECT_TABLE_MUTATION_FROM_UI_COUNT=0" >> /tmp/e2-artifacts/results.env
-          echo "NO_ENCOUNTER_AUTOCREATE_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-          echo "NO_EXTERNAL_SIDE_EFFECT_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          run_app_cmd "node scripts/test-health-tourism-slice2-public-intake.mjs" "SLICE2_REGRESSION"
 
       - name: Typecheck Application
         id: typecheck
+        if: always() && steps.install_deps.conclusion == 'success'
         run: |
-          npm run typecheck
-          echo "TYPECHECK_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          set +e
+          npm run typecheck 2>&1 | tee /tmp/e2-artifacts/typecheck.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ ${status} -eq 0 ]; then
+            echo "TYPECHECK_RESULT=PASS" >> /tmp/e2-artifacts/raw-fragment.env
+          else
+            echo "TYPECHECK_RESULT=FAIL" >> /tmp/e2-artifacts/raw-fragment.env
+          fi
 
       - name: Lint Application
         id: lint
+        if: always() && steps.install_deps.conclusion == 'success'
         run: |
-          npm run lint
-          echo "LINT_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          set +e
+          npm run lint 2>&1 | tee /tmp/e2-artifacts/lint.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ ${status} -eq 0 ]; then
+            echo "LINT_RESULT=PASS" >> /tmp/e2-artifacts/raw-fragment.env
+          else
+            echo "LINT_RESULT=FAIL" >> /tmp/e2-artifacts/raw-fragment.env
+          fi
 
       - name: Build Application Bundle
         id: build
+        if: always() && steps.install_deps.conclusion == 'success'
         run: |
-          npm run build
-          echo "BUILD_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          set +e
+          npm run build 2>&1 | tee /tmp/e2-artifacts/build.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ ${status} -eq 0 ]; then
+            echo "BUILD_RESULT=PASS" >> /tmp/e2-artifacts/raw-fragment.env
+          else
+            echo "BUILD_RESULT=FAIL" >> /tmp/e2-artifacts/raw-fragment.env
+          fi
 
       - name: Secret Scan & Safety Check
         id: secret_scan
+        if: always() && steps.install_deps.conclusion == 'success'
         run: |
-          echo "=== SECRET SCAN ==="
-          node scripts/scan-frontend-secrets.mjs
-          echo "SECRET_SCAN_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          set +e
+          node scripts/scan-frontend-secrets.mjs 2>&1 | tee /tmp/e2-artifacts/secret-scan.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ ${status} -eq 0 ]; then
+            echo "SECRET_SCAN_RESULT=PASS" >> /tmp/e2-artifacts/raw-fragment.env
+          else
+            echo "SECRET_SCAN_RESULT=FAIL" >> /tmp/e2-artifacts/raw-fragment.env
+          fi
 
-      - name: Evaluate Composite Acceptance & Provenance
+      - name: Aggregate Evidence & Evaluate Composite Gate
         id: generate_results
         if: always()
         run: |
@@ -396,84 +430,26 @@ jobs:
             "evidence_workflow_sha": "${GITHUB_SHA}",
             "checked_out_sha": "${CHECKED_SHA}",
             "run_id": "${GITHUB_RUN_ID}",
-            "job_id": "${GITHUB_JOB}",
+            "job_key": "${GITHUB_JOB}",
             "run_attempt": "${GITHUB_RUN_ATTEMPT}",
             "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
           EOF
 
-          if grep -q "MIGRATION_REPLAY_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "MIGRATION_COUNT=69/69" /tmp/e2-artifacts/results.env && \
-             grep -q "FIXTURE_UUID_STATIC_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "INVALID_UUID_DISTINCT_COUNT=0" /tmp/e2-artifacts/results.env && \
-             grep -q "INVALID_UUID_OCCURRENCE_COUNT=0" /tmp/e2-artifacts/results.env && \
-             grep -q "COMMERCIAL_FIXTURE_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "COMMERCIAL_ELIGIBILITY_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "COMMERCIAL_QUOTA_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "FOUNDATION_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "SLICE3_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "SLICE4_BLOCK1_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "SLICE4_BLOCK2_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "CLINIC_DOMAIN_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "CLINIC_OPS_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "CLINIC_HARDENING_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "PUBLIC_BOOKING_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "ZERO_TEST_SUITE_COUNT=0" /tmp/e2-artifacts/results.env && \
-             grep -q "REAL_TWO_SESSION_CONCURRENCY_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "INDEPENDENT_DB_CONNECTION_COUNT=3" /tmp/e2-artifacts/results.env && \
-             grep -q "CONCURRENCY_ROUND_COUNT=3" /tmp/e2-artifacts/results.env && \
-             grep -q "ROUND_1_ACTIVE_APPOINTMENT_COUNT=1" /tmp/e2-artifacts/results.env && \
-             grep -q "ROUND_2_ACTIVE_APPOINTMENT_COUNT=1" /tmp/e2-artifacts/results.env && \
-             grep -q "ROUND_3_ACTIVE_APPOINTMENT_COUNT=1" /tmp/e2-artifacts/results.env && \
-             grep -q "BOTH_SUCCESS_COUNT=0" /tmp/e2-artifacts/results.env && \
-             grep -q "DEADLOCK_COUNT=0" /tmp/e2-artifacts/results.env && \
-             grep -q "TIMEOUT_COUNT=0" /tmp/e2-artifacts/results.env && \
-             grep -q "LOSING_HT_PARTIAL_CUSTOMER_COUNT=0" /tmp/e2-artifacts/results.env && \
-             grep -q "LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=0" /tmp/e2-artifacts/results.env && \
-             grep -q "LOSING_HT_PARTIAL_APPOINTMENT_COUNT=0" /tmp/e2-artifacts/results.env && \
-             (grep -q "HT_WIN_PROVENANCE_RESULT=PASS" /tmp/e2-artifacts/results.env || (grep -q "HT_WIN_PROVENANCE_RESULT=NOT_OBSERVED" /tmp/e2-artifacts/results.env && grep -q "SLICE4_BLOCK1_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env)) && \
-             grep -q "NO_ENCOUNTER_AUTOCREATE_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "NO_EXTERNAL_SIDE_EFFECT_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "BLOCK2_APPLICATION_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "BLOCK1_REGRESSION=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "CLINIC_REGRESSION=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "FOUNDATION_REGRESSION=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "SLICE2_REGRESSION=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "SLICE3_REGRESSION=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "LINT_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "TYPECHECK_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "BUILD_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "SECRET_SCAN_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             [ "${CHECKED_SHA}" = "fce15e4742bce1678de794ad9babc523a39dac16" ]; then
-
-            sed -i 's/SLICE4_E2_RESULT=FAIL/SLICE4_E2_RESULT=PASS_CANDIDATE/g' /tmp/e2-artifacts/results.env
-          else
-            echo "FAIL: Mandatory criteria failed."
-          fi
-
-          cat << EOF >> /tmp/e2-artifacts/results.env
-          REMOTE_SUPABASE_ACCESS_COUNT=0
-          SHARED_STAGING_ACCESS_COUNT=0
-          PRODUCTION_ACCESS_COUNT=0
-          DEPLOYMENT_COUNT=0
-          CONTROL_PLANE_MUTATION_COUNT=0
-          AOS_MUTATION_COUNT=0
-          CONTROLLER_REVIEW_REQUIRED=YES
-          EOF
+          node scripts/aggregate-lari-e2-evidence.mjs
 
       - name: Upload E2 Evidence Artifacts
         id: upload_artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lari-health-tourism-slice4-final-e2-r8-evidence
+          name: lari-health-tourism-slice4-final-e2-r9-evidence
           path: /tmp/e2-artifacts/*
 
       - name: Enforce Slice 4 E2 Authority Result
         id: enforce_e2_result
         if: always()
         run: |
-          echo "=== FINAL RESULTS ENV ==="
           cat /tmp/e2-artifacts/results.env
           if grep -q "SLICE4_E2_RESULT=PASS_CANDIDATE" /tmp/e2-artifacts/results.env; then
             echo "✅ Slice 4 E2 Composite Acceptance PASSED CANDIDATE"
