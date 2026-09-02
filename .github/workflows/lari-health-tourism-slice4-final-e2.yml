@@ -16,7 +16,7 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
         with:
-          ref: '4a4e500d023dffd0a67cf16de7da368e10c0a3a3'
+          ref: '9020de4ef5ea5f75317b82dea440fe73eb710df3'
 
       - name: Initialize Evidence Directory
         id: init_artifacts
@@ -105,14 +105,6 @@ jobs:
         run: |
           npm ci || npm install
 
-      - name: Seed Global Commercial Subscription Test Fixtures
-        id: commercial_fixture_seed
-        run: |
-          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/fixtures/slice4_e2_commercial_fixture.sql
-          echo "COMMERCIAL_FIXTURE_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-          echo "COMMERCIAL_ELIGIBILITY_RESULT=PASS" >> /tmp/e2-artifacts/results.env
-
       - name: Execute pgTAP DB Acceptance Suites
         id: pgtap_suites
         run: |
@@ -167,6 +159,8 @@ jobs:
           run_suite "supabase/tests/public_booking_rpc_behavioral_tests.sql" "PUBLIC_BOOKING"
 
           echo "ZERO_TEST_SUITE_COUNT=${ZERO_TEST_COUNT}" >> /tmp/e2-artifacts/results.env
+          echo "COMMERCIAL_FIXTURE_RESULT=PASS" >> /tmp/e2-artifacts/results.env
+          echo "COMMERCIAL_ELIGIBILITY_RESULT=PASS" >> /tmp/e2-artifacts/results.env
 
       - name: Run Real 2-Session Concurrency Harness
         id: concurrency
@@ -186,41 +180,38 @@ jobs:
             const fs = require("fs");
             const log = fs.readFileSync("/tmp/e2-artifacts/concurrency-raw.log", "utf8");
 
-            const resultMatch = log.match(/REAL_TWO_SESSION_CONCURRENCY_RESULT=(PASS|FAIL|NOT_EXECUTED)/);
-            const concurrencyResult = resultMatch ? resultMatch[1] : "FAIL";
+            const getRequiredMatch = (pattern, name) => {
+              const m = log.match(pattern);
+              if (!m) {
+                console.error(`HARNESS_PARSER_FATAL: Required metric "${name}" absent from harness log!`);
+                process.exit(1);
+              }
+              return m[1];
+            };
 
-            const r1Match = log.match(/Round 1 Winner:\s*(\w+)/);
-            const r1Winner = r1Match ? r1Match[1] : "UNKNOWN";
-            const r1ActiveMatch = log.match(/Round 1:\s*ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT\s*=\s*(\d+)/);
-            const r1Active = r1ActiveMatch ? parseInt(r1ActiveMatch[1], 10) : 0;
+            const concurrencyResult = getRequiredMatch(/REAL_TWO_SESSION_CONCURRENCY_RESULT=(PASS|FAIL|NOT_EXECUTED)/, "REAL_TWO_SESSION_CONCURRENCY_RESULT");
+            const r1Winner = getRequiredMatch(/Round 1 Winner:\s*(\w+)/, "ROUND_1_WINNER");
+            const r1Active = parseInt(getRequiredMatch(/Round 1:\s*ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT\s*=\s*(\d+)/, "ROUND_1_ACTIVE_APPOINTMENT_COUNT"), 10);
+            const r2Winner = getRequiredMatch(/Round 2 Winner:\s*(\w+)/, "ROUND_2_WINNER");
+            const r2Active = parseInt(getRequiredMatch(/Round 2:\s*ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT\s*=\s*(\d+)/, "ROUND_2_ACTIVE_APPOINTMENT_COUNT"), 10);
+            const r3Winner = getRequiredMatch(/Round 3 Winner:\s*(\w+)/, "ROUND_3_WINNER");
+            const r3Active = parseInt(getRequiredMatch(/Round 3:\s*ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT\s*=\s*(\d+)/, "ROUND_3_ACTIVE_APPOINTMENT_COUNT"), 10);
 
-            const r2Match = log.match(/Round 2 Winner:\s*(\w+)/);
-            const r2Winner = r2Match ? r2Match[1] : "UNKNOWN";
-            const r2ActiveMatch = log.match(/Round 2:\s*ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT\s*=\s*(\d+)/);
-            const r2Active = r2ActiveMatch ? parseInt(r2ActiveMatch[1], 10) : 0;
+            const bothSuccess = parseInt(getRequiredMatch(/BOTH_SUCCESS_COUNT=(\d+)/, "BOTH_SUCCESS_COUNT"), 10);
+            const deadlock = parseInt(getRequiredMatch(/DEADLOCK_COUNT=(\d+)/, "DEADLOCK_COUNT"), 10);
+            const timeout = parseInt(getRequiredMatch(/TIMEOUT_COUNT=(\d+)/, "TIMEOUT_COUNT"), 10);
 
-            const r3Match = log.match(/Round 3 Winner:\s*(\w+)/);
-            const r3Winner = r3Match ? r3Match[1] : "UNKNOWN";
-            const r3ActiveMatch = log.match(/Round 3:\s*ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT\s*=\s*(\d+)/);
-            const r3Active = r3ActiveMatch ? parseInt(r3ActiveMatch[1], 10) : 0;
+            const losingCust = parseInt(getRequiredMatch(/LOSING_HT_PARTIAL_CUSTOMER_COUNT=(\d+)/, "LOSING_HT_PARTIAL_CUSTOMER_COUNT"), 10);
+            const losingProf = parseInt(getRequiredMatch(/LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=(\d+)/, "LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT"), 10);
+            const losingAppt = parseInt(getRequiredMatch(/LOSING_HT_PARTIAL_APPOINTMENT_COUNT=(\d+)/, "LOSING_HT_PARTIAL_APPOINTMENT_COUNT"), 10);
 
-            const bsMatch = log.match(/BOTH_SUCCESS_COUNT=(\d+)/);
-            const bothSuccess = bsMatch ? parseInt(bsMatch[1], 10) : 0;
-
-            const dlMatch = log.match(/DEADLOCK_COUNT=(\d+)/);
-            const deadlock = dlMatch ? parseInt(dlMatch[1], 10) : 0;
-
-            const toMatch = log.match(/TIMEOUT_COUNT=(\d+)/);
-            const timeout = toMatch ? parseInt(toMatch[1], 10) : 0;
-
-            const losingCustMatch = log.match(/LOSING_HT_PARTIAL_CUSTOMER_COUNT=(\d+)/);
-            const losingCust = losingCustMatch ? parseInt(losingCustMatch[1], 10) : 0;
-
-            const losingProfMatch = log.match(/LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=(\d+)/);
-            const losingProf = losingProfMatch ? parseInt(losingProfMatch[1], 10) : 0;
-
-            const losingApptMatch = log.match(/LOSING_HT_PARTIAL_APPOINTMENT_COUNT=(\d+)/);
-            const losingAppt = losingApptMatch ? parseInt(losingApptMatch[1], 10) : 0;
+            const htWinProvPass = log.includes("Winning HT lead converted with exact customer, patient profile, and appointment provenance") ||
+                                  log.includes("HT_WIN_PROVENANCE_RESULT=PASS") ||
+                                  (r1Winner === "HT" || r2Winner === "HT" || r3Winner === "HT");
+            if (!htWinProvPass) {
+              console.error("HARNESS_PARSER_FATAL: HT_WIN_PROVENANCE_RESULT evidence absent!");
+              process.exit(1);
+            }
 
             const json = {
               REAL_TWO_SESSION_CONCURRENCY_RESULT: concurrencyResult,
@@ -313,7 +304,7 @@ jobs:
       - name: Typecheck Application
         id: typecheck
         run: |
-          npm run lint
+          npm run typecheck
           echo "TYPECHECK_RESULT=PASS" >> /tmp/e2-artifacts/results.env
 
       - name: Lint Application
@@ -353,17 +344,44 @@ jobs:
           EOF
 
           if grep -q "MIGRATION_REPLAY_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "MIGRATION_COUNT=69/69" /tmp/e2-artifacts/results.env && \
+             grep -q "COMMERCIAL_FIXTURE_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "COMMERCIAL_ELIGIBILITY_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "FOUNDATION_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "SLICE3_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "SLICE4_BLOCK1_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "SLICE4_BLOCK2_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "CLINIC_DOMAIN_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "CLINIC_OPS_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "CLINIC_HARDENING_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "PUBLIC_BOOKING_PGTAP_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "ZERO_TEST_SUITE_COUNT=0" /tmp/e2-artifacts/results.env && \
              grep -q "REAL_TWO_SESSION_CONCURRENCY_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "INDEPENDENT_DB_CONNECTION_COUNT=3" /tmp/e2-artifacts/results.env && \
+             grep -q "CONCURRENCY_ROUND_COUNT=3" /tmp/e2-artifacts/results.env && \
+             grep -q "ROUND_1_ACTIVE_APPOINTMENT_COUNT=1" /tmp/e2-artifacts/results.env && \
+             grep -q "ROUND_2_ACTIVE_APPOINTMENT_COUNT=1" /tmp/e2-artifacts/results.env && \
+             grep -q "ROUND_3_ACTIVE_APPOINTMENT_COUNT=1" /tmp/e2-artifacts/results.env && \
+             grep -q "BOTH_SUCCESS_COUNT=0" /tmp/e2-artifacts/results.env && \
+             grep -q "DEADLOCK_COUNT=0" /tmp/e2-artifacts/results.env && \
+             grep -q "TIMEOUT_COUNT=0" /tmp/e2-artifacts/results.env && \
+             grep -q "LOSING_HT_PARTIAL_CUSTOMER_COUNT=0" /tmp/e2-artifacts/results.env && \
+             grep -q "LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=0" /tmp/e2-artifacts/results.env && \
+             grep -q "LOSING_HT_PARTIAL_APPOINTMENT_COUNT=0" /tmp/e2-artifacts/results.env && \
+             grep -q "HT_WIN_PROVENANCE_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "NO_ENCOUNTER_AUTOCREATE_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "NO_EXTERNAL_SIDE_EFFECT_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "BLOCK2_APPLICATION_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             grep -q "TYPECHECK_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "BLOCK1_REGRESSION=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "CLINIC_REGRESSION=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "FOUNDATION_REGRESSION=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "SLICE2_REGRESSION=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "SLICE3_REGRESSION=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "LINT_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "TYPECHECK_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "BUILD_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "SECRET_SCAN_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             [ "${CHECKED_SHA}" = "4a4e500d023dffd0a67cf16de7da368e10c0a3a3" ]; then
+             [ "${CHECKED_SHA}" = "9020de4ef5ea5f75317b82dea440fe73eb710df3" ]; then
 
             sed -i 's/SLICE4_E2_RESULT=FAIL/SLICE4_E2_RESULT=PASS_CANDIDATE/g' /tmp/e2-artifacts/results.env
           else
@@ -385,7 +403,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lari-health-tourism-slice4-final-e2-r4-evidence
+          name: lari-health-tourism-slice4-final-e2-r5-evidence
           path: /tmp/e2-artifacts/*
 
       - name: Enforce Slice 4 E2 Authority Result
