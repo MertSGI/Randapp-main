@@ -245,6 +245,42 @@ export function aggregateEvidence(targetDir = artifactsDir) {
     ...phaseFragmentOwners['27-secret-scan.env']
   ];
 
+  // 2. Validate explicit reasons for ALL FAIL / NOT_EXECUTED status keys and derive FIRST_FATAL
+  let firstFatalStep = '';
+  let firstFatalReason = '';
+
+  const executionOrderKeys = [
+    ...phaseFragmentOwners['01-migration.env'],
+    ...phaseFragmentOwners['02-commercial.env'],
+    ...phaseFragmentOwners['03-r9-selftest.env'],
+    ...phaseFragmentOwners['04-uuid-static.env'],
+    ...phaseFragmentOwners['05-arity-static.env'],
+    ...phaseFragmentOwners['06-pgtap-foundation.env'],
+    ...phaseFragmentOwners['07-pgtap-slice3.env'],
+    ...phaseFragmentOwners['08-pgtap-slice4-block1.env'],
+    ...phaseFragmentOwners['09-pgtap-slice4-block2.env'],
+    ...phaseFragmentOwners['10-pgtap-clinic-domain.env'],
+    ...phaseFragmentOwners['11-pgtap-clinic-ops.env'],
+    ...phaseFragmentOwners['12-pgtap-clinic-hardening.env'],
+    ...phaseFragmentOwners['13-pgtap-public-booking.env'],
+    ...phaseFragmentOwners['13b-pgtap-summary.env'],
+    ...phaseFragmentOwners['14-concurrency.env'],
+    ...phaseFragmentOwners['15-app-ht-slice4-block2.env'],
+    ...phaseFragmentOwners['16-app-ht-slice4-block1.env'],
+    ...phaseFragmentOwners['17-app-ht-foundation.env'],
+    ...phaseFragmentOwners['18-app-ht-slice3.env'],
+    ...phaseFragmentOwners['19-app-clinic-domain.env'],
+    ...phaseFragmentOwners['20-app-clinic-contracts.env'],
+    ...phaseFragmentOwners['21-app-clinic-operational.env'],
+    ...phaseFragmentOwners['22-app-clinic-workspace.env'],
+    ...phaseFragmentOwners['22b-app-clinic-summary.env'],
+    ...phaseFragmentOwners['23-app-ht-slice2.env'],
+    ...phaseFragmentOwners['24-typecheck.env'],
+    ...phaseFragmentOwners['25-lint.env'],
+    ...phaseFragmentOwners['26-build.env'],
+    ...phaseFragmentOwners['27-secret-scan.env']
+  ];
+
   for (const k of executionOrderKeys) {
     if (!explicitStatusKeys.has(k)) continue;
     const v = kv.get(k);
@@ -273,6 +309,76 @@ export function aggregateEvidence(targetDir = artifactsDir) {
   kv.set('FIRST_FATAL_STEP_IF_ANY', firstFatalStep);
   kv.set('FIRST_FATAL_REASON_IF_ANY', firstFatalReason);
 
+  // STRICT CONDITIONAL NOT_OBSERVED RULES VALIDATION
+  const uuidStaticRes = kv.get('FIXTURE_UUID_STATIC_RESULT');
+  const uuidDistinct = kv.get('INVALID_UUID_DISTINCT_COUNT');
+  const uuidOccur = kv.get('INVALID_UUID_OCCURRENCE_COUNT');
+  if (uuidStaticRes === 'PASS') {
+    if (uuidDistinct === 'NOT_OBSERVED' || uuidOccur === 'NOT_OBSERVED' || !/^\d+$/.test(uuidDistinct) || !/^\d+$/.test(uuidOccur)) {
+      throw new Error(`NOT_OBSERVED_VALIDATION_FAILED: UUID metrics must be nonnegative integers when FIXTURE_UUID_STATIC_RESULT=PASS`);
+    }
+  }
+
+  const arityStaticRes = kv.get('FIXTURE_ARITY_STATIC_RESULT');
+  const arityMetrics = [
+    'ARITY_CHECKED_INSERT_COUNT',
+    'ARITY_NON_VALUES_INSERT_COUNT',
+    'ARITY_MISMATCH_DISTINCT_COUNT',
+    'ARITY_MISMATCH_OCCURRENCE_COUNT',
+    'ARITY_UNSUPPORTED_STATEMENT_COUNT'
+  ];
+  if (arityStaticRes === 'PASS') {
+    for (const am of arityMetrics) {
+      const val = kv.get(am);
+      if (val === 'NOT_OBSERVED' || !/^\d+$/.test(val)) {
+        throw new Error(`NOT_OBSERVED_VALIDATION_FAILED: Arity metric ${am} must be integer string when FIXTURE_ARITY_STATIC_RESULT=PASS`);
+      }
+    }
+  }
+
+  const suitePrefixes = ['FOUNDATION', 'SLICE3', 'SLICE4_BLOCK1', 'SLICE4_BLOCK2', 'CLINIC_DOMAIN', 'CLINIC_OPS', 'CLINIC_HARDENING', 'PUBLIC_BOOKING'];
+  for (const p of suitePrefixes) {
+    const res = kv.get(`${p}_PGTAP_RESULT`);
+    const countKeys = [`${p}_PGTAP_PLANNED_COUNT`, `${p}_PGTAP_EXECUTED_COUNT`, `${p}_PGTAP_COUNT`, `${p}_PGTAP_PASSED_COUNT`, `${p}_PGTAP_FAILED_COUNT` ];
+    if (res === 'PASS' || res === 'FAIL') {
+      for (const ck of countKeys) {
+        if (kv.get(ck) === 'NOT_OBSERVED' || !/^\d+$/.test(kv.get(ck))) {
+          throw new Error(`NOT_OBSERVED_VALIDATION_FAILED: pgTAP count ${ck} cannot be NOT_OBSERVED when result is ${res}`);
+        }
+      }
+    }
+  }
+
+  const zeroTestSuiteVal = kv.get('ZERO_TEST_SUITE_COUNT');
+  const pgtapPhaseRes = kv.get('PGTAP_PHASE_RESULT');
+  if (pgtapPhaseRes === 'PASS' || pgtapPhaseRes === 'FAIL') {
+    if (zeroTestSuiteVal === 'NOT_OBSERVED' || !/^\d+$/.test(zeroTestSuiteVal)) {
+      throw new Error(`NOT_OBSERVED_VALIDATION_FAILED: ZERO_TEST_SUITE_COUNT cannot be NOT_OBSERVED when PGTAP_PHASE_RESULT is ${pgtapPhaseRes}`);
+    }
+  }
+
+  const concRes = kv.get('REAL_TWO_SESSION_CONCURRENCY_RESULT');
+  const concCritCounts = [
+    'INDEPENDENT_DB_CONNECTION_COUNT', 'CONCURRENCY_ROUND_COUNT',
+    'ROUND_1_ACTIVE_APPOINTMENT_COUNT', 'ROUND_2_ACTIVE_APPOINTMENT_COUNT', 'ROUND_3_ACTIVE_APPOINTMENT_COUNT',
+    'HT_WIN_COUNT', 'BOTH_SUCCESS_COUNT', 'DEADLOCK_COUNT', 'TIMEOUT_COUNT',
+    'LOSING_HT_PARTIAL_CUSTOMER_COUNT', 'LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT', 'LOSING_HT_PARTIAL_APPOINTMENT_COUNT'
+  ];
+  if (concRes === 'PASS') {
+    for (const cc of concCritCounts) {
+      if (kv.get(cc) === 'NOT_OBSERVED' || !/^\d+$/.test(kv.get(cc))) {
+        throw new Error(`NOT_OBSERVED_VALIDATION_FAILED: Concurrency count ${cc} cannot be NOT_OBSERVED on concurrency PASS`);
+      }
+    }
+    const winners = ['ROUND_1_WINNER', 'ROUND_2_WINNER', 'ROUND_3_WINNER'];
+    for (const w of winners) {
+      const wVal = kv.get(w);
+      if (!['core', 'ht'].includes(wVal)) {
+        throw new Error(`CONCURRENCY_WINNER_INVALID: Winner ${w} has invalid value "${wVal}" on concurrency PASS`);
+      }
+    }
+  }
+
   // 3. Evaluate Composite Acceptance Gate
   let compositePass = true;
 
@@ -289,7 +395,6 @@ export function aggregateEvidence(targetDir = artifactsDir) {
   }
 
   // 3. 8 pgTAP DB Suites
-  const suitePrefixes = ['FOUNDATION', 'SLICE3', 'SLICE4_BLOCK1', 'SLICE4_BLOCK2', 'CLINIC_DOMAIN', 'CLINIC_OPS', 'CLINIC_HARDENING', 'PUBLIC_BOOKING'];
   for (const p of suitePrefixes) {
     const plannedStr = kv.get(`${p}_PGTAP_PLANNED_COUNT`);
     const execStr = kv.get(`${p}_PGTAP_EXECUTED_COUNT`);
@@ -356,8 +461,12 @@ export function aggregateEvidence(targetDir = artifactsDir) {
   }
   fs.writeFileSync(targetResultsPath, outputStr);
 
-  // STRICT COMPLETE RE-READ DISK VERIFICATION
+  // STRICT COMPLETE RAW-BYTE DISK RE-READ VERIFICATION
   const rereadContent = fs.readFileSync(targetResultsPath, 'utf8');
+  if (rereadContent !== outputStr) {
+    throw new Error('REREAD_VALIDATION_FAILED: Exact raw-byte stream mismatch on results.env re-read');
+  }
+
   const rereadKv = new Map();
   const rereadLines = rereadContent.split('\n');
 
