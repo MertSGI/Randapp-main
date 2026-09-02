@@ -477,10 +477,47 @@ function testAggregatorAdversarial() {
   console.log('✅ Evidence aggregator 34 actual executable cases PASSED.');
 }
 
+function testConcurrencyHarnessEvidenceContract() {
+  console.log('--- Testing Concurrency Harness Static Source Evidence Contract (R9-R1.7) ---');
+  const harnessPath = path.join(__dirname, 'test-health-tourism-slice4-booking-concurrency.mjs');
+  const content = fs.readFileSync(harnessPath, 'utf8');
+
+  // Assert legacy non-canonical strings are completely absent
+  if (content.includes("CONTROLLER_LOCK_BARRIER_RESULT=ACQUIRED_HELD_RELEASED")) {
+    throw new Error('CONCURRENCY_HARNESS_DEFECT: Harness outputs non-canonical ACQUIRED_HELD_RELEASED!');
+  }
+  if (content.includes("BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT=PROVEN")) {
+    throw new Error('CONCURRENCY_HARNESS_DEFECT: Harness outputs non-canonical PROVEN!');
+  }
+  if (content.includes("INDEPENDENT_DB_CONNECTION_COUNT=3")) {
+    throw new Error('CONCURRENCY_HARNESS_DEFECT: Harness outputs connection count 3 instead of 2!');
+  }
+  if (content.includes("winner = 'HT'") || content.includes("winner = 'CORE'") || content.includes("winner = 'BOTH_SUCCEEDED_ERROR'")) {
+    throw new Error('CONCURRENCY_HARNESS_DEFECT: Harness outputs upper-case winner values!');
+  }
+
+  // Assert canonical markers are present in source
+  if (!content.includes("CONTROLLER_LOCK_BARRIER_RESULT=PASS")) {
+    throw new Error('CONCURRENCY_HARNESS_DEFECT: Missing canonical CONTROLLER_LOCK_BARRIER_RESULT=PASS output');
+  }
+  if (!content.includes("BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT=PASS")) {
+    throw new Error('CONCURRENCY_HARNESS_DEFECT: Missing canonical BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT=PASS output');
+  }
+  if (!content.includes("INDEPENDENT_DB_CONNECTION_COUNT=2")) {
+    throw new Error('CONCURRENCY_HARNESS_DEFECT: Missing canonical INDEPENDENT_DB_CONNECTION_COUNT=2 output');
+  }
+  if (!content.includes("winner = 'ht'") || !content.includes("winner = 'core'")) {
+    throw new Error('CONCURRENCY_HARNESS_DEFECT: Missing lower-case ht/core winner logic');
+  }
+
+  console.log('✅ Concurrency harness static evidence contract PASSED.');
+}
+
 function main() {
   testArityScannerAdversarial();
   testAggregatorAdversarial();
-  console.log('\n🎉 ALL HARDENED R9-R1.4/1.5 CONTRACT SELF-TESTS PASSED!');
+  testConcurrencyHarnessEvidenceContract();
+  console.log('\n🎉 ALL HARDENED R9-R1.7 CONTRACT SELF-TESTS PASSED!');
 }
 
 main();

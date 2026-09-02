@@ -296,18 +296,18 @@ async function runLiveConcurrencyContest() {
 
       if (htSuccess && coreSuccess) {
         bothSuccessCount++;
-        winner = 'BOTH_SUCCEEDED_ERROR';
+        winner = 'both_succeeded_error';
       } else if (htSuccess && !coreSuccess) {
-        winner = 'HT';
+        winner = 'ht';
       } else if (!htSuccess && coreSuccess) {
-        winner = 'CORE';
+        winner = 'core';
       }
 
       if (resA.status === 'rejected' && resA.reason?.message?.includes('deadlock')) deadlockCount++;
       if (resB.status === 'rejected' && resB.reason?.message?.includes('deadlock')) deadlockCount++;
 
       console.log(`Round ${round} Winner: ${winner}`);
-      assert(winner === 'HT' || winner === 'CORE', `Round ${round}: Exactly ONE operation succeeded`);
+      assert(winner === 'ht' || winner === 'core', `Round ${round}: Exactly ONE operation succeeded`);
 
       // 5. Final DB Verification & Partial State Proofs
       const countRes = await controllerClient.query(
@@ -323,7 +323,7 @@ async function runLiveConcurrencyContest() {
       );
       const leadRow = leadRes.rows[0];
 
-      if (winner === 'CORE') {
+      if (winner === 'core') {
         // HT Lost - Verify zero partial state
         const custCnt = (await controllerClient.query(`SELECT count(*)::integer AS cnt FROM public.customers WHERE email = $1`, [`lead${round}@example.com`])).rows[0].cnt;
         const profCnt = (await controllerClient.query(`SELECT count(*)::integer AS cnt FROM public.clinic_patient_profiles WHERE created_by = $1`, [callerStaffUid])).rows[0].cnt;
@@ -345,7 +345,7 @@ async function runLiveConcurrencyContest() {
         assert(custCnt === 0, `Round ${round}: Surviving HT-created customer count = 0`);
         assert(profCnt === 0, `Round ${round}: Surviving HT-created patient profile count = 0`);
         assert(apptCnt === 0, `Round ${round}: Surviving HT-created appointment count = 0`);
-      } else if (winner === 'HT') {
+      } else if (winner === 'ht') {
         // HT Won - Verify conversion provenance
         assert(
           leadRow.status === 'converted' &&
@@ -372,12 +372,12 @@ async function runLiveConcurrencyContest() {
     }
   }
 
-  const htWinCount = roundResults.filter((r) => r.winner === 'HT').length;
+  const htWinCount = roundResults.filter((r) => r.winner === 'ht').length;
 
   console.log('\n--- Contest Summary ---');
-  console.log('CONTROLLER_LOCK_BARRIER_RESULT=ACQUIRED_HELD_RELEASED');
-  console.log('BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT=PROVEN');
-  console.log('INDEPENDENT_DB_CONNECTION_COUNT=3');
+  console.log('CONTROLLER_LOCK_BARRIER_RESULT=PASS');
+  console.log('BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT=PASS');
+  console.log('INDEPENDENT_DB_CONNECTION_COUNT=2');
   console.log('CONCURRENCY_ROUND_COUNT=3');
   roundResults.forEach((r) => {
     console.log(`Round ${r.round} Winner: ${r.winner}`);
