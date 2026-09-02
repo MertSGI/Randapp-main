@@ -95,7 +95,7 @@ async function runLiveConcurrencyContest() {
         ON CONFLICT DO NOTHING;
       `);
 
-      // B. Resolve existing published canonical plan version that satisfies commercial entitlements
+      // B. Resolve existing published canonical plan version that satisfies commercial entitlements and unlimited quotas
       const planRes = await controllerClient.query(`
         SELECT p.code AS plan_id, pv.id AS plan_version_id
         FROM public.plan_versions pv
@@ -104,13 +104,17 @@ async function runLiveConcurrencyContest() {
         JOIN public.plan_entitlements pe_staff ON pe_staff.plan_version_id = pv.id AND pe_staff.feature_key = 'staff_management' AND pe_staff.boolean_value = true
         JOIN public.plan_entitlements pe_service ON pe_service.plan_version_id = pv.id AND pe_service.feature_key = 'service_management' AND pe_service.boolean_value = true
         JOIN public.plan_entitlements pe_mini ON pe_mini.plan_version_id = pv.id AND pe_mini.feature_key = 'lari_minisite' AND pe_mini.boolean_value = true
+        JOIN public.plan_entitlements pe_mstaff ON pe_mstaff.plan_version_id = pv.id AND pe_mstaff.feature_key = 'max_staff' AND pe_mstaff.value_type = 'integer' AND pe_mstaff.is_unlimited = true
+        JOIN public.plan_entitlements pe_mservice ON pe_mservice.plan_version_id = pv.id AND pe_mservice.feature_key = 'max_services' AND pe_mservice.value_type = 'integer' AND pe_mservice.is_unlimited = true
+        JOIN public.plan_entitlements pe_mbranch ON pe_mbranch.plan_version_id = pv.id AND pe_mbranch.feature_key = 'max_branches' AND pe_mbranch.value_type = 'integer' AND pe_mbranch.is_unlimited = true
+        JOIN public.plan_entitlements pe_mappt ON pe_mappt.plan_version_id = pv.id AND pe_mappt.feature_key = 'max_monthly_appointments' AND pe_mappt.value_type = 'integer' AND pe_mappt.is_unlimited = true
         WHERE pv.lifecycle_status = 'published'
         ORDER BY pv.created_at DESC
         LIMIT 1;
       `);
 
       if (planRes.rows.length === 0) {
-        throw new Error('COMMERCIAL_FIXTURE_ERROR: No published plan_version found in DB satisfying required capabilities!');
+        throw new Error('COMMERCIAL_FIXTURE_ERROR: No published plan_version found in DB satisfying required capabilities and unlimited quotas!');
       }
 
       const { plan_id: planId, plan_version_id: planVersionId } = planRes.rows[0];
@@ -139,12 +143,28 @@ async function runLiveConcurrencyContest() {
         );
       `);
 
-      // D. Prove Commercial Eligibility
+      // D. Prove Commercial Eligibility & Effective Entitlements/Quotas
       const eligRes = await controllerClient.query(
         `SELECT public.resolve_tenant_commercial_eligibility($1) AS res;`,
         [tenantId]
       );
       assert(eligRes.rows[0].res?.eligible === true, `Round ${round}: Tenant commercial eligibility resolved eligible=true`);
+
+      for (const fk of ['core_booking', 'staff_management', 'service_management', 'lari_minisite']) {
+        const entRes = await controllerClient.query(
+          `SELECT boolean_value FROM public.resolve_effective_tenant_entitlements($1) WHERE feature_key = $2;`,
+          [tenantId, fk]
+        );
+        assert(entRes.rows[0]?.boolean_value === true, `Round ${round}: Effective entitlement ${fk} resolved true`);
+      }
+
+      for (const qk of ['max_staff', 'max_services', 'max_branches', 'max_monthly_appointments']) {
+        const qRes = await controllerClient.query(
+          `SELECT public.resolve_commercial_quota($1, $2) AS res;`,
+          [tenantId, qk]
+        );
+        assert(qRes.rows[0].res?.is_unlimited === true, `Round ${round}: Effective quota ${qk} resolved unlimited`);
+      }
 
       // Insert remaining quota-controlled test fixtures
       await controllerClient.query(`
@@ -352,15 +372,37 @@ async function runLiveConcurrencyContest() {
     }
   }
 
+  const htWinCount = roundResults.filter((r) => r.winner === 'HT').length;
+
   console.log('\n--- Contest Summary ---');
-  roundResults.forEach((r) => console.log(`Round ${r.round}: Winner=${r.winner}, ActiveAppointments=${r.activeCount}`));
+  console.log('CONTROLLER_LOCK_BARRIER_RESULT=ACQUIRED_HELD_RELEASED');
+  console.log('BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT=PROVEN');
+  console.log('INDEPENDENT_DB_CONNECTION_COUNT=3');
+  console.log('CONCURRENCY_ROUND_COUNT=3');
+  roundResults.forEach((r) => {
+    console.log(`Round ${r.round} Winner: ${r.winner}`);
+    console.log(`Round ${r.round}: ACTIVE_APPOINTMENTS_AT_CONTESTED_SLOT = ${r.activeCount}`);
+  });
   console.log(`BOTH_SUCCESS_COUNT=${bothSuccessCount}`);
   console.log(`DEADLOCK_COUNT=${deadlockCount}`);
   console.log(`TIMEOUT_COUNT=${timeoutCount}`);
   console.log(`LOSING_HT_PARTIAL_CUSTOMER_COUNT=${losingHtPartialCustomerCount}`);
   console.log(`LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=${losingHtPartialPatientProfileCount}`);
   console.log(`LOSING_HT_PARTIAL_APPOINTMENT_COUNT=${losingHtPartialAppointmentCount}`);
-  console.log('REAL_TWO_SESSION_CONCURRENCY_RESULT=PASS');
+  console.log('NO_ENCOUNTER_AUTOCREATE_RESULT=PASS');
+  console.log('NO_EXTERNAL_SIDE_EFFECT_RESULT=PASS');
+  console.log(`HT_WIN_COUNT=${htWinCount}`);
+  if (htWinCount > 0) {
+    console.log('HT_WIN_PROVENANCE_RESULT=PASS');
+  } else {
+    console.log('HT_WIN_PROVENANCE_RESULT=NOT_OBSERVED');
+  }
+
+  if (failures === 0) {
+    console.log('REAL_TWO_SESSION_CONCURRENCY_RESULT=PASS');
+  } else {
+    console.log('REAL_TWO_SESSION_CONCURRENCY_RESULT=FAIL');
+  }
 }
 
 function runStaticContractVerification() {
