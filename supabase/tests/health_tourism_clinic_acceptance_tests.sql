@@ -489,11 +489,23 @@ SELECT is(
     '37 cancelled appointment does NOT block valid slot'
 );
 
+-- Capture baseline counts before Assertion 38
+CREATE TEMP TABLE _past_slot_baseline AS
+SELECT
+    (SELECT count(*)::integer FROM public.customers) AS cust_cnt,
+    (SELECT count(*)::integer FROM public.clinic_patient_profiles) AS prof_cnt,
+    (SELECT count(*)::integer FROM public.appointments) AS appt_cnt;
+
+-- Insert dedicated lead for past slot testing (after pending acceptance list assertions 24 & 25)
+INSERT INTO public.ht_leads (id, tenant_id, status, handoff_state, preferred_language, country_code, full_name, email, phone, passport_number, notes) VALUES
+  ('d1000000-0000-0000-0000-000000000008', 'a1111111-1111-1111-1111-111111111111', 'handoff_pending', 'requested', 'en', 'US', 'Dedicated Past Slot Lead', 'pastslot@example.invalid', '+15550008', NULL, 'Past slot test')
+ON CONFLICT (id) DO NOTHING;
+
 -- ----------------------------------------------------------------------------
 -- ASSERTION 38: Branch timezone-aware past slot denied
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000005', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2020-01-01'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000008', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2020-01-01'::date, '10:00'::time) $$,
     'INVALID_APPOINTMENT_SLOT:slot_in_past',
     '38 branch timezone-aware past slot denied'
 );
@@ -501,10 +513,25 @@ SELECT throws_ok(
 -- ----------------------------------------------------------------------------
 -- ASSERTION 39: Slot evaluator temporary/fail-closed result creates zero customer/profile/appointment/conversion mutation
 -- ----------------------------------------------------------------------------
--- Attempt past slot conversion for d1000000-0000-0000-0000-000000000005
 SELECT is(
-    (SELECT status FROM public.ht_leads WHERE id = 'd1000000-0000-0000-0000-000000000005'),
-    'handoff_pending',
+    (
+        SELECT (
+            l.status = 'handoff_pending' AND
+            l.handoff_state = 'requested' AND
+            l.converted_customer_id IS NULL AND
+            l.converted_patient_profile_id IS NULL AND
+            l.converted_appointment_id IS NULL AND
+            l.converted_at IS NULL AND
+            l.converted_by_staff_id IS NULL AND
+            (SELECT count(*)::integer FROM public.customers) = b.cust_cnt AND
+            (SELECT count(*)::integer FROM public.clinic_patient_profiles) = b.prof_cnt AND
+            (SELECT count(*)::integer FROM public.appointments) = b.appt_cnt AND
+            (SELECT count(*)::integer FROM public.customers WHERE email = 'pastslot@example.invalid') = 0
+        )
+        FROM public.ht_leads l, _past_slot_baseline b
+        WHERE l.id = 'd1000000-0000-0000-0000-000000000008'
+    ),
+    true,
     '39 slot evaluator temporary/fail-closed result creates zero customer/profile/appointment/conversion mutation'
 );
 
