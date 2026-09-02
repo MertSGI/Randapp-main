@@ -35,6 +35,8 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 \i supabase/tests/fixtures/slice4_e2_commercial_fixture.sql
+SELECT pg_temp.slice4_e2_bootstrap_commercial('a1111111-1111-1111-1111-111111111111');
+SELECT pg_temp.slice4_e2_bootstrap_commercial('b2222222-2222-2222-2222-222222222222');
 
 -- Materialize Synthetic Auth Users (auth.users)
 INSERT INTO auth.users (id, email) VALUES

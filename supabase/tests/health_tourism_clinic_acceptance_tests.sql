@@ -18,6 +18,8 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 \i supabase/tests/fixtures/slice4_e2_commercial_fixture.sql
+SELECT pg_temp.slice4_e2_bootstrap_commercial('a1111111-1111-1111-1111-111111111111');
+SELECT pg_temp.slice4_e2_bootstrap_commercial('b2222222-2222-2222-2222-222222222222');
 
 INSERT INTO auth.users (id, email) VALUES
   ('u1111111-1111-4111-8111-111111111111', 'clinic_manage@s4-alpha.example.invalid'),

@@ -20,6 +20,8 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 \i supabase/tests/fixtures/slice4_e2_commercial_fixture.sql
+SELECT pg_temp.slice4_e2_bootstrap_commercial('a0000000-0000-0000-0000-000000000001');
+SELECT pg_temp.slice4_e2_bootstrap_commercial('b0000000-0000-0000-0000-000000000002');
 
 -- Auth Users
 INSERT INTO auth.users (id, email) VALUES

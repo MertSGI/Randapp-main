@@ -97,19 +97,26 @@ async function runLiveConcurrencyContest() {
 
       // B. Resolve existing published canonical plan version that satisfies commercial entitlements
       const planRes = await controllerClient.query(`
-        SELECT pv.id AS plan_version_id, pv.plan_id
+        SELECT p.code AS plan_id, pv.id AS plan_version_id
         FROM public.plan_versions pv
         JOIN public.plans p ON p.id = pv.plan_id
+        JOIN public.plan_entitlements pe_core ON pe_core.plan_version_id = pv.id AND pe_core.feature_key = 'core_booking' AND pe_core.boolean_value = true
+        JOIN public.plan_entitlements pe_staff ON pe_staff.plan_version_id = pv.id AND pe_staff.feature_key = 'staff_management' AND pe_staff.boolean_value = true
+        JOIN public.plan_entitlements pe_service ON pe_service.plan_version_id = pv.id AND pe_service.feature_key = 'service_management' AND pe_service.boolean_value = true
+        JOIN public.plan_entitlements pe_mini ON pe_mini.plan_version_id = pv.id AND pe_mini.feature_key = 'lari_minisite' AND pe_mini.boolean_value = true
         WHERE pv.lifecycle_status = 'published'
         ORDER BY pv.created_at DESC
         LIMIT 1;
       `);
 
       if (planRes.rows.length === 0) {
-        throw new Error('COMMERCIAL_FIXTURE_ERROR: No published plan_version found in DB!');
+        throw new Error('COMMERCIAL_FIXTURE_ERROR: No published plan_version found in DB satisfying required capabilities!');
       }
 
       const { plan_id: planId, plan_version_id: planVersionId } = planRes.rows[0];
+
+      // Remove existing subscriptions for synthetic test tenant
+      await controllerClient.query(`DELETE FROM public.subscriptions WHERE tenant_id = '${tenantId}';`);
 
       // C. Insert Active Subscription BEFORE adding quota-controlled staff/service/branch
       await controllerClient.query(`
@@ -125,13 +132,11 @@ async function runLiveConcurrencyContest() {
           '${tenantId}',
           '${planId}',
           '${planVersionId}',
-          'manual_active',
+          'active',
           'manual',
           now() - interval '1 day',
           now() + interval '1 year'
-        ) ON CONFLICT (tenant_id) DO UPDATE SET
-          status = 'manual_active',
-          plan_version_id = EXCLUDED.plan_version_id;
+        );
       `);
 
       // D. Prove Commercial Eligibility
