@@ -13,7 +13,7 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
         with:
-          ref: 'd7cf230b6c9508b1fe0572b237d94c5d3f6ec090'
+          ref: '2bbe7c581c7253ea8087b2db81104c0d2c75b3a9'
 
       - name: Initialize Evidence Directory
         id: init_artifacts
@@ -40,6 +40,10 @@ jobs:
         id: postgres_start
         if: always()
         run: |
+          if [ "${{ steps.tool_setup.conclusion }}" != "success" ]; then
+            echo "Tool setup failed."
+            exit 1
+          fi
           PINNED_IMAGE="supabase/postgres:15.1.0.147"
           docker pull "${PINNED_IMAGE}"
           docker run -d \
@@ -55,13 +59,21 @@ jobs:
         run: |
           if [ "${{ steps.postgres_start.conclusion }}" != "success" ]; then
             echo "Postgres container start failed or skipped."
-            exit 0
+            exit 1
           fi
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          READY=0
           for i in {1..60}; do
-            if pg_isready -h 127.0.0.1 -p 54322 -U postgres -d postgres; then break; fi
+            if pg_isready -h 127.0.0.1 -p 54322 -U postgres -d postgres; then
+              READY=1
+              break
+            fi
             sleep 1
           done
+          if [ ${READY} -ne 1 ]; then
+            echo "Postgres readiness check timed out."
+            exit 1
+          fi
           psql "$DB_URL" -c "SELECT version();"
 
       - name: Execute Managed Runtime Bootstrap Fixture
@@ -70,7 +82,7 @@ jobs:
         run: |
           if [ "${{ steps.postgres_ready.conclusion }}" != "success" ]; then
             echo "Postgres readiness failed or skipped."
-            exit 0
+            exit 1
           fi
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/fixtures/p2a_managed_runtime_bootstrap.sql
@@ -79,9 +91,20 @@ jobs:
         id: migration_replay
         if: always()
         run: |
-          if [ "${{ steps.bootstrap.conclusion }}" != "success" ]; then
+          PREREQ_REASON=""
+          if [ "${{ steps.tool_setup.conclusion }}" != "success" ]; then
+            PREREQ_REASON="TOOL_SETUP_FAILED"
+          elif [ "${{ steps.postgres_start.conclusion }}" != "success" ]; then
+            PREREQ_REASON="POSTGRES_START_FAILED"
+          elif [ "${{ steps.postgres_ready.conclusion }}" != "success" ]; then
+            PREREQ_REASON="POSTGRES_READINESS_FAILED"
+          elif [ "${{ steps.bootstrap.conclusion }}" != "success" ]; then
+            PREREQ_REASON="BOOTSTRAP_FAILED"
+          fi
+
+          if [ -n "${PREREQ_REASON}" ]; then
             echo "MIGRATION_REPLAY_RESULT=NOT_EXECUTED" > /tmp/e2-artifacts/01-migration.env
-            echo "MIGRATION_REPLAY_RESULT_NOT_EXECUTED_REASON=BOOTSTRAP_FAILED" >> /tmp/e2-artifacts/01-migration.env
+            echo "MIGRATION_REPLAY_RESULT_NOT_EXECUTED_REASON=${PREREQ_REASON}" >> /tmp/e2-artifacts/01-migration.env
             echo "MIGRATION_COUNT=NOT_OBSERVED" >> /tmp/e2-artifacts/01-migration.env
             exit 0
           fi
@@ -189,11 +212,23 @@ jobs:
             ];
             let fragment = "";
             for (const k of keys) {
-              if (log.includes(k + "=PASS")) {
-                fragment += k + "=PASS\n";
+              if (exitCode !== 0) {
+                if (k === "COMMERCIAL_FIXTURE_RESULT") {
+                  fragment += k + "=FAIL\n";
+                  fragment += k + "_FAILURE_REASON=COMMERCIAL_VERIFICATION_PSQL_EXIT_" + exitCode + "\n";
+                } else if (log.includes(k + "=PASS")) {
+                  fragment += k + "=PASS\n";
+                } else {
+                  fragment += k + "=FAIL\n";
+                  fragment += k + "_FAILURE_REASON=COMMERCIAL_VERIFICATION_PSQL_EXIT_" + exitCode + "\n";
+                }
               } else {
-                fragment += k + "=FAIL\n";
-                fragment += k + "_FAILURE_REASON=COMMERCIAL_VERIFICATION_PSQL_EXIT_" + exitCode + "\n";
+                if (log.includes(k + "=PASS")) {
+                  fragment += k + "=PASS\n";
+                } else {
+                  fragment += k + "=FAIL\n";
+                  fragment += k + "_FAILURE_REASON=MISSING_" + k + "_PASS_MARKER\n";
+                }
               }
             }
             fs.writeFileSync("/tmp/e2-artifacts/02-commercial.env", fragment);
@@ -248,14 +283,28 @@ jobs:
             const fs = require("fs");
             const log = fs.readFileSync("/tmp/e2-artifacts/fixture-uuid-static.log", "utf8");
             const exitCode = '${uuid_status}';
-            const res = log.match(/FIXTURE_UUID_STATIC_RESULT=(PASS|FAIL)/)?.[1] || "FAIL";
+            const hasMarker = log.includes("FIXTURE_UUID_STATIC_RESULT=");
+            const rawRes = log.match(/FIXTURE_UUID_STATIC_RESULT=(PASS|FAIL)/)?.[1];
             const dist = log.match(/INVALID_UUID_DISTINCT_COUNT=(\d+)/)?.[1] || "NOT_OBSERVED";
             const occ = log.match(/INVALID_UUID_OCCURRENCE_COUNT=(\d+)/)?.[1] || "NOT_OBSERVED";
+
+            let res = "FAIL";
+            let reason = "";
+            if (exitCode !== 0) {
+              res = "FAIL";
+              reason = "UUID_SCANNER_EXIT_" + exitCode;
+            } else if (!hasMarker || !rawRes) {
+              res = "FAIL";
+              reason = "UUID_RESULT_MARKER_MISSING";
+            } else {
+              res = rawRes;
+              if (res === "FAIL") reason = "UUID_SCANNER_MARKER_FAILED";
+            }
 
             let env = "";
             env += `FIXTURE_UUID_STATIC_RESULT=${res}\n`;
             if (res === "FAIL") {
-              env += `FIXTURE_UUID_STATIC_RESULT_FAILURE_REASON=UUID_SCANNER_EXIT_${exitCode}\n`;
+              env += `FIXTURE_UUID_STATIC_RESULT_FAILURE_REASON=${reason}\n`;
             }
             env += `INVALID_UUID_DISTINCT_COUNT=${dist}\n`;
             env += `INVALID_UUID_OCCURRENCE_COUNT=${occ}\n`;
@@ -287,12 +336,26 @@ jobs:
             const log = fs.readFileSync("/tmp/e2-artifacts/fixture-arity-static.log", "utf8");
             const exitCode = '${arity_status}';
             const getVal = (pattern) => log.match(pattern)?.[1] || "NOT_OBSERVED";
-            const res = log.match(/FIXTURE_ARITY_STATIC_RESULT=(PASS|FAIL)/)?.[1] || "FAIL";
+            const hasMarker = log.includes("FIXTURE_ARITY_STATIC_RESULT=");
+            const rawRes = log.match(/FIXTURE_ARITY_STATIC_RESULT=(PASS|FAIL)/)?.[1];
+
+            let res = "FAIL";
+            let reason = "";
+            if (exitCode !== 0) {
+              res = "FAIL";
+              reason = "ARITY_SCANNER_EXIT_" + exitCode;
+            } else if (!hasMarker || !rawRes) {
+              res = "FAIL";
+              reason = "ARITY_RESULT_MARKER_MISSING";
+            } else {
+              res = rawRes;
+              if (res === "FAIL") reason = "ARITY_SCANNER_MARKER_FAILED";
+            }
 
             let env = "";
             env += `FIXTURE_ARITY_STATIC_RESULT=${res}\n`;
             if (res === "FAIL") {
-              env += `FIXTURE_ARITY_STATIC_RESULT_FAILURE_REASON=ARITY_SCANNER_EXIT_${exitCode}\n`;
+              env += `FIXTURE_ARITY_STATIC_RESULT_FAILURE_REASON=${reason}\n`;
             }
             env += `ARITY_CHECKED_INSERT_COUNT=${getVal(/ARITY_CHECKED_INSERT_COUNT=(\d+)/)}\n`;
             env += `ARITY_NON_VALUES_INSERT_COUNT=${getVal(/ARITY_NON_VALUES_INSERT_COUNT=(\d+)/)}\n`;
@@ -488,11 +551,14 @@ jobs:
             const log = fs.readFileSync("/tmp/e2-artifacts/concurrency-raw.log", "utf8");
             const exitCode = '${conc_status}';
 
-            const getOptMatch = (pattern) => log.match(pattern)?.[1] || "NOT_OBSERVED";
+            const getOptMatch = (pattern) => {
+              const m = log.match(pattern);
+              return m ? m[1] : undefined;
+            };
 
-            const concurrencyResult = getOptMatch(/REAL_TWO_SESSION_CONCURRENCY_RESULT=(PASS|FAIL|NOT_EXECUTED)/) || (exitCode === 0 ? "PASS" : "FAIL");
-            const lockBarrierResult = getOptMatch(/CONTROLLER_LOCK_BARRIER_RESULT=(\w+)/) || "FAIL";
-            const bothBlockedResult = getOptMatch(/BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT=(\w+)/) || "FAIL";
+            const rawConcRes = getOptMatch(/REAL_TWO_SESSION_CONCURRENCY_RESULT=(PASS|FAIL|NOT_EXECUTED)/);
+            const lockBarrierResult = getOptMatch(/CONTROLLER_LOCK_BARRIER_RESULT=(\w+)/);
+            const bothBlockedResult = getOptMatch(/BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT=(\w+)/);
             const connCount = getOptMatch(/INDEPENDENT_DB_CONNECTION_COUNT=(\d+)/);
             const roundCount = getOptMatch(/CONCURRENCY_ROUND_COUNT=(\d+)/);
 
@@ -514,36 +580,82 @@ jobs:
             const losingProf = getOptMatch(/LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=(\d+)/);
             const losingAppt = getOptMatch(/LOSING_HT_PARTIAL_APPOINTMENT_COUNT=(\d+)/);
 
-            const noEncounter = getOptMatch(/NO_ENCOUNTER_AUTOCREATE_RESULT=(PASS|FAIL)/) || "FAIL";
-            const noSideEffect = getOptMatch(/NO_EXTERNAL_SIDE_EFFECT_RESULT=(PASS|FAIL)/) || "FAIL";
+            const noEncounter = getOptMatch(/NO_ENCOUNTER_AUTOCREATE_RESULT=(PASS|FAIL)/);
+            const noSideEffect = getOptMatch(/NO_EXTERNAL_SIDE_EFFECT_RESULT=(PASS|FAIL)/);
+
+            let concurrencyResult = "FAIL";
+            let concurrencyFailReason = "";
+
+            if (exitCode !== 0) {
+              concurrencyResult = "FAIL";
+              concurrencyFailReason = "HARNESS_EXIT_" + exitCode;
+            } else if (!rawConcRes || !lockBarrierResult || !bothBlockedResult || !connCount || !roundCount || !r1Winner || !r1Active || !r2Winner || !r2Active || !r3Winner || !r3Active || !htWinCount || !bothSuccess || !deadlock || !timeout || !losingCust || !losingProf || !losingAppt || !noEncounter || !noSideEffect) {
+              concurrencyResult = "FAIL";
+              concurrencyFailReason = "CONCURRENCY_EVIDENCE_PARSE_INCOMPLETE";
+            } else {
+              concurrencyResult = rawConcRes;
+              if (concurrencyResult === "FAIL") concurrencyFailReason = "CONCURRENCY_HARNESS_REPORTED_FAIL";
+            }
+
+            const evalStatus = (val, keyName) => {
+              if (val) return val;
+              if (exitCode !== 0) return "NOT_EXECUTED";
+              return "FAIL";
+            };
+
+            const finalLockBarrier = evalStatus(lockBarrierResult, "CONTROLLER_LOCK_BARRIER_RESULT");
+            const finalBothBlocked = evalStatus(bothBlockedResult, "BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT");
+            const finalNoEncounter = evalStatus(noEncounter, "NO_ENCOUNTER_AUTOCREATE_RESULT");
+            const finalNoSideEffect = evalStatus(noSideEffect, "NO_EXTERNAL_SIDE_EFFECT_RESULT");
 
             let envAdd = "";
             envAdd += `REAL_TWO_SESSION_CONCURRENCY_RESULT=${concurrencyResult}\n`;
-            if (concurrencyResult === "FAIL") envAdd += `REAL_TWO_SESSION_CONCURRENCY_RESULT_FAILURE_REASON=HARNESS_EXIT_${exitCode}\n`;
-            envAdd += `CONTROLLER_LOCK_BARRIER_RESULT=${lockBarrierResult}\n`;
-            if (lockBarrierResult === "FAIL") envAdd += `CONTROLLER_LOCK_BARRIER_RESULT_FAILURE_REASON=LOCK_BARRIER_FAILED\n`;
-            envAdd += `BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT=${bothBlockedResult}\n`;
-            if (bothBlockedResult === "FAIL") envAdd += `BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT_FAILURE_REASON=BARRIER_RELEASE_FAILED\n`;
-            envAdd += `INDEPENDENT_DB_CONNECTION_COUNT=${connCount}\n`;
-            envAdd += `CONCURRENCY_ROUND_COUNT=${roundCount}\n`;
-            envAdd += `ROUND_1_WINNER=${r1Winner}\n`;
-            envAdd += `ROUND_1_ACTIVE_APPOINTMENT_COUNT=${r1Active}\n`;
-            envAdd += `ROUND_2_WINNER=${r2Winner}\n`;
-            envAdd += `ROUND_2_ACTIVE_APPOINTMENT_COUNT=${r2Active}\n`;
-            envAdd += `ROUND_3_WINNER=${r3Winner}\n`;
-            envAdd += `ROUND_3_ACTIVE_APPOINTMENT_COUNT=${r3Active}\n`;
-            envAdd += `HT_WIN_COUNT=${htWinCount}\n`;
-            envAdd += `HT_WIN_PROVENANCE_RESULT=${htWinProvResult}\n`;
-            envAdd += `BOTH_SUCCESS_COUNT=${bothSuccess}\n`;
-            envAdd += `DEADLOCK_COUNT=${deadlock}\n`;
-            envAdd += `TIMEOUT_COUNT=${timeout}\n`;
-            envAdd += `LOSING_HT_PARTIAL_CUSTOMER_COUNT=${losingCust}\n`;
-            envAdd += `LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=${losingProf}\n`;
-            envAdd += `LOSING_HT_PARTIAL_APPOINTMENT_COUNT=${losingAppt}\n`;
-            envAdd += `NO_ENCOUNTER_AUTOCREATE_RESULT=${noEncounter}\n`;
-            if (noEncounter === "FAIL") envAdd += `NO_ENCOUNTER_AUTOCREATE_RESULT_FAILURE_REASON=ENCOUNTER_AUTOCREATE_DETECTED\n`;
-            envAdd += `NO_EXTERNAL_SIDE_EFFECT_RESULT=${noSideEffect}\n`;
-            if (noSideEffect === "FAIL") envAdd += `NO_EXTERNAL_SIDE_EFFECT_RESULT_FAILURE_REASON=EXTERNAL_SIDE_EFFECT_DETECTED\n`;
+            if (concurrencyResult === "FAIL") envAdd += `REAL_TWO_SESSION_CONCURRENCY_RESULT_FAILURE_REASON=${concurrencyFailReason}\n`;
+
+            envAdd += `CONTROLLER_LOCK_BARRIER_RESULT=${finalLockBarrier}\n`;
+            if (finalLockBarrier === "FAIL") {
+              envAdd += `CONTROLLER_LOCK_BARRIER_RESULT_FAILURE_REASON=LOCK_BARRIER_FAILED\n`;
+            } else if (finalLockBarrier === "NOT_EXECUTED") {
+              envAdd += `CONTROLLER_LOCK_BARRIER_RESULT_NOT_EXECUTED_REASON=HARNESS_TERMINATED_BEFORE_CONTROLLER_LOCK_BARRIER_RESULT\n`;
+            }
+
+            envAdd += `BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT=${finalBothBlocked}\n`;
+            if (finalBothBlocked === "FAIL") {
+              envAdd += `BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT_FAILURE_REASON=BARRIER_RELEASE_FAILED\n`;
+            } else if (finalBothBlocked === "NOT_EXECUTED") {
+              envAdd += `BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT_NOT_EXECUTED_REASON=HARNESS_TERMINATED_BEFORE_BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT\n`;
+            }
+
+            envAdd += `INDEPENDENT_DB_CONNECTION_COUNT=${connCount || "NOT_OBSERVED"}\n`;
+            envAdd += `CONCURRENCY_ROUND_COUNT=${roundCount || "NOT_OBSERVED"}\n`;
+            envAdd += `ROUND_1_WINNER=${r1Winner || "NOT_OBSERVED"}\n`;
+            envAdd += `ROUND_1_ACTIVE_APPOINTMENT_COUNT=${r1Active || "NOT_OBSERVED"}\n`;
+            envAdd += `ROUND_2_WINNER=${r2Winner || "NOT_OBSERVED"}\n`;
+            envAdd += `ROUND_2_ACTIVE_APPOINTMENT_COUNT=${r2Active || "NOT_OBSERVED"}\n`;
+            envAdd += `ROUND_3_WINNER=${r3Winner || "NOT_OBSERVED"}\n`;
+            envAdd += `ROUND_3_ACTIVE_APPOINTMENT_COUNT=${r3Active || "NOT_OBSERVED"}\n`;
+            envAdd += `HT_WIN_COUNT=${htWinCount || "NOT_OBSERVED"}\n`;
+            envAdd += `HT_WIN_PROVENANCE_RESULT=${htWinProvResult || "NOT_OBSERVED"}\n`;
+            envAdd += `BOTH_SUCCESS_COUNT=${bothSuccess || "NOT_OBSERVED"}\n`;
+            envAdd += `DEADLOCK_COUNT=${deadlock || "NOT_OBSERVED"}\n`;
+            envAdd += `TIMEOUT_COUNT=${timeout || "NOT_OBSERVED"}\n`;
+            envAdd += `LOSING_HT_PARTIAL_CUSTOMER_COUNT=${losingCust || "NOT_OBSERVED"}\n`;
+            envAdd += `LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=${losingProf || "NOT_OBSERVED"}\n`;
+            envAdd += `LOSING_HT_PARTIAL_APPOINTMENT_COUNT=${losingAppt || "NOT_OBSERVED"}\n`;
+
+            envAdd += `NO_ENCOUNTER_AUTOCREATE_RESULT=${finalNoEncounter}\n`;
+            if (finalNoEncounter === "FAIL") {
+              envAdd += `NO_ENCOUNTER_AUTOCREATE_RESULT_FAILURE_REASON=ENCOUNTER_AUTOCREATE_DETECTED\n`;
+            } else if (finalNoEncounter === "NOT_EXECUTED") {
+              envAdd += `NO_ENCOUNTER_AUTOCREATE_RESULT_NOT_EXECUTED_REASON=HARNESS_TERMINATED_BEFORE_NO_ENCOUNTER_AUTOCREATE_RESULT\n`;
+            }
+
+            envAdd += `NO_EXTERNAL_SIDE_EFFECT_RESULT=${finalNoSideEffect}\n`;
+            if (finalNoSideEffect === "FAIL") {
+              envAdd += `NO_EXTERNAL_SIDE_EFFECT_RESULT_FAILURE_REASON=EXTERNAL_SIDE_EFFECT_DETECTED\n`;
+            } else if (finalNoSideEffect === "NOT_EXECUTED") {
+              envAdd += `NO_EXTERNAL_SIDE_EFFECT_RESULT_NOT_EXECUTED_REASON=HARNESS_TERMINATED_BEFORE_NO_EXTERNAL_SIDE_EFFECT_RESULT\n`;
+            }
 
             fs.writeFileSync("/tmp/e2-artifacts/14-concurrency.env", envAdd);
           '
