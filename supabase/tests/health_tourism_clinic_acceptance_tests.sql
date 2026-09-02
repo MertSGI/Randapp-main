@@ -22,93 +22,93 @@ SELECT pg_temp.slice4_e2_bootstrap_commercial('a1111111-1111-1111-1111-111111111
 SELECT pg_temp.slice4_e2_bootstrap_commercial('b2222222-2222-2222-2222-222222222222');
 
 INSERT INTO auth.users (id, email) VALUES
-  ('u1111111-1111-4111-8111-111111111111', 'clinic_manage@s4-alpha.example.invalid'),
-  ('u2222222-2222-4222-8222-222222222222', 'ht_only@s4-alpha.example.invalid'),
-  ('u3333333-3333-4333-8333-333333333333', 'clinic_nomanage@s4-alpha.example.invalid'),
-  ('u4444444-4444-4444-8444-444444444444', 'clinic_manage@s4-beta.example.invalid'),
-  ('u5555555-5555-4555-8555-555555555555', 'practitioner@s4-alpha.example.invalid')
+  ('f1111111-1111-4111-8111-111111111111', 'clinic_manage@s4-alpha.example.invalid'),
+  ('f2222222-2222-4222-8222-222222222222', 'ht_only@s4-alpha.example.invalid'),
+  ('f3333333-3333-4333-8333-333333333333', 'clinic_nomanage@s4-alpha.example.invalid'),
+  ('f4444444-4444-4444-8444-444444444444', 'clinic_manage@s4-beta.example.invalid'),
+  ('f5555555-5555-4555-8555-555555555555', 'practitioner@s4-alpha.example.invalid')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.users_profile (id, tenant_id, role, name, active) VALUES
-  ('u1111111-1111-4111-8111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'staff', 'Alpha Clinic Manager Staff', true),
-  ('u2222222-2222-4222-8222-222222222222', 'a1111111-1111-1111-1111-111111111111', 'staff', 'Alpha HT Only Staff', true),
-  ('u3333333-3333-4333-8333-333333333333', 'a1111111-1111-1111-1111-111111111111', 'staff', 'Alpha Clinic View Staff', true),
-  ('u4444444-4444-4444-8444-444444444444', 'b2222222-2222-2222-2222-222222222222', 'staff', 'Beta Clinic Manager Staff', true),
-  ('u5555555-5555-4555-8555-555555555555', 'a1111111-1111-1111-1111-111111111111', 'staff', 'Alpha Practitioner Staff', true)
+  ('f1111111-1111-4111-8111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'staff', 'Alpha Clinic Manager Staff', true),
+  ('f2222222-2222-4222-8222-222222222222', 'a1111111-1111-1111-1111-111111111111', 'staff', 'Alpha HT Only Staff', true),
+  ('f3333333-3333-4333-8333-333333333333', 'a1111111-1111-1111-1111-111111111111', 'staff', 'Alpha Clinic View Staff', true),
+  ('f4444444-4444-4444-8444-444444444444', 'b2222222-2222-2222-2222-222222222222', 'staff', 'Beta Clinic Manager Staff', true),
+  ('f5555555-5555-4555-8555-555555555555', 'a1111111-1111-1111-1111-111111111111', 'staff', 'Alpha Practitioner Staff', true)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.staff (id, tenant_id, user_profile_id, name, active) VALUES
-  ('st111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'u1111111-1111-4111-8111-111111111111', 'Alpha Clinic Manager', true),
-  ('st222222-2222-2222-2222-222222222222', 'a1111111-1111-1111-1111-111111111111', 'u2222222-2222-4222-8222-222222222222', 'Alpha HT Staff', true),
-  ('st333333-3333-3333-3333-333333333333', 'a1111111-1111-1111-1111-111111111111', 'u3333333-3333-4333-8333-333333333333', 'Alpha NoManage Staff', true),
-  ('st444444-4444-4444-8444-444444444444', 'b2222222-2222-2222-2222-222222222222', 'u4444444-4444-4444-8444-444444444444', 'Beta Clinic Manager', true),
-  ('st555555-5555-5555-5555-555555555555', 'a1111111-1111-1111-1111-111111111111', 'u5555555-5555-4555-8555-555555555555', 'Dr. Alpha Active', true),
-  ('st666666-6666-6666-6666-666666666666', 'a1111111-1111-1111-1111-111111111111', NULL, 'Dr. Alpha NoClinicProfile', true),
-  ('st777777-7777-7777-7777-777777777777', 'a1111111-1111-1111-1111-111111111111', NULL, 'Dr. Alpha Inactive', false),
-  ('st888888-8888-8888-8888-888888888888', 'b2222222-2222-2222-2222-222222222222', NULL, 'Dr. Beta Active', true),
-  ('st999999-9999-9999-9999-999999999999', 'a1111111-1111-1111-1111-111111111111', NULL, 'Dr. Alpha UnmappedStaff', true)
+  ('51111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'f1111111-1111-4111-8111-111111111111', 'Alpha Clinic Manager', true),
+  ('51222222-2222-2222-2222-222222222222', 'a1111111-1111-1111-1111-111111111111', 'f2222222-2222-4222-8222-222222222222', 'Alpha HT Staff', true),
+  ('51333333-3333-3333-3333-333333333333', 'a1111111-1111-1111-1111-111111111111', 'f3333333-3333-4333-8333-333333333333', 'Alpha NoManage Staff', true),
+  ('51444444-4444-4444-8444-444444444444', 'b2222222-2222-2222-2222-222222222222', 'f4444444-4444-4444-8444-444444444444', 'Beta Clinic Manager', true),
+  ('51555555-5555-5555-5555-555555555555', 'a1111111-1111-1111-1111-111111111111', 'f5555555-5555-4555-8555-555555555555', 'Dr. Alpha Active', true),
+  ('51666666-6666-6666-6666-666666666666', 'a1111111-1111-1111-1111-111111111111', NULL, 'Dr. Alpha NoClinicProfile', true),
+  ('51777777-7777-7777-7777-777777777777', 'a1111111-1111-1111-1111-111111111111', NULL, 'Dr. Alpha Inactive', false),
+  ('51888888-8888-8888-8888-888888888888', 'b2222222-2222-2222-2222-222222222222', NULL, 'Dr. Beta Active', true),
+  ('51999999-9999-9999-9999-999999999999', 'a1111111-1111-1111-1111-111111111111', NULL, 'Dr. Alpha UnmappedStaff', true)
 ON CONFLICT (id) DO NOTHING;
 
 -- Configure Clinic Staff Profiles
 INSERT INTO public.clinic_staff_profiles (tenant_id, staff_id, can_manage_patient_profiles, can_view_clinical_records, can_write_clinical_notes) VALUES
-  ('a1111111-1111-1111-1111-111111111111', 'st111111-1111-1111-1111-111111111111', true, true, true),
-  ('a1111111-1111-1111-1111-111111111111', 'st333333-3333-3333-3333-333333333333', false, true, false),
-  ('b2222222-2222-2222-2222-222222222222', 'st444444-4444-4444-8444-444444444444', true, true, true),
-  ('a1111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', true, true, true),
-  ('b2222222-2222-2222-2222-222222222222', 'st888888-8888-8888-8888-888888888888', true, true, true),
-  ('a1111111-1111-1111-1111-111111111111', 'st999999-9999-9999-9999-999999999999', true, true, true)
+  ('a1111111-1111-1111-1111-111111111111', '51111111-1111-1111-1111-111111111111', true, true, true),
+  ('a1111111-1111-1111-1111-111111111111', '51333333-3333-3333-3333-333333333333', false, true, false),
+  ('b2222222-2222-2222-2222-222222222222', '51444444-4444-4444-8444-444444444444', true, true, true),
+  ('a1111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', true, true, true),
+  ('b2222222-2222-2222-2222-222222222222', '51888888-8888-8888-8888-888888888888', true, true, true),
+  ('a1111111-1111-1111-1111-111111111111', '51999999-9999-9999-9999-999999999999', true, true, true)
 ON CONFLICT (staff_id) DO NOTHING;
 
 -- Configure HT Staff Profiles
 INSERT INTO public.ht_staff_profiles (tenant_id, staff_id, can_manage_ht_leads, can_view_ht_leads) VALUES
-  ('a1111111-1111-1111-1111-111111111111', 'st222222-2222-2222-2222-222222222222', true, true)
+  ('a1111111-1111-1111-1111-111111111111', '51222222-2222-2222-2222-222222222222', true, true)
 ON CONFLICT (staff_id) DO NOTHING;
 
 -- Create Branches
 INSERT INTO public.branches (id, tenant_id, name, is_active, is_primary) VALUES
-  ('br111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'Alpha Main Branch', true, true),
-  ('br222222-2222-2222-2222-222222222222', 'a1111111-1111-1111-1111-111111111111', 'Alpha Closed Branch', false, false),
-  ('br333333-3333-3333-3333-333333333333', 'b2222222-2222-2222-2222-222222222222', 'Beta Main Branch', true, true),
-  ('br444444-4444-4444-4444-444444444444', 'a1111111-1111-1111-1111-111111111111', 'Alpha Unmapped Branch', true, false)
+  ('b7111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'Alpha Main Branch', true, true),
+  ('b7222222-2222-2222-2222-222222222222', 'a1111111-1111-1111-1111-111111111111', 'Alpha Closed Branch', false, false),
+  ('b7333333-3333-3333-3333-333333333333', 'b2222222-2222-2222-2222-222222222222', 'Beta Main Branch', true, true),
+  ('b7444444-4444-4444-4444-444444444444', 'a1111111-1111-1111-1111-111111111111', 'Alpha Unmapped Branch', true, false)
 ON CONFLICT (id) DO NOTHING;
 
 -- Create Services
 INSERT INTO public.services (id, tenant_id, name, duration, price, active) VALUES
-  ('sv111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'Dental Consultation', 45, 100, true),
-  ('sv222222-2222-2222-2222-222222222222', 'a1111111-1111-1111-1111-111111111111', 'Inactive Procedure', 60, 200, false),
-  ('sv333333-3333-3333-3333-333333333333', 'b2222222-2222-2222-2222-222222222222', 'Beta Hair Transplant', 90, 500, true),
-  ('sv444444-4444-4444-4444-444444444444', 'a1111111-1111-1111-1111-111111111111', 'Unmapped Service', 30, 150, true)
+  ('5e111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111111', 'Dental Consultation', 45, 100, true),
+  ('5e222222-2222-2222-2222-222222222222', 'a1111111-1111-1111-1111-111111111111', 'Inactive Procedure', 60, 200, false),
+  ('5e333333-3333-3333-3333-333333333333', 'b2222222-2222-2222-2222-222222222222', 'Beta Hair Transplant', 90, 500, true),
+  ('5e444444-4444-4444-4444-444444444444', 'a1111111-1111-1111-1111-111111111111', 'Unmapped Service', 30, 150, true)
 ON CONFLICT (id) DO NOTHING;
 
 -- Create Junction Mappings for Core Slot Evaluator
 INSERT INTO public.service_branches (tenant_id, service_id, branch_id) VALUES
-  ('a1111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'br111111-1111-1111-1111-111111111111')
+  ('a1111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', 'b7111111-1111-1111-1111-111111111111')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id) VALUES
-  ('a1111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', 'br111111-1111-1111-1111-111111111111')
+  ('a1111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', 'b7111111-1111-1111-1111-111111111111')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.staff_services (staff_id, service_id) VALUES
-  ('st555555-5555-5555-5555-555555555555', 'sv111111-1111-1111-1111-111111111111')
+  ('51555555-5555-5555-5555-555555555555', '5e111111-1111-1111-1111-111111111111')
 ON CONFLICT DO NOTHING;
 
--- Create Availability Rules (Mon..Sun 08:00..18:00 for Dr. Alpha Active st555555)
+-- Create Availability Rules (Mon..Sun 08:00..18:00 for Dr. Alpha Active 51555555)
 INSERT INTO public.availability_rules (tenant_id, staff_id, weekday, start_time, end_time, is_active)
-SELECT 'a1111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', w, '08:00'::time, '18:00'::time, true
+SELECT 'a1111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', w, '08:00'::time, '18:00'::time, true
 FROM generate_series(1, 7) w
 ON CONFLICT DO NOTHING;
 
 -- Create Test Leads
 INSERT INTO public.ht_leads (id, tenant_id, status, handoff_state, preferred_language, country_code, full_name, email, phone, passport_number, notes) VALUES
-  ('l1000000-0000-0000-0000-000000000001', 'a1111111-1111-1111-1111-111111111111', 'new', 'none', 'en', 'US', 'Lead New', 'new@example.com', '+15550001', NULL, NULL),
-  ('l1000000-0000-0000-0000-000000000002', 'a1111111-1111-1111-1111-111111111111', 'contacted', 'none', 'en', 'US', 'Lead Contacted', 'contacted@example.com', '+15550002', NULL, NULL),
-  ('l1000000-0000-0000-0000-000000000003', 'a1111111-1111-1111-1111-111111111111', 'qualified', 'none', 'en', 'US', 'Lead Qualified', 'qualified@example.com', '+15550003', NULL, NULL),
-  ('l1000000-0000-0000-0000-000000000004', 'a1111111-1111-1111-1111-111111111111', 'closed', 'none', 'en', 'US', 'Lead Closed', 'closed@example.com', '+15550004', NULL, NULL),
-  ('l1000000-0000-0000-0000-000000000005', 'a1111111-1111-1111-1111-111111111111', 'handoff_pending', 'none', 'de', 'DE', 'Lead Unrequested Handoff', 'unrequested@example.de', '+4915550005', NULL, NULL),
-  ('l1000000-0000-0000-0000-000000000006', 'a1111111-1111-1111-1111-111111111111', 'handoff_pending', 'requested', 'de', 'DE', 'Franz Becker', 'franz@example.de', '+4915550006', 'DE_PASSPORT_SECRET_999', 'Dental implant inquiry from Munich'),
-  ('l1000000-0000-0000-0000-000000000007', 'a1111111-1111-1111-1111-111111111111', 'handoff_pending', 'requested', 'en', 'GB', 'George Smith', 'george@example.co.uk', '+4415550007', NULL, 'General checkup'),
-  ('l2000000-0000-0000-0000-000000000001', 'b2222222-2222-2222-2222-222222222222', 'handoff_pending', 'requested', 'tr', 'TR', 'Ahmet Yilmaz', 'ahmet@example.tr', '+905550001', 'TR_PASSPORT_SECRET_888', 'Beta inquiry')
+  ('d1000000-0000-0000-0000-000000000001', 'a1111111-1111-1111-1111-111111111111', 'new', 'none', 'en', 'US', 'Lead New', 'new@example.com', '+15550001', NULL, NULL),
+  ('d1000000-0000-0000-0000-000000000002', 'a1111111-1111-1111-1111-111111111111', 'contacted', 'none', 'en', 'US', 'Lead Contacted', 'contacted@example.com', '+15550002', NULL, NULL),
+  ('d1000000-0000-0000-0000-000000000003', 'a1111111-1111-1111-1111-111111111111', 'qualified', 'none', 'en', 'US', 'Lead Qualified', 'qualified@example.com', '+15550003', NULL, NULL),
+  ('d1000000-0000-0000-0000-000000000004', 'a1111111-1111-1111-1111-111111111111', 'closed', 'none', 'en', 'US', 'Lead Closed', 'closed@example.com', '+15550004', NULL, NULL),
+  ('d1000000-0000-0000-0000-000000000005', 'a1111111-1111-1111-1111-111111111111', 'handoff_pending', 'none', 'de', 'DE', 'Lead Unrequested Handoff', 'unrequested@example.de', '+4915550005', NULL, NULL),
+  ('d1000000-0000-0000-0000-000000000006', 'a1111111-1111-1111-1111-111111111111', 'handoff_pending', 'requested', 'de', 'DE', 'Franz Becker', 'franz@example.de', '+4915550006', 'DE_PASSPORT_SECRET_999', 'Dental implant inquiry from Munich'),
+  ('d1000000-0000-0000-0000-000000000007', 'a1111111-1111-1111-1111-111111111111', 'handoff_pending', 'requested', 'en', 'GB', 'George Smith', 'george@example.co.uk', '+4415550007', NULL, 'General checkup'),
+  ('d2000000-0000-0000-0000-000000000001', 'b2222222-2222-2222-2222-222222222222', 'handoff_pending', 'requested', 'tr', 'TR', 'Ahmet Yilmaz', 'ahmet@example.tr', '+905550001', 'TR_PASSPORT_SECRET_888', 'Beta inquiry')
 ON CONFLICT (id) DO NOTHING;
 
 
@@ -117,7 +117,7 @@ ON CONFLICT (id) DO NOTHING;
 -- ----------------------------------------------------------------------------
 SELECT set_config('request.jwt.claim.sub', '', true);
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000006', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000006', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
     'UNAUTHENTICATED: Authentication required.',
     '01 unauthenticated conversion denied'
 );
@@ -125,9 +125,9 @@ SELECT throws_ok(
 -- ----------------------------------------------------------------------------
 -- ASSERTION 02: Clinic staff without can_manage_patient_profiles denied
 -- ----------------------------------------------------------------------------
-SELECT set_config('request.jwt.claim.sub', 'u3333333-3333-4333-8333-333333333333', true); -- Alpha NoManage Staff
+SELECT set_config('request.jwt.claim.sub', 'f3333333-3333-4333-8333-333333333333', true); -- Alpha NoManage Staff
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000006', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000006', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
     'FORBIDDEN: Staff member lacks can_manage_patient_profiles permission.',
     '02 clinic staff without can_manage_patient_profiles denied'
 );
@@ -135,9 +135,9 @@ SELECT throws_ok(
 -- ----------------------------------------------------------------------------
 -- ASSERTION 03: Cross-tenant lead conversion denied
 -- ----------------------------------------------------------------------------
-SELECT set_config('request.jwt.claim.sub', 'u1111111-1111-4111-8111-111111111111', true); -- Alpha Clinic Manager
+SELECT set_config('request.jwt.claim.sub', 'f1111111-1111-4111-8111-111111111111', true); -- Alpha Clinic Manager
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l2000000-0000-0000-0000-000000000001', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d2000000-0000-0000-0000-000000000001', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
     'FORBIDDEN: Caller has no active staff identity in this tenant.',
     '03 cross-tenant lead conversion denied'
 );
@@ -146,7 +146,7 @@ SELECT throws_ok(
 -- ASSERTION 04: Lead status new denied
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000001', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000001', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
     'INVALID_LEAD_STATE: Lead must be in handoff_pending status with handoff_state requested.',
     '04 lead status new denied'
 );
@@ -155,7 +155,7 @@ SELECT throws_ok(
 -- ASSERTION 05: Contacted denied
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000002', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000002', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
     'INVALID_LEAD_STATE: Lead must be in handoff_pending status with handoff_state requested.',
     '05 contacted denied'
 );
@@ -164,7 +164,7 @@ SELECT throws_ok(
 -- ASSERTION 06: Qualified without explicit handoff denied
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000003', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000003', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
     'INVALID_LEAD_STATE: Lead must be in handoff_pending status with handoff_state requested.',
     '06 qualified without explicit handoff denied'
 );
@@ -173,7 +173,7 @@ SELECT throws_ok(
 -- ASSERTION 07: Closed denied
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000004', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000004', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
     'INVALID_LEAD_STATE: Lead must be in handoff_pending status with handoff_state requested.',
     '07 closed denied'
 );
@@ -182,7 +182,7 @@ SELECT throws_ok(
 -- ASSERTION 08: Handoff_pending but handoff_state != requested denied
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000005', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000005', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
     'INVALID_LEAD_STATE: Lead must be in handoff_pending status with handoff_state requested.',
     '08 handoff_pending but handoff_state != requested denied'
 );
@@ -191,7 +191,7 @@ SELECT throws_ok(
 -- ASSERTION 09: Inactive/cross-tenant branch denied
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000006', 'br222222-2222-2222-2222-222222222222', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000006', 'b7222222-2222-2222-2222-222222222222', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
     'INVALID_APPOINTMENT_SLOT:invalid_branch',
     '09 inactive/cross-tenant branch denied'
 );
@@ -200,7 +200,7 @@ SELECT throws_ok(
 -- ASSERTION 10: Inactive/cross-tenant service denied
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000006', 'br111111-1111-1111-1111-111111111111', 'sv222222-2222-2222-2222-222222222222', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000006', 'b7111111-1111-1111-1111-111111111111', '5e222222-2222-2222-2222-222222222222', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
     'INVALID_APPOINTMENT_SLOT:invalid_service',
     '10 inactive/cross-tenant service denied'
 );
@@ -209,7 +209,7 @@ SELECT throws_ok(
 -- ASSERTION 11: Inactive/cross-tenant practitioner denied
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000006', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st777777-7777-7777-7777-777777777777', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000006', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51777777-7777-7777-7777-777777777777', '2026-10-15'::date, '10:00'::time) $$,
     'INVALID_APPOINTMENT_SLOT:invalid_staff',
     '11 inactive/cross-tenant practitioner denied'
 );
@@ -218,7 +218,7 @@ SELECT throws_ok(
 -- ASSERTION 12: Practitioner without Clinic profile denied
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000006', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st666666-6666-6666-6666-666666666666', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000006', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51666666-6666-6666-6666-666666666666', '2026-10-15'::date, '10:00'::time) $$,
     'INVALID_APPOINTMENT_SLOT:invalid_staff',
     '12 practitioner without Clinic profile denied'
 );
@@ -226,14 +226,14 @@ SELECT throws_ok(
 -- ----------------------------------------------------------------------------
 -- EXECUTE SUCCESSFUL CONVERSION FOR ASSERTIONS 13-20
 -- ----------------------------------------------------------------------------
-SELECT set_config('request.jwt.claim.sub', 'u1111111-1111-4111-8111-111111111111', true);
+SELECT set_config('request.jwt.claim.sub', 'f1111111-1111-4111-8111-111111111111', true);
 
 CREATE TEMP TABLE _conv_res AS
 SELECT public.ht_accept_lead_into_clinic(
-    'l1000000-0000-0000-0000-000000000006',
-    'br111111-1111-1111-1111-111111111111',
-    'sv111111-1111-1111-1111-111111111111',
-    'st555555-5555-5555-5555-555555555555',
+    'd1000000-0000-0000-0000-000000000006',
+    'b7111111-1111-1111-1111-111111111111',
+    '5e111111-1111-1111-1111-111111111111',
+    '51555555-5555-5555-5555-555555555555',
     '2026-10-15'::date,
     '10:00'::time
 ) AS res;
@@ -282,14 +282,14 @@ SELECT is(
 
 -- ASSERTION 19: Lead becomes status=converted, handoff_state=acknowledged
 SELECT is(
-    (SELECT status || ':' || handoff_state FROM public.ht_leads WHERE id = 'l1000000-0000-0000-0000-000000000006'),
+    (SELECT status || ':' || handoff_state FROM public.ht_leads WHERE id = 'd1000000-0000-0000-0000-000000000006'),
     'converted:acknowledged',
     '19 lead becomes status=converted, handoff_state=acknowledged'
 );
 
 -- ASSERTION 20: Conversion provenance IDs/timestamp/actor persisted correctly
 SELECT is(
-    (SELECT (converted_customer_id IS NOT NULL AND converted_patient_profile_id IS NOT NULL AND converted_appointment_id IS NOT NULL AND converted_by_staff_id = 'st111111-1111-1111-1111-111111111111' AND converted_at IS NOT NULL) FROM public.ht_leads WHERE id = 'l1000000-0000-0000-0000-000000000006'),
+    (SELECT (converted_customer_id IS NOT NULL AND converted_patient_profile_id IS NOT NULL AND converted_appointment_id IS NOT NULL AND converted_by_staff_id = '51111111-1111-1111-1111-111111111111' AND converted_at IS NOT NULL) FROM public.ht_leads WHERE id = 'd1000000-0000-0000-0000-000000000006'),
     true,
     '20 all four conversion provenance IDs/timestamp/actor are persisted correctly'
 );
@@ -300,10 +300,10 @@ SELECT is(
 -- ----------------------------------------------------------------------------
 CREATE TEMP TABLE _idem_res AS
 SELECT public.ht_accept_lead_into_clinic(
-    'l1000000-0000-0000-0000-000000000006',
-    'br111111-1111-1111-1111-111111111111',
-    'sv111111-1111-1111-1111-111111111111',
-    'st555555-5555-5555-5555-555555555555',
+    'd1000000-0000-0000-0000-000000000006',
+    'b7111111-1111-1111-1111-111111111111',
+    '5e111111-1111-1111-1111-111111111111',
+    '51555555-5555-5555-5555-555555555555',
     '2026-10-15'::date,
     '10:00'::time
 ) AS res;
@@ -318,7 +318,7 @@ SELECT is(
 -- ASSERTION 22: Second call with different booking parameters returns ALREADY_CONVERTED
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000006', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2026-10-20'::date, '14:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000006', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2026-10-20'::date, '14:00'::time) $$,
     'ALREADY_CONVERTED: Lead has already been converted under different booking parameters.',
     '22 second call with different booking parameters returns ALREADY_CONVERTED'
 );
@@ -335,7 +335,7 @@ SELECT is(
 -- ----------------------------------------------------------------------------
 -- ASSERTION 24: Pending acceptance list is same-tenant only
 -- ----------------------------------------------------------------------------
-SELECT set_config('request.jwt.claim.sub', 'u1111111-1111-4111-8111-111111111111', true);
+SELECT set_config('request.jwt.claim.sub', 'f1111111-1111-4111-8111-111111111111', true);
 SELECT is(
     (SELECT count(*)::integer FROM public.ht_list_pending_clinic_acceptance()),
     1, -- George Smith remaining for Alpha
@@ -345,7 +345,7 @@ SELECT is(
 -- ----------------------------------------------------------------------------
 -- ASSERTION 25: Pending acceptance list excludes passport_number
 -- ----------------------------------------------------------------------------
-SELECT set_config('request.jwt.claim.sub', 'u4444444-4444-4444-8444-444444444444', true); -- Beta Manager
+SELECT set_config('request.jwt.claim.sub', 'f4444444-4444-4444-8444-444444444444', true); -- Beta Manager
 SELECT is(
     (SELECT count(*)::integer FROM public.ht_list_pending_clinic_acceptance() WHERE full_name = 'Ahmet Yilmaz'),
     1,
@@ -355,9 +355,9 @@ SELECT is(
 -- ----------------------------------------------------------------------------
 -- ASSERTION 26: Unauthorized HT-only staff without Clinic patient management authority cannot perform Clinic acceptance
 -- ----------------------------------------------------------------------------
-SELECT set_config('request.jwt.claim.sub', 'u2222222-2222-4222-8222-222222222222', true); -- Alpha HT Only staff
+SELECT set_config('request.jwt.claim.sub', 'f2222222-2222-4222-8222-222222222222', true); -- Alpha HT Only staff
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000005', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000005', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
     'FORBIDDEN: Staff member lacks can_manage_patient_profiles permission.',
     '26 unauthorized HT-only staff without Clinic patient management authority cannot perform Clinic acceptance'
 );
@@ -389,7 +389,7 @@ SELECT has_column('public', 'clinic_patient_profiles', 'preferred_language', '29
 -- ASSERTION 30: Existing Slice 1/2/3 HT tests remain green
 -- ----------------------------------------------------------------------------
 SELECT is(
-    (SELECT status FROM public.ht_leads WHERE id = 'l1000000-0000-0000-0000-000000000006'),
+    (SELECT status FROM public.ht_leads WHERE id = 'd1000000-0000-0000-0000-000000000006'),
     'converted',
     '30 existing Slice 1/2/3 HT tests remain green'
 );
@@ -398,13 +398,13 @@ SELECT is(
 -- ============================================================================
 -- R1 ADDITIONS: ASSERTIONS 31-40 (CANONICAL SLOT ENGINE & CONCURRENCY)
 -- ============================================================================
-SELECT set_config('request.jwt.claim.sub', 'u1111111-1111-4111-8111-111111111111', true);
+SELECT set_config('request.jwt.claim.sub', 'f1111111-1111-4111-8111-111111111111', true);
 
 -- ----------------------------------------------------------------------------
 -- ASSERTION 31: Service not mapped to selected branch denied
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000007', 'br111111-1111-1111-1111-111111111111', 'sv444444-4444-4444-4444-444444444444', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000007', 'b7111111-1111-1111-1111-111111111111', '5e444444-4444-4444-4444-444444444444', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:00'::time) $$,
     'INVALID_APPOINTMENT_SLOT:invalid_service',
     '31 service not mapped to selected branch denied'
 );
@@ -413,7 +413,7 @@ SELECT throws_ok(
 -- ASSERTION 32: Practitioner not mapped to selected branch denied
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000007', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st999999-9999-9999-9999-999999999999', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000007', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51999999-9999-9999-9999-999999999999', '2026-10-15'::date, '10:00'::time) $$,
     'INVALID_APPOINTMENT_SLOT:invalid_staff',
     '32 practitioner not mapped to selected branch denied'
 );
@@ -421,13 +421,13 @@ SELECT throws_ok(
 -- ----------------------------------------------------------------------------
 -- ASSERTION 33: Practitioner not mapped to selected service denied
 -- ----------------------------------------------------------------------------
--- Map st999999 to branch br111111 but NOT to service sv111111
+-- Map 51999999 to branch b7111111 but NOT to service 5e111111
 INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)
-VALUES ('a1111111-1111-1111-1111-111111111111', 'st999999-9999-9999-9999-999999999999', 'br111111-1111-1111-1111-111111111111')
+VALUES ('a1111111-1111-1111-1111-111111111111', '51999999-9999-9999-9999-999999999999', 'b7111111-1111-1111-1111-111111111111')
 ON CONFLICT DO NOTHING;
 
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000007', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st999999-9999-9999-9999-999999999999', '2026-10-15'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000007', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51999999-9999-9999-9999-999999999999', '2026-10-15'::date, '10:00'::time) $$,
     'INVALID_APPOINTMENT_SLOT:invalid_staff',
     '33 practitioner not mapped to selected service denied'
 );
@@ -437,7 +437,7 @@ SELECT throws_ok(
 -- ----------------------------------------------------------------------------
 -- Request 07:00 (availability is 08:00..18:00)
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000007', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '07:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000007', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '07:00'::time) $$,
     'INVALID_APPOINTMENT_SLOT:outside_availability',
     '34 outside practitioner availability denied'
 );
@@ -447,7 +447,7 @@ SELECT throws_ok(
 -- ----------------------------------------------------------------------------
 -- Lead 6 conversion created appointment at 2026-10-15 10:00 (duration 45m). Overlapping at 10:15 should fail!
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000007', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:15'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000007', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '10:15'::time) $$,
     'INVALID_APPOINTMENT_SLOT:slot_conflict',
     '35 overlapping pending appointment denied'
 );
@@ -457,10 +457,10 @@ SELECT throws_ok(
 -- ----------------------------------------------------------------------------
 -- Insert a confirmed appointment at 2026-10-15 14:00 (duration 45m)
 INSERT INTO public.appointments (tenant_id, branch_id, staff_id, service_id, appointment_date, appointment_time, duration_minutes, status)
-VALUES ('a1111111-1111-1111-1111-111111111111', 'br111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', 'sv111111-1111-1111-1111-111111111111', '2026-10-15'::date, '14:00'::time, 45, 'confirmed');
+VALUES ('a1111111-1111-1111-1111-111111111111', 'b7111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '5e111111-1111-1111-1111-111111111111', '2026-10-15'::date, '14:00'::time, 45, 'confirmed');
 
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000007', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2026-10-15'::date, '14:15'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000007', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2026-10-15'::date, '14:15'::time) $$,
     'INVALID_APPOINTMENT_SLOT:slot_conflict',
     '36 overlapping confirmed appointment denied'
 );
@@ -470,15 +470,15 @@ SELECT throws_ok(
 -- ----------------------------------------------------------------------------
 -- Insert a cancelled appointment at 2026-10-15 11:00 (duration 45m)
 INSERT INTO public.appointments (tenant_id, branch_id, staff_id, service_id, appointment_date, appointment_time, duration_minutes, status)
-VALUES ('a1111111-1111-1111-1111-111111111111', 'br111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', 'sv111111-1111-1111-1111-111111111111', '2026-10-15'::date, '11:00'::time, 45, 'cancelled');
+VALUES ('a1111111-1111-1111-1111-111111111111', 'b7111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '5e111111-1111-1111-1111-111111111111', '2026-10-15'::date, '11:00'::time, 45, 'cancelled');
 
 -- Lead 7 conversion at 11:00 should succeed!
 CREATE TEMP TABLE _conv_res7 AS
 SELECT public.ht_accept_lead_into_clinic(
-    'l1000000-0000-0000-0000-000000000007',
-    'br111111-1111-1111-1111-111111111111',
-    'sv111111-1111-1111-1111-111111111111',
-    'st555555-5555-5555-5555-555555555555',
+    'd1000000-0000-0000-0000-000000000007',
+    'b7111111-1111-1111-1111-111111111111',
+    '5e111111-1111-1111-1111-111111111111',
+    '51555555-5555-5555-5555-555555555555',
     '2026-10-15'::date,
     '11:00'::time
 ) AS res;
@@ -493,7 +493,7 @@ SELECT is(
 -- ASSERTION 38: Branch timezone-aware past slot denied
 -- ----------------------------------------------------------------------------
 SELECT throws_ok(
-    $$ SELECT public.ht_accept_lead_into_clinic('l1000000-0000-0000-0000-000000000005', 'br111111-1111-1111-1111-111111111111', 'sv111111-1111-1111-1111-111111111111', 'st555555-5555-5555-5555-555555555555', '2020-01-01'::date, '10:00'::time) $$,
+    $$ SELECT public.ht_accept_lead_into_clinic('d1000000-0000-0000-0000-000000000005', 'b7111111-1111-1111-1111-111111111111', '5e111111-1111-1111-1111-111111111111', '51555555-5555-5555-5555-555555555555', '2020-01-01'::date, '10:00'::time) $$,
     'INVALID_APPOINTMENT_SLOT:slot_in_past',
     '38 branch timezone-aware past slot denied'
 );
@@ -501,9 +501,9 @@ SELECT throws_ok(
 -- ----------------------------------------------------------------------------
 -- ASSERTION 39: Slot evaluator temporary/fail-closed result creates zero customer/profile/appointment/conversion mutation
 -- ----------------------------------------------------------------------------
--- Attempt past slot conversion for l1000000-0000-0000-0000-000000000005
+-- Attempt past slot conversion for d1000000-0000-0000-0000-000000000005
 SELECT is(
-    (SELECT status FROM public.ht_leads WHERE id = 'l1000000-0000-0000-0000-000000000005'),
+    (SELECT status FROM public.ht_leads WHERE id = 'd1000000-0000-0000-0000-000000000005'),
     'handoff_pending',
     '39 slot evaluator temporary/fail-closed result creates zero customer/profile/appointment/conversion mutation'
 );
@@ -513,7 +513,7 @@ SELECT is(
 -- ----------------------------------------------------------------------------
 -- Count appointments at 2026-10-15 11:00 (active only, excluding cancelled)
 SELECT is(
-    (SELECT count(*)::integer FROM public.appointments WHERE staff_id = 'st555555-5555-5555-5555-555555555555' AND appointment_date = '2026-10-15'::date AND appointment_time = '11:00'::time AND status <> 'cancelled'),
+    (SELECT count(*)::integer FROM public.appointments WHERE staff_id = '51555555-5555-5555-5555-555555555555' AND appointment_date = '2026-10-15'::date AND appointment_time = '11:00'::time AND status <> 'cancelled'),
     1,
     '40 post-conversion booking conflict integrity check: exactly 1 active appointment exists for contested slot'
 );
