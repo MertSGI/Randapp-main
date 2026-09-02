@@ -13,7 +13,7 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
         with:
-          ref: '2bbe7c581c7253ea8087b2db81104c0d2c75b3a9'
+          ref: 'ca5cbeb9339314fdd5b94bcba121ba513dd7bace'
 
       - name: Initialize Evidence Directory
         id: init_artifacts
@@ -200,7 +200,12 @@ jobs:
           node -e '
             const fs = require("fs");
             const log = fs.readFileSync("/tmp/e2-artifacts/commercial-verification.log", "utf8");
-            const exitCode = '${psql_exit}';
+            const rawExit = '${psql_exit}';
+            const exitCode = Number(rawExit);
+
+            if (!Number.isInteger(exitCode) || exitCode < 0) {
+              throw new Error("INVALID_PSQL_EXIT_CODE_" + rawExit);
+            }
 
             const keys = [
               "COMMERCIAL_BOOTSTRAP_RESULT", "COMMERCIAL_ELIGIBILITY_RESULT",
@@ -282,7 +287,13 @@ jobs:
           node -e '
             const fs = require("fs");
             const log = fs.readFileSync("/tmp/e2-artifacts/fixture-uuid-static.log", "utf8");
-            const exitCode = '${uuid_status}';
+            const rawExit = '${uuid_status}';
+            const exitCode = Number(rawExit);
+
+            if (!Number.isInteger(exitCode) || exitCode < 0) {
+              throw new Error("INVALID_UUID_EXIT_CODE_" + rawExit);
+            }
+
             const hasMarker = log.includes("FIXTURE_UUID_STATIC_RESULT=");
             const rawRes = log.match(/FIXTURE_UUID_STATIC_RESULT=(PASS|FAIL)/)?.[1];
             const dist = log.match(/INVALID_UUID_DISTINCT_COUNT=(\d+)/)?.[1] || "NOT_OBSERVED";
@@ -334,7 +345,13 @@ jobs:
           node -e '
             const fs = require("fs");
             const log = fs.readFileSync("/tmp/e2-artifacts/fixture-arity-static.log", "utf8");
-            const exitCode = '${arity_status}';
+            const rawExit = '${arity_status}';
+            const exitCode = Number(rawExit);
+
+            if (!Number.isInteger(exitCode) || exitCode < 0) {
+              throw new Error("INVALID_ARITY_EXIT_CODE_" + rawExit);
+            }
+
             const getVal = (pattern) => log.match(pattern)?.[1] || "NOT_OBSERVED";
             const hasMarker = log.includes("FIXTURE_ARITY_STATIC_RESULT=");
             const rawRes = log.match(/FIXTURE_ARITY_STATIC_RESULT=(PASS|FAIL)/)?.[1];
@@ -512,11 +529,11 @@ jobs:
             echo "BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT_NOT_EXECUTED_REASON=PREREQUISITE_FAILED" >> /tmp/e2-artifacts/14-concurrency.env
             echo "INDEPENDENT_DB_CONNECTION_COUNT=NOT_OBSERVED" >> /tmp/e2-artifacts/14-concurrency.env
             echo "CONCURRENCY_ROUND_COUNT=NOT_OBSERVED" >> /tmp/e2-artifacts/14-concurrency.env
-            echo "ROUND_1_WINNER=none" >> /tmp/e2-artifacts/14-concurrency.env
+            echo "ROUND_1_WINNER=NOT_OBSERVED" >> /tmp/e2-artifacts/14-concurrency.env
             echo "ROUND_1_ACTIVE_APPOINTMENT_COUNT=NOT_OBSERVED" >> /tmp/e2-artifacts/14-concurrency.env
-            echo "ROUND_2_WINNER=none" >> /tmp/e2-artifacts/14-concurrency.env
+            echo "ROUND_2_WINNER=NOT_OBSERVED" >> /tmp/e2-artifacts/14-concurrency.env
             echo "ROUND_2_ACTIVE_APPOINTMENT_COUNT=NOT_OBSERVED" >> /tmp/e2-artifacts/14-concurrency.env
-            echo "ROUND_3_WINNER=none" >> /tmp/e2-artifacts/14-concurrency.env
+            echo "ROUND_3_WINNER=NOT_OBSERVED" >> /tmp/e2-artifacts/14-concurrency.env
             echo "ROUND_3_ACTIVE_APPOINTMENT_COUNT=NOT_OBSERVED" >> /tmp/e2-artifacts/14-concurrency.env
             echo "HT_WIN_COUNT=NOT_OBSERVED" >> /tmp/e2-artifacts/14-concurrency.env
             echo "HT_WIN_PROVENANCE_RESULT=NOT_OBSERVED" >> /tmp/e2-artifacts/14-concurrency.env
@@ -549,7 +566,12 @@ jobs:
           node -e '
             const fs = require("fs");
             const log = fs.readFileSync("/tmp/e2-artifacts/concurrency-raw.log", "utf8");
-            const exitCode = '${conc_status}';
+            const rawExit = '${conc_status}';
+            const exitCode = Number(rawExit);
+
+            if (!Number.isInteger(exitCode) || exitCode < 0) {
+              throw new Error("INVALID_CONCURRENCY_EXIT_CODE_" + rawExit);
+            }
 
             const getOptMatch = (pattern) => {
               const m = log.match(pattern);
