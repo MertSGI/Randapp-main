@@ -1,9 +1,9 @@
 // ============================================================================
-// STATIC FIXTURE ARITY CONTRACT SCANNER
+// HARDENED LEXICAL ARITY CONTRACT SCANNER (R9-R1)
 // File: scripts/test-health-tourism-slice4-fixture-arity-contract.mjs
 // Purpose:
-//   Lexical fail-closed scanner that parses all 8 mandatory pgTAP SQL test files
-//   and verifies column count vs value tuple count for static INSERT statements.
+//   Lexical fail-closed scanner verifying column count vs value tuple count
+//   for static INSERT statements across all 8 mandatory pgTAP SQL test files.
 // ============================================================================
 
 import fs from 'fs';
@@ -118,13 +118,19 @@ export function tokenizeSql(sql, filename = 'test.sql') {
         }
         i = endIdx + tag.length;
 
-        // If body looks like DO/PLpgSQL block, tokenize body recursively so static INSERTs inside DO blocks are inspected!
-        if (/\bINSERT\s+INTO\b/i.test(body) && !/\bEXECUTE\b/i.test(body)) {
-          try {
-            const innerTokens = tokenizeSql(body, `${filename}:DO_BLOCK`);
-            tokens.push(...innerTokens);
-          } catch {
-            tokens.push({ type: 'DOLLAR_STRING', value: body, line: startLine });
+        // Inspect body if it contains static INSERT statements!
+        if (/\bINSERT\s+INTO\b/i.test(body)) {
+          // If body contains dynamic EXECUTE with concatenation or variables, mark as UNSUPPORTED!
+          if (/\bEXECUTE\b\s+[^';]+/i.test(body) && !/\bEXECUTE\b\s+'[^']+'/i.test(body)) {
+            tokens.push({ type: 'UNSUPPORTED_DYNAMIC_EXECUTE', value: body, line: startLine });
+          } else {
+            try {
+              const innerTokens = tokenizeSql(body, `${filename}:DO_BLOCK`);
+              tokens.push(...innerTokens);
+            } catch (err) {
+              // Fail closed! Do NOT convert parser failure into opaque success DOLLAR_STRING!
+              throw new Error(`FAIL_CLOSED_DOLLAR_PARSE_ERROR at ${filename}:${startLine}: ${err.message}`);
+            }
           }
         } else {
           tokens.push({ type: 'DOLLAR_STRING', value: body, line: startLine });
@@ -133,8 +139,8 @@ export function tokenizeSql(sql, filename = 'test.sql') {
       }
     }
 
-    // Punctuation () , ;
-    if (['(', ')', ',', ';'].includes(char)) {
+    // Punctuation () , ; [] {}
+    if (['(', ')', ',', ';', '[', ']', '{', '}'].includes(char)) {
       tokens.push({ type: 'PUNCT', value: char, line });
       i++;
       continue;
@@ -143,7 +149,7 @@ export function tokenizeSql(sql, filename = 'test.sql') {
     // Identifiers & Keywords
     let ident = '';
     const startLine = line;
-    while (i < len && !/\s/.test(sql[i]) && !['(', ')', ',', ';', "'", '"', '$'].includes(sql[i]) && !(sql[i] === '-' && sql[i+1] === '-') && !(sql[i] === '/' && sql[i+1] === '*')) {
+    while (i < len && !/\s/.test(sql[i]) && !['(', ')', ',', ';', '[', ']', '{', '}', "'", '"', '$'].includes(sql[i]) && !(sql[i] === '-' && sql[i+1] === '-') && !(sql[i] === '/' && sql[i+1] === '*')) {
       ident += sql[i];
       i++;
     }
@@ -152,6 +158,25 @@ export function tokenizeSql(sql, filename = 'test.sql') {
     } else {
       i++;
     }
+  }
+
+  // Validate balanced brackets across token stream
+  let pCount = 0, bCount = 0, cCount = 0;
+  for (const t of tokens) {
+    if (t.type === 'PUNCT') {
+      if (t.value === '(') pCount++;
+      else if (t.value === ')') pCount--;
+      else if (t.value === '[') bCount++;
+      else if (t.value === ']') bCount--;
+      else if (t.value === '{') cCount++;
+      else if (t.value === '}') cCount--;
+    }
+    if (pCount < 0 || bCount < 0 || cCount < 0) {
+      throw new Error(`UNBALANCED_PUNCTUATION_CLOSE at ${filename}:${t.line}`);
+    }
+  }
+  if (pCount !== 0 || bCount !== 0 || cCount !== 0) {
+    throw new Error(`UNBALANCED_PUNCTUATION_OPEN at ${filename}`);
   }
 
   return tokens;
@@ -163,8 +188,8 @@ export function splitTokenListByCommas(tokens) {
   let depth = 0;
 
   for (const t of tokens) {
-    if (t.type === 'PUNCT' && (t.value === '(' || t.value === '[')) depth++;
-    else if (t.type === 'PUNCT' && (t.value === ')' || t.value === ']')) depth--;
+    if (t.type === 'PUNCT' && (t.value === '(' || t.value === '[' || t.value === '{')) depth++;
+    else if (t.type === 'PUNCT' && (t.value === ')' || t.value === ']' || t.value === '}')) depth--;
 
     if (t.type === 'PUNCT' && t.value === ',' && depth === 0) {
       items.push(current);
@@ -189,6 +214,14 @@ export function parseAndVerifyInsertStatements(tokens, filename) {
 
   while (idx < len) {
     const t = tokens[idx];
+
+    if (t.type === 'UNSUPPORTED_DYNAMIC_EXECUTE') {
+      unsupportedCount++;
+      console.error(`❌ ARITY UNSUPPORTED [${filename}:${t.line}]: Dynamic SQL EXECUTE statement cannot be deterministically verified.`);
+      idx++;
+      continue;
+    }
+
     if (t.type === 'WORD' && t.value.toUpperCase() === 'INSERT') {
       const insertLine = t.line;
       if (idx + 1 < len && tokens[idx + 1].type === 'WORD' && tokens[idx + 1].value.toUpperCase() === 'INTO') {
@@ -197,7 +230,7 @@ export function parseAndVerifyInsertStatements(tokens, filename) {
           const tableName = tokens[cur].value;
           cur++;
 
-          // Check if explicit column list (cols...) is present
+          // Explicit column list (cols...)
           if (cur < len && tokens[cur].type === 'PUNCT' && tokens[cur].value === '(') {
             cur++;
             const colTokens = [];
@@ -212,7 +245,7 @@ export function parseAndVerifyInsertStatements(tokens, filename) {
             const declaredCols = splitTokenListByCommas(colTokens);
             const expectedArity = declaredCols.length;
 
-            // Look for VALUES or SELECT or DEFAULT VALUES
+            // Look for VALUES or SELECT or DEFAULT
             while (cur < len && tokens[cur].type === 'WORD' && !['VALUES', 'SELECT', 'DEFAULT'].includes(tokens[cur].value.toUpperCase())) {
               cur++;
             }
@@ -237,8 +270,8 @@ export function parseAndVerifyInsertStatements(tokens, filename) {
                   const tupleTokens = [];
                   let depth = 1;
                   while (cur < len && depth > 0) {
-                    if (tokens[cur].type === 'PUNCT' && tokens[cur].value === '(') depth++;
-                    else if (tokens[cur].type === 'PUNCT' && tokens[cur].value === ')') depth--;
+                    if (tokens[cur].type === 'PUNCT' && (tokens[cur].value === '(' || tokens[cur].value === '[' || tokens[cur].value === '{')) depth++;
+                    else if (tokens[cur].type === 'PUNCT' && (tokens[cur].value === ')' || tokens[cur].value === ']' || tokens[cur].value === '}')) depth--;
 
                     if (depth > 0) {
                       tupleTokens.push(tokens[cur]);
@@ -257,7 +290,6 @@ export function parseAndVerifyInsertStatements(tokens, filename) {
                     console.error(`❌ ARITY MISMATCH [${filename}:${insertLine}] Table ${tableName}: expected ${expectedArity} cols, received ${tupleVals.length} values in tuple #${tupleNum}`);
                   }
 
-                  // If next token is comma, skip and continue to next tuple
                   if (cur < len && tokens[cur].type === 'PUNCT' && tokens[cur].value === ',') {
                     cur++;
                   } else {
