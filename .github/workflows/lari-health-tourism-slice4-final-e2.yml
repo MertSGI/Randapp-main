@@ -16,7 +16,7 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
         with:
-          ref: 'bb6e326a24e7a4f440ff433e38ccb16cd04631f2'
+          ref: '92372a7bbdff3518aee408c57f218fc12ab2a9aa'
 
       - name: Initialize Evidence Directory
         id: init_artifacts
@@ -104,6 +104,43 @@ jobs:
         id: install_deps
         run: |
           npm ci || npm install
+
+      - name: Execute Static Fixture UUID Contract Check
+        id: uuid_contract
+        run: |
+          set -euo pipefail
+          echo "=== RUNNING FIXTURE UUID STATIC CONTRACT CHECK ==="
+          node scripts/test-health-tourism-slice4-fixture-uuid-contract.mjs 2>&1 | tee /tmp/e2-artifacts/fixture-uuid-static.log
+
+          node -e '
+            const fs = require("fs");
+            const log = fs.readFileSync("/tmp/e2-artifacts/fixture-uuid-static.log", "utf8");
+
+            const getRequiredMatch = (pattern, name) => {
+              const m = log.match(pattern);
+              if (!m) {
+                console.error(`UUID_PARSER_FATAL: Required metric "${name}" absent from log!`);
+                process.exit(1);
+              }
+              return m[1];
+            };
+
+            const uuidResult = getRequiredMatch(/FIXTURE_UUID_STATIC_RESULT=(PASS|FAIL)/, "FIXTURE_UUID_STATIC_RESULT");
+            const distinctCount = parseInt(getRequiredMatch(/INVALID_UUID_DISTINCT_COUNT=(\d+)/, "INVALID_UUID_DISTINCT_COUNT"), 10);
+            const occurrenceCount = parseInt(getRequiredMatch(/INVALID_UUID_OCCURRENCE_COUNT=(\d+)/, "INVALID_UUID_OCCURRENCE_COUNT"), 10);
+
+            let envAdd = "";
+            envAdd += `FIXTURE_UUID_STATIC_RESULT=${uuidResult}\n`;
+            envAdd += `INVALID_UUID_DISTINCT_COUNT=${distinctCount}\n`;
+            envAdd += `INVALID_UUID_OCCURRENCE_COUNT=${occurrenceCount}\n`;
+
+            fs.appendFileSync("/tmp/e2-artifacts/results.env", envAdd);
+
+            if (uuidResult !== "PASS" || distinctCount !== 0 || occurrenceCount !== 0) {
+              console.error("❌ UUID Static Contract Check Failed!");
+              process.exit(1);
+            }
+          '
 
       - name: Execute pgTAP DB Acceptance Suites
         id: pgtap_suites
@@ -358,6 +395,9 @@ jobs:
 
           if grep -q "MIGRATION_REPLAY_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "MIGRATION_COUNT=69/69" /tmp/e2-artifacts/results.env && \
+             grep -q "FIXTURE_UUID_STATIC_RESULT=PASS" /tmp/e2-artifacts/results.env && \
+             grep -q "INVALID_UUID_DISTINCT_COUNT=0" /tmp/e2-artifacts/results.env && \
+             grep -q "INVALID_UUID_OCCURRENCE_COUNT=0" /tmp/e2-artifacts/results.env && \
              grep -q "COMMERCIAL_FIXTURE_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "COMMERCIAL_ELIGIBILITY_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "COMMERCIAL_QUOTA_RESULT=PASS" /tmp/e2-artifacts/results.env && \
@@ -395,7 +435,7 @@ jobs:
              grep -q "TYPECHECK_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "BUILD_RESULT=PASS" /tmp/e2-artifacts/results.env && \
              grep -q "SECRET_SCAN_RESULT=PASS" /tmp/e2-artifacts/results.env && \
-             [ "${CHECKED_SHA}" = "bb6e326a24e7a4f440ff433e38ccb16cd04631f2" ]; then
+             [ "${CHECKED_SHA}" = "92372a7bbdff3518aee408c57f218fc12ab2a9aa" ]; then
 
             sed -i 's/SLICE4_E2_RESULT=FAIL/SLICE4_E2_RESULT=PASS_CANDIDATE/g' /tmp/e2-artifacts/results.env
           else
@@ -417,7 +457,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lari-health-tourism-slice4-final-e2-r6-evidence
+          name: lari-health-tourism-slice4-final-e2-r7-evidence
           path: /tmp/e2-artifacts/*
 
       - name: Enforce Slice 4 E2 Authority Result
