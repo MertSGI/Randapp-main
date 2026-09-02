@@ -1,5 +1,5 @@
 // ============================================================================
-// HARDENED LEXICAL ARITY CONTRACT SCANNER (R9-R1.3)
+// HARDENED LEXICAL ARITY CONTRACT SCANNER (R9-R1.4)
 // File: scripts/test-health-tourism-slice4-fixture-arity-contract.mjs
 // Purpose:
 //   Lexical fail-closed scanner verifying column count vs value tuple count
@@ -246,7 +246,7 @@ export function parseAndVerifyInsertStatements(tokens, filename) {
         // Check if there is concatenation || or variables after string
         let isDynamic = false;
         let p = idx + 2;
-        while (p < len && tokens[p].type !== 'PUNCT' || tokens[p]?.value !== ';') {
+        while (p < len && (tokens[p].type !== 'PUNCT' || tokens[p]?.value !== ';')) {
           if (tokens[p].type === 'WORD' && tokens[p].value === '||') { isDynamic = true; break; }
           if (tokens[p].type === 'WORD' && tokens[p].value.toUpperCase() === 'USING') { isDynamic = true; break; }
           p++;
@@ -263,6 +263,11 @@ export function parseAndVerifyInsertStatements(tokens, filename) {
             nonValuesInserts += res.nonValuesInserts;
             mismatchOccurrences += res.mismatchOccurrences;
             unsupportedCount += res.unsupportedCount;
+
+            // Merge recursive mismatches into mismatchMap to preserve distinct mismatch count
+            for (const [k, v] of res.mismatchMap.entries()) {
+              mismatchMap.set(k, (mismatchMap.get(k) || 0) + v);
+            }
           } catch {
             unsupportedCount++;
           }
@@ -377,6 +382,7 @@ export function parseAndVerifyInsertStatements(tokens, filename) {
     nonValuesInserts,
     mismatchOccurrences,
     distinctMismatches: mismatchMap.size,
+    mismatchMap,
     unsupportedCount
   };
 }
@@ -387,7 +393,7 @@ export function runArityScanner() {
   let totalChecked = 0;
   let totalNonValues = 0;
   let totalOccurrences = 0;
-  let totalDistinct = 0;
+  const globalMismatchMap = new Map();
   let totalUnsupported = 0;
   let fileError = false;
 
@@ -407,14 +413,18 @@ export function runArityScanner() {
       totalChecked += res.checkedInserts;
       totalNonValues += res.nonValuesInserts;
       totalOccurrences += res.mismatchOccurrences;
-      totalDistinct += res.distinctMismatches;
       totalUnsupported += res.unsupportedCount;
+
+      for (const [k, v] of res.mismatchMap.entries()) {
+        globalMismatchMap.set(k, (globalMismatchMap.get(k) || 0) + v);
+      }
     } catch (err) {
       console.error(`❌ SCANNER_PARSER_FATAL in ${relPath}: ${err.message}`);
       fileError = true;
     }
   }
 
+  const totalDistinct = globalMismatchMap.size;
   const passed = !fileError && totalDistinct === 0 && totalOccurrences === 0 && totalUnsupported === 0;
 
   console.log(`\nFIXTURE_ARITY_STATIC_RESULT=${passed ? 'PASS' : 'FAIL'}`);

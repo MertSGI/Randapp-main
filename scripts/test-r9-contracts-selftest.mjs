@@ -1,10 +1,10 @@
 // ============================================================================
-// HARDENED SELF-TEST MATRIX FOR SCANNER & AGGREGATOR (R9-R1.3)
+// HARDENED SELF-TEST MATRIX FOR SCANNER & AGGREGATOR (R9-R1.4)
 // File: scripts/test-r9-contracts-selftest.mjs
 // Purpose:
 //   Executes comprehensive positive and adversarial unit tests for 30 fragment ownership,
-//   strict enum/integer parsing, conditional reason key ownership, FIRST_FATAL reason
-//   preservation, and results.env disk re-read validation.
+//   strict enum/integer parsing, status-only reason key ownership, FIRST_FATAL reason
+//   preservation, second FAIL reason missing rejection, and results.env total disk re-read.
 // ============================================================================
 
 import fs from 'fs';
@@ -17,17 +17,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 function testArityScannerAdversarial() {
-  console.log('--- Testing Arity Scanner Positive & Adversarial Cases (R9-R1.3) ---');
+  console.log('--- Testing Arity Scanner Positive & Adversarial Cases (R9-R1.4) ---');
 
   // 1. Valid Normal INSERT
   const sql1 = `INSERT INTO public.t1 (c1, c2) VALUES ('v1', 'v2'), ('v3', 'v4');`;
   const res1 = parseAndVerifyInsertStatements(tokenizeSql(sql1, 'sql1.sql'), 'sql1.sql');
-  if (res1.mismatchOccurrences !== 0) throw new Error('Failed valid normal INSERT');
+  if (res1.mismatchOccurrences !== 0 || res1.distinctMismatches !== 0) throw new Error('Failed valid normal INSERT');
 
   // 2. Deliberate Arity Mismatch
   const sql2 = `INSERT INTO public.t2 (c1, c2) VALUES ('v1', 'v2', 'v3_extra');`;
   const res2 = parseAndVerifyInsertStatements(tokenizeSql(sql2, 'sql2.sql'), 'sql2.sql');
-  if (res2.mismatchOccurrences !== 1) throw new Error('Failed to catch deliberate arity mismatch');
+  if (res2.mismatchOccurrences !== 1 || res2.distinctMismatches !== 1) throw new Error('Failed to catch deliberate arity mismatch');
 
   // 3. Multi-row VALUES
   const sql3 = `INSERT INTO public.t3 (a, b) VALUES (1, 2), (3, 4), (5, 6);`;
@@ -68,10 +68,12 @@ function testArityScannerAdversarial() {
   const res8 = parseAndVerifyInsertStatements(tokenizeSql(sql8, 'sql8.sql'), 'sql8.sql');
   if (res8.checkedInserts !== 1 || res8.mismatchOccurrences !== 0) throw new Error('Failed static EXECUTE valid');
 
-  // 9. Static EXECUTE String (Mismatch)
+  // 9. Static EXECUTE String (Mismatch) -> Occurrence > 0 AND Distinct > 0
   const sql9 = `EXECUTE 'INSERT INTO public.t9 (c1, c2) VALUES (''v1'', ''v2'', ''v3'')';`;
   const res9 = parseAndVerifyInsertStatements(tokenizeSql(sql9, 'sql9.sql'), 'sql9.sql');
-  if (res9.mismatchOccurrences !== 1) throw new Error('Failed static EXECUTE mismatch');
+  if (res9.mismatchOccurrences !== 1 || res9.distinctMismatches !== 1) {
+    throw new Error(`Failed static EXECUTE mismatch propagation (occurrences=${res9.mismatchOccurrences}, distinct=${res9.distinctMismatches})`);
+  }
 
   // 10. Dynamic EXECUTE Variable / Concatenation Unsupported
   const sql10 = `EXECUTE 'INSERT INTO public.t10 (c1) VALUES (' || v_var || ')';`;
@@ -88,7 +90,32 @@ function testArityScannerAdversarial() {
   const res12 = parseAndVerifyInsertStatements(tokenizeSql(sql12, 'sql12.sql'), 'sql12.sql');
   if (res12.nonValuesInserts !== 1) throw new Error('Failed INSERT...SELECT handling');
 
-  console.log('✅ Arity scanner adversarial self-tests PASSED.');
+  // 13. Syntax Rejections
+  let unclosedStringCaught = false;
+  try { tokenizeSql("SELECT 'unclosed string", 'test.sql'); } catch (e) { if (e.message.includes('UNCLOSED_STRING_LITERAL')) unclosedStringCaught = true; }
+  if (!unclosedStringCaught) throw new Error('Failed unclosed string literal rejection');
+
+  let unclosedIdentCaught = false;
+  try { tokenizeSql('SELECT "unclosed ident', 'test.sql'); } catch (e) { if (e.message.includes('UNCLOSED_DOUBLE_QUOTE')) unclosedIdentCaught = true; }
+  if (!unclosedIdentCaught) throw new Error('Failed unclosed double quote rejection');
+
+  let unclosedCommentCaught = false;
+  try { tokenizeSql('/* unclosed block comment', 'test.sql'); } catch (e) { if (e.message.includes('UNCLOSED_BLOCK_COMMENT')) unclosedCommentCaught = true; }
+  if (!unclosedCommentCaught) throw new Error('Failed unclosed block comment rejection');
+
+  let unclosedDollarCaught = false;
+  try { tokenizeSql('DO $tag$ unclosed body', 'test.sql'); } catch (e) { if (e.message.includes('UNCLOSED_DOLLAR_QUOTE')) unclosedDollarCaught = true; }
+  if (!unclosedDollarCaught) throw new Error('Failed unclosed dollar quote rejection');
+
+  let unbalancedOpenCaught = false;
+  try { tokenizeSql('INSERT INTO t (c1, c2 VALUES (1, 2);', 'test.sql'); } catch (e) { if (e.message.includes('UNBALANCED_PUNCTUATION_OPEN')) unbalancedOpenCaught = true; }
+  if (!unbalancedOpenCaught) throw new Error('Failed unbalanced opening punctuation rejection');
+
+  let unbalancedCloseCaught = false;
+  try { tokenizeSql('INSERT INTO t (c1, c2)) VALUES (1, 2);', 'test.sql'); } catch (e) { if (e.message.includes('UNBALANCED_PUNCTUATION_CLOSE')) unbalancedCloseCaught = true; }
+  if (!unbalancedCloseCaught) throw new Error('Failed unbalanced closing punctuation rejection');
+
+  console.log('✅ Arity scanner 25+ adversarial self-tests PASSED.');
 }
 
 function writeValidPhaseFragments(targetDir) {
@@ -132,7 +159,7 @@ function writeValidPhaseFragments(targetDir) {
 }
 
 function testAggregatorAdversarial() {
-  console.log('--- Testing Evidence Aggregator Fragment Ownership & Adversarial Cases (R9-R1.3) ---');
+  console.log('--- Testing Evidence Aggregator Fragment Ownership & Adversarial Cases (R9-R1.4) ---');
   const tempDir = path.join(__dirname, '../scratch/test-aggregator-fragments-tmp');
 
   // 1. Positive Full Set PASS (30 Fragments)
@@ -147,19 +174,20 @@ function testAggregatorAdversarial() {
   try { aggregateEvidence(tempDir); } catch (e) { if (e.message.includes('UNKNOWN_FRAGMENT_REJECTED')) unkFragCaught = true; }
   if (!unkFragCaught) throw new Error('Failed unknown fragment rejection');
 
-  // 3. Wrong Owner Failure Reason Key Rejection
+  // 3. Non-status Key Reason Attachment Rejection
   writeValidPhaseFragments(tempDir);
-  fs.appendFileSync(path.join(tempDir, '01-migration.env'), 'TYPECHECK_RESULT_FAILURE_REASON=WRONG_FILE\n');
-  let wrongReasonOwnerCaught = false;
-  try { aggregateEvidence(tempDir); } catch (e) { if (e.message.includes('WRONG_OWNER_KEY_REJECTED')) wrongReasonOwnerCaught = true; }
-  if (!wrongReasonOwnerCaught) throw new Error('Failed wrong owner failure reason key rejection');
+  fs.appendFileSync(path.join(tempDir, '04-uuid-static.env'), 'INVALID_UUID_DISTINCT_COUNT_FAILURE_REASON=NOT_ALLOWED\n');
+  let nonStatusReasonCaught = false;
+  try { aggregateEvidence(tempDir); } catch (e) { if (e.message.includes('UNKNOWN_KEY_REJECTED')) nonStatusReasonCaught = true; }
+  if (!nonStatusReasonCaught) throw new Error('Failed non-status key reason attachment rejection');
 
-  // 4. Invalid Enum Rejection
+  // 4. Second FAIL Missing Explicit Reason Rejection
   writeValidPhaseFragments(tempDir);
-  fs.writeFileSync(path.join(tempDir, '24-typecheck.env'), 'TYPECHECK_RESULT=MAYBE\n');
-  let invalidEnumCaught = false;
-  try { aggregateEvidence(tempDir); } catch (e) { if (e.message.includes('STRICT_ENUM_VALIDATION_FAILED')) invalidEnumCaught = true; }
-  if (!invalidEnumCaught) throw new Error('Failed invalid enum rejection');
+  fs.writeFileSync(path.join(tempDir, '08-pgtap-slice4-block1.env'), 'SLICE4_BLOCK1_PGTAP_PLANNED_COUNT=40\nSLICE4_BLOCK1_PGTAP_EXECUTED_COUNT=40\nSLICE4_BLOCK1_PGTAP_COUNT=40\nSLICE4_BLOCK1_PGTAP_PASSED_COUNT=39\nSLICE4_BLOCK1_PGTAP_FAILED_COUNT=1\nSLICE4_BLOCK1_PGTAP_RESULT=FAIL\nSLICE4_BLOCK1_PGTAP_RESULT_FAILURE_REASON=ASSERTION_38_PAST_SLOT_DENIED_FAILED\nSLICE4_BLOCK1_PGTAP_FAILURE_CLASS=ASSERTION_FAILURE\n');
+  fs.writeFileSync(path.join(tempDir, '24-typecheck.env'), 'TYPECHECK_RESULT=FAIL\n'); // SECOND FAIL MISSING REASON
+  let secondFailReasonMissingCaught = false;
+  try { aggregateEvidence(tempDir); } catch (e) { if (e.message.includes('MISSING_FAILURE_REASON_REJECTED')) secondFailReasonMissingCaught = true; }
+  if (!secondFailReasonMissingCaught) throw new Error('Failed to reject when SECOND FAIL status key is missing explicit failure reason');
 
   // 5. Invalid Integer Rejection
   writeValidPhaseFragments(tempDir);
@@ -168,48 +196,42 @@ function testAggregatorAdversarial() {
   try { aggregateEvidence(tempDir); } catch (e) { if (e.message.includes('STRICT_INTEGER_VALIDATION_FAILED')) invalidIntCaught = true; }
   if (!invalidIntCaught) throw new Error('Failed invalid integer rejection');
 
-  // 6. FIRST_FATAL Preserves Explicit Failure Reason Exactly
+  // 6. FIRST_FATAL Preserves Exact Earliest Reason
   writeValidPhaseFragments(tempDir);
   fs.writeFileSync(path.join(tempDir, '08-pgtap-slice4-block1.env'), 'SLICE4_BLOCK1_PGTAP_PLANNED_COUNT=40\nSLICE4_BLOCK1_PGTAP_EXECUTED_COUNT=40\nSLICE4_BLOCK1_PGTAP_COUNT=40\nSLICE4_BLOCK1_PGTAP_PASSED_COUNT=39\nSLICE4_BLOCK1_PGTAP_FAILED_COUNT=1\nSLICE4_BLOCK1_PGTAP_RESULT=FAIL\nSLICE4_BLOCK1_PGTAP_RESULT_FAILURE_REASON=ASSERTION_38_PAST_SLOT_DENIED_FAILED\nSLICE4_BLOCK1_PGTAP_FAILURE_CLASS=ASSERTION_FAILURE\n');
+  fs.writeFileSync(path.join(tempDir, '24-typecheck.env'), 'TYPECHECK_RESULT=FAIL\nTYPECHECK_RESULT_FAILURE_REASON=TYPECHECK_EXIT_1\n');
   aggregateEvidence(tempDir);
   const resEnv1 = fs.readFileSync(path.join(tempDir, 'results.env'), 'utf8');
   if (!resEnv1.includes('FIRST_FATAL_REASON_IF_ANY=ASSERTION_38_PAST_SLOT_DENIED_FAILED')) {
-    throw new Error('FIRST_FATAL failed to preserve exact explicit failure reason value!');
+    throw new Error('FIRST_FATAL failed to preserve exact earliest explicit failure reason value!');
   }
 
-  // 7. Missing Failure Reason Rejection
-  writeValidPhaseFragments(tempDir);
-  fs.writeFileSync(path.join(tempDir, '24-typecheck.env'), 'TYPECHECK_RESULT=FAIL\n');
-  let missingReasonCaught = false;
-  try { aggregateEvidence(tempDir); } catch (e) { if (e.message.includes('MISSING_FAILURE_REASON_REJECTED')) missingReasonCaught = true; }
-  if (!missingReasonCaught) throw new Error('Failed missing explicit failure reason rejection');
-
-  // 8. Missing NOT_EXECUTED Reason Rejection
+  // 7. NOT_EXECUTED Reason Rejection
   writeValidPhaseFragments(tempDir);
   fs.writeFileSync(path.join(tempDir, '24-typecheck.env'), 'TYPECHECK_RESULT=NOT_EXECUTED\n');
   let missingNotExecCaught = false;
   try { aggregateEvidence(tempDir); } catch (e) { if (e.message.includes('MISSING_NOT_EXECUTED_REASON_REJECTED')) missingNotExecCaught = true; }
   if (!missingNotExecCaught) throw new Error('Failed missing explicit NOT_EXECUTED reason rejection');
 
-  // 9. pgTAP COUNT != EXECUTED Rejection
+  // 8. pgTAP COUNT != EXECUTED Rejection
   writeValidPhaseFragments(tempDir);
   fs.writeFileSync(path.join(tempDir, '06-pgtap-foundation.env'), 'FOUNDATION_PGTAP_PLANNED_COUNT=32\nFOUNDATION_PGTAP_EXECUTED_COUNT=32\nFOUNDATION_PGTAP_COUNT=30\nFOUNDATION_PGTAP_PASSED_COUNT=32\nFOUNDATION_PGTAP_FAILED_COUNT=0\nFOUNDATION_PGTAP_RESULT=PASS\nFOUNDATION_PGTAP_FAILURE_CLASS=NONE\n');
   const countRes = aggregateEvidence(tempDir);
   if (countRes !== false) throw new Error('pgTAP COUNT != EXECUTED must fail composite gate');
 
-  // 10. Concurrency Round Active Count != 1 Rejection
+  // 9. Concurrency Round Active Count != 1 Rejection
   writeValidPhaseFragments(tempDir);
   fs.writeFileSync(path.join(tempDir, '14-concurrency.env'), `REAL_TWO_SESSION_CONCURRENCY_RESULT=PASS\nCONTROLLER_LOCK_BARRIER_RESULT=PASS\nBOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT=PASS\nINDEPENDENT_DB_CONNECTION_COUNT=2\nCONCURRENCY_ROUND_COUNT=3\nROUND_1_WINNER=core\nROUND_1_ACTIVE_APPOINTMENT_COUNT=2\nROUND_2_WINNER=ht\nROUND_2_ACTIVE_APPOINTMENT_COUNT=1\nROUND_3_WINNER=core\nROUND_3_ACTIVE_APPOINTMENT_COUNT=1\nHT_WIN_COUNT=1\nHT_WIN_PROVENANCE_RESULT=PASS\nBOTH_SUCCESS_COUNT=0\nDEADLOCK_COUNT=0\nTIMEOUT_COUNT=0\nLOSING_HT_PARTIAL_CUSTOMER_COUNT=0\nLOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=0\nLOSING_HT_PARTIAL_APPOINTMENT_COUNT=0\nNO_ENCOUNTER_AUTOCREATE_RESULT=PASS\nNO_EXTERNAL_SIDE_EFFECT_RESULT=PASS\n`);
   const concRes = aggregateEvidence(tempDir);
   if (concRes !== false) throw new Error('Concurrency round active count != 1 must fail composite gate');
 
-  console.log('✅ Evidence aggregator 30-fragment & R9-R1.3 consistency self-tests PASSED.');
+  console.log('✅ Evidence aggregator 30-fragment & R9-R1.4 consistency self-tests PASSED.');
 }
 
 function main() {
   testArityScannerAdversarial();
   testAggregatorAdversarial();
-  console.log('\n🎉 ALL HARDENED R9-R1.3 CONTRACT SELF-TESTS PASSED!');
+  console.log('\n🎉 ALL HARDENED R9-R1.4 CONTRACT SELF-TESTS PASSED!');
 }
 
 main();

@@ -1,10 +1,10 @@
 // ============================================================================
-// CANONICAL EVIDENCE AGGREGATOR & SCHEMA VALIDATOR (R9-R1.3 LITERAL)
+// CANONICAL EVIDENCE AGGREGATOR & SCHEMA VALIDATOR (R9-R1.4 HARDENED)
 // File: scripts/aggregate-lari-e2-evidence.mjs
 // Purpose:
 //   Consumes exactly 30 separate phase-owned evidence fragments under /tmp/e2-artifacts/,
-//   validates strict 1:1 key ownership including conditional reason keys,
-//   enforces explicit *_FAILURE_REASON for all FAIL steps, re-reads results.env from disk,
+//   validates strict 1:1 key ownership, enforces that EVERY FAIL status owns an explicit
+//   *_FAILURE_REASON, performs complete results.env disk re-read verification,
 //   and evaluates composite acceptance.
 // ============================================================================
 
@@ -63,8 +63,35 @@ export const phaseFragmentOwners = {
   '28-containment.env': ['REMOTE_SUPABASE_ACCESS_COUNT', 'SHARED_STAGING_ACCESS_COUNT', 'PRODUCTION_ACCESS_COUNT', 'DEPLOYMENT_COUNT', 'CONTROL_PLANE_MUTATION_COUNT', 'AOS_MUTATION_COUNT']
 };
 
+export const explicitStatusKeys = new Set([
+  'MIGRATION_REPLAY_RESULT',
+  'COMMERCIAL_BOOTSTRAP_RESULT', 'COMMERCIAL_ELIGIBILITY_RESULT',
+  'COMMERCIAL_CORE_BOOKING_RESULT', 'COMMERCIAL_STAFF_MANAGEMENT_RESULT',
+  'COMMERCIAL_SERVICE_MANAGEMENT_RESULT', 'COMMERCIAL_LARI_MINISITE_RESULT',
+  'COMMERCIAL_MAX_STAFF_RESULT', 'COMMERCIAL_MAX_SERVICES_RESULT',
+  'COMMERCIAL_MAX_BRANCHES_RESULT', 'COMMERCIAL_MAX_MONTHLY_APPOINTMENTS_RESULT',
+  'COMMERCIAL_FIXTURE_RESULT', 'COMMERCIAL_QUOTA_RESULT',
+  'R9_SELFTEST_RESULT',
+  'FIXTURE_UUID_STATIC_RESULT',
+  'FIXTURE_ARITY_STATIC_RESULT',
+  'FOUNDATION_PGTAP_RESULT', 'SLICE3_PGTAP_RESULT', 'SLICE4_BLOCK1_PGTAP_RESULT', 'SLICE4_BLOCK2_PGTAP_RESULT',
+  'CLINIC_DOMAIN_PGTAP_RESULT', 'CLINIC_OPS_PGTAP_RESULT', 'CLINIC_HARDENING_PGTAP_RESULT', 'PUBLIC_BOOKING_PGTAP_RESULT',
+  'PGTAP_PHASE_RESULT',
+  'REAL_TWO_SESSION_CONCURRENCY_RESULT', 'CONTROLLER_LOCK_BARRIER_RESULT', 'BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT',
+  'HT_WIN_PROVENANCE_RESULT', 'NO_ENCOUNTER_AUTOCREATE_RESULT', 'NO_EXTERNAL_SIDE_EFFECT_RESULT',
+  'HT_SLICE4_BLOCK2_APP_RESULT', 'BLOCK2_APPLICATION_RESULT',
+  'HT_SLICE4_BLOCK1_APP_RESULT', 'BLOCK1_REGRESSION',
+  'HT_FOUNDATION_APP_RESULT', 'FOUNDATION_REGRESSION',
+  'HT_SLICE3_APP_RESULT', 'SLICE3_REGRESSION',
+  'CLINIC_DOMAIN_APP_RESULT', 'CLINIC_APPLICATION_CONTRACTS_APP_RESULT',
+  'CLINIC_OPERATIONAL_APP_RESULT', 'CLINIC_WORKSPACE_APP_RESULT',
+  'CLINIC_REGRESSION',
+  'HT_SLICE2_APP_RESULT', 'SLICE2_REGRESSION',
+  'TYPECHECK_RESULT', 'LINT_RESULT', 'BUILD_RESULT', 'SECRET_SCAN_RESULT'
+]);
+
 export function aggregateEvidence(targetDir = artifactsDir) {
-  console.log('=== CANONICAL EVIDENCE AGGREGATOR RUNNING (R9-R1.3 LITERAL) ===');
+  console.log('=== CANONICAL EVIDENCE AGGREGATOR RUNNING (R9-R1.4 HARDENED) ===');
   const kv = new Map();
   const keyOwnerMap = new Map();
   const globalKeyToOwner = new Map();
@@ -89,7 +116,7 @@ export function aggregateEvidence(targetDir = artifactsDir) {
     throw new Error(`MANIFEST_ERROR: Expected exactly 30 fragment files, found ${fragCount}`);
   }
 
-  // Build global reverse lookup map for base keys and explicit reason keys
+  // Build global reverse lookup map ONLY for canonical keys and status reason keys
   for (const [fragFile, ownedKeys] of Object.entries(phaseFragmentOwners)) {
     for (const k of ownedKeys) {
       if (globalKeyToOwner.has(k)) {
@@ -97,9 +124,11 @@ export function aggregateEvidence(targetDir = artifactsDir) {
       }
       globalKeyToOwner.set(k, fragFile);
 
-      // Register explicit conditional reason keys to exact same fragment owner
-      globalKeyToOwner.set(`${k}_FAILURE_REASON`, fragFile);
-      globalKeyToOwner.set(`${k}_NOT_EXECUTED_REASON`, fragFile);
+      // ONLY canonical status keys may own conditional reason keys
+      if (explicitStatusKeys.has(k)) {
+        globalKeyToOwner.set(`${k}_FAILURE_REASON`, fragFile);
+        globalKeyToOwner.set(`${k}_NOT_EXECUTED_REASON`, fragFile);
+      }
     }
   }
 
@@ -126,7 +155,10 @@ export function aggregateEvidence(targetDir = artifactsDir) {
 
       // Check if key is explicitly owned by this fragment
       const expectedOwner = globalKeyToOwner.get(k);
-      if (!expectedOwner || expectedOwner !== fragFile) {
+      if (!expectedOwner) {
+        throw new Error(`UNKNOWN_KEY_REJECTED: Key "${k}" in ${fragFile} is not a valid canonical key or status reason key!`);
+      }
+      if (expectedOwner !== fragFile) {
         throw new Error(`WRONG_OWNER_KEY_REJECTED: Key "${k}" in ${fragFile} is not owned by this fragment (expected ${expectedOwner})!`);
       }
 
@@ -142,25 +174,25 @@ export function aggregateEvidence(targetDir = artifactsDir) {
       }
       keyOwnerMap.set(k, fragFile);
 
-      // Validate strict result enums
-      if (k.endsWith('_RESULT')) {
+      // Validate explicit status enums
+      if (explicitStatusKeys.has(k)) {
         const allowedEnums = k === 'HT_WIN_PROVENANCE_RESULT' ? ['PASS', 'NOT_OBSERVED'] : ['PASS', 'FAIL', 'NOT_EXECUTED'];
         if (!allowedEnums.includes(v)) {
-          throw new Error(`STRICT_ENUM_VALIDATION_FAILED: Key "${k}" has invalid enum "${v}" in ${fragFile}`);
+          throw new Error(`STRICT_ENUM_VALIDATION_FAILED: Status key "${k}" has invalid enum "${v}" in ${fragFile}`);
         }
       }
 
-      // Validate strict integers for count keys
+      // Validate strict integers for numeric count keys (allowing NOT_OBSERVED when execution did not occur)
       if (k.endsWith('_COUNT') && !['MIGRATION_COUNT'].includes(k)) {
-        if (!/^\d+$/.test(v)) {
-          throw new Error(`STRICT_INTEGER_VALIDATION_FAILED: Key "${k}" has invalid integer "${v}" in ${fragFile}`);
+        if (!/^\d+$/.test(v) && v !== 'NOT_OBSERVED') {
+          throw new Error(`STRICT_INTEGER_VALIDATION_FAILED: Count key "${k}" has invalid numeric string "${v}" in ${fragFile}`);
         }
       }
 
       kv.set(k, v);
     }
 
-    // Verify all declared owned keys exist in fragment
+    // Verify all declared owned base keys exist in fragment
     for (const k of ownedKeys) {
       if (!kv.has(k)) {
         throw new Error(`MISSING_KEY_IN_FRAGMENT: Fragment ${fragFile} did not provide key "${k}"`);
@@ -173,11 +205,11 @@ export function aggregateEvidence(targetDir = artifactsDir) {
   for (const k of containmentKeys) {
     const val = kv.get(k);
     if (!/^\d+$/.test(val)) {
-      throw new Error(`INVALID_NUMERIC_VALUE: Key "${k}" has non-numeric value "${val}"`);
+      throw new Error(`INVALID_NUMERIC_VALUE: Containment key "${k}" has non-numeric value "${val}"`);
     }
   }
 
-  // 2. Derive FIRST_FATAL strictly from actual FAIL steps
+  // 2. Validate explicit reasons for ALL FAIL / NOT_EXECUTED status keys and derive FIRST_FATAL
   let firstFatalStep = '';
   let firstFatalReason = '';
 
@@ -195,6 +227,7 @@ export function aggregateEvidence(targetDir = artifactsDir) {
     ...phaseFragmentOwners['11-pgtap-clinic-ops.env'],
     ...phaseFragmentOwners['12-pgtap-clinic-hardening.env'],
     ...phaseFragmentOwners['13-pgtap-public-booking.env'],
+    ...phaseFragmentOwners['13b-pgtap-summary.env'],
     ...phaseFragmentOwners['14-concurrency.env'],
     ...phaseFragmentOwners['15-app-ht-slice4-block2.env'],
     ...phaseFragmentOwners['16-app-ht-slice4-block1.env'],
@@ -204,6 +237,7 @@ export function aggregateEvidence(targetDir = artifactsDir) {
     ...phaseFragmentOwners['20-app-clinic-contracts.env'],
     ...phaseFragmentOwners['21-app-clinic-operational.env'],
     ...phaseFragmentOwners['22-app-clinic-workspace.env'],
+    ...phaseFragmentOwners['22b-app-clinic-summary.env'],
     ...phaseFragmentOwners['23-app-ht-slice2.env'],
     ...phaseFragmentOwners['24-typecheck.env'],
     ...phaseFragmentOwners['25-lint.env'],
@@ -212,23 +246,27 @@ export function aggregateEvidence(targetDir = artifactsDir) {
   ];
 
   for (const k of executionOrderKeys) {
+    if (!explicitStatusKeys.has(k)) continue;
     const v = kv.get(k);
 
-    // Validate NOT_EXECUTED requires explicit _NOT_EXECUTED_REASON
-    if (v === 'NOT_EXECUTED' && !['HT_WIN_PROVENANCE_RESULT'].includes(k)) {
+    // EVERY status key equal to NOT_EXECUTED requires explicit _NOT_EXECUTED_REASON
+    if (v === 'NOT_EXECUTED' && k !== 'HT_WIN_PROVENANCE_RESULT') {
       const notExecReason = kv.get(`${k}_NOT_EXECUTED_REASON`);
       if (!notExecReason) {
-        throw new Error(`MISSING_NOT_EXECUTED_REASON_REJECTED: Step "${k}" reported NOT_EXECUTED without explicit "${k}_NOT_EXECUTED_REASON"!`);
+        throw new Error(`MISSING_NOT_EXECUTED_REASON_REJECTED: Status key "${k}" reported NOT_EXECUTED without explicit "${k}_NOT_EXECUTED_REASON"!`);
       }
     }
 
-    if (v === 'FAIL' && !firstFatalStep) {
-      firstFatalStep = k;
+    // EVERY status key equal to FAIL requires explicit _FAILURE_REASON
+    if (v === 'FAIL') {
       const explicitReason = kv.get(`${k}_FAILURE_REASON`);
       if (!explicitReason) {
-        throw new Error(`MISSING_FAILURE_REASON_REJECTED: Step "${k}" reported FAIL without explicit "${k}_FAILURE_REASON"!`);
+        throw new Error(`MISSING_FAILURE_REASON_REJECTED: Status key "${k}" reported FAIL without explicit "${k}_FAILURE_REASON"!`);
       }
-      firstFatalReason = explicitReason;
+      if (!firstFatalStep) {
+        firstFatalStep = k;
+        firstFatalReason = explicitReason;
+      }
     }
   }
 
@@ -253,15 +291,25 @@ export function aggregateEvidence(targetDir = artifactsDir) {
   // 3. 8 pgTAP DB Suites
   const suitePrefixes = ['FOUNDATION', 'SLICE3', 'SLICE4_BLOCK1', 'SLICE4_BLOCK2', 'CLINIC_DOMAIN', 'CLINIC_OPS', 'CLINIC_HARDENING', 'PUBLIC_BOOKING'];
   for (const p of suitePrefixes) {
-    const planned = parseInt(kv.get(`${p}_PGTAP_PLANNED_COUNT`), 10);
-    const executed = parseInt(kv.get(`${p}_PGTAP_EXECUTED_COUNT`), 10);
-    const passed = parseInt(kv.get(`${p}_PGTAP_PASSED_COUNT`), 10);
-    const failed = parseInt(kv.get(`${p}_PGTAP_FAILED_COUNT`), 10);
-    const count = parseInt(kv.get(`${p}_PGTAP_COUNT`), 10);
+    const plannedStr = kv.get(`${p}_PGTAP_PLANNED_COUNT`);
+    const execStr = kv.get(`${p}_PGTAP_EXECUTED_COUNT`);
+    const passStr = kv.get(`${p}_PGTAP_PASSED_COUNT`);
+    const failStr = kv.get(`${p}_PGTAP_FAILED_COUNT`);
+    const countStr = kv.get(`${p}_PGTAP_COUNT`);
     const result = kv.get(`${p}_PGTAP_RESULT`);
 
-    if (result !== 'PASS' || planned <= 0 || executed !== planned || passed !== planned || failed !== 0 || count !== executed) {
+    if (result !== 'PASS' || plannedStr === 'NOT_OBSERVED' || execStr === 'NOT_OBSERVED') {
       compositePass = false;
+    } else {
+      const planned = parseInt(plannedStr, 10);
+      const executed = parseInt(execStr, 10);
+      const passed = parseInt(passStr, 10);
+      const failed = parseInt(failStr, 10);
+      const count = parseInt(countStr, 10);
+
+      if (planned <= 0 || executed !== planned || passed !== planned || failed !== 0 || count !== executed) {
+        compositePass = false;
+      }
     }
   }
   if (kv.get('ZERO_TEST_SUITE_COUNT') !== '0' || kv.get('PGTAP_PHASE_RESULT') !== 'PASS') compositePass = false;
@@ -308,7 +356,7 @@ export function aggregateEvidence(targetDir = artifactsDir) {
   }
   fs.writeFileSync(targetResultsPath, outputStr);
 
-  // RE-READ & STRICTLY VALIDATE RESULTS.ENV FROM DISK
+  // STRICT COMPLETE RE-READ DISK VERIFICATION
   const rereadContent = fs.readFileSync(targetResultsPath, 'utf8');
   const rereadKv = new Map();
   const rereadLines = rereadContent.split('\n');
@@ -324,11 +372,20 @@ export function aggregateEvidence(targetDir = artifactsDir) {
     rereadKv.set(rK, rV);
   }
 
-  if (rereadKv.get('SLICE4_E2_RESULT') !== (compositePass ? 'PASS_CANDIDATE' : 'FAIL')) {
-    throw new Error('REREAD_VALIDATION_FAILED: SLICE4_E2_RESULT mismatch on disk re-read');
+  if (rereadKv.size !== kv.size) {
+    throw new Error(`REREAD_VALIDATION_FAILED: Key count mismatch (in-memory ${kv.size} vs disk ${rereadKv.size})`);
   }
 
-  console.log('✅ Canonical results.env written and verified via disk re-read.');
+  for (const [memK, memV] of kv.entries()) {
+    if (!rereadKv.has(memK)) {
+      throw new Error(`REREAD_VALIDATION_FAILED: Missing key "${memK}" on disk re-read`);
+    }
+    if (rereadKv.get(memK) !== memV) {
+      throw new Error(`REREAD_VALIDATION_FAILED: Value mismatch for key "${memK}" (in-memory "${memV}" vs disk "${rereadKv.get(memK)}")`);
+    }
+  }
+
+  console.log('✅ Canonical results.env written and verified via complete strict disk re-read.');
   return compositePass;
 }
 
