@@ -554,11 +554,41 @@ function testConcurrencyHarnessEvidenceContract() {
 }
 
 function testPublicBookingSourceContract() {
-  console.log('--- Testing Public Booking Behavioral Test Suite Source Contract (R9-R1.8.2) ---');
+  console.log('--- Testing Public Booking Behavioral Test Suite & Product Migration Source Contract (R9-R1.8.3) ---');
   const sqlPath = path.join(__dirname, '..', 'supabase/tests/public_booking_rpc_behavioral_tests.sql');
   const content = fs.readFileSync(sqlPath, 'utf8');
 
-  // Conflict target assertions
+  const mig20260813Path = path.join(__dirname, '..', 'supabase/migrations/20260813_h1c_commercial_eligibility_and_quota_enforcement.sql');
+  const mig20260723Path = path.join(__dirname, '..', 'supabase/migrations/20260723_booking_lifecycle_foundation.sql');
+  const mig20260827Path = path.join(__dirname, '..', 'supabase/migrations/20260827_h1e_c_public_booking_release_gate_runtime_fix.sql');
+
+  const mig20260813 = fs.readFileSync(mig20260813Path, 'utf8');
+  const mig20260723 = fs.readFileSync(mig20260723Path, 'utf8');
+  const mig20260827 = fs.readFileSync(mig20260827Path, 'utf8');
+
+  // Product migration canonical identity assertions
+  if (!mig20260813.includes('CREATE OR REPLACE FUNCTION public.create_public_booking(') || !mig20260813.includes('SECURITY DEFINER')) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260813 missing create_public_booking SECURITY DEFINER function');
+  }
+  if (!mig20260813.includes('public.create_public_booking(\n    p_slug text,\n    p_service_id uuid,\n    p_staff_id uuid,\n    p_appointment_date date,\n    p_appointment_time time,\n    p_customer_name text,\n    p_customer_email text,\n    p_customer_phone text,\n    p_required_consent boolean,\n    p_marketing_consent boolean,\n    p_kvkk_consent boolean,\n    p_idempotency_key text,\n    p_branch_id uuid')) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260813 missing exact 13-parameter create_public_booking signature');
+  }
+
+  if (!mig20260723.includes('CREATE OR REPLACE FUNCTION public.get_public_available_slots(') || !mig20260723.includes('SECURITY DEFINER')) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260723 missing get_public_available_slots SECURITY DEFINER function');
+  }
+  if (!mig20260723.includes('public.get_public_available_slots(TEXT, UUID, UUID, UUID, DATE)')) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260723 missing exact 5-parameter get_public_available_slots grant/revoke identity');
+  }
+
+  if (!mig20260827.includes('CREATE OR REPLACE FUNCTION public.can_accept_public_booking(p_slug text)') || !mig20260827.includes('SECURITY DEFINER')) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260827 missing can_accept_public_booking SECURITY DEFINER function');
+  }
+  if (!mig20260827.includes('public.can_accept_public_booking(text)')) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260827 missing exact grant identity for can_accept_public_booking(text)');
+  }
+
+  // Conflict target assertions in test SQL
   if (!content.includes('ON CONFLICT (staff_id, branch_id) DO NOTHING')) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Missing canonical ON CONFLICT (staff_id, branch_id) DO NOTHING');
   }
@@ -573,12 +603,44 @@ function testPublicBookingSourceContract() {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Invalid ON CONFLICT (tenant_id, service_id, branch_id) target present');
   }
 
-  // Tests 21-26 mapping setup assertions
-  if (!content.includes('v_b_id uuid := \'c3c3c3c3-dd44-ee55-ff66-aa7777777777\'::uuid;')) {
-    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 21-26 missing deterministic primary branch reference');
+  // Tests 21-26 structural mapping assertions
+  const tests21To26Start = content.indexOf('-- STAFF-SERVICE MAPPING TESTS: Tests 21-26');
+  const tests21To26End = content.indexOf('RAISE NOTICE \'=== STAFF-SERVICE MAPPING TESTS 21-26 COMPLETED ===\';');
+  if (tests21To26Start === -1 || tests21To26End === -1) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Could not locate Tests 21-26 section in test SQL');
+  }
+  const tests21To26Section = content.substring(tests21To26Start, tests21To26End);
+
+  if (!tests21To26Section.includes('INSERT INTO public.service_branches (tenant_id, service_id, branch_id)\n    VALUES (v_tenant_id, v_service_id, v_b_id)')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 21-26 section missing structural service_branches mapping');
+  }
+  if (!tests21To26Section.includes('INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)\n    VALUES (v_tenant_id, v_mapped_staff_id, v_b_id)')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 21-26 section missing mapped staff_branches mapping');
+  }
+  if (!tests21To26Section.includes('INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)\n    VALUES (v_tenant_id, v_unmapped_staff_id, v_b_id)')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 21-26 section missing unmapped staff_branches mapping');
+  }
+  if (!tests21To26Section.includes('INSERT INTO public.staff_services (staff_id, service_id)\n  VALUES (v_mapped_staff_id, v_service_id);')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 21-26 section missing mapped staff_services positive mapping');
+  }
+  const test22Idx = tests21To26Section.indexOf('TEST 22: Active unmapped staff returns invalid_staff');
+  const preTest22Section = tests21To26Section.substring(0, test22Idx);
+  if (preTest22Section.includes('VALUES (v_unmapped_staff_id, v_service_id)')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: v_unmapped_staff_id was incorrectly mapped to service before Test 22');
   }
 
-  // RPC signature assertions
+  // Causal isolation & restore assertions in Tests 25-26
+  if (!tests21To26Section.includes('DELETE FROM public.staff_services\n  WHERE staff_id = v_mapped_staff_id AND service_id = v_service_id;')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 25 missing exact staff_services deletion');
+  }
+  if (tests21To26Section.indexOf('DELETE FROM public.staff_branches') < tests21To26Section.indexOf('TEST 26: Restoring mapping restores booking success')) {
+    const preTest26Cleanup = tests21To26Section.substring(0, tests21To26Section.indexOf('TEST 26: Restoring mapping restores booking success'));
+    if (preTest26Cleanup.includes('DELETE FROM public.staff_branches')) {
+      throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: staff_branches deleted prematurely before Test 26');
+    }
+  }
+
+  // Test 66 & Test 67 regprocedure checks
   if (!content.includes("'public.create_public_booking(text,uuid,uuid,date,time,text,text,text,boolean,boolean,boolean,text,uuid)'")) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Missing canonical create_public_booking signature in ACL test');
   }
@@ -592,7 +654,18 @@ function testPublicBookingSourceContract() {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Deprecated get_public_booking_eligibility_by_slug present');
   }
 
-  console.log('✅ Public booking behavioral test suite source contract PASSED.');
+  if (!content.includes("to_regprocedure('public.create_public_booking(text,uuid,uuid,date,time,text,text,text,boolean,boolean,boolean,text,uuid)')") ||
+      !content.includes("to_regprocedure('public.get_public_available_slots(text,uuid,uuid,uuid,date)')") ||
+      !content.includes("to_regprocedure('public.can_accept_public_booking(text)')")) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 67 missing exact to_regprocedure checks for all three canonical functions');
+  }
+
+  if (content.includes("HAVING COUNT(*) = 3")) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 67 contains weak generic HAVING COUNT(*) = 3 pattern');
+  }
+
+  console.log('PUBLIC_BOOKING_TEST_VS_CANONICAL_PRODUCT_CONTRACT=PASS');
+  console.log('✅ Public booking behavioral test suite & product migration source contract PASSED.');
 }
 
 function main() {
@@ -600,7 +673,7 @@ function main() {
   testAggregatorAdversarial();
   testConcurrencyHarnessEvidenceContract();
   testPublicBookingSourceContract();
-  console.log('\n🎉 ALL HARDENED R9-R1.8.2 CONTRACT SELF-TESTS PASSED!');
+  console.log('\n🎉 ALL HARDENED R9-R1.8.3 CONTRACT SELF-TESTS PASSED!');
 }
 
 main();

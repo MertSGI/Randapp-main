@@ -1995,11 +1995,25 @@ BEGIN
 
   -- TEST 67: Public booking RPCs remain SECURITY DEFINER
   IF NOT EXISTS (
-    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
-    WHERE n.nspname = 'public' AND p.proname IN ('create_public_booking', 'get_public_available_slots', 'can_accept_public_booking')
-    HAVING COUNT(*) = 3 AND MIN(p.prosecdef::int) = 1
+    SELECT 1 FROM pg_proc
+    WHERE oid = to_regprocedure('public.create_public_booking(text,uuid,uuid,date,time,text,text,text,boolean,boolean,boolean,text,uuid)')
+      AND prosecdef = true
   ) THEN
-    RAISE EXCEPTION 'TEST 67 FAIL: Public booking RPCs lost SECURITY DEFINER status';
+    RAISE EXCEPTION 'TEST 67 FAIL: create_public_booking missing or lost SECURITY DEFINER status';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc
+    WHERE oid = to_regprocedure('public.get_public_available_slots(text,uuid,uuid,uuid,date)')
+      AND prosecdef = true
+  ) THEN
+    RAISE EXCEPTION 'TEST 67 FAIL: get_public_available_slots missing or lost SECURITY DEFINER status';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc
+    WHERE oid = to_regprocedure('public.can_accept_public_booking(text)')
+      AND prosecdef = true
+  ) THEN
+    RAISE EXCEPTION 'TEST 67 FAIL: can_accept_public_booking missing or lost SECURITY DEFINER status';
   END IF;
   RAISE NOTICE 'TEST 67 PASS: Public booking RPCs remain SECURITY DEFINER.';
 
