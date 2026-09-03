@@ -655,7 +655,7 @@ BEGIN
   RAISE NOTICE 'TEST 22 PASS: Unmapped active staff correctly rejected with invalid_staff.';
 
   -- -----------------------------------------------------------------------
-  -- TEST 23: Cross-tenant staff returns invalid_staff
+  -- TEST 23: Cross-tenant staff correctly rejected
   -- -----------------------------------------------------------------------
   DECLARE
     v_xt_tenant_id uuid;
@@ -664,6 +664,8 @@ BEGIN
     INSERT INTO public.tenants (name, slug, status, onboarding_status, public_site_status)
     VALUES ('Cross Tenant', 'cross-tenant-t23', 'active', 'completed', 'published')
     RETURNING id INTO v_xt_tenant_id;
+
+    PERFORM pg_temp.slice4_e2_bootstrap_commercial(v_xt_tenant_id);
 
     INSERT INTO public.staff (tenant_id, name, title, active)
     VALUES (v_xt_tenant_id, 'Cross Tenant Staff', 'Specialist', true)

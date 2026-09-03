@@ -879,6 +879,91 @@ function testPublicBookingSourceContract() {
   console.log('TEST16_OBJSUBID_SINGLE_BIGINT_PRESENT=YES');
   console.log('TEST16_POSITIVE_LOCK_ASSERTION_PRESENT=YES');
   console.log('TEST16_SIGNED_OID_COMPARISON_PRESENT=NO');
+
+  // 12. TEST 23 COMMERCIAL FIXTURE & QUOTA-BYPASS GUARD (R1.8.10)
+  const test23StartIdx = content.indexOf('-- TEST 23: Cross-tenant staff correctly rejected');
+  const test24StartIdx = content.indexOf('-- TEST 24: Duplicate mapping insert is idempotent (no error)');
+
+  if (test23StartIdx === -1 || test24StartIdx === -1 || test23StartIdx >= test24StartIdx) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 23 and Test 24 markers missing or out of order');
+  }
+
+  const test23Region = content.substring(test23StartIdx, test24StartIdx);
+
+  const t23TenantIdx = test23Region.indexOf('INSERT INTO public.tenants');
+  const t23RetIdx = test23Region.indexOf('RETURNING id INTO v_xt_tenant_id');
+  const t23BootstrapIdx = test23Region.indexOf('pg_temp.slice4_e2_bootstrap_commercial(v_xt_tenant_id)');
+  const t23StaffIdx = test23Region.indexOf('INSERT INTO public.staff');
+  const t23BookingIdx = test23Region.indexOf('public.create_public_booking');
+  const t23InvalidStaffIdx = test23Region.indexOf('invalid_staff');
+  const t23DelStaffIdx = test23Region.indexOf('DELETE FROM public.staff');
+  const t23DelTenantIdx = test23Region.indexOf('DELETE FROM public.tenants');
+
+  if (
+    t23TenantIdx === -1 ||
+    t23RetIdx === -1 ||
+    t23BootstrapIdx === -1 ||
+    t23StaffIdx === -1 ||
+    t23BookingIdx === -1 ||
+    t23InvalidStaffIdx === -1 ||
+    t23DelStaffIdx === -1 ||
+    t23DelTenantIdx === -1
+  ) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 23 missing required semantic markers');
+  }
+
+  if (!(t23TenantIdx < t23BootstrapIdx && t23BootstrapIdx < t23StaffIdx && t23StaffIdx < t23BookingIdx && t23BookingIdx < t23InvalidStaffIdx)) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 23 semantic markers out of strict required order');
+  }
+
+  const t23BypassKeywords = [
+    'DISABLE TRIGGER',
+    'session_replication_role',
+    'DROP TRIGGER',
+    'DROP FUNCTION enforce_staff_quota',
+    'ALTER TABLE'
+  ];
+  for (const kw of t23BypassKeywords) {
+    if (test23Region.includes(kw)) {
+      throw new Error(`PUBLIC_BOOKING_CONTRACT_DEFECT: Test 23 contains forbidden quota bypass statement: ${kw}`);
+    }
+  }
+
+  console.log('TEST23_REGION_FAIL_CLOSED=YES');
+  console.log('TEST23_COMMERCIAL_BOOTSTRAP_PRESENT=YES');
+  console.log('TEST23_COMMERCIAL_BOOTSTRAP_BEFORE_STAFF=YES');
+  console.log('TEST23_INVALID_STAFF_ASSERTION_PRESENT=YES');
+  console.log('TEST23_QUOTA_BYPASS_PRESENT=NO');
+
+  // 13. FOUNDATION TEST32 SELFTEST GUARD (R1.8.10)
+  const foundationTestsPath = path.join(__dirname, '..', 'supabase/tests/health_tourism_foundation_server_authority_tests.sql');
+  const foundationContent = fs.readFileSync(foundationTestsPath, 'utf8');
+
+  const f32FromIdx = foundationContent.indexOf('FROM public.appointments');
+  const f32WhereIdx = foundationContent.indexOf('WHERE tenant_id IN');
+  const f32Tenant1Idx = foundationContent.indexOf("'a1111111-1111-1111-1111-111111111111'::uuid");
+  const f32Tenant2Idx = foundationContent.indexOf("'b2222222-2222-2222-2222-222222222222'::uuid");
+  const f32ZeroIdx = foundationContent.indexOf('0::bigint');
+  const f32MessageIdx = foundationContent.indexOf('No Core appointments created');
+
+  if (
+    f32FromIdx === -1 ||
+    f32WhereIdx === -1 ||
+    f32Tenant1Idx === -1 ||
+    f32Tenant2Idx === -1 ||
+    f32ZeroIdx === -1 ||
+    f32MessageIdx === -1
+  ) {
+    throw new Error('FOUNDATION_CONTRACT_DEFECT: Foundation Test32 missing tenant-scoped appointment markers');
+  }
+
+  if (foundationContent.includes('(SELECT count(*) FROM public.appointments),')) {
+    throw new Error('FOUNDATION_CONTRACT_DEFECT: Foundation Test32 still contains unscoped global appointment count assertion');
+  }
+
+  console.log('FOUNDATION_TEST32_HT_TENANT_SCOPED=YES');
+  console.log('FOUNDATION_TEST32_GLOBAL_ZERO_ASSERTION_PRESENT=NO');
+
   console.log('PUBLIC_BOOKING_TEST_VS_CANONICAL_PRODUCT_CONTRACT=PASS');
   console.log('✅ Public booking behavioral test suite & product migration source contract PASSED.');
 }

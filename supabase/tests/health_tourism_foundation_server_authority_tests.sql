@@ -345,7 +345,14 @@ SELECT is(
 );
 
 SELECT is(
-  (SELECT count(*) FROM public.appointments),
+  (
+    SELECT count(*)
+    FROM public.appointments
+    WHERE tenant_id IN (
+      'a1111111-1111-1111-1111-111111111111'::uuid,
+      'b2222222-2222-2222-2222-222222222222'::uuid
+    )
+  ),
   0::bigint,
   'No Core appointments created by Health Tourism lead domain operations'
 );
