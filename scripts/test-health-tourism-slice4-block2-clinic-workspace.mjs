@@ -106,7 +106,7 @@ if (fs.existsSync(harnessMjsPath)) {
   const mjsText = fs.readFileSync(harnessMjsPath, 'utf8');
   assert(mjsText.includes('00000000-0000-0000-0000-0000000000') || mjsText.includes('e0000000-0000-0000-0000-0000000000') || mjsText.includes('00000000-0000-0000-0000-0000000001'), 'R2 mjs harness uses valid UUIDs');
   assert(mjsText.includes('create_public_booking($1, $2, $3, $4::date, $5::time, $6, $7, $8, $9, $10, $11, $12, $13)'), 'R2 mjs harness uses exact canonical create_public_booking signature');
-  assert(mjsText.includes('LIVE_CONCURRENCY_EXECUTION=NOT_EXECUTED'), 'R2 mjs harness static fallback reports NOT_EXECUTED');
+  assert(mjsText.includes('REAL_TWO_SESSION_CONCURRENCY_RESULT=NOT_EXECUTED'), 'R2 mjs harness static fallback reports NOT_EXECUTED');
 }
 
 console.log('\n--- Summary ---');

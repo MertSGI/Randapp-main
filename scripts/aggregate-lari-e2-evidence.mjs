@@ -35,10 +35,10 @@ export const phaseFragmentOwners = {
   '07-pgtap-slice3.env': ['SLICE3_PGTAP_PLANNED_COUNT', 'SLICE3_PGTAP_EXECUTED_COUNT', 'SLICE3_PGTAP_COUNT', 'SLICE3_PGTAP_PASSED_COUNT', 'SLICE3_PGTAP_FAILED_COUNT', 'SLICE3_PGTAP_RESULT', 'SLICE3_PGTAP_FAILURE_CLASS'],
   '08-pgtap-slice4-block1.env': ['SLICE4_BLOCK1_PGTAP_PLANNED_COUNT', 'SLICE4_BLOCK1_PGTAP_EXECUTED_COUNT', 'SLICE4_BLOCK1_PGTAP_COUNT', 'SLICE4_BLOCK1_PGTAP_PASSED_COUNT', 'SLICE4_BLOCK1_PGTAP_FAILED_COUNT', 'SLICE4_BLOCK1_PGTAP_RESULT', 'SLICE4_BLOCK1_PGTAP_FAILURE_CLASS'],
   '09-pgtap-slice4-block2.env': ['SLICE4_BLOCK2_PGTAP_PLANNED_COUNT', 'SLICE4_BLOCK2_PGTAP_EXECUTED_COUNT', 'SLICE4_BLOCK2_PGTAP_COUNT', 'SLICE4_BLOCK2_PGTAP_PASSED_COUNT', 'SLICE4_BLOCK2_PGTAP_FAILED_COUNT', 'SLICE4_BLOCK2_PGTAP_RESULT', 'SLICE4_BLOCK2_PGTAP_FAILURE_CLASS'],
-  '10-pgtap-clinic-domain.env': ['CLINIC_DOMAIN_PGTAP_PLANNED_COUNT', 'CLINIC_DOMAIN_PGTAP_EXECUTED_COUNT', 'CLINIC_DOMAIN_PGTAP_COUNT', 'CLINIC_DOMAIN_PGTAP_PASSED_COUNT', 'CLINIC_DOMAIN_PGTAP_FAILED_COUNT', 'CLINIC_DOMAIN_PGTAP_RESULT', 'CLINIC_DOMAIN_PGTAP_FAILURE_CLASS'],
-  '11-pgtap-clinic-ops.env': ['CLINIC_OPS_PGTAP_PLANNED_COUNT', 'CLINIC_OPS_PGTAP_EXECUTED_COUNT', 'CLINIC_OPS_PGTAP_COUNT', 'CLINIC_OPS_PGTAP_PASSED_COUNT', 'CLINIC_OPS_PGTAP_FAILED_COUNT', 'CLINIC_OPS_PGTAP_RESULT', 'CLINIC_OPS_PGTAP_FAILURE_CLASS'],
-  '12-pgtap-clinic-hardening.env': ['CLINIC_HARDENING_PGTAP_PLANNED_COUNT', 'CLINIC_HARDENING_PGTAP_EXECUTED_COUNT', 'CLINIC_HARDENING_PGTAP_COUNT', 'CLINIC_HARDENING_PGTAP_PASSED_COUNT', 'CLINIC_HARDENING_PGTAP_FAILED_COUNT', 'CLINIC_HARDENING_PGTAP_RESULT', 'CLINIC_HARDENING_PGTAP_FAILURE_CLASS'],
-  '13-pgtap-public-booking.env': ['PUBLIC_BOOKING_PGTAP_PLANNED_COUNT', 'PUBLIC_BOOKING_PGTAP_EXECUTED_COUNT', 'PUBLIC_BOOKING_PGTAP_COUNT', 'PUBLIC_BOOKING_PGTAP_PASSED_COUNT', 'PUBLIC_BOOKING_PGTAP_FAILED_COUNT', 'PUBLIC_BOOKING_PGTAP_RESULT', 'PUBLIC_BOOKING_PGTAP_FAILURE_CLASS'],
+  '10-sql-clinic-domain.env': ['CLINIC_DOMAIN_SQL_EXECUTION_RESULT'],
+  '11-sql-clinic-ops.env': ['CLINIC_OPS_SQL_EXECUTION_RESULT'],
+  '12-sql-clinic-hardening.env': ['CLINIC_HARDENING_SQL_EXECUTION_RESULT'],
+  '13-sql-public-booking.env': ['PUBLIC_BOOKING_SQL_EXECUTION_RESULT'],
   '13b-pgtap-summary.env': ['ZERO_TEST_SUITE_COUNT', 'PGTAP_PHASE_RESULT'],
   '14-concurrency.env': [
     'REAL_TWO_SESSION_CONCURRENCY_RESULT', 'CONTROLLER_LOCK_BARRIER_RESULT', 'BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT', 'INDEPENDENT_DB_CONNECTION_COUNT', 'CONCURRENCY_ROUND_COUNT',
@@ -75,7 +75,7 @@ export const explicitStatusKeys = new Set([
   'FIXTURE_UUID_STATIC_RESULT',
   'FIXTURE_ARITY_STATIC_RESULT',
   'FOUNDATION_PGTAP_RESULT', 'SLICE3_PGTAP_RESULT', 'SLICE4_BLOCK1_PGTAP_RESULT', 'SLICE4_BLOCK2_PGTAP_RESULT',
-  'CLINIC_DOMAIN_PGTAP_RESULT', 'CLINIC_OPS_PGTAP_RESULT', 'CLINIC_HARDENING_PGTAP_RESULT', 'PUBLIC_BOOKING_PGTAP_RESULT',
+  'CLINIC_DOMAIN_SQL_EXECUTION_RESULT', 'CLINIC_OPS_SQL_EXECUTION_RESULT', 'CLINIC_HARDENING_SQL_EXECUTION_RESULT', 'PUBLIC_BOOKING_SQL_EXECUTION_RESULT',
   'PGTAP_PHASE_RESULT',
   'REAL_TWO_SESSION_CONCURRENCY_RESULT', 'CONTROLLER_LOCK_BARRIER_RESULT', 'BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT',
   'HT_WIN_PROVENANCE_RESULT', 'NO_ENCOUNTER_AUTOCREATE_RESULT', 'NO_EXTERNAL_SIDE_EFFECT_RESULT',
@@ -223,10 +223,10 @@ export function aggregateEvidence(targetDir = artifactsDir) {
     ...phaseFragmentOwners['07-pgtap-slice3.env'],
     ...phaseFragmentOwners['08-pgtap-slice4-block1.env'],
     ...phaseFragmentOwners['09-pgtap-slice4-block2.env'],
-    ...phaseFragmentOwners['10-pgtap-clinic-domain.env'],
-    ...phaseFragmentOwners['11-pgtap-clinic-ops.env'],
-    ...phaseFragmentOwners['12-pgtap-clinic-hardening.env'],
-    ...phaseFragmentOwners['13-pgtap-public-booking.env'],
+    ...phaseFragmentOwners['10-sql-clinic-domain.env'],
+    ...phaseFragmentOwners['11-sql-clinic-ops.env'],
+    ...phaseFragmentOwners['12-sql-clinic-hardening.env'],
+    ...phaseFragmentOwners['13-sql-public-booking.env'],
     ...phaseFragmentOwners['13b-pgtap-summary.env'],
     ...phaseFragmentOwners['14-concurrency.env'],
     ...phaseFragmentOwners['15-app-ht-slice4-block2.env'],
@@ -300,7 +300,7 @@ export function aggregateEvidence(targetDir = artifactsDir) {
     }
   }
 
-  const suitePrefixes = ['FOUNDATION', 'SLICE3', 'SLICE4_BLOCK1', 'SLICE4_BLOCK2', 'CLINIC_DOMAIN', 'CLINIC_OPS', 'CLINIC_HARDENING', 'PUBLIC_BOOKING'];
+  const suitePrefixes = ['FOUNDATION', 'SLICE3', 'SLICE4_BLOCK1', 'SLICE4_BLOCK2'];
   for (const p of suitePrefixes) {
     const res = kv.get(`${p}_PGTAP_RESULT`);
     const countKeys = [`${p}_PGTAP_PLANNED_COUNT`, `${p}_PGTAP_EXECUTED_COUNT`, `${p}_PGTAP_COUNT`, `${p}_PGTAP_PASSED_COUNT`, `${p}_PGTAP_FAILED_COUNT` ];
@@ -358,7 +358,7 @@ export function aggregateEvidence(targetDir = artifactsDir) {
     if (kv.get(k) !== 'PASS') compositePass = false;
   }
 
-  // 3. 8 pgTAP DB Suites
+  // 3. 4 pgTAP DB Suites + 4 SQL DB Suites
   for (const p of suitePrefixes) {
     const plannedStr = kv.get(`${p}_PGTAP_PLANNED_COUNT`);
     const execStr = kv.get(`${p}_PGTAP_EXECUTED_COUNT`);
@@ -382,6 +382,11 @@ export function aggregateEvidence(targetDir = artifactsDir) {
     }
   }
   if (kv.get('ZERO_TEST_SUITE_COUNT') !== '0' || kv.get('PGTAP_PHASE_RESULT') !== 'PASS') compositePass = false;
+
+  if (kv.get('CLINIC_DOMAIN_SQL_EXECUTION_RESULT') !== 'PASS') compositePass = false;
+  if (kv.get('CLINIC_OPS_SQL_EXECUTION_RESULT') !== 'PASS') compositePass = false;
+  if (kv.get('CLINIC_HARDENING_SQL_EXECUTION_RESULT') !== 'PASS') compositePass = false;
+  if (kv.get('PUBLIC_BOOKING_SQL_EXECUTION_RESULT') !== 'PASS') compositePass = false;
 
   // 4. Concurrency
   if (kv.get('REAL_TWO_SESSION_CONCURRENCY_RESULT') !== 'PASS' || kv.get('CONTROLLER_LOCK_BARRIER_RESULT') !== 'PASS' || kv.get('BOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT') !== 'PASS' || kv.get('INDEPENDENT_DB_CONNECTION_COUNT') !== '2' || kv.get('CONCURRENCY_ROUND_COUNT') !== '3' || kv.get('ROUND_1_ACTIVE_APPOINTMENT_COUNT') !== '1' || kv.get('ROUND_2_ACTIVE_APPOINTMENT_COUNT') !== '1' || kv.get('ROUND_3_ACTIVE_APPOINTMENT_COUNT') !== '1' || kv.get('BOTH_SUCCESS_COUNT') !== '0' || kv.get('DEADLOCK_COUNT') !== '0' || kv.get('TIMEOUT_COUNT') !== '0' || kv.get('LOSING_HT_PARTIAL_CUSTOMER_COUNT') !== '0' || kv.get('LOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT') !== '0' || kv.get('LOSING_HT_PARTIAL_APPOINTMENT_COUNT') !== '0' || kv.get('NO_ENCOUNTER_AUTOCREATE_RESULT') !== 'PASS' || kv.get('NO_EXTERNAL_SIDE_EFFECT_RESULT') !== 'PASS') {

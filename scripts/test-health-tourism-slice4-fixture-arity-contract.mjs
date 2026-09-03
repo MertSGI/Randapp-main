@@ -253,8 +253,53 @@ export function parseAndVerifyInsertStatements(tokens, filename) {
         }
 
         if (isDynamic) {
-          unsupportedCount++;
-          console.error(`❌ ARITY UNSUPPORTED [${filename}:${execLine}]: Dynamic EXECUTE string concatenation/USING cannot be deterministically verified.`);
+          // Check for bounded safe SET / SET LOCAL + quote_literal construction
+          const staticPrefix = unquotedSql.toUpperCase().trim();
+          const isSetPrefix = staticPrefix.startsWith('SET LOCAL ') || staticPrefix.startsWith('SET ');
+          
+          let isSafeSetQuoteLiteral = false;
+          if (isSetPrefix) {
+            // Inspect the dynamic expression after string token (at idx + 1)
+            // Expected tokens: || WORD(quote_literal) PUNCT(() ... PUNCT())
+            let k = idx + 2;
+            if (k < len && tokens[k].type === 'WORD' && tokens[k].value === '||') {
+              k++;
+              if (k < len && tokens[k].type === 'WORD' && tokens[k].value.toLowerCase() === 'quote_literal') {
+                k++;
+                if (k < len && tokens[k].type === 'PUNCT' && tokens[k].value === '(') {
+                  // Find matching closing paren
+                  let pDepth = 1;
+                  k++;
+                  while (k < len && pDepth > 0) {
+                    if (tokens[k].type === 'PUNCT' && tokens[k].value === '(') pDepth++;
+                    else if (tokens[k].type === 'PUNCT' && tokens[k].value === ')') pDepth--;
+                    k++;
+                  }
+                  if (pDepth === 0) {
+                    // Check if stream after quote_literal(...) reaches semicolon without further || or USING
+                    let trailingDynamic = false;
+                    while (k < len && (tokens[k].type !== 'PUNCT' || tokens[k].value !== ';')) {
+                      if (tokens[k].type === 'WORD' && (tokens[k].value === '||' || tokens[k].value.toUpperCase() === 'USING')) {
+                        trailingDynamic = true;
+                        break;
+                      }
+                      k++;
+                    }
+                    if (!trailingDynamic) {
+                      isSafeSetQuoteLiteral = true;
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          if (isSafeSetQuoteLiteral) {
+            // Safe session-setting statement, NOT an INSERT statement -> safe non-INSERT
+          } else {
+            unsupportedCount++;
+            console.error(`❌ ARITY UNSUPPORTED [${filename}:${execLine}]: Dynamic EXECUTE string concatenation/USING cannot be deterministically verified.`);
+          }
         } else {
           try {
             const innerTokens = tokenizeSql(unquotedSql, `${filename}:EXECUTE`);
@@ -362,13 +407,20 @@ export function parseAndVerifyInsertStatements(tokens, filename) {
               }
             }
           } else {
-            // INSERT INTO table VALUES (...) without column list -> UNSUPPORTED!
-            while (cur < len && tokens[cur].type === 'WORD' && !['VALUES', 'SELECT', 'DEFAULT'].includes(tokens[cur].value.toUpperCase())) {
+            // INSERT INTO table DEFAULT VALUES or VALUES (...) without column list
+            while (cur < len && (tokens[cur].type === 'WORD' || tokens[cur].type === 'IDENT') && !['VALUES', 'SELECT', 'DEFAULT'].includes(tokens[cur].value.toUpperCase())) {
               cur++;
             }
-            if (cur < len && tokens[cur].type === 'WORD' && tokens[cur].value.toUpperCase() === 'VALUES') {
-              unsupportedCount++;
-              console.error(`❌ ARITY UNSUPPORTED [${filename}:${insertLine}] Table ${tableName}: INSERT VALUES without explicit column list.`);
+            if (cur < len && (tokens[cur].type === 'WORD' || tokens[cur].type === 'IDENT')) {
+              const kw = tokens[cur].value.toUpperCase();
+              if (kw === 'DEFAULT' || kw === 'SELECT') {
+                nonValuesInserts++;
+                idx = cur + 1;
+                continue;
+              } else if (kw === 'VALUES') {
+                unsupportedCount++;
+                console.error(`❌ ARITY UNSUPPORTED [${filename}:${insertLine}] Table ${tableName}: INSERT VALUES without explicit column list.`);
+              }
             }
           }
         }

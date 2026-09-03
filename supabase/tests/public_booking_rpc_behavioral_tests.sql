@@ -27,13 +27,76 @@ BEGIN
     RAISE EXCEPTION 'TEST SETUP FAIL: Melis Güzellik tenant slug not found.';
   END IF;
 
+  -- Ensure deterministic tenant state for disposable replay
+  UPDATE public.tenants
+  SET onboarding_status = 'completed',
+      public_site_status = 'published',
+      status = 'active'
+  WHERE id = v_tenant_id;
+
+  -- Ensure disposable subscription bound to published plan/version with required capabilities/quotas
+  DECLARE
+    v_plan_code TEXT;
+    v_plan_ver_id UUID;
+  BEGIN
+    SELECT p.code, pv.id INTO v_plan_code, v_plan_ver_id
+    FROM public.plan_versions pv
+    JOIN public.plans p ON p.id = pv.plan_id
+    JOIN public.plan_entitlements pe_core ON pe_core.plan_version_id = pv.id AND pe_core.feature_key = 'core_booking' AND pe_core.boolean_value = true
+    JOIN public.plan_entitlements pe_staff ON pe_staff.plan_version_id = pv.id AND pe_staff.feature_key = 'staff_management' AND pe_staff.boolean_value = true
+    JOIN public.plan_entitlements pe_service ON pe_service.plan_version_id = pv.id AND pe_service.feature_key = 'service_management' AND pe_service.boolean_value = true
+    JOIN public.plan_entitlements pe_mini ON pe_mini.plan_version_id = pv.id AND pe_mini.feature_key = 'lari_minisite' AND pe_mini.boolean_value = true
+    JOIN public.plan_entitlements pe_mstaff ON pe_mstaff.plan_version_id = pv.id AND pe_mstaff.feature_key = 'max_staff' AND pe_mstaff.value_type = 'integer' AND pe_mstaff.is_unlimited = true
+    JOIN public.plan_entitlements pe_mservice ON pe_mservice.plan_version_id = pv.id AND pe_mservice.feature_key = 'max_services' AND pe_mservice.value_type = 'integer' AND pe_mservice.is_unlimited = true
+    JOIN public.plan_entitlements pe_mbranch ON pe_mbranch.plan_version_id = pv.id AND pe_mbranch.feature_key = 'max_branches' AND pe_mbranch.value_type = 'integer' AND pe_mbranch.is_unlimited = true
+    JOIN public.plan_entitlements pe_mappt ON pe_mappt.plan_version_id = pv.id AND pe_mappt.feature_key = 'max_monthly_appointments' AND pe_mappt.value_type = 'integer' AND pe_mappt.is_unlimited = true
+    WHERE pv.lifecycle_status = 'published'
+    ORDER BY pv.created_at DESC
+    LIMIT 1;
+
+    IF v_plan_ver_id IS NOT NULL THEN
+      DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
+      INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_start, current_period_end)
+      VALUES (v_tenant_id, v_plan_code, v_plan_ver_id, 'active', 'manual', now() - interval '1 day', now() + interval '1 year');
+    END IF;
+  END;
+
+  -- Ensure deterministic single primary test branch for Melis tenant
+  DECLARE
+    v_b_id UUID;
+  BEGIN
+    SELECT id INTO v_b_id FROM public.branches WHERE tenant_id = v_tenant_id AND is_primary = true LIMIT 1;
+    IF v_b_id IS NULL THEN
+      INSERT INTO public.branches (tenant_id, name, slug, is_active, is_primary)
+      VALUES (v_tenant_id, 'Melis Primary Branch', 'melis-primary-branch', true, true)
+      RETURNING id INTO v_b_id;
+    ELSE
+      UPDATE public.branches SET is_active = true WHERE id = v_b_id;
+    END IF;
+  END;
+
+  -- Ensure deterministic service, staff, and mappings for Melis tenant
   SELECT id, duration INTO v_service_id, v_service_duration 
   FROM public.services 
   WHERE tenant_id = v_tenant_id AND active = true LIMIT 1;
+  IF v_service_id IS NULL THEN
+    INSERT INTO public.services (tenant_id, name, duration, price, active)
+    VALUES (v_tenant_id, 'Melis Deterministic Service', 30, 100, true)
+    RETURNING id, duration INTO v_service_id, v_service_duration;
+  END IF;
 
   SELECT id INTO v_staff_id 
   FROM public.staff 
   WHERE tenant_id = v_tenant_id AND active = true LIMIT 1;
+  IF v_staff_id IS NULL THEN
+    INSERT INTO public.staff (tenant_id, name, title, active)
+    VALUES (v_tenant_id, 'Melis Deterministic Staff', 'Specialist', true)
+    RETURNING id INTO v_staff_id;
+  END IF;
+
+  INSERT INTO public.staff_services (staff_id, service_id) VALUES (v_staff_id, v_service_id) ON CONFLICT DO NOTHING;
+  INSERT INTO public.availability_rules (tenant_id, staff_id, weekday, start_time, end_time, is_active)
+  SELECT v_tenant_id, v_staff_id, d, '08:00', '20:00', true FROM generate_series(1, 7) AS d ON CONFLICT DO NOTHING;
 
   RAISE NOTICE '=== STARTING HARDENED PUBLIC BOOKING BEHAVIORAL DB TESTS ===';
 
@@ -1891,6 +1954,11 @@ BEGIN
   RAISE NOTICE 'TEST 67 PASS: Public booking RPCs remain SECURITY DEFINER.';
 
   RAISE NOTICE '=== ALL STAGE B.2 ACL HARDENING TESTS 57-67 PASSED SUCCESSFULLY ===';
+END $$;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'PUBLIC_BOOKING_SQL_DB_EXECUTION=PASS';
 END $$;
 
 

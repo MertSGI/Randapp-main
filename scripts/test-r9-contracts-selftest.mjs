@@ -162,7 +162,32 @@ function testArityScannerAdversarial() {
   try { tokenizeSql('INSERT INTO t (c1, c2)) VALUES (1, 2);', 'sql25.sql'); } catch (e) { if (e.message.includes('UNBALANCED_PUNCTUATION_CLOSE')) c25Caught = true; }
   if (!c25Caught) throw new Error('Case 25 failed: unbalanced closing punctuation');
 
-  console.log('✅ Arity scanner 25 distinct executable cases PASSED.');
+  // Case 26: DEFAULT VALUES without column list => nonValues
+  const sql26 = `INSERT INTO public.t26 DEFAULT VALUES;`;
+  const res26 = parseAndVerifyInsertStatements(tokenizeSql(sql26, 'sql26.sql'), 'sql26.sql');
+  if (res26.nonValuesInserts !== 1 || res26.unsupportedCount !== 0) throw new Error('Case 26 failed: DEFAULT VALUES without column list');
+
+  // Case 27: safe SET LOCAL + quote_literal scalar => accepted non-INSERT
+  const sql27 = `EXECUTE 'SET LOCAL request.jwt.claim.sub = ' || quote_literal(v_id::text);`;
+  const res27 = parseAndVerifyInsertStatements(tokenizeSql(sql27, 'sql27.sql'), 'sql27.sql');
+  if (res27.unsupportedCount !== 0) throw new Error('Case 27 failed: safe SET LOCAL + quote_literal scalar');
+
+  // Case 28: dynamic INSERT + quote_literal => unsupported
+  const sql28 = `EXECUTE 'INSERT INTO public.t28 (c1) VALUES (' || quote_literal(v_val) || ')';`;
+  const res28 = parseAndVerifyInsertStatements(tokenizeSql(sql28, 'sql28.sql'), 'sql28.sql');
+  if (res28.unsupportedCount !== 1) throw new Error('Case 28 failed: dynamic INSERT + quote_literal => unsupported');
+
+  // Case 29: SET LOCAL + raw variable concatenation => unsupported
+  const sql29 = `EXECUTE 'SET LOCAL request.jwt.claim.sub = ' || v_raw_var;`;
+  const res29 = parseAndVerifyInsertStatements(tokenizeSql(sql29, 'sql29.sql'), 'sql29.sql');
+  if (res29.unsupportedCount !== 1) throw new Error('Case 29 failed: SET LOCAL + raw variable concatenation => unsupported');
+
+  // Case 30: ambiguous dynamic EXECUTE => unsupported
+  const sql30 = `EXECUTE v_ambiguous_stmt;`;
+  const res30 = parseAndVerifyInsertStatements(tokenizeSql(sql30, 'sql30.sql'), 'sql30.sql');
+  if (res30.unsupportedCount !== 1) throw new Error('Case 30 failed: ambiguous dynamic EXECUTE => unsupported');
+
+  console.log('✅ Arity scanner adversarial cases PASSED.');
 }
 
 function writeValidPhaseFragments(targetDir) {
@@ -179,10 +204,10 @@ function writeValidPhaseFragments(targetDir) {
   fs.writeFileSync(path.join(targetDir, '07-pgtap-slice3.env'), 'SLICE3_PGTAP_PLANNED_COUNT=40\nSLICE3_PGTAP_EXECUTED_COUNT=40\nSLICE3_PGTAP_COUNT=40\nSLICE3_PGTAP_PASSED_COUNT=40\nSLICE3_PGTAP_FAILED_COUNT=0\nSLICE3_PGTAP_RESULT=PASS\nSLICE3_PGTAP_FAILURE_CLASS=NONE\n');
   fs.writeFileSync(path.join(targetDir, '08-pgtap-slice4-block1.env'), 'SLICE4_BLOCK1_PGTAP_PLANNED_COUNT=40\nSLICE4_BLOCK1_PGTAP_EXECUTED_COUNT=40\nSLICE4_BLOCK1_PGTAP_COUNT=40\nSLICE4_BLOCK1_PGTAP_PASSED_COUNT=40\nSLICE4_BLOCK1_PGTAP_FAILED_COUNT=0\nSLICE4_BLOCK1_PGTAP_RESULT=PASS\nSLICE4_BLOCK1_PGTAP_FAILURE_CLASS=NONE\n');
   fs.writeFileSync(path.join(targetDir, '09-pgtap-slice4-block2.env'), 'SLICE4_BLOCK2_PGTAP_PLANNED_COUNT=20\nSLICE4_BLOCK2_PGTAP_EXECUTED_COUNT=20\nSLICE4_BLOCK2_PGTAP_COUNT=20\nSLICE4_BLOCK2_PGTAP_PASSED_COUNT=20\nSLICE4_BLOCK2_PGTAP_FAILED_COUNT=0\nSLICE4_BLOCK2_PGTAP_RESULT=PASS\nSLICE4_BLOCK2_PGTAP_FAILURE_CLASS=NONE\n');
-  fs.writeFileSync(path.join(targetDir, '10-pgtap-clinic-domain.env'), 'CLINIC_DOMAIN_PGTAP_PLANNED_COUNT=10\nCLINIC_DOMAIN_PGTAP_EXECUTED_COUNT=10\nCLINIC_DOMAIN_PGTAP_COUNT=10\nCLINIC_DOMAIN_PGTAP_PASSED_COUNT=10\nCLINIC_DOMAIN_PGTAP_FAILED_COUNT=0\nCLINIC_DOMAIN_PGTAP_RESULT=PASS\nCLINIC_DOMAIN_PGTAP_FAILURE_CLASS=NONE\n');
-  fs.writeFileSync(path.join(targetDir, '11-pgtap-clinic-ops.env'), 'CLINIC_OPS_PGTAP_PLANNED_COUNT=10\nCLINIC_OPS_PGTAP_EXECUTED_COUNT=10\nCLINIC_OPS_PGTAP_COUNT=10\nCLINIC_OPS_PGTAP_PASSED_COUNT=10\nCLINIC_OPS_PGTAP_FAILED_COUNT=0\nCLINIC_OPS_PGTAP_RESULT=PASS\nCLINIC_OPS_PGTAP_FAILURE_CLASS=NONE\n');
-  fs.writeFileSync(path.join(targetDir, '12-pgtap-clinic-hardening.env'), 'CLINIC_HARDENING_PGTAP_PLANNED_COUNT=10\nCLINIC_HARDENING_PGTAP_EXECUTED_COUNT=10\nCLINIC_HARDENING_PGTAP_COUNT=10\nCLINIC_HARDENING_PGTAP_PASSED_COUNT=10\nCLINIC_HARDENING_PGTAP_FAILED_COUNT=0\nCLINIC_HARDENING_PGTAP_RESULT=PASS\nCLINIC_HARDENING_PGTAP_FAILURE_CLASS=NONE\n');
-  fs.writeFileSync(path.join(targetDir, '13-pgtap-public-booking.env'), 'PUBLIC_BOOKING_PGTAP_PLANNED_COUNT=67\nPUBLIC_BOOKING_PGTAP_EXECUTED_COUNT=67\nPUBLIC_BOOKING_PGTAP_COUNT=67\nPUBLIC_BOOKING_PGTAP_PASSED_COUNT=67\nPUBLIC_BOOKING_PGTAP_FAILED_COUNT=0\nPUBLIC_BOOKING_PGTAP_RESULT=PASS\nPUBLIC_BOOKING_PGTAP_FAILURE_CLASS=NONE\n');
+  fs.writeFileSync(path.join(targetDir, '10-sql-clinic-domain.env'), 'CLINIC_DOMAIN_SQL_EXECUTION_RESULT=PASS\n');
+  fs.writeFileSync(path.join(targetDir, '11-sql-clinic-ops.env'), 'CLINIC_OPS_SQL_EXECUTION_RESULT=PASS\n');
+  fs.writeFileSync(path.join(targetDir, '12-sql-clinic-hardening.env'), 'CLINIC_HARDENING_SQL_EXECUTION_RESULT=PASS\n');
+  fs.writeFileSync(path.join(targetDir, '13-sql-public-booking.env'), 'PUBLIC_BOOKING_SQL_EXECUTION_RESULT=PASS\n');
   fs.writeFileSync(path.join(targetDir, '13b-pgtap-summary.env'), 'ZERO_TEST_SUITE_COUNT=0\nPGTAP_PHASE_RESULT=PASS\n');
 
   fs.writeFileSync(path.join(targetDir, '14-concurrency.env'), `REAL_TWO_SESSION_CONCURRENCY_RESULT=PASS\nCONTROLLER_LOCK_BARRIER_RESULT=PASS\nBOTH_CALLS_BLOCKED_BEFORE_RELEASE_RESULT=PASS\nINDEPENDENT_DB_CONNECTION_COUNT=2\nCONCURRENCY_ROUND_COUNT=3\nROUND_1_WINNER=core\nROUND_1_ACTIVE_APPOINTMENT_COUNT=1\nROUND_2_WINNER=ht\nROUND_2_ACTIVE_APPOINTMENT_COUNT=1\nROUND_3_WINNER=core\nROUND_3_ACTIVE_APPOINTMENT_COUNT=1\nHT_WIN_COUNT=1\nHT_WIN_PROVENANCE_RESULT=PASS\nBOTH_SUCCESS_COUNT=0\nDEADLOCK_COUNT=0\nTIMEOUT_COUNT=0\nLOSING_HT_PARTIAL_CUSTOMER_COUNT=0\nLOSING_HT_PARTIAL_PATIENT_PROFILE_COUNT=0\nLOSING_HT_PARTIAL_APPOINTMENT_COUNT=0\nNO_ENCOUNTER_AUTOCREATE_RESULT=PASS\nNO_EXTERNAL_SIDE_EFFECT_RESULT=PASS\n`);

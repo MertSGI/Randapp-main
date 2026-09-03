@@ -252,15 +252,14 @@ SELECT ok(
 -- ----------------------------------------------------------------------------
 -- ASSERTION 15: Slot generation uses actual availability_rules
 -- ----------------------------------------------------------------------------
-SELECT is_gt(
-  (SELECT jsonb_array_length(public.ht_get_clinic_acceptance_slots(
+SELECT ok(
+  jsonb_array_length(public.ht_get_clinic_acceptance_slots(
     'c0000000-0000-0000-0000-000000000001',
     'a0000000-0000-0000-0000-000000000201',
     'a0000000-0000-0000-0000-000000000301',
     'a0000000-0000-0000-0000-000000000503',
     '2026-11-02'::date
-  )->'available_slots')),
-  0,
+  )->'available_slots') > 0,
   '15: Slot generation yields candidate slots based on availability_rules'
 );
 
