@@ -665,6 +665,8 @@ BEGIN
     VALUES ('Cross Tenant', 'cross-tenant-t23', 'active', 'completed', 'published')
     RETURNING id INTO v_xt_tenant_id;
 
+    PERFORM pg_temp.slice4_e2_bootstrap_commercial(v_xt_tenant_id);
+
     INSERT INTO public.staff (tenant_id, name, title, active)
     VALUES (v_xt_tenant_id, 'Cross Tenant Staff', 'Specialist', true)
     RETURNING id INTO v_xt_staff_id;
