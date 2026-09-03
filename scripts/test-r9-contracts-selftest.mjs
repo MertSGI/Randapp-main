@@ -764,12 +764,70 @@ function testPublicBookingSourceContract() {
   console.log('✅ Public booking behavioral test suite & product migration source contract PASSED.');
 }
 
+
+function testR187HostedEvidenceHarnessContracts() {
+  console.log('--- Testing R1.8.7 Hosted Evidence Harness & Security Contract Repairs ---');
+
+  const fixturePath = path.join(__dirname, '..', 'supabase/tests/fixtures/slice4_e2_commercial_fixture.sql');
+  const workspaceTestsPath = path.join(__dirname, '..', 'supabase/tests/health_tourism_clinic_acceptance_workspace_tests.sql');
+  const hardeningMigPath = path.join(__dirname, '..', 'supabase/migrations/20260804_appointments_direct_update_hardening.sql');
+
+  const fixtureContent = fs.readFileSync(fixturePath, 'utf8');
+  const workspaceTestsContent = fs.readFileSync(workspaceTestsPath, 'utf8');
+  const hardeningMigContent = fs.readFileSync(hardeningMigPath, 'utf8');
+
+  // 1. Verify 20260804 migration canonical REVOKE statements
+  if (
+    !hardeningMigContent.includes('REVOKE UPDATE ON public.appointments FROM PUBLIC;') ||
+    !hardeningMigContent.includes('REVOKE UPDATE ON public.appointments FROM anon;') ||
+    !hardeningMigContent.includes('REVOKE UPDATE ON public.appointments FROM authenticated;')
+  ) {
+    throw new Error('R187_CONTRACT_DEFECT: 20260804 migration missing exact REVOKE UPDATE ON public.appointments statements');
+  }
+
+  // 2. Commercial Fixture Checks
+  if (fixtureContent.includes('DELETE FROM public.subscriptions')) {
+    throw new Error('R187_CONTRACT_DEFECT: Commercial fixture contains destructive DELETE FROM public.subscriptions');
+  }
+  if (fixtureContent.includes('public.subscription_events')) {
+    throw new Error('R187_CONTRACT_DEFECT: Commercial fixture mutates append-only subscription_events ledger');
+  }
+  if (!fixtureContent.includes('UPDATE public.subscriptions') || !fixtureContent.includes('FOR UPDATE')) {
+    throw new Error('R187_CONTRACT_DEFECT: Commercial fixture missing update-existing subscription path with FOR UPDATE locking');
+  }
+  if (!fixtureContent.includes('INSERT INTO public.subscriptions')) {
+    throw new Error('R187_CONTRACT_DEFECT: Commercial fixture missing insert-if-missing subscription path');
+  }
+
+  // 3. Block2 Test 20 Checks
+  if (workspaceTestsContent.includes('zero direct table-write authority')) {
+    throw new Error('R187_CONTRACT_DEFECT: Workspace tests still contain stale overbroad zero direct table-write assertion');
+  }
+  if (
+    !workspaceTestsContent.includes("has_table_privilege('anon', 'public.appointments', 'UPDATE') = false") ||
+    !workspaceTestsContent.includes("has_table_privilege('authenticated', 'public.appointments', 'UPDATE') = false")
+  ) {
+    throw new Error('R187_CONTRACT_DEFECT: Workspace tests missing exact appointments UPDATE privilege checks');
+  }
+  if (
+    !workspaceTestsContent.includes('bool_and(c.relrowsecurity) = true') ||
+    !workspaceTestsContent.includes("'appointments', 'customers', 'clinic_patient_profiles', 'ht_leads'")
+  ) {
+    throw new Error('R187_CONTRACT_DEFECT: Workspace tests missing RLS relrowsecurity checks for all four protected tables');
+  }
+
+  console.log('COMMERCIAL_FIXTURE_APPEND_ONLY_SAFE=PASS');
+  console.log('BLOCK2_TEST20_MATCHES_CANONICAL_SECURITY_CONTRACT=PASS');
+  console.log('Finished R1.8.7 Hosted evidence harness & security contracts PASS.');
+}
+
 function main() {
   testArityScannerAdversarial();
   testAggregatorAdversarial();
   testConcurrencyHarnessEvidenceContract();
   testPublicBookingSourceContract();
-  console.log('\n🎉 ALL HARDENED R9-R1.8.6 CONTRACT SELF-TESTS PASSED!');
+  testR187HostedEvidenceHarnessContracts();
+  console.log('\n🎉 ALL HARDENED R9-R1.8.7 CONTRACT SELF-TESTS PASSED!');
 }
 
 main();

@@ -9,6 +9,7 @@ DECLARE
     v_bool_val BOOLEAN;
     v_quota JSONB;
     v_fk TEXT;
+    v_existing_sub_id UUID;
 BEGIN
     IF p_tenant_id IS NULL THEN
         RAISE EXCEPTION 'slice4_e2_bootstrap_commercial: p_tenant_id cannot be null';
@@ -35,28 +36,44 @@ BEGIN
         RAISE EXCEPTION 'COMMERCIAL_TEST_FIXTURE_FATAL: No published plan_version found satisfying required capabilities and unlimited quotas.';
     END IF;
 
-    -- Remove existing subscriptions for this synthetic test tenant only to prevent duplicates
-    DELETE FROM public.subscriptions
-    WHERE tenant_id = p_tenant_id;
+    -- Resolve the most recent existing subscription for p_tenant_id using row locking
+    SELECT id INTO v_existing_sub_id
+    FROM public.subscriptions
+    WHERE tenant_id = p_tenant_id
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+    FOR UPDATE;
 
-    -- Insert exactly one canonical active subscription
-    INSERT INTO public.subscriptions (
-        tenant_id,
-        plan_id,
-        plan_version_id,
-        status,
-        billing_mode,
-        current_period_start,
-        current_period_end
-    ) VALUES (
-        p_tenant_id,
-        v_plan_code,
-        v_plan_version_id,
-        'active',
-        'manual',
-        now() - interval '1 day',
-        now() + interval '1 year'
-    );
+    IF v_existing_sub_id IS NOT NULL THEN
+        -- Update existing subscription row to qualifying test authority without modifying created_at
+        UPDATE public.subscriptions
+        SET plan_id = v_plan_code,
+            plan_version_id = v_plan_version_id,
+            status = 'active',
+            billing_mode = 'manual',
+            current_period_start = now() - interval '1 day',
+            current_period_end = now() + interval '1 year'
+        WHERE id = v_existing_sub_id;
+    ELSE
+        -- Insert exactly one canonical active subscription
+        INSERT INTO public.subscriptions (
+            tenant_id,
+            plan_id,
+            plan_version_id,
+            status,
+            billing_mode,
+            current_period_start,
+            current_period_end
+        ) VALUES (
+            p_tenant_id,
+            v_plan_code,
+            v_plan_version_id,
+            'active',
+            'manual',
+            now() - interval '1 day',
+            now() + interval '1 year'
+        );
+    END IF;
 
     -- 1. Prove Commercial Eligibility
     v_elig := public.resolve_tenant_commercial_eligibility(p_tenant_id);

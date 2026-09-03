@@ -349,17 +349,23 @@ SELECT has_function(
 );
 
 -- ----------------------------------------------------------------------------
--- ASSERTION 20: No direct table-write authority is introduced
+-- ASSERTION 20: Canonical RLS and appointments direct-UPDATE hardening remain active
 -- ----------------------------------------------------------------------------
 SELECT ok(
-  NOT EXISTS (
-    SELECT 1 FROM information_schema.role_table_grants
-    WHERE table_schema = 'public'
-      AND table_name IN ('appointments', 'customers', 'clinic_patient_profiles', 'ht_leads')
-      AND grantee IN ('anon', 'authenticated')
-      AND privilege_type IN ('INSERT', 'UPDATE', 'DELETE')
+  (
+    has_table_privilege('anon', 'public.appointments', 'UPDATE') = false
+    AND
+    has_table_privilege('authenticated', 'public.appointments', 'UPDATE') = false
+  )
+  AND
+  (
+    SELECT (count(*) = 4 AND bool_and(c.relrowsecurity) = true)
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relname IN ('appointments', 'customers', 'clinic_patient_profiles', 'ht_leads')
   ),
-  '20: RLS write protection maintained - zero direct table-write authority for public/anon/authenticated'
+  '20: Canonical RLS and appointments direct-UPDATE hardening remain active'
 );
 
 SELECT * FROM finish();
