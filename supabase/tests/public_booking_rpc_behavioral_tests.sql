@@ -475,7 +475,13 @@ BEGIN
   );
   SELECT COUNT(*) INTO v_count
   FROM pg_locks
-  WHERE locktype = 'advisory' AND classid = (v_lock_key >> 32) AND objid = (v_lock_key & x'ffffffff'::int);
+  WHERE locktype = 'advisory'
+    AND classid::bigint = ((v_lock_key >> 32) & 4294967295::bigint)
+    AND objid::bigint = (v_lock_key & 4294967295::bigint)
+    AND objsubid = 1;
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'TEST 16 FAIL: Expected canonical advisory lock was not observed.';
+  END IF;
   RAISE NOTICE 'TEST 16 PASS: Concurrency locks verified. (Advisory Lock Key Exists = Yes)';
 
   -- -----------------------------------------------------------------------

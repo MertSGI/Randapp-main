@@ -816,6 +816,69 @@ function testPublicBookingSourceContract() {
   console.log('TEST10_INVALID_STAFF_ASSERTION_PRESENT=YES');
   console.log('TEST10_COMMERCIAL_BOOTSTRAP_BEFORE_STAFF=YES');
   console.log('TEST10_QUOTA_BYPASS_PRESENT=NO');
+
+  // 11. TEST 16 ADVISORY LOCK INTROSPECTION CONTRACT (R1.8.9)
+  const test16StartIdx = content.indexOf('-- TEST 16: Concurrency Advisory Lock Enforcement');
+  const test17StartIdx = content.indexOf('-- TEST 17: No PII stored in public_booking_idempotency');
+
+  if (test16StartIdx === -1 || test17StartIdx === -1 || test16StartIdx >= test17StartIdx) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 16 and Test 17 markers missing or out of order');
+  }
+
+  const test16Region = content.substring(test16StartIdx, test17StartIdx);
+
+  // Require forbidden old broken representations ABSENT in Test 16 region
+  const forbiddenRepresentations = [
+    'classid = (v_lock_key >> 32)',
+    "objid = (v_lock_key & x'ffffffff'::int)"
+  ];
+  for (const rep of forbiddenRepresentations) {
+    if (test16Region.includes(rep)) {
+      throw new Error(`PUBLIC_BOOKING_CONTRACT_DEFECT: Test 16 contains forbidden signed OID comparison representation: ${rep}`);
+    }
+  }
+
+  // Required markers in Test 16 region
+  const t16HashIdx = test16Region.indexOf('hashtextextended');
+  const t16LocksIdx = test16Region.indexOf('pg_locks');
+  const t16AdvisoryIdx = test16Region.indexOf("locktype = 'advisory'");
+  const t16ClassidIdx = test16Region.indexOf('classid::bigint');
+  const t16ObjidIdx = test16Region.indexOf('objid::bigint');
+  const t16MaskIdx = test16Region.indexOf('4294967295::bigint');
+  const t16SubidIdx = test16Region.indexOf('objsubid = 1');
+  const t16CountZeroIdx = test16Region.indexOf('v_count = 0');
+  const t16RaiseIdx = test16Region.indexOf('RAISE EXCEPTION');
+  const t16PassIdx = test16Region.indexOf('TEST 16 PASS');
+
+  if (
+    t16HashIdx === -1 ||
+    t16LocksIdx === -1 ||
+    t16AdvisoryIdx === -1 ||
+    t16ClassidIdx === -1 ||
+    t16ObjidIdx === -1 ||
+    t16MaskIdx === -1 ||
+    t16SubidIdx === -1 ||
+    t16CountZeroIdx === -1 ||
+    t16RaiseIdx === -1 ||
+    t16PassIdx === -1
+  ) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 16 missing required semantic markers');
+  }
+
+  // Ordering check: LOCK_KEY_DERIVATION < PG_LOCKS_QUERY < POSITIVE_OBSERVATION_ASSERTION < PASS_MARKER
+  if (!(t16HashIdx < t16LocksIdx && t16LocksIdx < t16CountZeroIdx && t16CountZeroIdx < t16PassIdx)) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 16 semantic markers out of strict required order');
+  }
+
+  console.log('TEST16_REGION_FAIL_CLOSED=YES');
+  console.log('TEST16_CANONICAL_HASH_KEY_PRESENT=YES');
+  console.log('TEST16_PG_LOCKS_QUERY_PRESENT=YES');
+  console.log('TEST16_CLASSID_BIGINT_NORMALIZATION_PRESENT=YES');
+  console.log('TEST16_OBJID_BIGINT_NORMALIZATION_PRESENT=YES');
+  console.log('TEST16_UNSIGNED_32BIT_MASK_PRESENT=YES');
+  console.log('TEST16_OBJSUBID_SINGLE_BIGINT_PRESENT=YES');
+  console.log('TEST16_POSITIVE_LOCK_ASSERTION_PRESENT=YES');
+  console.log('TEST16_SIGNED_OID_COMPARISON_PRESENT=NO');
   console.log('PUBLIC_BOOKING_TEST_VS_CANONICAL_PRODUCT_CONTRACT=PASS');
   console.log('✅ Public booking behavioral test suite & product migration source contract PASSED.');
 }
