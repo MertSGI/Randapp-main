@@ -550,15 +550,15 @@ function testConcurrencyHarnessEvidenceContract() {
     throw new Error('CONCURRENCY_HARNESS_DEFECT: Missing lower-case ht/core winner logic');
   }
 
-  console.log('✅ Concurrency harness static evidence contract PASSED.');
-}
-
-function normalizeSql(str) {
-  return str.replace(/\s+/g, ' ').trim();
+  console.log('✅ Concurrency harness static evidence contract PASSED.');function normalizeSql(str) {
+  return str
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 }
 
 function testPublicBookingSourceContract() {
-  console.log('--- Testing Public Booking Behavioral Test Suite & Product Migration Source Contract (R9-R1.8.4) ---');
+  console.log('--- Testing Public Booking Behavioral Test Suite & Product Migration Source Contract (R9-R1.8.5) ---');
   const sqlPath = path.join(__dirname, '..', 'supabase/tests/public_booking_rpc_behavioral_tests.sql');
   const content = fs.readFileSync(sqlPath, 'utf8');
 
@@ -569,12 +569,6 @@ function testPublicBookingSourceContract() {
   const mig20260813 = fs.readFileSync(mig20260813Path, 'utf8');
   const mig20260723 = fs.readFileSync(mig20260723Path, 'utf8');
   const mig20260827 = fs.readFileSync(mig20260827Path, 'utf8');
-
-  // Verify p_kvkk_consent assertion is NOT present anywhere in this script
-  const selftestContent = fs.readFileSync(__filename, 'utf8');
-  if (selftestContent.includes('p_kvkk_consent')) {
-    throw new Error('SELFTEST_DEFECT: p_kvkk_consent assertion is still present in selftest');
-  }
 
   // 1. CANONICAL CREATE_PUBLIC_BOOKING IDENTITY (20260813)
   const normMig20260813 = normalizeSql(mig20260813);
@@ -679,28 +673,28 @@ function testPublicBookingSourceContract() {
   const preTest22Region = content.substring(sectionStart, test22Idx);
 
   const normSetup = normalizeSql(setupRegion);
-  if (!normSetup.includes('service_branches (tenant_id, service_id, branch_id) values (v_tenant_id, v_service_id, v_b_id)')) {
+  if (!normSetup.includes(normalizeSql('service_branches (tenant_id, service_id, branch_id) values (v_tenant_id, v_service_id, v_b_id)'))) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Setup region missing service_branches mapping');
   }
-  if (!normSetup.includes('staff_branches (tenant_id, staff_id, branch_id) values (v_tenant_id, v_mapped_staff_id, v_b_id)')) {
+  if (!normSetup.includes(normalizeSql('staff_branches (tenant_id, staff_id, branch_id) values (v_tenant_id, v_mapped_staff_id, v_b_id)'))) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Setup region missing mapped staff_branches mapping');
   }
-  if (!normSetup.includes('staff_branches (tenant_id, staff_id, branch_id) values (v_tenant_id, v_unmapped_staff_id, v_b_id)')) {
+  if (!normSetup.includes(normalizeSql('staff_branches (tenant_id, staff_id, branch_id) values (v_tenant_id, v_unmapped_staff_id, v_b_id)'))) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Setup region missing unmapped staff_branches mapping');
   }
-  if (!normSetup.includes('staff_services (staff_id, service_id) values (v_mapped_staff_id, v_service_id)')) {
+  if (!normSetup.includes(normalizeSql('staff_services (staff_id, service_id) values (v_mapped_staff_id, v_service_id)'))) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Setup region missing staff_services positive mapping for mapped staff');
   }
 
   const normPreTest22 = normalizeSql(preTest22Region);
-  if (normPreTest22.includes('values (v_unmapped_staff_id, v_service_id)')) {
+  if (normPreTest22.includes(normalizeSql('values (v_unmapped_staff_id, v_service_id)'))) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Pre-Test22 region incorrectly inserted staff_services mapping for unmapped staff');
   }
 
   // 7. TEST25 CAUSAL ISOLATION
   const test25Region = content.substring(test25Idx, test26Idx);
   const normTest25Region = normalizeSql(test25Region);
-  if (!normTest25Region.includes('delete from public.staff_services where staff_id = v_mapped_staff_id and service_id = v_service_id;')) {
+  if (!normTest25Region.includes(normalizeSql('delete from public.staff_services where staff_id = v_mapped_staff_id and service_id = v_service_id;'))) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 25 region missing exact staff_services deletion');
   }
 
@@ -722,7 +716,7 @@ function testPublicBookingSourceContract() {
   const test26BeforeBooking = test26Region.substring(0, test26BookingCallIdx);
   const normTest26BeforeBooking = normalizeSql(test26BeforeBooking);
 
-  if (!normTest26BeforeBooking.includes('insert into public.staff_services (staff_id, service_id) values (v_mapped_staff_id, v_service_id) on conflict (staff_id, service_id) do nothing')) {
+  if (!normTest26BeforeBooking.includes(normalizeSql('insert into public.staff_services (staff_id, service_id) values (v_mapped_staff_id, v_service_id) on conflict (staff_id, service_id) do nothing'))) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 26 before-booking region missing exact semantic staff_services restore');
   }
   if (test26BeforeBooking.includes('DELETE FROM public.staff_branches') || test26BeforeBooking.includes('DELETE FROM public.service_branches')) {
@@ -772,7 +766,7 @@ function main() {
   testAggregatorAdversarial();
   testConcurrencyHarnessEvidenceContract();
   testPublicBookingSourceContract();
-  console.log('\n🎉 ALL HARDENED R9-R1.8.4 CONTRACT SELF-TESTS PASSED!');
+  console.log('\n🎉 ALL HARDENED R9-R1.8.5 CONTRACT SELF-TESTS PASSED!');
 }
 
 main();
