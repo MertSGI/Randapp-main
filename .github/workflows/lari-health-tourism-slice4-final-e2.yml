@@ -13,7 +13,7 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
         with:
-          ref: 'f8036da81b4dda702b8b920a1e017487f69944bd'
+          ref: '974f0514e914f91cd7b25bfdd08512449019b7e9'
 
       - name: Initialize Evidence Directory
         id: init_artifacts
@@ -382,7 +382,7 @@ jobs:
             fs.writeFileSync("/tmp/e2-artifacts/05-arity-static.env", env);
           '
 
-      - name: Execute pgTAP DB Acceptance Suites
+      - name: Execute pgTAP & Executable SQL DB Acceptance Suites
         id: pgtap_suites
         if: always()
         run: |
@@ -400,15 +400,23 @@ jobs:
             echo "${prefix}_PGTAP_FAILURE_CLASS=NOT_EXECUTED" >> "${file}"
           }
 
+          write_sql_not_executed() {
+            local file="$1"
+            local key="$2"
+            local reason="$3"
+            echo "${key}=NOT_EXECUTED" > "${file}"
+            echo "${key}_NOT_EXECUTED_REASON=${reason}" >> "${file}"
+          }
+
           if [ "${{ steps.migration_replay.conclusion }}" != "success" ] || [ ! -f /tmp/e2-artifacts/01-migration.env ] || grep -q "MIGRATION_REPLAY_RESULT=FAIL" /tmp/e2-artifacts/01-migration.env || grep -q "MIGRATION_REPLAY_RESULT=NOT_EXECUTED" /tmp/e2-artifacts/01-migration.env; then
             write_not_executed "/tmp/e2-artifacts/06-pgtap-foundation.env" "FOUNDATION" "MIGRATION_REPLAY_FAILED"
             write_not_executed "/tmp/e2-artifacts/07-pgtap-slice3.env" "SLICE3" "MIGRATION_REPLAY_FAILED"
             write_not_executed "/tmp/e2-artifacts/08-pgtap-slice4-block1.env" "SLICE4_BLOCK1" "MIGRATION_REPLAY_FAILED"
             write_not_executed "/tmp/e2-artifacts/09-pgtap-slice4-block2.env" "SLICE4_BLOCK2" "MIGRATION_REPLAY_FAILED"
-            write_not_executed "/tmp/e2-artifacts/10-pgtap-clinic-domain.env" "CLINIC_DOMAIN" "MIGRATION_REPLAY_FAILED"
-            write_not_executed "/tmp/e2-artifacts/11-pgtap-clinic-ops.env" "CLINIC_OPS" "MIGRATION_REPLAY_FAILED"
-            write_not_executed "/tmp/e2-artifacts/12-pgtap-clinic-hardening.env" "CLINIC_HARDENING" "MIGRATION_REPLAY_FAILED"
-            write_not_executed "/tmp/e2-artifacts/13-pgtap-public-booking.env" "PUBLIC_BOOKING" "MIGRATION_REPLAY_FAILED"
+            write_sql_not_executed "/tmp/e2-artifacts/10-sql-clinic-domain.env" "CLINIC_DOMAIN_SQL_EXECUTION_RESULT" "MIGRATION_REPLAY_FAILED"
+            write_sql_not_executed "/tmp/e2-artifacts/11-sql-clinic-ops.env" "CLINIC_OPS_SQL_EXECUTION_RESULT" "MIGRATION_REPLAY_FAILED"
+            write_sql_not_executed "/tmp/e2-artifacts/12-sql-clinic-hardening.env" "CLINIC_HARDENING_SQL_EXECUTION_RESULT" "MIGRATION_REPLAY_FAILED"
+            write_sql_not_executed "/tmp/e2-artifacts/13-sql-public-booking.env" "PUBLIC_BOOKING_SQL_EXECUTION_RESULT" "MIGRATION_REPLAY_FAILED"
             echo "ZERO_TEST_SUITE_COUNT=NOT_OBSERVED" > /tmp/e2-artifacts/13b-pgtap-summary.env
             echo "PGTAP_PHASE_RESULT=NOT_EXECUTED" >> /tmp/e2-artifacts/13b-pgtap-summary.env
             echo "PGTAP_PHASE_RESULT_NOT_EXECUTED_REASON=MIGRATION_REPLAY_FAILED" >> /tmp/e2-artifacts/13b-pgtap-summary.env
@@ -417,6 +425,38 @@ jobs:
 
           export PGPASSWORD=postgres
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+
+          run_sql_suite() {
+            local suite_file="$1"
+            local result_key="$2"
+            local frag_file="$3"
+            local marker="$4"
+            local log_file="/tmp/e2-artifacts/sql-${result_key}.txt"
+
+            echo "=== Running Executable SQL Suite ${suite_file} ==="
+            set +e
+            psql "$DB_URL" -v ON_ERROR_STOP=1 -f "${suite_file}" > "${log_file}" 2>&1
+            local psql_exit=$?
+            set -e
+
+            if [ ${psql_exit} -ne 0 ]; then
+              echo "${result_key}=FAIL" > "${frag_file}"
+              echo "${result_key}_FAILURE_REASON=PSQL_EXIT_${psql_exit}" >> "${frag_file}"
+              return 0
+            fi
+
+            if grep -q "${marker}" "${log_file}"; then
+              echo "${result_key}=PASS" > "${frag_file}"
+            else
+              echo "${result_key}=FAIL" > "${frag_file}"
+              echo "${result_key}_FAILURE_REASON=COMPLETION_MARKER_MISSING" >> "${frag_file}"
+            fi
+          }
+
+          run_sql_suite "supabase/tests/clinic_domain_server_authority_tests.sql" "CLINIC_DOMAIN_SQL_EXECUTION_RESULT" "/tmp/e2-artifacts/10-sql-clinic-domain.env" "CLINIC_SQL_DB_EXECUTION=PASS"
+          run_sql_suite "supabase/tests/clinic_operational_integration_tests.sql" "CLINIC_OPS_SQL_EXECUTION_RESULT" "/tmp/e2-artifacts/11-sql-clinic-ops.env" "CLINIC_BLOCK2_SQL_DB_EXECUTION=PASS"
+          run_sql_suite "supabase/tests/clinic_workspace_authority_hardening_tests.sql" "CLINIC_HARDENING_SQL_EXECUTION_RESULT" "/tmp/e2-artifacts/12-sql-clinic-hardening.env" "CLINIC_WORKSPACE_AUTHORITY_HARDENING_DB_EXECUTION=PASS"
+          run_sql_suite "supabase/tests/public_booking_rpc_behavioral_tests.sql" "PUBLIC_BOOKING_SQL_EXECUTION_RESULT" "/tmp/e2-artifacts/13-sql-public-booking.env" "PUBLIC_BOOKING_SQL_DB_EXECUTION=PASS"
 
           set +e
           psql "$DB_URL" -c "CREATE EXTENSION IF NOT EXISTS pgtap;" > /tmp/e2-artifacts/pgtap-setup.log 2>&1
@@ -428,10 +468,6 @@ jobs:
             write_not_executed "/tmp/e2-artifacts/07-pgtap-slice3.env" "SLICE3" "PGTAP_SETUP_FAILED"
             write_not_executed "/tmp/e2-artifacts/08-pgtap-slice4-block1.env" "SLICE4_BLOCK1" "PGTAP_SETUP_FAILED"
             write_not_executed "/tmp/e2-artifacts/09-pgtap-slice4-block2.env" "SLICE4_BLOCK2" "PGTAP_SETUP_FAILED"
-            write_not_executed "/tmp/e2-artifacts/10-pgtap-clinic-domain.env" "CLINIC_DOMAIN" "PGTAP_SETUP_FAILED"
-            write_not_executed "/tmp/e2-artifacts/11-pgtap-clinic-ops.env" "CLINIC_OPS" "PGTAP_SETUP_FAILED"
-            write_not_executed "/tmp/e2-artifacts/12-pgtap-clinic-hardening.env" "CLINIC_HARDENING" "PGTAP_SETUP_FAILED"
-            write_not_executed "/tmp/e2-artifacts/13-pgtap-public-booking.env" "PUBLIC_BOOKING" "PGTAP_SETUP_FAILED"
             echo "ZERO_TEST_SUITE_COUNT=NOT_OBSERVED" > /tmp/e2-artifacts/13b-pgtap-summary.env
             echo "PGTAP_PHASE_RESULT=FAIL" >> /tmp/e2-artifacts/13b-pgtap-summary.env
             echo "PGTAP_PHASE_RESULT_FAILURE_REASON=PGTAP_SETUP_EXIT_${pgtap_setup_status}" >> /tmp/e2-artifacts/13b-pgtap-summary.env
@@ -441,13 +477,13 @@ jobs:
           SUITE_FAILURES=0
           ZERO_TEST_COUNT=0
 
-          run_suite() {
+          run_tap_suite() {
             local suite_file="$1"
             local result_prefix="$2"
             local frag_file="$3"
             local log_file="/tmp/e2-artifacts/pgtap-${result_prefix}.txt"
             
-            echo "=== Running ${suite_file} ==="
+            echo "=== Running TAP suite ${suite_file} ==="
             set +e
             pg_prove --verbose -h 127.0.0.1 -p 54322 -U postgres -d postgres "${suite_file}" > "${log_file}" 2>&1
             local prove_status=$?
@@ -499,14 +535,10 @@ jobs:
             echo "${result_prefix}_PGTAP_FAILURE_CLASS=NONE" >> "${frag_file}"
           }
 
-          run_suite "supabase/tests/health_tourism_foundation_server_authority_tests.sql" "FOUNDATION" "/tmp/e2-artifacts/06-pgtap-foundation.env"
-          run_suite "supabase/tests/health_tourism_lead_ops_ai_assist_tests.sql" "SLICE3" "/tmp/e2-artifacts/07-pgtap-slice3.env"
-          run_suite "supabase/tests/health_tourism_clinic_acceptance_tests.sql" "SLICE4_BLOCK1" "/tmp/e2-artifacts/08-pgtap-slice4-block1.env"
-          run_suite "supabase/tests/health_tourism_clinic_acceptance_workspace_tests.sql" "SLICE4_BLOCK2" "/tmp/e2-artifacts/09-pgtap-slice4-block2.env"
-          run_suite "supabase/tests/clinic_domain_server_authority_tests.sql" "CLINIC_DOMAIN" "/tmp/e2-artifacts/10-pgtap-clinic-domain.env"
-          run_suite "supabase/tests/clinic_operational_integration_tests.sql" "CLINIC_OPS" "/tmp/e2-artifacts/11-pgtap-clinic-ops.env"
-          run_suite "supabase/tests/clinic_workspace_authority_hardening_tests.sql" "CLINIC_HARDENING" "/tmp/e2-artifacts/12-pgtap-clinic-hardening.env"
-          run_suite "supabase/tests/public_booking_rpc_behavioral_tests.sql" "PUBLIC_BOOKING" "/tmp/e2-artifacts/13-pgtap-public-booking.env"
+          run_tap_suite "supabase/tests/health_tourism_foundation_server_authority_tests.sql" "FOUNDATION" "/tmp/e2-artifacts/06-pgtap-foundation.env"
+          run_tap_suite "supabase/tests/health_tourism_lead_ops_ai_assist_tests.sql" "SLICE3" "/tmp/e2-artifacts/07-pgtap-slice3.env"
+          run_tap_suite "supabase/tests/health_tourism_clinic_acceptance_tests.sql" "SLICE4_BLOCK1" "/tmp/e2-artifacts/08-pgtap-slice4-block1.env"
+          run_tap_suite "supabase/tests/health_tourism_clinic_acceptance_workspace_tests.sql" "SLICE4_BLOCK2" "/tmp/e2-artifacts/09-pgtap-slice4-block2.env"
 
           echo "ZERO_TEST_SUITE_COUNT=${ZERO_TEST_COUNT}" > /tmp/e2-artifacts/13b-pgtap-summary.env
           if [ "${SUITE_FAILURES}" -gt 0 ]; then
@@ -743,7 +775,7 @@ jobs:
             echo "CLINIC_REGRESSION_FAILURE_REASON=ONE_OR_MORE_CLINIC_COMMANDS_FAILED" >> /tmp/e2-artifacts/22b-app-clinic-summary.env
           fi
 
-          run_app_cmd "node scripts/test-health-tourism-slice2-public-intake.mjs" "HT_SLICE2_APP_RESULT" "SLICE2_REGRESSION" "/tmp/e2-artifacts/23-app-ht-slice2.env"
+          run_app_cmd "node --import tsx scripts/test-health-tourism-slice2-public-intake.mjs" "HT_SLICE2_APP_RESULT" "SLICE2_REGRESSION" "/tmp/e2-artifacts/23-app-ht-slice2.env"
 
       - name: Typecheck Application
         id: typecheck
@@ -756,7 +788,7 @@ jobs:
           fi
 
           set +e
-          npm run typecheck 2>&1 | tee /tmp/e2-artifacts/typecheck.log
+          npx tsc --noEmit 2>&1 | tee /tmp/e2-artifacts/typecheck.log
           status=${PIPESTATUS[0]}
           set -e
           if [ ${status} -eq 0 ]; then
