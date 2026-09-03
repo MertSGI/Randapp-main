@@ -13,7 +13,7 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
         with:
-          ref: '7997946b849eff048182937685c3511f6cd66dc2'
+          ref: '152a1697fc70ebab44ab9489390efa579ebdbfc2'
 
       - name: Initialize Evidence Directory
         id: init_artifacts
@@ -426,6 +426,38 @@ jobs:
           export PGPASSWORD=postgres
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 
+          run_sql_suite() {
+            local suite_file="$1"
+            local result_key="$2"
+            local frag_file="$3"
+            local marker="$4"
+            local log_file="/tmp/e2-artifacts/sql-${result_key}.txt"
+
+            echo "=== Running Executable SQL Suite ${suite_file} ==="
+            set +e
+            psql "$DB_URL" -v ON_ERROR_STOP=1 -f "${suite_file}" > "${log_file}" 2>&1
+            local psql_exit=$?
+            set -e
+
+            if [ ${psql_exit} -ne 0 ]; then
+              echo "${result_key}=FAIL" > "${frag_file}"
+              echo "${result_key}_FAILURE_REASON=PSQL_EXIT_${psql_exit}" >> "${frag_file}"
+              return 0
+            fi
+
+            if grep -q "${marker}" "${log_file}"; then
+              echo "${result_key}=PASS" > "${frag_file}"
+            else
+              echo "${result_key}=FAIL" > "${frag_file}"
+              echo "${result_key}_FAILURE_REASON=COMPLETION_MARKER_MISSING" >> "${frag_file}"
+            fi
+          }
+
+          run_sql_suite "supabase/tests/clinic_domain_server_authority_tests.sql" "CLINIC_DOMAIN_SQL_EXECUTION_RESULT" "/tmp/e2-artifacts/10-sql-clinic-domain.env" "CLINIC_SQL_DB_EXECUTION=PASS"
+          run_sql_suite "supabase/tests/clinic_operational_integration_tests.sql" "CLINIC_OPS_SQL_EXECUTION_RESULT" "/tmp/e2-artifacts/11-sql-clinic-ops.env" "CLINIC_BLOCK2_SQL_DB_EXECUTION=PASS"
+          run_sql_suite "supabase/tests/clinic_workspace_authority_hardening_tests.sql" "CLINIC_HARDENING_SQL_EXECUTION_RESULT" "/tmp/e2-artifacts/12-sql-clinic-hardening.env" "CLINIC_WORKSPACE_AUTHORITY_HARDENING_DB_EXECUTION=PASS"
+          run_sql_suite "supabase/tests/public_booking_rpc_behavioral_tests.sql" "PUBLIC_BOOKING_SQL_EXECUTION_RESULT" "/tmp/e2-artifacts/13-sql-public-booking.env" "PUBLIC_BOOKING_SQL_DB_EXECUTION=PASS"
+
           set +e
           psql "$DB_URL" -c "CREATE EXTENSION IF NOT EXISTS pgtap;" > /tmp/e2-artifacts/pgtap-setup.log 2>&1
           pgtap_setup_status=$?
@@ -436,10 +468,6 @@ jobs:
             write_not_executed "/tmp/e2-artifacts/07-pgtap-slice3.env" "SLICE3" "PGTAP_SETUP_FAILED"
             write_not_executed "/tmp/e2-artifacts/08-pgtap-slice4-block1.env" "SLICE4_BLOCK1" "PGTAP_SETUP_FAILED"
             write_not_executed "/tmp/e2-artifacts/09-pgtap-slice4-block2.env" "SLICE4_BLOCK2" "PGTAP_SETUP_FAILED"
-            write_sql_not_executed "/tmp/e2-artifacts/10-sql-clinic-domain.env" "CLINIC_DOMAIN_SQL_EXECUTION_RESULT" "PGTAP_SETUP_FAILED"
-            write_sql_not_executed "/tmp/e2-artifacts/11-sql-clinic-ops.env" "CLINIC_OPS_SQL_EXECUTION_RESULT" "PGTAP_SETUP_FAILED"
-            write_sql_not_executed "/tmp/e2-artifacts/12-sql-clinic-hardening.env" "CLINIC_HARDENING_SQL_EXECUTION_RESULT" "PGTAP_SETUP_FAILED"
-            write_sql_not_executed "/tmp/e2-artifacts/13-sql-public-booking.env" "PUBLIC_BOOKING_SQL_EXECUTION_RESULT" "PGTAP_SETUP_FAILED"
             echo "ZERO_TEST_SUITE_COUNT=NOT_OBSERVED" > /tmp/e2-artifacts/13b-pgtap-summary.env
             echo "PGTAP_PHASE_RESULT=FAIL" >> /tmp/e2-artifacts/13b-pgtap-summary.env
             echo "PGTAP_PHASE_RESULT_FAILURE_REASON=PGTAP_SETUP_EXIT_${pgtap_setup_status}" >> /tmp/e2-artifacts/13b-pgtap-summary.env
@@ -507,42 +535,10 @@ jobs:
             echo "${result_prefix}_PGTAP_FAILURE_CLASS=NONE" >> "${frag_file}"
           }
 
-          run_sql_suite() {
-            local suite_file="$1"
-            local result_key="$2"
-            local frag_file="$3"
-            local marker="$4"
-            local log_file="/tmp/e2-artifacts/sql-${result_key}.txt"
-
-            echo "=== Running Executable SQL Suite ${suite_file} ==="
-            set +e
-            psql "$DB_URL" -v ON_ERROR_STOP=1 -f "${suite_file}" > "${log_file}" 2>&1
-            local psql_exit=$?
-            set -e
-
-            if [ ${psql_exit} -ne 0 ]; then
-              echo "${result_key}=FAIL" > "${frag_file}"
-              echo "${result_key}_FAILURE_REASON=PSQL_EXIT_${psql_exit}" >> "${frag_file}"
-              return 0
-            fi
-
-            if grep -q "${marker}" "${log_file}"; then
-              echo "${result_key}=PASS" > "${frag_file}"
-            else
-              echo "${result_key}=FAIL" > "${frag_file}"
-              echo "${result_key}_FAILURE_REASON=COMPLETION_MARKER_MISSING" >> "${frag_file}"
-            fi
-          }
-
           run_tap_suite "supabase/tests/health_tourism_foundation_server_authority_tests.sql" "FOUNDATION" "/tmp/e2-artifacts/06-pgtap-foundation.env"
           run_tap_suite "supabase/tests/health_tourism_lead_ops_ai_assist_tests.sql" "SLICE3" "/tmp/e2-artifacts/07-pgtap-slice3.env"
           run_tap_suite "supabase/tests/health_tourism_clinic_acceptance_tests.sql" "SLICE4_BLOCK1" "/tmp/e2-artifacts/08-pgtap-slice4-block1.env"
           run_tap_suite "supabase/tests/health_tourism_clinic_acceptance_workspace_tests.sql" "SLICE4_BLOCK2" "/tmp/e2-artifacts/09-pgtap-slice4-block2.env"
-
-          run_sql_suite "supabase/tests/clinic_domain_server_authority_tests.sql" "CLINIC_DOMAIN_SQL_EXECUTION_RESULT" "/tmp/e2-artifacts/10-sql-clinic-domain.env" "CLINIC_SQL_DB_EXECUTION=PASS"
-          run_sql_suite "supabase/tests/clinic_operational_integration_tests.sql" "CLINIC_OPS_SQL_EXECUTION_RESULT" "/tmp/e2-artifacts/11-sql-clinic-ops.env" "CLINIC_BLOCK2_SQL_DB_EXECUTION=PASS"
-          run_sql_suite "supabase/tests/clinic_workspace_authority_hardening_tests.sql" "CLINIC_HARDENING_SQL_EXECUTION_RESULT" "/tmp/e2-artifacts/12-sql-clinic-hardening.env" "CLINIC_WORKSPACE_AUTHORITY_HARDENING_DB_EXECUTION=PASS"
-          run_sql_suite "supabase/tests/public_booking_rpc_behavioral_tests.sql" "PUBLIC_BOOKING_SQL_EXECUTION_RESULT" "/tmp/e2-artifacts/13-sql-public-booking.env" "PUBLIC_BOOKING_SQL_DB_EXECUTION=PASS"
 
           echo "ZERO_TEST_SUITE_COUNT=${ZERO_TEST_COUNT}" > /tmp/e2-artifacts/13b-pgtap-summary.env
           if [ "${SUITE_FAILURES}" -gt 0 ]; then
