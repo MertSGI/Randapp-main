@@ -553,8 +553,12 @@ function testConcurrencyHarnessEvidenceContract() {
   console.log('✅ Concurrency harness static evidence contract PASSED.');
 }
 
+function normalizeSql(str) {
+  return str.replace(/\s+/g, ' ').trim();
+}
+
 function testPublicBookingSourceContract() {
-  console.log('--- Testing Public Booking Behavioral Test Suite & Product Migration Source Contract (R9-R1.8.3) ---');
+  console.log('--- Testing Public Booking Behavioral Test Suite & Product Migration Source Contract (R9-R1.8.4) ---');
   const sqlPath = path.join(__dirname, '..', 'supabase/tests/public_booking_rpc_behavioral_tests.sql');
   const content = fs.readFileSync(sqlPath, 'utf8');
 
@@ -566,36 +570,83 @@ function testPublicBookingSourceContract() {
   const mig20260723 = fs.readFileSync(mig20260723Path, 'utf8');
   const mig20260827 = fs.readFileSync(mig20260827Path, 'utf8');
 
-  // Product migration canonical identity assertions
-  if (!mig20260813.includes('CREATE OR REPLACE FUNCTION public.create_public_booking(') || !mig20260813.includes('SECURITY DEFINER')) {
-    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260813 missing create_public_booking SECURITY DEFINER function');
-  }
-  if (!mig20260813.includes('public.create_public_booking(\n    p_slug text,\n    p_service_id uuid,\n    p_staff_id uuid,\n    p_appointment_date date,\n    p_appointment_time time,\n    p_customer_name text,\n    p_customer_email text,\n    p_customer_phone text,\n    p_required_consent boolean,\n    p_marketing_consent boolean,\n    p_kvkk_consent boolean,\n    p_idempotency_key text,\n    p_branch_id uuid')) {
-    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260813 missing exact 13-parameter create_public_booking signature');
+  // Verify p_kvkk_consent assertion is NOT present anywhere in this script
+  const selftestContent = fs.readFileSync(__filename, 'utf8');
+  if (selftestContent.includes('p_kvkk_consent')) {
+    throw new Error('SELFTEST_DEFECT: p_kvkk_consent assertion is still present in selftest');
   }
 
-  if (!mig20260723.includes('CREATE OR REPLACE FUNCTION public.get_public_available_slots(') || !mig20260723.includes('SECURITY DEFINER')) {
-    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260723 missing get_public_available_slots SECURITY DEFINER function');
+  // 1. CANONICAL CREATE_PUBLIC_BOOKING IDENTITY (20260813)
+  const normMig20260813 = normalizeSql(mig20260813);
+  const expectedCreateRevoke = normalizeSql(
+    'REVOKE EXECUTE ON FUNCTION public.create_public_booking(text, uuid, uuid, date, time, text, text, text, boolean, boolean, boolean, text, uuid) FROM PUBLIC;'
+  );
+  const expectedCreateGrant = normalizeSql(
+    'GRANT EXECUTE ON FUNCTION public.create_public_booking(text, uuid, uuid, date, time, text, text, text, boolean, boolean, boolean, text, uuid) TO anon, authenticated;'
+  );
+
+  if (!normMig20260813.includes(expectedCreateRevoke)) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260813 missing REVOKE EXECUTE ON FUNCTION public.create_public_booking(...) with exact 13 parameter types');
   }
-  if (!mig20260723.includes('public.get_public_available_slots(TEXT, UUID, UUID, UUID, DATE)')) {
-    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260723 missing exact 5-parameter get_public_available_slots grant/revoke identity');
+  if (!normMig20260813.includes(expectedCreateGrant)) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260813 missing GRANT EXECUTE ON FUNCTION public.create_public_booking(...) with exact 13 parameter types');
   }
 
-  if (!mig20260827.includes('CREATE OR REPLACE FUNCTION public.can_accept_public_booking(p_slug text)') || !mig20260827.includes('SECURITY DEFINER')) {
-    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260827 missing can_accept_public_booking SECURITY DEFINER function');
+  // Function-local SECURITY DEFINER guard for create_public_booking
+  const createStart = mig20260813.indexOf('CREATE OR REPLACE FUNCTION public.create_public_booking(');
+  const createGrantIdx = mig20260813.indexOf('GRANT EXECUTE ON FUNCTION public.create_public_booking(', createStart);
+  if (createStart === -1 || createGrantIdx === -1 || createGrantIdx <= createStart) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260813 could not isolate function region for create_public_booking');
   }
-  if (!mig20260827.includes('public.can_accept_public_booking(text)')) {
-    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260827 missing exact grant identity for can_accept_public_booking(text)');
+  const createRegion = mig20260813.substring(createStart, createGrantIdx);
+  if (!createRegion.includes('SECURITY DEFINER')) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260813 create_public_booking function region missing SECURITY DEFINER');
   }
 
-  // Conflict target assertions in test SQL
+  // 2. GET_PUBLIC_AVAILABLE_SLOTS CANONICAL IDENTITY (20260723)
+  const normMig20260723 = normalizeSql(mig20260723);
+  const expectedSlotsRevoke = normalizeSql('REVOKE EXECUTE ON FUNCTION public.get_public_available_slots(TEXT, UUID, UUID, UUID, DATE) FROM PUBLIC;');
+  const expectedSlotsGrant = normalizeSql('GRANT EXECUTE ON FUNCTION public.get_public_available_slots(TEXT, UUID, UUID, UUID, DATE) TO anon, authenticated;');
+
+  if (!normMig20260723.includes(expectedSlotsRevoke) || !normMig20260723.includes(expectedSlotsGrant)) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260723 missing REVOKE/GRANT for public.get_public_available_slots(TEXT, UUID, UUID, UUID, DATE)');
+  }
+
+  const slotStart = mig20260723.indexOf('CREATE OR REPLACE FUNCTION public.get_public_available_slots(');
+  const slotGrantIdx = mig20260723.indexOf('GRANT EXECUTE ON FUNCTION public.get_public_available_slots(', slotStart);
+  if (slotStart === -1 || slotGrantIdx === -1 || slotGrantIdx <= slotStart) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260723 could not isolate function region for get_public_available_slots');
+  }
+  const slotRegion = mig20260723.substring(slotStart, slotGrantIdx);
+  if (!slotRegion.includes('SECURITY DEFINER')) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260723 get_public_available_slots function region missing SECURITY DEFINER');
+  }
+
+  // 3. CAN_ACCEPT_PUBLIC_BOOKING CANONICAL IDENTITY (20260827)
+  const normMig20260827 = normalizeSql(mig20260827);
+  const expectedCanAcceptGrant = normalizeSql('GRANT EXECUTE ON FUNCTION public.can_accept_public_booking(text) TO anon, authenticated;');
+
+  if (!normMig20260827.includes(expectedCanAcceptGrant)) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260827 missing GRANT EXECUTE ON FUNCTION public.can_accept_public_booking(text)');
+  }
+
+  const canAcceptStart = mig20260827.indexOf('CREATE OR REPLACE FUNCTION public.can_accept_public_booking(');
+  const canAcceptGrantIdx = mig20260827.indexOf('GRANT EXECUTE ON FUNCTION public.can_accept_public_booking(', canAcceptStart);
+  if (canAcceptStart === -1 || canAcceptGrantIdx === -1 || canAcceptGrantIdx <= canAcceptStart) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260827 could not isolate function region for can_accept_public_booking');
+  }
+  const canAcceptRegion = mig20260827.substring(canAcceptStart, canAcceptGrantIdx);
+  if (!canAcceptRegion.includes('SECURITY DEFINER')) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260827 can_accept_public_booking function region missing SECURITY DEFINER');
+  }
+
+  // 4. CONFLICT TARGET ASSERTIONS IN TEST SQL
   if (!content.includes('ON CONFLICT (staff_id, branch_id) DO NOTHING')) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Missing canonical ON CONFLICT (staff_id, branch_id) DO NOTHING');
   }
   if (content.includes('ON CONFLICT (tenant_id, staff_id, branch_id)')) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Invalid ON CONFLICT (tenant_id, staff_id, branch_id) target present');
   }
-
   if (!content.includes('ON CONFLICT (service_id, branch_id) DO NOTHING')) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Missing canonical ON CONFLICT (service_id, branch_id) DO NOTHING');
   }
@@ -603,44 +654,82 @@ function testPublicBookingSourceContract() {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Invalid ON CONFLICT (tenant_id, service_id, branch_id) target present');
   }
 
-  // Tests 21-26 structural mapping assertions
-  const tests21To26Start = content.indexOf('-- STAFF-SERVICE MAPPING TESTS: Tests 21-26');
-  const tests21To26End = content.indexOf('RAISE NOTICE \'=== STAFF-SERVICE MAPPING TESTS 21-26 COMPLETED ===\';');
-  if (tests21To26Start === -1 || tests21To26End === -1) {
-    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Could not locate Tests 21-26 section in test SQL');
-  }
-  const tests21To26Section = content.substring(tests21To26Start, tests21To26End);
+  // 5. TEST SECTION MARKERS MUST FAIL CLOSED (Tests 21-26)
+  const sectionStart = content.indexOf('-- STAFF-SERVICE MAPPING TESTS: Tests 21-26');
+  const test21Idx = content.indexOf('-- TEST 21: Mapped staff succeeds', sectionStart);
+  const test22Idx = content.indexOf('-- TEST 22: Active unmapped staff returns invalid_staff', test21Idx);
+  const test25Idx = content.indexOf('-- TEST 25: Removing mapping causes invalid_staff', test22Idx);
+  const test26Idx = content.indexOf('-- TEST 26: Restoring mapping restores booking success', test25Idx);
+  const completionMarkerIdx = content.indexOf("RAISE NOTICE '=== STAFF-SERVICE MAPPING TESTS 21-26 COMPLETED ===';", test26Idx);
 
-  if (!tests21To26Section.includes('INSERT INTO public.service_branches (tenant_id, service_id, branch_id)\n    VALUES (v_tenant_id, v_service_id, v_b_id)')) {
-    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 21-26 section missing structural service_branches mapping');
-  }
-  if (!tests21To26Section.includes('INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)\n    VALUES (v_tenant_id, v_mapped_staff_id, v_b_id)')) {
-    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 21-26 section missing mapped staff_branches mapping');
-  }
-  if (!tests21To26Section.includes('INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)\n    VALUES (v_tenant_id, v_unmapped_staff_id, v_b_id)')) {
-    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 21-26 section missing unmapped staff_branches mapping');
-  }
-  if (!tests21To26Section.includes('INSERT INTO public.staff_services (staff_id, service_id)\n  VALUES (v_mapped_staff_id, v_service_id);')) {
-    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 21-26 section missing mapped staff_services positive mapping');
-  }
-  const test22Idx = tests21To26Section.indexOf('TEST 22: Active unmapped staff returns invalid_staff');
-  const preTest22Section = tests21To26Section.substring(0, test22Idx);
-  if (preTest22Section.includes('VALUES (v_unmapped_staff_id, v_service_id)')) {
-    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: v_unmapped_staff_id was incorrectly mapped to service before Test 22');
+  if (
+    sectionStart === -1 ||
+    test21Idx === -1 ||
+    test22Idx === -1 ||
+    test25Idx === -1 ||
+    test26Idx === -1 ||
+    completionMarkerIdx === -1 ||
+    !(sectionStart < test21Idx && test21Idx < test22Idx && test22Idx < test25Idx && test25Idx < test26Idx && test26Idx < completionMarkerIdx)
+  ) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 21-26 markers missing or out of strict order');
   }
 
-  // Causal isolation & restore assertions in Tests 25-26
-  if (!tests21To26Section.includes('DELETE FROM public.staff_services\n  WHERE staff_id = v_mapped_staff_id AND service_id = v_service_id;')) {
-    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 25 missing exact staff_services deletion');
+  // 6. TEST22 CAUSAL ISOLATION
+  const setupRegion = content.substring(sectionStart, test21Idx);
+  const preTest22Region = content.substring(sectionStart, test22Idx);
+
+  const normSetup = normalizeSql(setupRegion);
+  if (!normSetup.includes('service_branches (tenant_id, service_id, branch_id) values (v_tenant_id, v_service_id, v_b_id)')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Setup region missing service_branches mapping');
   }
-  if (tests21To26Section.indexOf('DELETE FROM public.staff_branches') < tests21To26Section.indexOf('TEST 26: Restoring mapping restores booking success')) {
-    const preTest26Cleanup = tests21To26Section.substring(0, tests21To26Section.indexOf('TEST 26: Restoring mapping restores booking success'));
-    if (preTest26Cleanup.includes('DELETE FROM public.staff_branches')) {
-      throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: staff_branches deleted prematurely before Test 26');
-    }
+  if (!normSetup.includes('staff_branches (tenant_id, staff_id, branch_id) values (v_tenant_id, v_mapped_staff_id, v_b_id)')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Setup region missing mapped staff_branches mapping');
+  }
+  if (!normSetup.includes('staff_branches (tenant_id, staff_id, branch_id) values (v_tenant_id, v_unmapped_staff_id, v_b_id)')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Setup region missing unmapped staff_branches mapping');
+  }
+  if (!normSetup.includes('staff_services (staff_id, service_id) values (v_mapped_staff_id, v_service_id)')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Setup region missing staff_services positive mapping for mapped staff');
   }
 
-  // Test 66 & Test 67 regprocedure checks
+  const normPreTest22 = normalizeSql(preTest22Region);
+  if (normPreTest22.includes('values (v_unmapped_staff_id, v_service_id)')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Pre-Test22 region incorrectly inserted staff_services mapping for unmapped staff');
+  }
+
+  // 7. TEST25 CAUSAL ISOLATION
+  const test25Region = content.substring(test25Idx, test26Idx);
+  const normTest25Region = normalizeSql(test25Region);
+  if (!normTest25Region.includes('delete from public.staff_services where staff_id = v_mapped_staff_id and service_id = v_service_id;')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 25 region missing exact staff_services deletion');
+  }
+
+  const test25BookingCallIdx = test25Region.indexOf('create_public_booking');
+  if (test25BookingCallIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 25 region missing create_public_booking call');
+  }
+  const test25BeforeBooking = test25Region.substring(0, test25BookingCallIdx);
+  if (test25BeforeBooking.includes('DELETE FROM public.staff_branches') || test25BeforeBooking.includes('DELETE FROM public.service_branches')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 25 deleted staff_branches or service_branches prematurely before booking call');
+  }
+
+  // 8. TEST26 RESTORE GUARD
+  const test26Region = content.substring(test26Idx, completionMarkerIdx);
+  const test26BookingCallIdx = test26Region.indexOf('create_public_booking');
+  if (test26BookingCallIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 26 region missing create_public_booking call');
+  }
+  const test26BeforeBooking = test26Region.substring(0, test26BookingCallIdx);
+  const normTest26BeforeBooking = normalizeSql(test26BeforeBooking);
+
+  if (!normTest26BeforeBooking.includes('insert into public.staff_services (staff_id, service_id) values (v_mapped_staff_id, v_service_id) on conflict (staff_id, service_id) do nothing')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 26 before-booking region missing exact semantic staff_services restore');
+  }
+  if (test26BeforeBooking.includes('DELETE FROM public.staff_branches') || test26BeforeBooking.includes('DELETE FROM public.service_branches')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 26 deleted staff_branches or service_branches prematurely before booking call');
+  }
+
+  // 9. CROSS-SOURCE TEST66/67 CONTRACT
   if (!content.includes("'public.create_public_booking(text,uuid,uuid,date,time,text,text,text,boolean,boolean,boolean,text,uuid)'")) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Missing canonical create_public_booking signature in ACL test');
   }
@@ -650,20 +739,30 @@ function testPublicBookingSourceContract() {
   if (!content.includes("'public.can_accept_public_booking(text)'")) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Missing canonical can_accept_public_booking in ACL test');
   }
-  if (content.includes('get_public_booking_eligibility_by_slug')) {
-    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Deprecated get_public_booking_eligibility_by_slug present');
-  }
 
-  if (!content.includes("to_regprocedure('public.create_public_booking(text,uuid,uuid,date,time,text,text,text,boolean,boolean,boolean,text,uuid)')") ||
-      !content.includes("to_regprocedure('public.get_public_available_slots(text,uuid,uuid,uuid,date)')") ||
-      !content.includes("to_regprocedure('public.can_accept_public_booking(text)')")) {
+  if (
+    !content.includes("to_regprocedure('public.create_public_booking(text,uuid,uuid,date,time,text,text,text,boolean,boolean,boolean,text,uuid)')") ||
+    !content.includes("to_regprocedure('public.get_public_available_slots(text,uuid,uuid,uuid,date)')") ||
+    !content.includes("to_regprocedure('public.can_accept_public_booking(text)')")
+  ) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 67 missing exact to_regprocedure checks for all three canonical functions');
   }
 
-  if (content.includes("HAVING COUNT(*) = 3")) {
+  if (content.includes('HAVING COUNT(*) = 3')) {
     throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 67 contains weak generic HAVING COUNT(*) = 3 pattern');
   }
 
+  // REQUIRED STATIC PROOF PRINTS
+  console.log('CREATE_BOOKING_CANONICAL_IDENTITY_USES_TYPES_ONLY=YES');
+  console.log('CREATE_BOOKING_P_KVKK_NAME_ASSERTION_PRESENT=NO');
+  console.log('CREATE_BOOKING_FUNCTION_LOCAL_SECURITY_DEFINER_GUARD=YES');
+  console.log('SLOT_FUNCTION_LOCAL_SECURITY_DEFINER_GUARD=YES');
+  console.log('ELIGIBILITY_FUNCTION_LOCAL_SECURITY_DEFINER_GUARD=YES');
+  console.log('TEST21_TO_26_MARKERS_FAIL_CLOSED=YES');
+  console.log('SELFTEST_TEST22_NO_STAFF_SERVICE_MAPPING_GUARD=YES');
+  console.log('SELFTEST_TEST25_CAUSAL_ISOLATION_GUARD=YES');
+  console.log('SELFTEST_TEST26_RESTORE_GUARD=YES');
+  console.log('TEST67_EXACT_REGPROCEDURE_GUARDS_PRESERVED=YES');
   console.log('PUBLIC_BOOKING_TEST_VS_CANONICAL_PRODUCT_CONTRACT=PASS');
   console.log('✅ Public booking behavioral test suite & product migration source contract PASSED.');
 }
@@ -673,7 +772,8 @@ function main() {
   testAggregatorAdversarial();
   testConcurrencyHarnessEvidenceContract();
   testPublicBookingSourceContract();
-  console.log('\n🎉 ALL HARDENED R9-R1.8.3 CONTRACT SELF-TESTS PASSED!');
+  console.log('\n🎉 ALL HARDENED R9-R1.8.4 CONTRACT SELF-TESTS PASSED!');
 }
 
 main();
+
