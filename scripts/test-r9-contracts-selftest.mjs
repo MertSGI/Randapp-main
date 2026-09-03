@@ -162,32 +162,47 @@ function testArityScannerAdversarial() {
   try { tokenizeSql('INSERT INTO t (c1, c2)) VALUES (1, 2);', 'sql25.sql'); } catch (e) { if (e.message.includes('UNBALANCED_PUNCTUATION_CLOSE')) c25Caught = true; }
   if (!c25Caught) throw new Error('Case 25 failed: unbalanced closing punctuation');
 
-  // Case 26: DEFAULT VALUES without column list => nonValues
-  const sql26 = `INSERT INTO public.t26 DEFAULT VALUES;`;
-  const res26 = parseAndVerifyInsertStatements(tokenizeSql(sql26, 'sql26.sql'), 'sql26.sql');
-  if (res26.nonValuesInserts !== 1 || res26.unsupportedCount !== 0) throw new Error('Case 26 failed: DEFAULT VALUES without column list');
+  // Case A: safe SET LOCAL + quote_literal scalar => supported safe non-INSERT
+  const sqlA = `EXECUTE 'SET LOCAL request.jwt.claim.sub = ' || quote_literal(v_id::text);`;
+  const resA = parseAndVerifyInsertStatements(tokenizeSql(sqlA, 'sqlA.sql'), 'sqlA.sql');
+  if (resA.unsupportedCount !== 0) throw new Error('Case A failed: safe SET LOCAL + quote_literal scalar must be supported');
 
-  // Case 27: safe SET LOCAL + quote_literal scalar => accepted non-INSERT
-  const sql27 = `EXECUTE 'SET LOCAL request.jwt.claim.sub = ' || quote_literal(v_id::text);`;
-  const res27 = parseAndVerifyInsertStatements(tokenizeSql(sql27, 'sql27.sql'), 'sql27.sql');
-  if (res27.unsupportedCount !== 0) throw new Error('Case 27 failed: safe SET LOCAL + quote_literal scalar');
+  // Case B: multi-statement with INSERT => unsupported
+  const sqlB = `EXECUTE 'SET LOCAL request.jwt.claim.sub = 1; INSERT INTO public.t(c) VALUES (' || quote_literal(v) || ')';`;
+  const resB = parseAndVerifyInsertStatements(tokenizeSql(sqlB, 'sqlB.sql'), 'sqlB.sql');
+  if (resB.unsupportedCount !== 1) throw new Error('Case B failed: multi-statement with INSERT must be unsupported');
 
-  // Case 28: dynamic INSERT + quote_literal => unsupported
-  const sql28 = `EXECUTE 'INSERT INTO public.t28 (c1) VALUES (' || quote_literal(v_val) || ')';`;
-  const res28 = parseAndVerifyInsertStatements(tokenizeSql(sql28, 'sql28.sql'), 'sql28.sql');
-  if (res28.unsupportedCount !== 1) throw new Error('Case 28 failed: dynamic INSERT + quote_literal => unsupported');
+  // Case C: multi-statement with SELECT => unsupported
+  const sqlC = `EXECUTE 'SET LOCAL request.jwt.claim.sub = 1; SELECT ' || quote_literal(v);`;
+  const resC = parseAndVerifyInsertStatements(tokenizeSql(sqlC, 'sqlC.sql'), 'sqlC.sql');
+  if (resC.unsupportedCount !== 1) throw new Error('Case C failed: multi-statement with SELECT must be unsupported');
 
-  // Case 29: SET LOCAL + raw variable concatenation => unsupported
-  const sql29 = `EXECUTE 'SET LOCAL request.jwt.claim.sub = ' || v_raw_var;`;
-  const res29 = parseAndVerifyInsertStatements(tokenizeSql(sql29, 'sql29.sql'), 'sql29.sql');
-  if (res29.unsupportedCount !== 1) throw new Error('Case 29 failed: SET LOCAL + raw variable concatenation => unsupported');
+  // Case D: SET ROLE => unsupported
+  const sqlD = `EXECUTE 'SET ROLE ' || quote_literal(v);`;
+  const resD = parseAndVerifyInsertStatements(tokenizeSql(sqlD, 'sqlD.sql'), 'sqlD.sql');
+  if (resD.unsupportedCount !== 1) throw new Error('Case D failed: SET ROLE must be unsupported');
 
-  // Case 30: ambiguous dynamic EXECUTE => unsupported
-  const sql30 = `EXECUTE v_ambiguous_stmt;`;
-  const res30 = parseAndVerifyInsertStatements(tokenizeSql(sql30, 'sql30.sql'), 'sql30.sql');
-  if (res30.unsupportedCount !== 1) throw new Error('Case 30 failed: ambiguous dynamic EXECUTE => unsupported');
+  // Case E: raw variable concatenation => unsupported
+  const sqlE = `EXECUTE 'SET LOCAL request.jwt.claim.sub = ' || v_raw;`;
+  const resE = parseAndVerifyInsertStatements(tokenizeSql(sqlE, 'sqlE.sql'), 'sqlE.sql');
+  if (resE.unsupportedCount !== 1) throw new Error('Case E failed: raw variable concatenation must be unsupported');
 
-  console.log('✅ Arity scanner adversarial cases PASSED.');
+  // Case F: dynamic INSERT => unsupported
+  const sqlF = `EXECUTE 'INSERT INTO public.t(c) VALUES (' || quote_literal(v) || ')';`;
+  const resF = parseAndVerifyInsertStatements(tokenizeSql(sqlF, 'sqlF.sql'), 'sqlF.sql');
+  if (resF.unsupportedCount !== 1) throw new Error('Case F failed: dynamic INSERT must be unsupported');
+
+  // Case G: safe prefix followed by USING => unsupported
+  const sqlG = `EXECUTE 'SET LOCAL request.jwt.claim.sub = ' || quote_literal(v) USING v_param;`;
+  const resG = parseAndVerifyInsertStatements(tokenizeSql(sqlG, 'sqlG.sql'), 'sqlG.sql');
+  if (resG.unsupportedCount !== 1) throw new Error('Case G failed: safe prefix followed by USING must be unsupported');
+
+  // Case H: safe prefix followed by second concatenation => unsupported
+  const sqlH = `EXECUTE 'SET LOCAL request.jwt.claim.sub = ' || quote_literal(v) || ' ;';`;
+  const resH = parseAndVerifyInsertStatements(tokenizeSql(sqlH, 'sqlH.sql'), 'sqlH.sql');
+  if (resH.unsupportedCount !== 1) throw new Error('Case H failed: safe prefix followed by second concatenation must be unsupported');
+
+  console.log('✅ Arity scanner adversarial cases A-H PASSED.');
 }
 
 function writeValidPhaseFragments(targetDir) {

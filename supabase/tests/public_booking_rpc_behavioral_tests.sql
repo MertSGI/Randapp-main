@@ -3,6 +3,8 @@
 -- Verifies anon RLS isolation, concurrency locks, overlapping durations, timezone boundaries,
 -- and rollback behavior. Tested against the canonical staging setup.
 
+\i supabase/tests/fixtures/slice4_e2_commercial_fixture.sql
+
 DO $$
 DECLARE
   v_slug text := 'melis-guzellik';
@@ -21,82 +23,90 @@ DECLARE
   v_customer_id2 uuid;
   v_test_date date := (CURRENT_DATE + 14)::date; -- standard future date
 BEGIN
-  -- Resolve canonical tenant credentials
-  SELECT id INTO v_tenant_id FROM public.tenants WHERE slug = v_slug;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'TEST SETUP FAIL: Melis Güzellik tenant slug not found.';
-  END IF;
-
-  -- Ensure deterministic tenant state for disposable replay
-  UPDATE public.tenants
-  SET onboarding_status = 'completed',
-      public_site_status = 'published',
-      status = 'active'
-  WHERE id = v_tenant_id;
-
-  -- Ensure disposable subscription bound to published plan/version with required capabilities/quotas
+  -- Fixed UUID constants for deterministic R9 public-booking test fixture
+  v_service_id := 'a1a1a1a1-bb22-cc33-dd44-ee5555555555'::uuid;
+  v_staff_id   := 'b2b2b2b2-cc33-dd44-ee55-ff6666666666'::uuid;
   DECLARE
-    v_plan_code TEXT;
-    v_plan_ver_id UUID;
+    v_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;
+    v_cnt int;
   BEGIN
-    SELECT p.code, pv.id INTO v_plan_code, v_plan_ver_id
-    FROM public.plan_versions pv
-    JOIN public.plans p ON p.id = pv.plan_id
-    JOIN public.plan_entitlements pe_core ON pe_core.plan_version_id = pv.id AND pe_core.feature_key = 'core_booking' AND pe_core.boolean_value = true
-    JOIN public.plan_entitlements pe_staff ON pe_staff.plan_version_id = pv.id AND pe_staff.feature_key = 'staff_management' AND pe_staff.boolean_value = true
-    JOIN public.plan_entitlements pe_service ON pe_service.plan_version_id = pv.id AND pe_service.feature_key = 'service_management' AND pe_service.boolean_value = true
-    JOIN public.plan_entitlements pe_mini ON pe_mini.plan_version_id = pv.id AND pe_mini.feature_key = 'lari_minisite' AND pe_mini.boolean_value = true
-    JOIN public.plan_entitlements pe_mstaff ON pe_mstaff.plan_version_id = pv.id AND pe_mstaff.feature_key = 'max_staff' AND pe_mstaff.value_type = 'integer' AND pe_mstaff.is_unlimited = true
-    JOIN public.plan_entitlements pe_mservice ON pe_mservice.plan_version_id = pv.id AND pe_mservice.feature_key = 'max_services' AND pe_mservice.value_type = 'integer' AND pe_mservice.is_unlimited = true
-    JOIN public.plan_entitlements pe_mbranch ON pe_mbranch.plan_version_id = pv.id AND pe_mbranch.feature_key = 'max_branches' AND pe_mbranch.value_type = 'integer' AND pe_mbranch.is_unlimited = true
-    JOIN public.plan_entitlements pe_mappt ON pe_mappt.plan_version_id = pv.id AND pe_mappt.feature_key = 'max_monthly_appointments' AND pe_mappt.value_type = 'integer' AND pe_mappt.is_unlimited = true
-    WHERE pv.lifecycle_status = 'published'
-    ORDER BY pv.created_at DESC
-    LIMIT 1;
+    -- Resolve canonical tenant credentials
+    SELECT id INTO v_tenant_id FROM public.tenants WHERE slug = v_slug;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'TEST SETUP FAIL: Melis Güzellik tenant slug not found.';
+    END IF;
 
-    IF v_plan_ver_id IS NOT NULL THEN
-      DELETE FROM public.subscriptions WHERE tenant_id = v_tenant_id;
-      INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_start, current_period_end)
-      VALUES (v_tenant_id, v_plan_code, v_plan_ver_id, 'active', 'manual', now() - interval '1 day', now() + interval '1 year');
+    -- 1. Set canonical disposable tenant state
+    UPDATE public.tenants
+    SET onboarding_status = 'completed',
+        public_site_status = 'published',
+        status = 'active'
+    WHERE id = v_tenant_id;
+
+    -- Call canonical commercial bootstrap helper (fails closed if no qualifying plan)
+    PERFORM pg_temp.slice4_e2_bootstrap_commercial(v_tenant_id);
+
+    -- 2. Deactivate any pre-existing active branches for this tenant
+    UPDATE public.branches SET is_active = false WHERE tenant_id = v_tenant_id;
+
+    -- 3. Create/upsert exactly ONE active deterministic primary branch
+    INSERT INTO public.branches (id, tenant_id, name, slug, is_active, is_primary)
+    VALUES (v_primary_branch_id, v_tenant_id, 'R9 Primary Branch', 'r9-primary-branch', true, true)
+    ON CONFLICT (id) DO UPDATE SET is_active = true, is_primary = true;
+
+    -- 4. Create/upsert deterministic active service
+    INSERT INTO public.services (id, tenant_id, name, duration, price, active)
+    VALUES (v_service_id, v_tenant_id, 'R9 Public Booking Service', 30, 100, true)
+    ON CONFLICT (id) DO UPDATE SET duration = 30, active = true;
+    v_service_duration := 30;
+
+    -- 5. Create/upsert deterministic active staff
+    INSERT INTO public.staff (id, tenant_id, name, title, active)
+    VALUES (v_staff_id, v_tenant_id, 'R9 Public Booking Staff', 'Specialist', true)
+    ON CONFLICT (id) DO UPDATE SET active = true;
+
+    -- 6. Create exact mappings for this pair and branch
+    INSERT INTO public.staff_services (staff_id, service_id)
+    VALUES (v_staff_id, v_service_id) ON CONFLICT DO NOTHING;
+
+    INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)
+    VALUES (v_tenant_id, v_staff_id, v_primary_branch_id) ON CONFLICT (tenant_id, staff_id, branch_id) DO NOTHING;
+
+    INSERT INTO public.service_branches (tenant_id, service_id, branch_id)
+    VALUES (v_tenant_id, v_service_id, v_primary_branch_id) ON CONFLICT (tenant_id, service_id, branch_id) DO NOTHING;
+
+    -- 7. Establish deterministic availability rules for all weekdays
+    INSERT INTO public.availability_rules (tenant_id, staff_id, weekday, start_time, end_time, is_active)
+    SELECT v_tenant_id, v_staff_id, d, '08:00'::time, '20:00'::time, true
+    FROM generate_series(1, 7) AS d
+    ON CONFLICT DO NOTHING;
+
+    -- Assertions before initial booking
+    SELECT count(*) INTO v_cnt FROM public.branches WHERE tenant_id = v_tenant_id AND is_active = true;
+    IF v_cnt != 1 THEN
+      RAISE EXCEPTION 'TEST_SETUP FAIL: Expected active branch count == 1, got %', v_cnt;
+    END IF;
+
+    SELECT count(*) INTO v_cnt FROM public.staff_services WHERE staff_id = v_staff_id AND service_id = v_service_id;
+    IF v_cnt != 1 THEN
+      RAISE EXCEPTION 'TEST_SETUP FAIL: Expected staff-service mapping count == 1, got %', v_cnt;
+    END IF;
+
+    SELECT count(*) INTO v_cnt FROM public.staff_branches WHERE staff_id = v_staff_id AND branch_id = v_primary_branch_id;
+    IF v_cnt != 1 THEN
+      RAISE EXCEPTION 'TEST_SETUP FAIL: Expected staff-branch mapping count == 1, got %', v_cnt;
+    END IF;
+
+    SELECT count(*) INTO v_cnt FROM public.service_branches WHERE service_id = v_service_id AND branch_id = v_primary_branch_id;
+    IF v_cnt != 1 THEN
+      RAISE EXCEPTION 'TEST_SETUP FAIL: Expected service-branch mapping count == 1, got %', v_cnt;
+    END IF;
+
+    SELECT count(*) INTO v_cnt FROM public.availability_rules WHERE staff_id = v_staff_id AND is_active = true;
+    IF v_cnt = 0 THEN
+      RAISE EXCEPTION 'TEST_SETUP FAIL: Expected availability rules to exist for staff';
     END IF;
   END;
-
-  -- Ensure deterministic single primary test branch for Melis tenant
-  DECLARE
-    v_b_id UUID;
-  BEGIN
-    SELECT id INTO v_b_id FROM public.branches WHERE tenant_id = v_tenant_id AND is_primary = true LIMIT 1;
-    IF v_b_id IS NULL THEN
-      INSERT INTO public.branches (tenant_id, name, slug, is_active, is_primary)
-      VALUES (v_tenant_id, 'Melis Primary Branch', 'melis-primary-branch', true, true)
-      RETURNING id INTO v_b_id;
-    ELSE
-      UPDATE public.branches SET is_active = true WHERE id = v_b_id;
-    END IF;
-  END;
-
-  -- Ensure deterministic service, staff, and mappings for Melis tenant
-  SELECT id, duration INTO v_service_id, v_service_duration 
-  FROM public.services 
-  WHERE tenant_id = v_tenant_id AND active = true LIMIT 1;
-  IF v_service_id IS NULL THEN
-    INSERT INTO public.services (tenant_id, name, duration, price, active)
-    VALUES (v_tenant_id, 'Melis Deterministic Service', 30, 100, true)
-    RETURNING id, duration INTO v_service_id, v_service_duration;
-  END IF;
-
-  SELECT id INTO v_staff_id 
-  FROM public.staff 
-  WHERE tenant_id = v_tenant_id AND active = true LIMIT 1;
-  IF v_staff_id IS NULL THEN
-    INSERT INTO public.staff (tenant_id, name, title, active)
-    VALUES (v_tenant_id, 'Melis Deterministic Staff', 'Specialist', true)
-    RETURNING id INTO v_staff_id;
-  END IF;
-
-  INSERT INTO public.staff_services (staff_id, service_id) VALUES (v_staff_id, v_service_id) ON CONFLICT DO NOTHING;
-  INSERT INTO public.availability_rules (tenant_id, staff_id, weekday, start_time, end_time, is_active)
-  SELECT v_tenant_id, v_staff_id, d, '08:00', '20:00', true FROM generate_series(1, 7) AS d ON CONFLICT DO NOTHING;
 
   RAISE NOTICE '=== STARTING HARDENED PUBLIC BOOKING BEHAVIORAL DB TESTS ===';
 
@@ -116,7 +126,7 @@ BEGIN
     p_idempotency_key  => 'key-test-1'
   );
   IF NOT (r->>'success')::boolean THEN
-    RAISE EXCEPTION 'TEST 1 FAIL: expected success=true';
+    RAISE EXCEPTION 'TEST 1 FAIL: expected success=true, result=%', r;
   END IF;
   v_apt_id1 := (r->>'appointment_id')::uuid;
   v_token1  := r->>'manage_token';
@@ -814,19 +824,12 @@ BEGIN
     RAISE EXCEPTION 'SLOT TEST SETUP FAIL: melis-guzellik tenant not found.';
   END IF;
 
-  SELECT s.id INTO v_service_id
-  FROM public.services s
-  WHERE s.tenant_id = v_tenant_id AND s.active = true
-  LIMIT 1;
+  v_service_id := 'a1a1a1a1-bb22-cc33-dd44-ee5555555555'::uuid;
+  v_staff_id   := 'b2b2b2b2-cc33-dd44-ee55-ff6666666666'::uuid;
 
-  SELECT ss.staff_id INTO v_staff_id
-  FROM public.staff_services ss
-  JOIN public.staff st ON st.id = ss.staff_id
-  WHERE ss.service_id = v_service_id AND st.active = true AND st.tenant_id = v_tenant_id
-  LIMIT 1;
-
-  IF v_service_id IS NULL OR v_staff_id IS NULL THEN
-    RAISE EXCEPTION 'SLOT TEST SETUP FAIL: no active service/staff pair found for tenant';
+  IF NOT EXISTS (SELECT 1 FROM public.services WHERE id = v_service_id AND tenant_id = v_tenant_id AND active = true) OR
+     NOT EXISTS (SELECT 1 FROM public.staff WHERE id = v_staff_id AND tenant_id = v_tenant_id AND active = true) THEN
+    RAISE EXCEPTION 'SLOT TEST SETUP FAIL: deterministic service/staff pair not found for tenant';
   END IF;
 
   -- Find the nearest future weekday with an availability rule for this staff
@@ -1104,6 +1107,22 @@ BEGIN
   -- -----------------------------------------------------------------------
   -- TEST 34: Single-branch tenant auto-resolves branch_id when p_branch_id IS NULL
   -- -----------------------------------------------------------------------
+  -- Guarantee exactly ONE active branch for Melis tenant before Test 34
+  UPDATE public.branches SET is_active = false WHERE tenant_id = v_tenant_id;
+  UPDATE public.branches SET is_active = true WHERE id = v_branch_id;
+
+  DECLARE
+    v_active_b_count int;
+  BEGIN
+    SELECT count(*) INTO v_active_b_count
+    FROM public.branches
+    WHERE tenant_id = v_tenant_id AND is_active = true;
+
+    IF v_active_b_count != 1 THEN
+      RAISE EXCEPTION 'TEST 34 SETUP FAIL: Expected active branch count == 1, got %', v_active_b_count;
+    END IF;
+  END;
+
   r := public.get_public_available_slots(
     p_slug       => v_slug,
     p_branch_id  => NULL, -- Omitted branch_id
@@ -1122,6 +1141,18 @@ BEGIN
   INSERT INTO public.branches (tenant_id, name, slug, is_active, is_primary)
   VALUES (v_tenant_id, 'Stage A Second Active Branch', 'stage-a-second', true, false)
   RETURNING id INTO v_branch_id2;
+
+  DECLARE
+    v_multi_b_count int;
+  BEGIN
+    SELECT count(*) INTO v_multi_b_count
+    FROM public.branches
+    WHERE tenant_id = v_tenant_id AND is_active = true;
+
+    IF v_multi_b_count < 2 THEN
+      RAISE EXCEPTION 'TEST 35 SETUP FAIL: Expected active branch count >= 2, got %', v_multi_b_count;
+    END IF;
+  END;
 
   r := public.get_public_available_slots(
     p_slug       => v_slug,

@@ -253,9 +253,9 @@ export function parseAndVerifyInsertStatements(tokens, filename) {
         }
 
         if (isDynamic) {
-          // Check for bounded safe SET / SET LOCAL + quote_literal construction
-          const staticPrefix = unquotedSql.toUpperCase().trim();
-          const isSetPrefix = staticPrefix.startsWith('SET LOCAL ') || staticPrefix.startsWith('SET ');
+          // Check for bounded safe SET / SET LOCAL <setting> = quote_literal construction
+          const staticPrefix = unquotedSql.trim();
+          const isSetPrefix = /^SET(?: LOCAL)? [A-Za-z_][A-Za-z0-9_.]*\s*=\s*$/i.test(staticPrefix);
           
           let isSafeSetQuoteLiteral = false;
           if (isSetPrefix) {
