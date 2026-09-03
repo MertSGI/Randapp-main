@@ -1,0 +1,64 @@
+HANDOFF_PROTOCOL_VERSION=1
+HANDOFF_KIND=EXECUTOR_CLAIM_ONLY
+CONTROLLER_ACCEPTANCE_IMPLIED=NO
+CORRECTION_AUTHORITY_ID=LARI-S4-R9-R1-8-1-DETERMINISM-REPAIR-20260903-01
+REMOTE_FEATURE_HEAD_UNCHANGED=1891cf5d5f5eda5160790edbe359cb0076de0dcf
+R9_R1_8_1_SUPPORT_SHA=152a1697fc70ebab44ab9489390efa579ebdbfc2
+R9_R1_8_1_WORKFLOW_SHA=80acf791f4e319bac3ee60afa432a84b66304130
+
+# LARI R9-R1.8.1 Local Determinism + Fail-Closed Repair Handoff
+
+## Local Commit Topology
+
+- **REMOTE_FEATURE_HEAD_UNCHANGED**: 1891cf5d5f5eda5160790edbe359cb0076de0dcf
+
+### Commit 1 (Support / Test Correction)
+- **R9_R1_8_1_SUPPORT_SHA**: 152a1697fc70ebab44ab9489390efa579ebdbfc2
+- **Parent**: 1891cf5d5f5eda5160790edbe359cb0076de0dcf
+- **Commit Message**: `fix(ht): harden R9 deterministic evidence fixtures`
+- **Changed Files**:
+  - `scripts/test-health-tourism-slice4-fixture-arity-contract.mjs`
+  - `scripts/test-r9-contracts-selftest.mjs`
+  - `supabase/tests/public_booking_rpc_behavioral_tests.sql`
+
+### Commit 2 (Workflow-Only Correction)
+- **R9_R1_8_1_WORKFLOW_SHA**: 80acf791f4e319bac3ee60afa432a84b66304130
+- **Parent**: 152a1697fc70ebab44ab9489390efa579ebdbfc2
+- **Commit Message**: `fix(ht): decouple R9 SQL evidence execution`
+- **Changed File**:
+  - `.github/workflows/lari-health-tourism-slice4-final-e2.yml`
+- **WORKFLOW_CHECKOUT_REF**: 152a1697fc70ebab44ab9489390efa579ebdbfc2
+
+## Local Static Proof Fields
+
+- **SCANNER_SAFE_SET_EXACT_GRAMMAR_PRESENT**: YES
+- **SCANNER_MULTI_STATEMENT_SET_REJECT_TEST_PRESENT**: YES
+- **PUBLIC_BOOKING_ARBITRARY_PRIMARY_PAIR_SELECTION_PRESENT**: NO
+- **PUBLIC_BOOKING_CANONICAL_HELPER_INCLUDED**: YES
+- **PUBLIC_BOOKING_EXACT_PRIMARY_MAPPINGS_PRESENT**: YES
+- **TEST34_EXACT_ONE_ACTIVE_BRANCH_GUARD_PRESENT**: YES
+- **SQL_EXECUTION_DEPENDS_ON_PGTAP_SETUP**: NO
+
+## Local Environment Observations
+
+- **R9_SELFTEST_EXECUTION_RESULT**: NOT_OBSERVED_ENVIRONMENT_UNAVAILABLE
+- **ARITY_STATIC_EXECUTION_RESULT**: NOT_OBSERVED_ENVIRONMENT_UNAVAILABLE
+- **LOCAL_PUBLIC_BOOKING_DB_RESULT**: NOT_OBSERVED
+
+## Execution & Operational Boundaries
+
+- **PUSH_COUNT**: 0
+- **FORCE_PUSH_COUNT**: 0
+- **AMEND_COUNT**: 0
+- **REBASE_COUNT**: 0
+- **HOSTED_FINAL_R9_DISPATCH_COUNT**: 0
+- **WORKFLOW_RERUN_COUNT**: 0
+- **REMOTE_SUPABASE_ACCESS_COUNT**: 0
+- **SHARED_STAGING_ACCESS_COUNT**: 0
+- **PRODUCTION_ACCESS_COUNT**: 0
+- **DEPLOYMENT_COUNT**: 0
+- **RUNTIME_PRODUCT_MUTATION_COUNT**: 0
+- **MIGRATION_MUTATION_COUNT**: 0
+- **AOS_MUTATION_COUNT**: 0
+
+- **CONTROLLER_REVIEW_REQUIRED**: YES
