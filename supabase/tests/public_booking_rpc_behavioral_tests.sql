@@ -70,10 +70,10 @@ BEGIN
     VALUES (v_staff_id, v_service_id) ON CONFLICT DO NOTHING;
 
     INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)
-    VALUES (v_tenant_id, v_staff_id, v_primary_branch_id) ON CONFLICT (tenant_id, staff_id, branch_id) DO NOTHING;
+    VALUES (v_tenant_id, v_staff_id, v_primary_branch_id) ON CONFLICT (staff_id, branch_id) DO NOTHING;
 
     INSERT INTO public.service_branches (tenant_id, service_id, branch_id)
-    VALUES (v_tenant_id, v_service_id, v_primary_branch_id) ON CONFLICT (tenant_id, service_id, branch_id) DO NOTHING;
+    VALUES (v_tenant_id, v_service_id, v_primary_branch_id) ON CONFLICT (service_id, branch_id) DO NOTHING;
 
     -- 7. Establish deterministic availability rules for all weekdays
     INSERT INTO public.availability_rules (tenant_id, staff_id, weekday, start_time, end_time, is_active)
@@ -585,6 +585,23 @@ BEGIN
   VALUES (v_tenant_id, 'Unmapped Staff Test', 'Test Specialist', true)
   RETURNING id INTO v_unmapped_staff_id;
 
+  DECLARE
+    v_b_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;
+  BEGIN
+    IF NOT EXISTS (SELECT 1 FROM public.branches WHERE id = v_b_id AND tenant_id = v_tenant_id AND is_active = true) THEN
+      RAISE EXCEPTION 'MAPPING TEST SETUP FAIL: deterministic active primary branch not found';
+    END IF;
+
+    INSERT INTO public.service_branches (tenant_id, service_id, branch_id)
+    VALUES (v_tenant_id, v_service_id, v_b_id) ON CONFLICT (service_id, branch_id) DO NOTHING;
+
+    INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)
+    VALUES (v_tenant_id, v_mapped_staff_id, v_b_id) ON CONFLICT (staff_id, branch_id) DO NOTHING;
+
+    INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)
+    VALUES (v_tenant_id, v_unmapped_staff_id, v_b_id) ON CONFLICT (staff_id, branch_id) DO NOTHING;
+  END;
+
   -- Only map the first staff member to the service
   INSERT INTO public.staff_services (staff_id, service_id)
   VALUES (v_mapped_staff_id, v_service_id);
@@ -725,6 +742,8 @@ BEGIN
 
   -- Cleanup test fixtures
   DELETE FROM public.staff_services WHERE staff_id IN (v_mapped_staff_id, v_unmapped_staff_id);
+  DELETE FROM public.staff_branches WHERE staff_id IN (v_mapped_staff_id, v_unmapped_staff_id);
+  DELETE FROM public.service_branches WHERE service_id = v_service_id;
 
   DELETE FROM public.appointment_access_tokens
   WHERE appointment_id IN (
@@ -1963,21 +1982,21 @@ BEGIN
   RAISE NOTICE 'TEST 65 PASS: All five functions retain fixed search_path = pg_catalog, public.';
 
   -- TEST 66: Public booking RPC ACLs remain unchanged (anon retains EXECUTE)
-  IF NOT has_function_privilege('anon', 'public.create_public_booking(text,uuid,uuid,date,time,text,text,text,boolean,text,integer)', 'EXECUTE') THEN
+  IF NOT has_function_privilege('anon', 'public.create_public_booking(text,uuid,uuid,date,time,text,text,text,boolean,boolean,boolean,text,uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION 'TEST 66 FAIL: anon lost EXECUTE on create_public_booking';
   END IF;
-  IF NOT has_function_privilege('anon', 'public.get_public_available_slots(text,uuid,uuid,date,date)', 'EXECUTE') THEN
+  IF NOT has_function_privilege('anon', 'public.get_public_available_slots(text,uuid,uuid,uuid,date)', 'EXECUTE') THEN
     RAISE EXCEPTION 'TEST 66 FAIL: anon lost EXECUTE on get_public_available_slots';
   END IF;
-  IF NOT has_function_privilege('anon', 'public.get_public_booking_eligibility_by_slug(text)', 'EXECUTE') THEN
-    RAISE EXCEPTION 'TEST 66 FAIL: anon lost EXECUTE on get_public_booking_eligibility_by_slug';
+  IF NOT has_function_privilege('anon', 'public.can_accept_public_booking(text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'TEST 66 FAIL: anon lost EXECUTE on can_accept_public_booking';
   END IF;
   RAISE NOTICE 'TEST 66 PASS: Public booking RPC ACLs remain unchanged (anon EXECUTE intact).';
 
   -- TEST 67: Public booking RPCs remain SECURITY DEFINER
   IF NOT EXISTS (
     SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
-    WHERE n.nspname = 'public' AND p.proname IN ('create_public_booking', 'get_public_available_slots', 'get_public_booking_eligibility_by_slug')
+    WHERE n.nspname = 'public' AND p.proname IN ('create_public_booking', 'get_public_available_slots', 'can_accept_public_booking')
     HAVING COUNT(*) = 3 AND MIN(p.prosecdef::int) = 1
   ) THEN
     RAISE EXCEPTION 'TEST 67 FAIL: Public booking RPCs lost SECURITY DEFINER status';

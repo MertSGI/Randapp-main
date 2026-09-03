@@ -553,11 +553,54 @@ function testConcurrencyHarnessEvidenceContract() {
   console.log('✅ Concurrency harness static evidence contract PASSED.');
 }
 
+function testPublicBookingSourceContract() {
+  console.log('--- Testing Public Booking Behavioral Test Suite Source Contract (R9-R1.8.2) ---');
+  const sqlPath = path.join(__dirname, '..', 'supabase/tests/public_booking_rpc_behavioral_tests.sql');
+  const content = fs.readFileSync(sqlPath, 'utf8');
+
+  // Conflict target assertions
+  if (!content.includes('ON CONFLICT (staff_id, branch_id) DO NOTHING')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Missing canonical ON CONFLICT (staff_id, branch_id) DO NOTHING');
+  }
+  if (content.includes('ON CONFLICT (tenant_id, staff_id, branch_id)')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Invalid ON CONFLICT (tenant_id, staff_id, branch_id) target present');
+  }
+
+  if (!content.includes('ON CONFLICT (service_id, branch_id) DO NOTHING')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Missing canonical ON CONFLICT (service_id, branch_id) DO NOTHING');
+  }
+  if (content.includes('ON CONFLICT (tenant_id, service_id, branch_id)')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Invalid ON CONFLICT (tenant_id, service_id, branch_id) target present');
+  }
+
+  // Tests 21-26 mapping setup assertions
+  if (!content.includes('v_b_id uuid := \'c3c3c3c3-dd44-ee55-ff66-aa7777777777\'::uuid;')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 21-26 missing deterministic primary branch reference');
+  }
+
+  // RPC signature assertions
+  if (!content.includes("'public.create_public_booking(text,uuid,uuid,date,time,text,text,text,boolean,boolean,boolean,text,uuid)'")) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Missing canonical create_public_booking signature in ACL test');
+  }
+  if (!content.includes("'public.get_public_available_slots(text,uuid,uuid,uuid,date)'")) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Missing canonical get_public_available_slots signature in ACL test');
+  }
+  if (!content.includes("'public.can_accept_public_booking(text)'")) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Missing canonical can_accept_public_booking in ACL test');
+  }
+  if (content.includes('get_public_booking_eligibility_by_slug')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Deprecated get_public_booking_eligibility_by_slug present');
+  }
+
+  console.log('✅ Public booking behavioral test suite source contract PASSED.');
+}
+
 function main() {
   testArityScannerAdversarial();
   testAggregatorAdversarial();
   testConcurrencyHarnessEvidenceContract();
-  console.log('\n🎉 ALL HARDENED R9-R1.7 CONTRACT SELF-TESTS PASSED!');
+  testPublicBookingSourceContract();
+  console.log('\n🎉 ALL HARDENED R9-R1.8.2 CONTRACT SELF-TESTS PASSED!');
 }
 
 main();
