@@ -760,6 +760,62 @@ function testPublicBookingSourceContract() {
   console.log('SELFTEST_TEST25_CAUSAL_ISOLATION_GUARD=YES');
   console.log('SELFTEST_TEST26_RESTORE_GUARD=YES');
   console.log('TEST67_EXACT_REGPROCEDURE_GUARDS_PRESERVED=YES');
+  // 10. TEST 10 COMMERCIAL FIXTURE & QUOTA CONTRACT (R1.8.8)
+  const test10StartIdx = content.indexOf('-- TEST 10: Cross-tenant staff rejected');
+  const test11StartIdx = content.indexOf('-- TEST 11: Outside hours slot rejected');
+
+  if (test10StartIdx === -1 || test11StartIdx === -1 || test10StartIdx >= test11StartIdx) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 10 and Test 11 markers missing or out of order');
+  }
+
+  const test10Region = content.substring(test10StartIdx, test11StartIdx);
+
+  const t10TenantInsertIdx = test10Region.indexOf('INSERT INTO public.tenants');
+  const t10BootstrapIdx = test10Region.indexOf('PERFORM pg_temp.slice4_e2_bootstrap_commercial(v_other_tenant_id);');
+  const t10StaffInsertIdx = test10Region.indexOf('INSERT INTO public.staff');
+  const t10BookingCallIdx = test10Region.indexOf('create_public_booking');
+  const t10AssertionIdx = test10Region.indexOf("reason_code' != 'invalid_staff'");
+
+  if (
+    t10TenantInsertIdx === -1 ||
+    t10BootstrapIdx === -1 ||
+    t10StaffInsertIdx === -1 ||
+    t10BookingCallIdx === -1 ||
+    t10AssertionIdx === -1
+  ) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 10 missing required semantic markers');
+  }
+
+  if (
+    !(
+      t10TenantInsertIdx < t10BootstrapIdx &&
+      t10BootstrapIdx < t10StaffInsertIdx &&
+      t10StaffInsertIdx < t10BookingCallIdx &&
+      t10BookingCallIdx < t10AssertionIdx
+    )
+  ) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 10 semantic markers out of strict required order');
+  }
+
+  const bypassKeywords = [
+    'DISABLE TRIGGER',
+    'session_replication_role',
+    'DROP TRIGGER',
+    'enforce_staff_quota'
+  ];
+  for (const kw of bypassKeywords) {
+    if (test10Region.includes(kw)) {
+      throw new Error(`PUBLIC_BOOKING_CONTRACT_DEFECT: Test 10 contains forbidden quota bypass statement: ${kw}`);
+    }
+  }
+
+  console.log('PUBLIC_BOOKING_TEST10_MARKERS_FAIL_CLOSED=YES');
+  console.log('TEST10_TEMP_TENANT_INSERT_PRESENT=YES');
+  console.log('TEST10_COMMERCIAL_BOOTSTRAP_PRESENT=YES');
+  console.log('TEST10_TEMP_STAFF_INSERT_PRESENT=YES');
+  console.log('TEST10_INVALID_STAFF_ASSERTION_PRESENT=YES');
+  console.log('TEST10_COMMERCIAL_BOOTSTRAP_BEFORE_STAFF=YES');
+  console.log('TEST10_QUOTA_BYPASS_PRESENT=NO');
   console.log('PUBLIC_BOOKING_TEST_VS_CANONICAL_PRODUCT_CONTRACT=PASS');
   console.log('✅ Public booking behavioral test suite & product migration source contract PASSED.');
 }
@@ -827,7 +883,7 @@ function main() {
   testConcurrencyHarnessEvidenceContract();
   testPublicBookingSourceContract();
   testR187HostedEvidenceHarnessContracts();
-  console.log('\n🎉 ALL HARDENED R9-R1.8.7 CONTRACT SELF-TESTS PASSED!');
+  console.log('\n🎉 ALL HARDENED R9-R1.8.8 CONTRACT SELF-TESTS PASSED!');
 }
 
 main();

@@ -329,6 +329,8 @@ BEGIN
     VALUES ('Temp Tenant', 'temp-tenant-10', 'active', 'completed', 'published')
     RETURNING id INTO v_other_tenant_id;
 
+    PERFORM pg_temp.slice4_e2_bootstrap_commercial(v_other_tenant_id);
+
     INSERT INTO public.staff (tenant_id, name, active)
     VALUES (v_other_tenant_id, 'Temp Staff', true)
     RETURNING id INTO v_other_staff_id;
