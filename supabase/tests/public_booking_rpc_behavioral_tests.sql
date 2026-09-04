@@ -835,18 +835,20 @@ END $$;
 -- =========================================================================
 DO $$
 DECLARE
-  v_slug          text  := 'melis-guzellik';
-  v_tenant_id     uuid;
-  v_service_id    uuid;
-  v_staff_id      uuid;
-  v_test_date     date;
-  v_slot_result   jsonb;
-  v_slots         jsonb;
-  v_slot_count    int;
-  v_first_slot    text;
-  v_book_time     time;
-  r               jsonb;
-  d               date;
+  v_slug               text  := 'melis-guzellik';
+  v_tenant_id          uuid;
+  v_service_id         uuid;
+  v_staff_id           uuid;
+  v_test_date          date;
+  v_slot_result        jsonb;
+  v_slots              jsonb;
+  v_slot_count         int;
+  v_first_slot         jsonb;
+  v_first_slot_start   text;
+  v_first_slot_end     text;
+  v_book_time          time;
+  r                    jsonb;
+  d                    date;
 BEGIN
   SELECT id INTO v_tenant_id FROM public.tenants WHERE slug = v_slug;
   IF NOT FOUND THEN
@@ -899,18 +901,35 @@ BEGIN
   END IF;
 
   v_slots := v_slot_result->'slots';
+  IF jsonb_typeof(v_slots) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION 'TEST 27 FAIL: expected slots array, got: %', v_slots;
+  END IF;
+
   v_slot_count := jsonb_array_length(v_slots);
   IF v_slot_count = 0 THEN
     RAISE EXCEPTION 'TEST 27 FAIL: expected at least 1 available slot, got 0';
   END IF;
 
-  v_first_slot := v_slots->0 #>> '{}';
-  RAISE NOTICE 'TEST 27 PASS: returned % slots. First slot: %', v_slot_count, v_first_slot;
+  v_first_slot := v_slots->0;
+
+  IF jsonb_typeof(v_first_slot) IS DISTINCT FROM 'object'
+     OR NULLIF(v_first_slot->>'start', '') IS NULL
+     OR NULLIF(v_first_slot->>'end', '') IS NULL
+  THEN
+    RAISE EXCEPTION
+      'TEST 27 FAIL: expected slot object with non-empty start/end, got: %',
+      v_first_slot;
+  END IF;
+
+  v_first_slot_start := v_first_slot->>'start';
+  v_first_slot_end   := v_first_slot->>'end';
+
+  RAISE NOTICE 'TEST 27 PASS: returned % slots. First slot: % (start: %, end: %)', v_slot_count, v_first_slot, v_first_slot_start, v_first_slot_end;
 
   -- -----------------------------------------------------------------------
   -- TEST 28: After booking, that slot no longer appears in get_public_available_slots
   -- -----------------------------------------------------------------------
-  v_book_time := v_first_slot::time;
+  v_book_time := v_first_slot_start::time;
 
   r := public.create_public_booking(
     p_slug             => v_slug,
@@ -935,13 +954,30 @@ BEGIN
     p_service_id => v_service_id,
     p_date       => v_test_date
   );
-  v_slots := v_slot_result->'slots';
 
-  IF v_slots @> to_jsonb(v_first_slot) THEN
-    RAISE EXCEPTION 'TEST 28 FAIL: booked slot % still present in slot list: %', v_first_slot, v_slots;
+  IF NOT (v_slot_result->>'success')::boolean OR v_slot_result->>'reason_code' != 'ok' THEN
+    RAISE EXCEPTION
+      'TEST 28 FAIL: second slot query failed: %',
+      v_slot_result;
   END IF;
 
-  RAISE NOTICE 'TEST 28 PASS: booked slot % absent from subsequent query.', v_first_slot;
+  v_slots := v_slot_result->'slots';
+  IF jsonb_typeof(v_slots) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION 'TEST 28 FAIL: expected second query slots array, got: %', v_slots;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(v_slots) AS elem(slot)
+    WHERE elem.slot->>'start' = v_first_slot_start
+  ) THEN
+    RAISE EXCEPTION
+      'TEST 28 FAIL: booked slot % still present in slot list: %',
+      v_first_slot_start,
+      v_slots;
+  END IF;
+
+  RAISE NOTICE 'TEST 28 PASS: booked slot % absent from subsequent query.', v_first_slot_start;
 
   -- Cleanup
   DELETE FROM public.appointment_access_tokens
@@ -1635,10 +1671,27 @@ BEGIN
     p_staff_id   => v_staff_id,
     p_date       => v_test_date
   );
-  v_slots := v_slot_res->'slots';
 
-  IF v_slots @> jsonb_build_array(jsonb_build_object('start', v_first_slot, 'end', (v_first_slot::time + interval '30 minutes')::text)) THEN
-    RAISE EXCEPTION 'TEST 47 FAIL: Booked slot % still returned in slot list: %', v_first_slot, v_slots;
+  IF NOT (v_slot_res->>'success')::boolean OR v_slot_res->>'reason_code' != 'ok' THEN
+    RAISE EXCEPTION
+      'TEST 47 FAIL: second slot query failed: %',
+      v_slot_res;
+  END IF;
+
+  v_slots := v_slot_res->'slots';
+  IF jsonb_typeof(v_slots) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION 'TEST 47 FAIL: expected slots array, got: %', v_slots;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(v_slots) AS elem(slot)
+    WHERE elem.slot->>'start' = v_first_slot
+  ) THEN
+    RAISE EXCEPTION
+      'TEST 47 FAIL: Booked slot % still returned in slot list: %',
+      v_first_slot,
+      v_slots;
   END IF;
   RAISE NOTICE 'TEST 47 PASS: Booked slot % correctly absent from subsequent slot RPC query.', v_first_slot;
 

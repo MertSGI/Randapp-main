@@ -1057,14 +1057,201 @@ function testR187HostedEvidenceHarnessContracts() {
   console.log('Finished R1.8.7 Hosted evidence harness & security contracts PASS.');
 }
 
+function testPublicBookingTests27_28_47HarnessContracts() {
+  console.log('--- Testing Tests 27-28 & 47 Hardened Slot Object Harness Contracts (R9-R1.8.11.2) ---');
+  const sqlPath = path.join(__dirname, '..', 'supabase/tests/public_booking_rpc_behavioral_tests.sql');
+  const content = fs.readFileSync(sqlPath, 'utf8');
+
+  // 1. TESTS 27-28 OUTER REGION ISOLATION
+  const t2728StartMarker = '-- TESTS 27-28: get_public_available_slots RPC (Phase 1C)';
+  const t2728EndMarker = '-- STAGE A ACCEPTANCE TESTS: Tests 29-35';
+
+  const t2728StartIdx = content.indexOf(t2728StartMarker);
+  const t2728EndIdx = content.indexOf(t2728EndMarker);
+
+  if (t2728StartIdx === -1 || t2728EndIdx === -1 || t2728StartIdx >= t2728EndIdx) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 27-28 outer region markers missing or out of order');
+  }
+
+  const region2728 = content.substring(t2728StartIdx, t2728EndIdx);
+
+  // Test27 shape & booking time requirements
+  const required27Tokens = [
+    'jsonb_typeof(v_first_slot)',
+    "v_first_slot->>'start'",
+    "v_first_slot->>'end'",
+    'v_first_slot_start',
+    'v_first_slot_end',
+    'v_book_time := v_first_slot_start::time'
+  ];
+
+  for (const token of required27Tokens) {
+    if (!region2728.includes(token)) {
+      throw new Error(`PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 27-28 region missing required token: ${token}`);
+    }
+  }
+
+  if (!/v_first_slot\s+jsonb/.test(region2728)) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 27-28 region missing v_first_slot jsonb declaration');
+  }
+
+  // Forbidden stale patterns in Tests 27-28
+  const forbidden2728Patterns = [
+    "v_slots->0 #>> '{}'",
+    'v_slots @> to_jsonb(v_first_slot)',
+    'v_first_slot::time'
+  ];
+
+  for (const pat of forbidden2728Patterns) {
+    if (region2728.includes(pat)) {
+      throw new Error(`PUBLIC_BOOKING_CONTRACT_DEFECT: Tests 27-28 region contains forbidden stale pattern: ${pat}`);
+    }
+  }
+
+  // 2. STRUCTURALLY PROVE TEST28 SECOND RPC & ORDERING
+  const test28Marker = '-- TEST 28: After booking, that slot no longer appears in get_public_available_slots';
+  const test28MarkerIdx = region2728.indexOf(test28Marker);
+
+  if (test28MarkerIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 28 marker missing in region2728');
+  }
+
+  const firstRpcIdx = region2728.indexOf('public.get_public_available_slots');
+  const secondRpcIdx = region2728.indexOf('public.get_public_available_slots', test28MarkerIdx);
+
+  if (firstRpcIdx < 0 || test28MarkerIdx <= firstRpcIdx || secondRpcIdx <= test28MarkerIdx) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 28 second RPC call structurally not proven or out of order');
+  }
+
+  const test28Region = region2728.substring(test28MarkerIdx);
+
+  const test28RpcInRegion = test28Region.indexOf('public.get_public_available_slots');
+  const test28ReasonInRegion = test28Region.indexOf("v_slot_result->>'reason_code' != 'ok'");
+  const test28TypeofInRegion = test28Region.indexOf("jsonb_typeof(v_slots) IS DISTINCT FROM 'array'");
+  const test28ElementsInRegion = test28Region.indexOf('jsonb_array_elements(v_slots)');
+  const test28StartFieldInRegion = test28Region.indexOf("elem.slot->>'start' = v_first_slot_start");
+  const test28PassInRegion = test28Region.indexOf('TEST 28 PASS');
+
+  if (
+    test28RpcInRegion === -1 ||
+    test28ReasonInRegion === -1 ||
+    test28TypeofInRegion === -1 ||
+    test28ElementsInRegion === -1 ||
+    test28StartFieldInRegion === -1 ||
+    test28PassInRegion === -1
+  ) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 28 missing required structural semantic tokens');
+  }
+
+  if (
+    !(
+      test28RpcInRegion < test28ReasonInRegion &&
+      test28ReasonInRegion < test28TypeofInRegion &&
+      test28TypeofInRegion < test28ElementsInRegion &&
+      test28ElementsInRegion < test28StartFieldInRegion &&
+      test28StartFieldInRegion < test28PassInRegion
+    )
+  ) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 28 structural semantic markers out of strict required order');
+  }
+
+  console.log('TEST27_28_REGION_FAIL_CLOSED=YES');
+  console.log('TEST27_SLOT_OBJECT_SHAPE_ASSERTION_PRESENT=YES');
+  console.log('TEST27_START_FIELD_TIME_CAST_PRESENT=YES');
+  console.log('TEST28_SECOND_RPC_STRUCTURALLY_PROVEN=YES');
+  console.log('TEST28_SECOND_QUERY_REASON_CODE_ASSERTION_PRESENT=YES');
+  console.log('TEST28_SLOT_START_ABSENCE_ASSERTION_PRESENT=YES');
+  console.log('TEST27_28_STALE_STRING_SLOT_ASSUMPTION_PRESENT=NO');
+
+  // 3. EXACT TEST 47 REGION ISOLATION & STRICT REASON-CODE PREDICATE ORDERING
+  const stageBStartMarker = '-- STAGE B ACCEPTANCE TESTS: Tests 44-48';
+  const stageB1StartMarker = '-- STAGE B.1 ACCEPTANCE TESTS: Tests 49-51';
+
+  const stageBStartIdx = content.indexOf(stageBStartMarker);
+  const stageB1StartIdx = content.indexOf(stageB1StartMarker);
+
+  if (stageBStartIdx === -1 || stageB1StartIdx === -1 || stageBStartIdx >= stageB1StartIdx) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Stage B outer region markers missing or out of order');
+  }
+
+  const stageBRegion = content.substring(stageBStartIdx, stageB1StartIdx);
+
+  const test46PassMarkerIdx = stageBRegion.indexOf('TEST 46 PASS');
+  if (test46PassMarkerIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 46 pass marker missing in Stage B region');
+  }
+
+  const test47StartMarker = '-- TEST 47: Booking a returned slot removes it from subsequent slot RPC queries (Slot Invalidation)';
+  const test48StartMarker = '-- TEST 48: Rebooking the exact same slot returns slot_conflict';
+
+  const test47StartIdx = stageBRegion.indexOf(test47StartMarker, test46PassMarkerIdx);
+  const test48StartIdx = stageBRegion.indexOf(test48StartMarker, test46PassMarkerIdx);
+
+  if (test47StartIdx === -1 || test48StartIdx === -1 || test47StartIdx >= test48StartIdx) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 47 comment markers missing or out of order in Stage B region');
+  }
+
+  const test47Region = stageBRegion.substring(test47StartIdx, test48StartIdx);
+
+  const test47RpcIdx = test47Region.indexOf('public.get_public_available_slots');
+  const test47SuccessPredicateIdx = test47Region.indexOf("v_slot_res->>'success'");
+  const test47ReasonCodePredicateIdx = test47Region.indexOf("v_slot_res->>'reason_code' != 'ok'");
+  const test47FailMessageIdx = test47Region.indexOf('TEST 47 FAIL: second slot query failed');
+  const test47TypeofIdx = test47Region.indexOf("jsonb_typeof(v_slots) IS DISTINCT FROM 'array'");
+  const test47ElementsIdx = test47Region.indexOf('jsonb_array_elements(v_slots)');
+  const test47StartFieldIdx = test47Region.indexOf("elem.slot->>'start' = v_first_slot");
+  const test47PassIdx = test47Region.indexOf('TEST 47 PASS');
+
+  if (
+    test47RpcIdx === -1 ||
+    test47SuccessPredicateIdx === -1 ||
+    test47ReasonCodePredicateIdx === -1 ||
+    test47FailMessageIdx === -1 ||
+    test47TypeofIdx === -1 ||
+    test47ElementsIdx === -1 ||
+    test47StartFieldIdx === -1 ||
+    test47PassIdx === -1
+  ) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 47 missing required structural semantic tokens in isolated region');
+  }
+
+  if (
+    !(
+      test47RpcIdx < test47SuccessPredicateIdx &&
+      test47SuccessPredicateIdx <= test47ReasonCodePredicateIdx &&
+      test47ReasonCodePredicateIdx < test47FailMessageIdx &&
+      test47FailMessageIdx < test47TypeofIdx &&
+      test47TypeofIdx < test47ElementsIdx &&
+      test47ElementsIdx < test47StartFieldIdx &&
+      test47StartFieldIdx < test47PassIdx
+    )
+  ) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 47 structural semantic markers out of strict required order');
+  }
+
+  if (test47Region.includes('v_slots @> jsonb_build_array(jsonb_build_object(')) {
+    throw new Error('PUBLIC_BOOKING_CONTRACT_DEFECT: Test 47 region contains fragile whole-object containment pattern');
+  }
+
+  console.log('TEST47_REGION_FAIL_CLOSED=YES');
+  console.log('TEST47_EXACT_COMMENT_MARKERS_BOUND=YES');
+  console.log('TEST47_REASON_CODE_PREDICATE_STRUCTURALLY_PROVEN=YES');
+  console.log('TEST47_SECOND_QUERY_REASON_CODE_ASSERTION_PRESENT=YES');
+  console.log('TEST47_SLOT_START_ABSENCE_ASSERTION_PRESENT=YES');
+  console.log('TEST47_FRAGILE_WHOLE_OBJECT_CONTAINMENT_PRESENT=NO');
+  console.log('✅ Tests 27-28 & 47 hardened slot object harness contracts PASSED.');
+}
+
 function main() {
   testArityScannerAdversarial();
   testAggregatorAdversarial();
   testConcurrencyHarnessEvidenceContract();
   testPublicBookingSourceContract();
   testR187HostedEvidenceHarnessContracts();
-  console.log('\n🎉 ALL HARDENED R9-R1.8.8 CONTRACT SELF-TESTS PASSED!');
+  testPublicBookingTests27_28_47HarnessContracts();
+  console.log('\n🎉 ALL HARDENED R9-R1.8.11.2 CONTRACT SELF-TESTS PASSED!');
 }
 
 main();
+
 
