@@ -1125,6 +1125,18 @@ BEGIN
     VALUES (v_tenant_id, 'Stage A Unmapped Branch', 'stage-a-unmapped', true, false)
     RETURNING id INTO v_unmapped_branch;
 
+    INSERT INTO public.service_branches (
+      tenant_id,
+      service_id,
+      branch_id
+    )
+    VALUES (
+      v_tenant_id,
+      v_service_id,
+      v_unmapped_branch
+    )
+    ON CONFLICT DO NOTHING;
+
     v_eval_res := public.evaluate_booking_slot(
       p_tenant_id  => v_tenant_id,
       p_branch_id  => v_unmapped_branch, -- staff is not mapped to this branch
@@ -1136,6 +1148,11 @@ BEGIN
     IF (v_eval_res->>'allowed')::boolean OR v_eval_res->>'reason_code' != 'invalid_staff' THEN
       RAISE EXCEPTION 'TEST 30 FAIL: Staff not mapped to branch was not rejected with invalid_staff';
     END IF;
+
+    DELETE FROM public.service_branches
+    WHERE tenant_id = v_tenant_id
+      AND service_id = v_service_id
+      AND branch_id = v_unmapped_branch;
 
     DELETE FROM public.branches WHERE id = v_unmapped_branch;
     RAISE NOTICE 'TEST 30 PASS: Unmapped branch enforced cleanly.';
