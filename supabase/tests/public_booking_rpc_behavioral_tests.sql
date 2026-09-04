@@ -1359,17 +1359,205 @@ BEGIN
   -- -----------------------------------------------------------------------
   -- TEST 36: Composite FK constraint rejects direct cross-tenant staff_branches INSERT
   -- -----------------------------------------------------------------------
+  DELETE FROM public.staff_branches
+  WHERE tenant_id = v_tenant_id
+    AND staff_id = v_staff_id
+    AND branch_id = v_branch_id;
+  GET DIAGNOSTICS v_rowcount = ROW_COUNT;
+  IF v_rowcount != 1 THEN
+    RAISE EXCEPTION 'TEST 36 SETUP FAIL: Pre-delete row count was %, expected 1', v_rowcount;
+  END IF;
+
   BEGIN
-    INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)
-    VALUES (v_other_tenant_id, v_staff_id, v_branch_id); -- Mismatched tenant_id
+    INSERT INTO public.staff_branches (
+      tenant_id,
+      staff_id,
+      branch_id
+    )
+    VALUES (
+      v_other_tenant_id,
+      v_staff_id,
+      v_branch_id
+    );
   EXCEPTION WHEN foreign_key_violation THEN
-    v_fk_failed := true;
+    GET STACKED DIAGNOSTICS v_constraint_name = CONSTRAINT_NAME;
+    IF v_constraint_name IN ('fk_staff_branches_staff_tenant', 'fk_staff_branches_branch_tenant') THEN
+      v_fk_failed := true;
+    ELSE
+      RAISE EXCEPTION 'TEST 36 FAIL: Unexpected foreign key constraint violation: %', v_constraint_name;
+    END IF;
   END;
 
   IF NOT v_fk_failed THEN
     RAISE EXCEPTION 'TEST 36 FAIL: Composite FK did not reject cross-tenant staff_branches INSERT';
   END IF;
   RAISE NOTICE 'TEST 36 PASS: Composite FK structurally rejected cross-tenant INSERT.';
+
+  INSERT INTO public.staff_branches (
+    tenant_id,
+    staff_id,
+    branch_id
+  )
+  VALUES (
+    v_tenant_id,
+    v_staff_id,
+    v_branch_id
+  );
+  GET DIAGNOSTICS v_rowcount = ROW_COUNT;
+  IF v_rowcount != 1 THEN
+    RAISE EXCEPTION 'TEST 36 RESTORE FAIL: Insert row count was %, expected 1', v_rowcount;
+  END IF;
+
+  SELECT count(*) INTO v_check_count
+  FROM public.staff_branches
+  WHERE tenant_id = v_tenant_id
+    AND staff_id = v_staff_id
+    AND branch_id = v_branch_id;
+  IF v_check_count != 1 THEN
+    RAISE EXCEPTION 'TEST 36 RESTORE FAIL: Restored count was %, expected 1', v_check_count;
+  END IF;
+
+  -- -----------------------------------------------------------------------
+  -- TEST 37: RLS WITH CHECK policy rejects unauthorized staff/owner branch mapping INSERT
+  -- -----------------------------------------------------------------------
+  INSERT INTO auth.users (
+    id,
+    email,
+    role,
+    created_at,
+    updated_at
+  )
+  VALUES (
+    v_foreign_owner_id,
+    'foreign_owner_test37@test.invalid',
+    'authenticated',
+    now(),
+    now()
+  )
+  ON CONFLICT (id) DO UPDATE
+  SET email = EXCLUDED.email,
+      role = 'authenticated',
+      updated_at = now();
+
+  INSERT INTO public.users_profile (id, tenant_id, role, active)
+  VALUES (v_foreign_owner_id, v_other_tenant_id, 'tenant_owner', true)
+  ON CONFLICT (id) DO UPDATE SET tenant_id = v_other_tenant_id, role = 'tenant_owner', active = true;
+
+  DELETE FROM public.staff_branches
+  WHERE tenant_id = v_tenant_id
+    AND staff_id = v_staff_id
+    AND branch_id = v_branch_id;
+  GET DIAGNOSTICS v_rowcount = ROW_COUNT;
+  IF v_rowcount != 1 THEN
+    RAISE EXCEPTION 'TEST 37 SETUP FAIL: Pre-delete row count was %, expected 1', v_rowcount;
+  END IF;
+
+  SELECT has_table_privilege('authenticated', 'public.staff_branches', 'INSERT') INTO v_auth_had_insert;
+  IF NOT v_auth_had_insert THEN
+    GRANT INSERT ON public.staff_branches TO authenticated;
+    v_temp_grant_insert := true;
+  END IF;
+
+  SELECT has_table_privilege('authenticated', 'public.staff_branches', 'SELECT') INTO v_auth_had_select_sb;
+  IF NOT v_auth_had_select_sb THEN
+    GRANT SELECT ON public.staff_branches TO authenticated;
+    v_temp_grant_select_sb := true;
+  END IF;
+
+  SELECT has_table_privilege('authenticated', 'public.users_profile', 'SELECT') INTO v_auth_had_select_up;
+  IF NOT v_auth_had_select_up THEN
+    GRANT SELECT ON public.users_profile TO authenticated;
+    v_temp_grant_select_up := true;
+  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', v_foreign_owner_id::text, true);
+  PERFORM set_config('role', 'authenticated', true);
+
+  BEGIN
+    INSERT INTO public.staff_branches (
+      tenant_id,
+      staff_id,
+      branch_id
+    )
+    VALUES (
+      v_tenant_id,
+      v_staff_id,
+      v_branch_id
+    );
+  EXCEPTION
+    WHEN unique_violation THEN
+      v_test37_pk_failed := true;
+    WHEN foreign_key_violation THEN
+      v_test37_fk_failed := true;
+    WHEN insufficient_privilege THEN
+      v_rls_rejected := true;
+    WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_err_code = RETURNED_SQLSTATE;
+      IF v_err_code = '42501' THEN
+        v_rls_rejected := true;
+      ELSE
+        RAISE EXCEPTION 'TEST 37 FAIL: Unexpected error state %: %', v_err_code, SQLERRM;
+      END IF;
+  END;
+
+  PERFORM set_config('role', 'postgres', true);
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+
+  IF v_test37_pk_failed OR v_test37_fk_failed THEN
+    RAISE EXCEPTION 'TEST 37 FAIL: PK or FK violation occurred instead of RLS rejection';
+  END IF;
+
+  IF NOT v_rls_rejected THEN
+    RAISE EXCEPTION 'TEST 37 FAIL: RLS WITH CHECK policy did not reject unauthorized staff_branches INSERT';
+  END IF;
+
+  SELECT count(*) INTO v_check_count
+  FROM public.staff_branches
+  WHERE tenant_id = v_tenant_id
+    AND staff_id = v_staff_id
+    AND branch_id = v_branch_id;
+  IF v_check_count != 0 THEN
+    RAISE EXCEPTION 'TEST 37 FAIL: Unauthorized row exists after rejected INSERT: count = %', v_check_count;
+  END IF;
+
+  IF v_temp_grant_insert THEN
+    REVOKE INSERT ON public.staff_branches FROM authenticated;
+  END IF;
+  IF v_temp_grant_select_sb THEN
+    REVOKE SELECT ON public.staff_branches FROM authenticated;
+  END IF;
+  IF v_temp_grant_select_up THEN
+    REVOKE SELECT ON public.users_profile FROM authenticated;
+  END IF;
+
+  DELETE FROM public.users_profile WHERE id = v_foreign_owner_id;
+  DELETE FROM auth.users WHERE id = v_foreign_owner_id;
+
+  INSERT INTO public.staff_branches (
+    tenant_id,
+    staff_id,
+    branch_id
+  )
+  VALUES (
+    v_tenant_id,
+    v_staff_id,
+    v_branch_id
+  );
+  GET DIAGNOSTICS v_rowcount = ROW_COUNT;
+  IF v_rowcount != 1 THEN
+    RAISE EXCEPTION 'TEST 37 RESTORE FAIL: Insert row count was %, expected 1', v_rowcount;
+  END IF;
+
+  SELECT count(*) INTO v_check_count
+  FROM public.staff_branches
+  WHERE tenant_id = v_tenant_id
+    AND staff_id = v_staff_id
+    AND branch_id = v_branch_id;
+  IF v_check_count != 1 THEN
+    RAISE EXCEPTION 'TEST 37 RESTORE FAIL: Restored count was %, expected 1', v_check_count;
+  END IF;
+
+  RAISE NOTICE 'TEST 37 PASS: RLS WITH CHECK rejected cross-tenant owner staff_branches INSERT.';
 
   -- -----------------------------------------------------------------------
   -- TEST 38: Anonymous user calling evaluate_booking_slot directly is rejected
