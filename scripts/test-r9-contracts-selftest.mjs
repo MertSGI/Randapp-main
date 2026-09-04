@@ -1874,7 +1874,186 @@ function testPublicBookingTests36_37HarnessContracts() {
   console.log('TEST37_CONTEXT_RESTORE_STRUCTURALLY_PROVEN=YES');
   console.log('TEST37_PRIVILEGE_RESTORE_STRUCTURALLY_PROVEN=YES');
   console.log('TEST37_FIXTURE_CLEANUP_STRUCTURALLY_PROVEN=YES');
+
+  testStageAHardeningDeclarationSelftest(content);
+
   console.log('✅ Test 36 & 37 FK and RLS isolation contracts PASSED.');
+}
+
+function verifyStageAHardeningDeclarations(sqlContent) {
+  const stageAHeaderMarker = '-- STAGE A HARDENING ACCEPTANCE TESTS: Tests 36-40';
+  const stageAHeaderIdx = sqlContent.indexOf(stageAHeaderMarker);
+  if (stageAHeaderIdx === -1) {
+    throw new Error('DECLARATION_VALIDATOR_DEFECT: Stage A hardening header missing');
+  }
+
+  const doIdx = sqlContent.indexOf('DO $$', stageAHeaderIdx);
+  const declareIdx = sqlContent.indexOf('DECLARE', doIdx);
+  const beginIdx = sqlContent.indexOf('BEGIN', declareIdx);
+  if (doIdx === -1 || declareIdx === -1 || beginIdx === -1 || doIdx >= declareIdx || declareIdx >= beginIdx) {
+    throw new Error('DECLARATION_VALIDATOR_DEFECT: Stage A hardening DO/DECLARE/BEGIN region missing or out of order');
+  }
+
+  const declareRegion = sqlContent.substring(declareIdx, beginIdx);
+
+  // Strip single line comments (-- ...)
+  const declareNoComments = declareRegion.replace(/--.*$/gm, '');
+
+  const requiredDeclarations = [
+    { name: 'v_rowcount', type: 'bigint', default: null },
+    { name: 'v_constraint_name', type: 'text', default: null },
+    { name: 'v_check_count', type: 'bigint', default: null },
+    { name: 'v_foreign_owner_id', type: 'uuid', default: "'a0370000-0000-4000-8000-000000000037'::uuid" },
+    { name: 'v_auth_had_insert', type: 'boolean', default: 'false' },
+    { name: 'v_auth_had_select_sb', type: 'boolean', default: 'false' },
+    { name: 'v_auth_had_select_up', type: 'boolean', default: 'false' },
+    { name: 'v_temp_grant_insert', type: 'boolean', default: 'false' },
+    { name: 'v_temp_grant_select_sb', type: 'boolean', default: 'false' },
+    { name: 'v_temp_grant_select_up', type: 'boolean', default: 'false' },
+    { name: 'v_test37_pk_failed', type: 'boolean', default: 'false' },
+    { name: 'v_test37_fk_failed', type: 'boolean', default: 'false' },
+    { name: 'v_rls_rejected', type: 'boolean', default: 'false' },
+    { name: 'v_err_code', type: 'text', default: null }
+  ];
+
+  for (const item of requiredDeclarations) {
+    const declRegex = new RegExp(`\\b${item.name}\\s+([a-z0-9_]+)(?:\\s*:=\\s*([^;]+))?;`, 'gi');
+    const matches = [...declareNoComments.matchAll(declRegex)];
+
+    if (matches.length === 0) {
+      throw new Error(`DECLARATION_VALIDATOR_DEFECT: Required declaration ${item.name} absent from DECLARE block`);
+    }
+    if (matches.length > 1) {
+      throw new Error(`DECLARATION_VALIDATOR_DEFECT: Required declaration ${item.name} declared multiple times (${matches.length})`);
+    }
+
+    const match = matches[0];
+    const declaredType = match[1].toLowerCase();
+    const declaredDefault = match[2] ? match[2].trim().toLowerCase() : null;
+
+    if (declaredType !== item.type) {
+      throw new Error(`DECLARATION_VALIDATOR_DEFECT: ${item.name} type mismatch. Expected ${item.type}, got ${declaredType}`);
+    }
+
+    if (item.default !== null) {
+      if (!declaredDefault || declaredDefault !== item.default.toLowerCase()) {
+        throw new Error(`DECLARATION_VALIDATOR_DEFECT: ${item.name} default mismatch. Expected ${item.default}, got ${declaredDefault}`);
+      }
+    }
+  }
+
+  // Target usage resolution check in isolated Test36 and Test37 body regions
+  const test36StartMarker = '-- TEST 36: Composite FK constraint rejects direct cross-tenant staff_branches INSERT';
+  const test38StartMarker = '-- TEST 38: Anonymous user calling evaluate_booking_slot directly is rejected';
+  const test36Idx = sqlContent.indexOf(test36StartMarker, beginIdx);
+  const test38Idx = sqlContent.indexOf(test38StartMarker, test36Idx);
+
+  if (test36Idx === -1 || test38Idx === -1 || test36Idx >= test38Idx) {
+    throw new Error('DECLARATION_VALIDATOR_DEFECT: Test36-37 body region missing or out of order');
+  }
+
+  const tests36_37Body = sqlContent.substring(test36Idx, test38Idx);
+  for (const item of requiredDeclarations) {
+    const usageRegex = new RegExp(`\\b${item.name}\\b`);
+    if (!usageRegex.test(tests36_37Body)) {
+      throw new Error(`DECLARATION_VALIDATOR_DEFECT: Target identifier ${item.name} not used in Test36/37 body region`);
+    }
+  }
+
+  return true;
+}
+
+function testStageAHardeningDeclarationSelftest(originalSqlContent) {
+  console.log('--- Testing Stage A Hardening Local Declaration Contracts (R9-R1.8.15) ---');
+
+  // Positive validation on unmodified sqlContent
+  verifyStageAHardeningDeclarations(originalSqlContent);
+
+  console.log('TEST36_37_DECLARATION_REGION_FAIL_CLOSED=YES');
+  console.log('TEST36_37_REQUIRED_LOCAL_DECLARATIONS_PRESENT=YES');
+  console.log('TEST36_37_REQUIRED_LOCAL_TYPES_EXACT=YES');
+  console.log('TEST36_37_REQUIRED_BOOLEAN_DEFAULTS_FALSE=YES');
+  console.log('TEST37_FOREIGN_OWNER_UUID_DECLARATION_EXACT=YES');
+  console.log('TEST36_37_LOCAL_DECLARATIONS_UNIQUE=YES');
+  console.log('TEST36_37_USED_LOCAL_BINDINGS_RESOLVE=YES');
+
+  // Adversarial suite (Cases A through H)
+  const declBlockStart = originalSqlContent.indexOf('v_rowcount');
+  const declBlockEnd = originalSqlContent.indexOf('BEGIN', declBlockStart);
+
+  // CASE A: remove v_rowcount declaration
+  const caseA = originalSqlContent.replace(/v_rowcount\s+bigint;/g, '');
+  try {
+    verifyStageAHardeningDeclarations(caseA);
+    throw new Error('Adversarial Case A FAILED: Validator did not catch missing v_rowcount');
+  } catch (err) {
+    if (!err.message.includes('v_rowcount absent')) throw err;
+  }
+
+  // CASE B: remove v_constraint_name declaration
+  const caseB = originalSqlContent.replace(/v_constraint_name\s+text;/g, '');
+  try {
+    verifyStageAHardeningDeclarations(caseB);
+    throw new Error('Adversarial Case B FAILED: Validator did not catch missing v_constraint_name');
+  } catch (err) {
+    if (!err.message.includes('v_constraint_name absent')) throw err;
+  }
+
+  // CASE C: remove v_foreign_owner_id declaration
+  const caseC = originalSqlContent.replace(/v_foreign_owner_id\s+uuid[^;]+;/g, '');
+  try {
+    verifyStageAHardeningDeclarations(caseC);
+    throw new Error('Adversarial Case C FAILED: Validator did not catch missing v_foreign_owner_id');
+  } catch (err) {
+    if (!err.message.includes('v_foreign_owner_id absent')) throw err;
+  }
+
+  // CASE D: remove one Test37 boolean declaration (v_rls_rejected)
+  const caseD = originalSqlContent.replace(/v_rls_rejected\s+boolean\s*:=\s*false;/g, '');
+  try {
+    verifyStageAHardeningDeclarations(caseD);
+    throw new Error('Adversarial Case D FAILED: Validator did not catch missing v_rls_rejected');
+  } catch (err) {
+    if (!err.message.includes('v_rls_rejected absent')) throw err;
+  }
+
+  // CASE E: duplicate a required declaration (v_rowcount)
+  const caseE = originalSqlContent.replace('v_rowcount                   bigint;', 'v_rowcount                   bigint;\n  v_rowcount                   bigint;');
+  try {
+    verifyStageAHardeningDeclarations(caseE);
+    throw new Error('Adversarial Case E FAILED: Validator did not catch duplicate v_rowcount');
+  } catch (err) {
+    if (!err.message.includes('multiple times')) throw err;
+  }
+
+  // CASE F: change v_rowcount type to text
+  const caseF = originalSqlContent.replace('v_rowcount                   bigint;', 'v_rowcount                   text;');
+  try {
+    verifyStageAHardeningDeclarations(caseF);
+    throw new Error('Adversarial Case F FAILED: Validator did not catch wrong v_rowcount type');
+  } catch (err) {
+    if (!err.message.includes('v_rowcount type mismatch')) throw err;
+  }
+
+  // CASE G: change required boolean default from false to true
+  const caseG = originalSqlContent.replace('v_rls_rejected               boolean := false;', 'v_rls_rejected               boolean := true;');
+  try {
+    verifyStageAHardeningDeclarations(caseG);
+    throw new Error('Adversarial Case G FAILED: Validator did not catch wrong boolean default');
+  } catch (err) {
+    if (!err.message.includes('v_rls_rejected default mismatch')) throw err;
+  }
+
+  // CASE H: place declaration text only inside comment
+  const caseH = originalSqlContent.replace('v_err_code                   text;', '-- v_err_code                   text;');
+  try {
+    verifyStageAHardeningDeclarations(caseH);
+    throw new Error('Adversarial Case H FAILED: Validator accepted comment-only declaration');
+  } catch (err) {
+    if (!err.message.includes('v_err_code absent')) throw err;
+  }
+
+  console.log('TEST36_37_DECLARATION_VALIDATOR_ADVERSARIAL=PASS');
 }
 
 function main() {

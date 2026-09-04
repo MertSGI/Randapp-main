@@ -1319,6 +1319,21 @@ DECLARE
   r                 jsonb;
   v_fk_failed       boolean := false;
   v_anon_failed     boolean := false;
+
+  v_rowcount                   bigint;
+  v_constraint_name            text;
+  v_check_count                bigint;
+  v_foreign_owner_id           uuid := 'a0370000-0000-4000-8000-000000000037'::uuid;
+  v_auth_had_insert            boolean := false;
+  v_auth_had_select_sb         boolean := false;
+  v_auth_had_select_up         boolean := false;
+  v_temp_grant_insert          boolean := false;
+  v_temp_grant_select_sb       boolean := false;
+  v_temp_grant_select_up       boolean := false;
+  v_test37_pk_failed           boolean := false;
+  v_test37_fk_failed           boolean := false;
+  v_rls_rejected               boolean := false;
+  v_err_code                   text;
 BEGIN
   SELECT id INTO v_tenant_id FROM public.tenants WHERE slug = v_slug;
 
