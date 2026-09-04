@@ -999,6 +999,35 @@ BEGIN
   WHERE tenant_id = v_tenant_id AND email = 'slot-inval-test-28@randapp-test.invalid';
 
   RAISE NOTICE '=== TESTS 27-28 COMPLETED SUCCESSFULLY ===';
+
+  -- Temporarily deactivate baseline primary branch before Stage A primary branch tests
+  DECLARE
+    v_baseline_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;
+    v_primary_transition_count int;
+  BEGIN
+    UPDATE public.branches
+    SET is_active = false
+    WHERE id = v_baseline_primary_branch_id
+      AND tenant_id = v_tenant_id
+      AND is_primary = true
+      AND is_active = true;
+
+    GET DIAGNOSTICS v_primary_transition_count = ROW_COUNT;
+
+    IF v_primary_transition_count != 1 THEN
+      RAISE EXCEPTION 'PRIMARY FIXTURE ISOLATION FAIL: expected exactly one baseline primary branch deactivation, affected %', v_primary_transition_count;
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM public.branches
+      WHERE tenant_id = v_tenant_id
+        AND is_active = true
+        AND is_primary = true
+    ) THEN
+      RAISE EXCEPTION 'PRIMARY FIXTURE ISOLATION FAIL: active primary branch remained before Stage A';
+    END IF;
+  END;
 END $$;
 
 
@@ -1834,6 +1863,50 @@ BEGIN
   DELETE FROM public.services WHERE id = v_service_id;
   DELETE FROM public.branches WHERE id = v_branch_id;
   DELETE FROM public.tenants WHERE id = v_other_tenant_id;
+
+  -- Restore deterministic baseline primary branch after Stage B.1 tests
+  DECLARE
+    v_baseline_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;
+    v_primary_restore_count int;
+    v_active_primary_count int;
+  BEGIN
+    UPDATE public.branches
+    SET is_active = true,
+        is_primary = true
+    WHERE id = v_baseline_primary_branch_id
+      AND tenant_id = v_tenant_id
+      AND is_active = false
+      AND is_primary = true;
+
+    GET DIAGNOSTICS v_primary_restore_count = ROW_COUNT;
+
+    IF v_primary_restore_count != 1 THEN
+      RAISE EXCEPTION 'PRIMARY FIXTURE RESTORE FAIL: expected exactly one baseline restore, affected %', v_primary_restore_count;
+    END IF;
+
+    SELECT count(*)
+    INTO v_active_primary_count
+    FROM public.branches
+    WHERE tenant_id = v_tenant_id
+      AND is_active = true
+      AND is_primary = true;
+
+    IF v_active_primary_count != 1 THEN
+      RAISE EXCEPTION 'PRIMARY FIXTURE RESTORE FAIL: expected active primary count == 1, got %', v_active_primary_count;
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1
+      FROM public.branches
+      WHERE id = v_baseline_primary_branch_id
+        AND tenant_id = v_tenant_id
+        AND slug = 'r9-primary-branch'
+        AND is_active = true
+        AND is_primary = true
+    ) THEN
+      RAISE EXCEPTION 'PRIMARY FIXTURE RESTORE FAIL: baseline branch identity mismatch';
+    END IF;
+  END;
 
   RAISE NOTICE '=== STAGE B.1 ACCEPTANCE TESTS 49-51 COMPLETED SUCCESSFULLY ===';
 END $$;

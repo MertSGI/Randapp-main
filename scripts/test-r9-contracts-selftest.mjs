@@ -997,6 +997,187 @@ function testPublicBookingSourceContract() {
   console.log('FOUNDATION_TEST32_GLOBAL_ZERO_ASSERTION_PRESENT=NO');
 
   console.log('PUBLIC_BOOKING_TEST_VS_CANONICAL_PRODUCT_CONTRACT=PASS');
+  // 14. R1.8.12.1 PRIMARY BRANCH FIXTURE ISOLATION & CONTRACT REPAIR SELFTEST
+  const baselineId = 'c3c3c3c3-dd44-ee55-ff66-aa7777777777';
+
+  // A. Deactivation boundary check
+  const t2728PassMarker = '=== TESTS 27-28 COMPLETED SUCCESSFULLY ===';
+  const stageAMarker = '-- STAGE A ACCEPTANCE TESTS: Tests 29-35';
+
+  const t2728PassIdx = content.indexOf(t2728PassMarker);
+  const stageAIdx = content.indexOf(stageAMarker);
+
+  if (t2728PassIdx === -1 || stageAIdx === -1 || t2728PassIdx >= stageAIdx) {
+    throw new Error('PRIMARY_BASELINE_CONTRACT_DEFECT: Deactivation boundary markers missing or out of order');
+  }
+
+  const deactRegion = content.substring(t2728PassIdx, stageAIdx);
+
+  const deactIdIdx = deactRegion.indexOf(baselineId);
+  const deactUpdateIdx = deactRegion.indexOf('SET is_active = false');
+  const deactIsPrimIdx = deactRegion.indexOf('is_primary = true');
+  const deactGetDiagIdx = deactRegion.indexOf('GET DIAGNOSTICS');
+  const deactRowCountIdx = deactRegion.indexOf('ROW_COUNT');
+  const deactGuardIdx = deactRegion.indexOf('PRIMARY FIXTURE ISOLATION FAIL');
+  const deactActiveGuardIdx = deactRegion.indexOf('active primary branch remained before Stage A');
+
+  if (
+    deactIdIdx === -1 ||
+    deactUpdateIdx === -1 ||
+    deactIsPrimIdx === -1 ||
+    deactGetDiagIdx === -1 ||
+    deactRowCountIdx === -1 ||
+    deactGuardIdx === -1 ||
+    deactActiveGuardIdx === -1
+  ) {
+    throw new Error('PRIMARY_BASELINE_CONTRACT_DEFECT: Deactivation region missing required tokens');
+  }
+
+  if (
+    !(
+      deactIdIdx < deactUpdateIdx &&
+      deactUpdateIdx < deactGetDiagIdx &&
+      deactGetDiagIdx < deactRowCountIdx &&
+      deactRowCountIdx < deactGuardIdx &&
+      deactGuardIdx < deactActiveGuardIdx
+    )
+  ) {
+    throw new Error('PRIMARY_BASELINE_CONTRACT_DEFECT: Deactivation tokens out of strict required order');
+  }
+
+  // B. Stage primary fixtures preservation (INSERT-statement-bounded)
+  const stagePrimaryFixtures = [
+    { slug: 'stage-a-primary', flagKey: 'STAGE_PRIMARY_FIXTURE_STAGE_A_BOUND' },
+    { slug: 'stage-a-hardening', flagKey: 'STAGE_PRIMARY_FIXTURE_STAGE_A_HARDENING_BOUND' },
+    { slug: 'stage-a-deletion', flagKey: 'STAGE_PRIMARY_FIXTURE_STAGE_A_DELETION_BOUND' },
+    { slug: 'stage-b-branch', flagKey: 'STAGE_PRIMARY_FIXTURE_STAGE_B_BOUND' },
+    { slug: 'stage-b1-branch', flagKey: 'STAGE_PRIMARY_FIXTURE_STAGE_B1_BOUND' }
+  ];
+
+  for (const fix of stagePrimaryFixtures) {
+    const slugIdx = content.indexOf(`'${fix.slug}'`);
+    if (slugIdx === -1) {
+      throw new Error(`PRIMARY_BASELINE_CONTRACT_DEFECT: Stage primary branch slug missing: ${fix.slug}`);
+    }
+
+    const stmtStartIdx = content.lastIndexOf('INSERT INTO public.branches', slugIdx);
+    if (stmtStartIdx === -1) {
+      throw new Error(`PRIMARY_BASELINE_CONTRACT_DEFECT: Nearest INSERT INTO public.branches missing before slug: ${fix.slug}`);
+    }
+
+    const stmtEndIdx = content.indexOf(';', slugIdx);
+    if (stmtEndIdx === -1 || stmtStartIdx >= stmtEndIdx || slugIdx >= stmtEndIdx) {
+      throw new Error(`PRIMARY_BASELINE_CONTRACT_DEFECT: Statement terminator missing or invalid for slug: ${fix.slug}`);
+    }
+
+    const stmtText = content.substring(stmtStartIdx, stmtEndIdx + 1);
+
+    const hasInsert = stmtText.includes('INSERT INTO public.branches');
+    const hasTenantId = stmtText.includes('tenant_id');
+    const hasName = stmtText.includes('name');
+    const hasSlugCol = stmtText.includes('slug');
+    const hasIsActiveCol = stmtText.includes('is_active');
+    const hasIsPrimaryCol = stmtText.includes('is_primary');
+    const hasTargetSlug = stmtText.includes(`'${fix.slug}'`);
+    const hasTrueTrue = stmtText.includes('true, true');
+
+    if (!hasInsert || !hasTenantId || !hasName || !hasSlugCol || !hasIsActiveCol || !hasIsPrimaryCol || !hasTargetSlug || !hasTrueTrue) {
+      throw new Error(`PRIMARY_BASELINE_CONTRACT_DEFECT: Isolated INSERT statement for ${fix.slug} missing required column/value tokens`);
+    }
+
+    if (stmtText.includes('ON CONFLICT')) {
+      if (!stmtText.includes('is_primary = true') || !stmtText.includes('is_active = true')) {
+        throw new Error(`PRIMARY_BASELINE_CONTRACT_DEFECT: Isolated INSERT statement for ${fix.slug} missing ON CONFLICT update flags`);
+      }
+    }
+
+    console.log(`${fix.flagKey}=YES`);
+  }
+
+  console.log('STAGE_PRIMARY_FIXTURES_PRESERVED=YES');
+
+  // C. Restore boundary check (cleanup anchor fail-closed)
+  const t51PassMarker = '=== STAGE B.1 ACCEPTANCE TESTS 49-51 COMPLETED SUCCESSFULLY ===';
+  const t52StartMarker = '-- STAGE B.1 FIX TESTS: Tests 52-56';
+  const stageB1StartMarker = '-- STAGE B.1 ACCEPTANCE TESTS: Tests 49-51';
+  const cleanupDeleteTarget = 'DELETE FROM public.branches WHERE id = v_branch_id;';
+
+  const stageB1StartIdx = content.indexOf(stageB1StartMarker);
+  const t51PassIdx = content.indexOf(t51PassMarker);
+  const t52StartIdx = content.indexOf(t52StartMarker);
+
+  if (stageB1StartIdx === -1 || t51PassIdx === -1 || t52StartIdx === -1 || stageB1StartIdx >= t51PassIdx || t51PassIdx >= t52StartIdx) {
+    throw new Error('PRIMARY_BASELINE_CONTRACT_DEFECT: Stage B.1 boundary markers missing or out of order');
+  }
+
+  const cleanupDeleteIdx = content.lastIndexOf(cleanupDeleteTarget, t51PassIdx);
+
+  if (cleanupDeleteIdx === -1 || cleanupDeleteIdx <= stageB1StartIdx || cleanupDeleteIdx >= t51PassIdx) {
+    throw new Error('PRIMARY_BASELINE_CONTRACT_DEFECT: Restore cleanup delete anchor missing or out of strict Stage B.1 region bounds');
+  }
+
+  const restoreRegion = content.substring(cleanupDeleteIdx, t51PassIdx);
+
+  const restoreIdIdx = restoreRegion.indexOf(baselineId);
+  const restoreUpdateIdx = restoreRegion.indexOf('SET is_active = true');
+  const restoreGetDiagIdx = restoreRegion.indexOf('GET DIAGNOSTICS');
+  const restoreRowCountIdx = restoreRegion.indexOf('ROW_COUNT');
+  const restoreRowCountGuardIdx = restoreRegion.indexOf('PRIMARY FIXTURE RESTORE FAIL: expected exactly one baseline restore');
+  const restoreActiveCountIdx = restoreRegion.indexOf('expected active primary count == 1');
+  const restoreIdentityIdx = restoreRegion.indexOf("slug = 'r9-primary-branch'");
+
+  if (
+    restoreIdIdx === -1 ||
+    restoreUpdateIdx === -1 ||
+    restoreGetDiagIdx === -1 ||
+    restoreRowCountIdx === -1 ||
+    restoreRowCountGuardIdx === -1 ||
+    restoreActiveCountIdx === -1 ||
+    restoreIdentityIdx === -1
+  ) {
+    throw new Error('PRIMARY_BASELINE_CONTRACT_DEFECT: Restore region missing required tokens');
+  }
+
+  if (
+    !(
+      restoreIdIdx < restoreUpdateIdx &&
+      restoreUpdateIdx < restoreGetDiagIdx &&
+      restoreGetDiagIdx < restoreRowCountIdx &&
+      restoreRowCountIdx < restoreRowCountGuardIdx &&
+      restoreRowCountGuardIdx < restoreActiveCountIdx &&
+      restoreActiveCountIdx < restoreIdentityIdx
+    )
+  ) {
+    throw new Error('PRIMARY_BASELINE_CONTRACT_DEFECT: Restore tokens out of strict required order');
+  }
+
+  console.log('PRIMARY_BASELINE_RESTORE_CLEANUP_ANCHOR_FAIL_CLOSED=YES');
+  console.log('PRIMARY_BASELINE_RESTORE_REGION_FAIL_CLOSED=YES');
+  console.log('PRIMARY_BASELINE_RESTORE_ROWCOUNT_GUARD=YES');
+  console.log('PRIMARY_BASELINE_FINAL_IDENTITY_UNIQUENESS_GUARD=YES');
+
+  // D. Bypass prohibition check
+  const forbiddenBypasses = [
+    'DROP INDEX idx_unique_primary_branch_per_tenant',
+    'DISABLE TRIGGER',
+    'session_replication_role',
+    'DROP TRIGGER',
+    'DROP CONSTRAINT'
+  ];
+
+  for (const bypass of forbiddenBypasses) {
+    if (content.includes(bypass)) {
+      throw new Error(`PRIMARY_BASELINE_CONTRACT_DEFECT: Public booking test contains forbidden constraint bypass: ${bypass}`);
+    }
+  }
+
+  console.log('PRIMARY_CONSTRAINT_BYPASS_PRESENT=NO');
+
+  console.log('PRIMARY_BASELINE_DEACTIVATION_REGION_FAIL_CLOSED=YES');
+  console.log('PRIMARY_BASELINE_EXACT_BRANCH_BOUND=YES');
+  console.log('PRIMARY_BASELINE_DEACTIVATION_ROWCOUNT_GUARD=YES');
+  console.log('PRIMARY_ACTIVE_UNIQUENESS_GUARD_BEFORE_STAGE_A=YES');
+
   console.log('✅ Public booking behavioral test suite & product migration source contract PASSED.');
 }
 
