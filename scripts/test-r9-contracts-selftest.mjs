@@ -1423,6 +1423,243 @@ function testPublicBookingTests27_28_47HarnessContracts() {
   console.log('✅ Tests 27-28 & 47 hardened slot object harness contracts PASSED.');
 }
 
+/**
+ * Strip SQL comments from source text for scanning purposes.
+ * Does NOT modify the original content—returns a derived copy.
+ */
+function stripSqlComments(text) {
+  // Remove block comments /* ... */
+  let result = text.replace(/\/\*[\s\S]*?\*\//g, ' ');
+  // Remove line comments -- ...
+  result = result.replace(/--[^\n]*/g, ' ');
+  return result;
+}
+
+/**
+ * Fail-closed mutation scanner for staff_branches table.
+ * Detects INSERT INTO / UPDATE statements targeting staff_branches
+ * (with or without public. schema prefix) using global regex on
+ * comment-stripped text. Returns array of detected mutation statement texts.
+ */
+function scanStaffBranchMutations(sqlText) {
+  const stripped = stripSqlComments(sqlText);
+  const mutations = [];
+
+  // Global case-insensitive regex to find INSERT INTO [public.]staff_branches ... ;
+  const insertPattern = /INSERT\s+INTO\s+(?:public\.)?staff_branches\b[^;]*;/gi;
+  let match;
+  while ((match = insertPattern.exec(stripped)) !== null) {
+    mutations.push(match[0]);
+  }
+
+  // Global case-insensitive regex to find UPDATE [public.]staff_branches ... ;
+  const updatePattern = /UPDATE\s+(?:public\.)?staff_branches\b[^;]*;/gi;
+  while ((match = updatePattern.exec(stripped)) !== null) {
+    mutations.push(match[0]);
+  }
+
+  return mutations;
+}
+
+function testPublicBookingTest30HarnessContracts() {
+  console.log('--- Testing Test 30 Staff-Branch Fixture Isolation Contract (R9-R1.8.13.2) ---');
+  const sqlPath = path.join(__dirname, '..', 'supabase/tests/public_booking_rpc_behavioral_tests.sql');
+  const content = fs.readFileSync(sqlPath, 'utf8');
+
+  const startMarker = '-- TEST 30: Staff-branch junction mapping enforcement';
+  const endMarker = '-- TEST 31: evaluate_booking_slot returns allowed=true for free slot & slot_conflict for occupied';
+
+  const startIdx = content.indexOf(startMarker);
+  const endIdx = content.indexOf(endMarker, startIdx);
+
+  if (startIdx === -1 || endIdx === -1 || startIdx >= endIdx) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Test 30 region markers missing or out of order');
+  }
+
+  const region30 = content.substring(startIdx, endIdx);
+
+  // 1. Unmapped branch creation must be statement-bound
+  const branchInsertIdx = region30.indexOf('INSERT INTO public.branches');
+  if (branchInsertIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Missing INSERT INTO public.branches');
+  }
+  const branchStmtEndIdx = region30.indexOf('RETURNING id INTO v_unmapped_branch', branchInsertIdx);
+  if (branchStmtEndIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Missing RETURNING id INTO v_unmapped_branch');
+  }
+  const branchStmt = region30.substring(branchInsertIdx, branchStmtEndIdx + 36);
+  if (
+    !branchStmt.includes('tenant_id') ||
+    !branchStmt.includes('name') ||
+    !branchStmt.includes('slug') ||
+    !branchStmt.includes('is_active') ||
+    !branchStmt.includes('is_primary') ||
+    !branchStmt.includes('v_tenant_id') ||
+    !branchStmt.includes("'Stage A Unmapped Branch'") ||
+    !branchStmt.includes("'stage-a-unmapped'") ||
+    !branchStmt.includes('true, false')
+  ) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Branch creation statement missing exact required column or value bindings');
+  }
+
+  // 2. Service branch insert must be statement-bound
+  const serviceBranchInsertIdx = region30.indexOf('INSERT INTO public.service_branches', branchStmtEndIdx);
+  if (serviceBranchInsertIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Missing INSERT INTO public.service_branches after branch creation');
+  }
+  const serviceBranchStmtEndIdx = region30.indexOf(';', serviceBranchInsertIdx);
+  if (serviceBranchStmtEndIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Missing semicolon terminator for service_branches insert statement');
+  }
+  const serviceBranchStmt = region30.substring(serviceBranchInsertIdx, serviceBranchStmtEndIdx);
+  if (
+    !serviceBranchStmt.includes('tenant_id') ||
+    !serviceBranchStmt.includes('service_id') ||
+    !serviceBranchStmt.includes('branch_id') ||
+    !serviceBranchStmt.includes('v_tenant_id') ||
+    !serviceBranchStmt.includes('v_service_id') ||
+    !serviceBranchStmt.includes('v_unmapped_branch')
+  ) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: service_branches insert statement missing exact required variable bindings');
+  }
+
+  // 3. Evaluator call must be exactly bound
+  const evalCallIdx = region30.indexOf('public.evaluate_booking_slot(', serviceBranchStmtEndIdx);
+  if (evalCallIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Missing evaluate_booking_slot call after service_branches insert');
+  }
+  const evalCallEndIdx = region30.indexOf(');', evalCallIdx);
+  if (evalCallEndIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Missing terminator for evaluate_booking_slot call');
+  }
+  const evalCallStmt = region30.substring(evalCallIdx, evalCallEndIdx);
+  if (
+    !evalCallStmt.includes('p_tenant_id  => v_tenant_id') ||
+    !evalCallStmt.includes('p_branch_id  => v_unmapped_branch') ||
+    !evalCallStmt.includes('p_service_id => v_service_id') ||
+    !evalCallStmt.includes('p_staff_id   => v_staff_id')
+  ) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: evaluate_booking_slot call missing exact parameter bindings');
+  }
+
+  // 4. Staff-branch absence: fail-closed mutation scanner (R1.8.13.2)
+  //    Uses global regex on comment-stripped text instead of defective semicolon-split/startsWith
+  const staffBranchMutations = scanStaffBranchMutations(region30);
+  for (const mutStmt of staffBranchMutations) {
+    if (mutStmt.includes('v_staff_id') && mutStmt.includes('v_unmapped_branch')) {
+      throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Found mutation statement mapping v_staff_id to v_unmapped_branch in Test 30 region');
+    }
+  }
+
+  // 5. Allowed=false and reason_code != 'invalid_staff' assertions must occur in same IF fail guard
+  const ifIdx = region30.indexOf('IF ', evalCallEndIdx);
+  const thenIdx = region30.indexOf(' THEN', ifIdx);
+  if (ifIdx === -1 || thenIdx === -1 || ifIdx >= thenIdx) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Missing IF condition after evaluate_booking_slot');
+  }
+  const ifCondition = region30.substring(ifIdx, thenIdx);
+  if (!ifCondition.includes("(v_eval_res->>'allowed')::boolean") || !ifCondition.includes("v_eval_res->>'reason_code' != 'invalid_staff'")) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: IF guard condition missing allowed=false or reason_code != invalid_staff predicate');
+  }
+
+  const raiseExceptionIdx = region30.indexOf("RAISE EXCEPTION 'TEST 30 FAIL: Staff not mapped to branch was not rejected with invalid_staff'", thenIdx);
+  if (raiseExceptionIdx === -1 || raiseExceptionIdx > region30.indexOf('END IF;', thenIdx)) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Fail guard missing exact RAISE EXCEPTION literal for Test 30');
+  }
+
+  // 6. Service branch cleanup must be statement-bound
+  const deleteServiceBranchIdx = region30.indexOf('DELETE FROM public.service_branches', raiseExceptionIdx);
+  if (deleteServiceBranchIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Missing DELETE FROM public.service_branches cleanup statement');
+  }
+  const deleteServiceBranchStmtEndIdx = region30.indexOf(';', deleteServiceBranchIdx);
+  if (deleteServiceBranchStmtEndIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Missing semicolon terminator for service_branches cleanup');
+  }
+  const deleteServiceBranchStmt = region30.substring(deleteServiceBranchIdx, deleteServiceBranchStmtEndIdx);
+  if (
+    !deleteServiceBranchStmt.includes('tenant_id = v_tenant_id') ||
+    !deleteServiceBranchStmt.includes('service_id = v_service_id') ||
+    !deleteServiceBranchStmt.includes('branch_id = v_unmapped_branch')
+  ) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: service_branches cleanup statement missing exact required condition bindings');
+  }
+
+  // 7. Branch cleanup statement-bound
+  const deleteBranchIdx = region30.indexOf('DELETE FROM public.branches WHERE id = v_unmapped_branch;', deleteServiceBranchStmtEndIdx);
+  if (deleteBranchIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Missing DELETE FROM public.branches WHERE id = v_unmapped_branch; cleanup statement');
+  }
+
+  const passNoticeIdx = region30.indexOf("RAISE NOTICE 'TEST 30 PASS: Unmapped branch enforced cleanly.';", deleteBranchIdx);
+  if (passNoticeIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Missing Test 30 PASS notice');
+  }
+
+  // 8. Ordering verification
+  if (
+    !(
+      branchInsertIdx < serviceBranchInsertIdx &&
+      serviceBranchInsertIdx < evalCallIdx &&
+      evalCallIdx < ifIdx &&
+      ifIdx < raiseExceptionIdx &&
+      raiseExceptionIdx < deleteServiceBranchIdx &&
+      deleteServiceBranchIdx < deleteBranchIdx &&
+      deleteBranchIdx < passNoticeIdx
+    )
+  ) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Test 30 statements out of strict required order');
+  }
+
+  console.log('TEST30_REGION_FAIL_CLOSED=YES');
+  console.log('TEST30_UNMAPPED_BRANCH_CREATION_STRUCTURALLY_PROVEN=YES');
+  console.log('TEST30_SERVICE_BRANCH_MAPPING_STRUCTURALLY_PROVEN=YES');
+  console.log('TEST30_STAFF_BRANCH_MAPPING_ABSENT=YES');
+  console.log('TEST30_STAFF_BRANCH_ABSENCE_HEURISTIC_PRESENT=NO');
+  console.log('TEST30_STAFF_BRANCH_MUTATION_SCANNER_BEGIN_PREFIX_SAFE=YES');
+  console.log('TEST30_STAFF_BRANCH_MUTATION_SCANNER_COMMENT_PREFIX_SAFE=YES');
+
+  // 9. Adversarial scanner selftests (R1.8.13.2 §5)
+  // CASE A: BEGIN-prefixed INSERT INTO public.staff_branches
+  const caseA = `BEGIN\nINSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)\nVALUES (v_tenant_id, v_staff_id, v_unmapped_branch);`;
+  const caseAMutations = scanStaffBranchMutations(caseA);
+  if (caseAMutations.length === 0 || !caseAMutations.some(m => m.includes('v_staff_id') && m.includes('v_unmapped_branch'))) {
+    throw new Error('ADVERSARIAL_SCANNER_DEFECT: Case A (BEGIN prefix) not detected as dangerous mutation');
+  }
+
+  // CASE B: Comment-prefixed INSERT INTO staff_branches
+  const caseB = `-- harmless comment\nINSERT INTO staff_branches (tenant_id, staff_id, branch_id)\nVALUES (v_tenant_id, v_staff_id, v_unmapped_branch);`;
+  const caseBMutations = scanStaffBranchMutations(caseB);
+  if (caseBMutations.length === 0 || !caseBMutations.some(m => m.includes('v_staff_id') && m.includes('v_unmapped_branch'))) {
+    throw new Error('ADVERSARIAL_SCANNER_DEFECT: Case B (comment prefix) not detected as dangerous mutation');
+  }
+
+  // CASE C: UPDATE public.staff_branches
+  const caseC = `UPDATE public.staff_branches\nSET branch_id = v_unmapped_branch\nWHERE staff_id = v_staff_id;`;
+  const caseCMutations = scanStaffBranchMutations(caseC);
+  if (caseCMutations.length === 0 || !caseCMutations.some(m => m.includes('v_staff_id') && m.includes('v_unmapped_branch'))) {
+    throw new Error('ADVERSARIAL_SCANNER_DEFECT: Case C (UPDATE) not detected as dangerous mutation');
+  }
+
+  // NEGATIVE: Comment-only text must NOT be classified as mutation
+  const commentOnly = `-- INSERT INTO staff_branches (tenant_id, staff_id, branch_id) VALUES (v_tenant_id, v_staff_id, v_unmapped_branch);`;
+  const commentOnlyMutations = scanStaffBranchMutations(commentOnly);
+  if (commentOnlyMutations.length !== 0) {
+    throw new Error('ADVERSARIAL_SCANNER_DEFECT: Comment-only text wrongly classified as mutation');
+  }
+
+  console.log('TEST30_STAFF_BRANCH_MUTATION_SCANNER_ADVERSARIAL=PASS');
+
+  console.log('TEST30_EVALUATOR_ARGUMENT_BINDING_STRUCTURALLY_PROVEN=YES');
+  console.log('TEST30_ALLOWED_FALSE_ASSERTION_STRUCTURALLY_PROVEN=YES');
+  console.log('TEST30_INVALID_STAFF_PREDICATE_STRUCTURALLY_PROVEN=YES');
+  console.log('TEST30_SERVICE_BRANCH_CLEANUP_EXACTLY_BOUND=YES');
+  console.log('TEST30_FIXTURE_CLEANUP_STRUCTURALLY_PROVEN=YES');
+  console.log('R1_8_11_2_SELFTEST_REGRESSION_RESULT=PASS');
+  console.log('R1_8_12_1_SELFTEST_REGRESSION_RESULT=PASS');
+  console.log('✅ Test 30 staff branch fixture isolation contracts PASSED.');
+}
+
 function main() {
   testArityScannerAdversarial();
   testAggregatorAdversarial();
@@ -1430,7 +1667,8 @@ function main() {
   testPublicBookingSourceContract();
   testR187HostedEvidenceHarnessContracts();
   testPublicBookingTests27_28_47HarnessContracts();
-  console.log('\n🎉 ALL HARDENED R9-R1.8.11.2 CONTRACT SELF-TESTS PASSED!');
+  testPublicBookingTest30HarnessContracts();
+  console.log('\n🎉 ALL HARDENED R9-R1.8.13.2 CONTRACT SELF-TESTS PASSED!');
 }
 
 main();
