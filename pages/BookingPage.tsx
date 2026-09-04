@@ -18,6 +18,7 @@ import { SalonBusinessProfile, BusinessBranch } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { canPreviewTenantSite } from '../utils/previewAuth';
 import SalonWebsiteView from '../components/SalonWebsiteView';
+import SalonWebsiteViewV2 from '../components/SalonWebsiteViewV2';
 import { getDataSourceMode } from '../services/dataSourceConfig';
 
 
@@ -803,18 +804,39 @@ const BookingPage: React.FC = () => {
          </div>
       ) : (
       <div data-testid="public-booking-ready">
-        <SalonWebsiteView 
-          tenant={tenant}
-          businessProfile={businessProfile}
-          staffList={staffList}
-          servicesList={servicesList}
-          onStartBooking={onStartBooking}
-          onServiceSelect={handleWebsiteServiceSelect}
-          onStaffSelect={handleWebsiteStaffSelect}
-          language={language}
-          isBookingOpen={step > 0}
-          isAiEnabled={isAiEnabled}
-          bookingComponent={
+        {(() => {
+          const searchParams = new URLSearchParams(
+            window.location.search || (window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '')
+          );
+          const uiParam = searchParams.get('ui');
+          const hostname = window.location.hostname;
+          const isBlockedHost =
+            hostname === 'randevulari.com' ||
+            hostname === 'www.randevulari.com' ||
+            hostname === 'lari-staging.vercel.app';
+          const isAllowedNonProdHost =
+            !isBlockedHost &&
+            (hostname === 'localhost' ||
+              hostname === '127.0.0.1' ||
+              hostname.endsWith('.vercel.app'));
+
+          const shouldRenderV2 = uiParam === 'v2' && isAllowedNonProdHost;
+
+          const SelectedView = shouldRenderV2 ? SalonWebsiteViewV2 : SalonWebsiteView;
+
+          return (
+            <SelectedView 
+              tenant={tenant}
+              businessProfile={businessProfile}
+              staffList={staffList}
+              servicesList={servicesList}
+              onStartBooking={onStartBooking}
+              onServiceSelect={handleWebsiteServiceSelect}
+              onStaffSelect={handleWebsiteStaffSelect}
+              language={language}
+              isBookingOpen={step > 0}
+              isAiEnabled={isAiEnabled}
+              bookingComponent={
             step > 0 ? (
               <div data-testid="public-booking-form" className="bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-blue-900/5 border border-gray-100 dark:border-slate-700/50 p-6 md:p-8 lg:p-10 mx-auto w-full mb-12">
                 {renderStepper()}
@@ -1443,6 +1465,8 @@ const BookingPage: React.FC = () => {
       ) : null
     }
     />
+  );
+})()}
     </div>
     )}
   </div>
