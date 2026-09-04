@@ -13,7 +13,7 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
         with:
-          ref: '99c6a13097cd071a6da5349dfc45e7c924460f98'
+          ref: 'c5c6c17790e08da7ecad7dede2f6ddb8e79a9a7f'
 
       - name: Initialize Evidence Directory
         id: init_artifacts
