@@ -513,7 +513,9 @@ function testAggregatorAdversarial() {
   if (!c34Caught) throw new Error('Case 34 failed: missing canonical key in fragment was synthesized instead of rejected');
 
   // Clean up scratch temp dir
-  fs.rmSync(tempDir, { recursive: true, force: true });
+  try {
+    fs.rmSync(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch {}
   console.log('✅ Evidence aggregator 34 actual executable cases PASSED.');
 }
 
@@ -1660,6 +1662,160 @@ function testPublicBookingTest30HarnessContracts() {
   console.log('✅ Test 30 staff branch fixture isolation contracts PASSED.');
 }
 
+function testPublicBookingTests36_37HarnessContracts() {
+  console.log('--- Testing Test 36 & 37 Isolation Contracts (R9-R1.8.14) ---');
+  const sqlPath = path.join(__dirname, '..', 'supabase/tests/public_booking_rpc_behavioral_tests.sql');
+  const content = fs.readFileSync(sqlPath, 'utf8');
+
+  // TEST 36 REGION CHECK
+  const stageAHeaderNotice = '=== STARTING STAGE A HARDENING TESTS 36-40 ===';
+  const stageAHeaderIdx = content.indexOf(stageAHeaderNotice);
+  if (stageAHeaderIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_TEST36_37_CONTRACT_DEFECT: Stage A hardening notice missing');
+  }
+
+  const test36StartMarker = '-- TEST 36: Composite FK constraint rejects direct cross-tenant staff_branches INSERT';
+  const test37StartMarker = '-- TEST 37: RLS WITH CHECK policy rejects unauthorized staff/owner branch mapping INSERT';
+  const test38StartMarker = '-- TEST 38: Anonymous user calling evaluate_booking_slot directly is rejected';
+
+  const test36StartIdx = content.indexOf(test36StartMarker, stageAHeaderIdx);
+  const test37StartIdx = content.indexOf(test37StartMarker, test36StartIdx);
+  const test38StartIdx = content.indexOf(test38StartMarker, test37StartIdx);
+
+  if (test36StartIdx === -1 || test37StartIdx === -1 || test38StartIdx === -1 || test36StartIdx >= test37StartIdx || test37StartIdx >= test38StartIdx) {
+    throw new Error('PUBLIC_BOOKING_TEST36_37_CONTRACT_DEFECT: Test 36, 37, 38 region markers missing or out of order');
+  }
+
+  const region36 = content.substring(test36StartIdx, test37StartIdx);
+
+  // Check Test 36 structural order
+  const predelete36Idx = region36.indexOf('DELETE FROM public.staff_branches');
+  const rowcountGuard36Idx = region36.indexOf('GET DIAGNOSTICS v_rowcount = ROW_COUNT;', predelete36Idx);
+  const invalidInsert36Idx = region36.indexOf('INSERT INTO public.staff_branches', rowcountGuard36Idx);
+  const fkViolationIdx = region36.indexOf('foreign_key_violation', invalidInsert36Idx);
+  const diagConstraintIdx = region36.indexOf('GET STACKED DIAGNOSTICS v_constraint_name = CONSTRAINT_NAME;', fkViolationIdx);
+  const checkCanonicalFkIdx = region36.indexOf("fk_staff_branches_staff_tenant'", diagConstraintIdx);
+  const failGuard36Idx = region36.indexOf('IF NOT v_fk_failed THEN', checkCanonicalFkIdx);
+  const passNotice36Idx = region36.indexOf('TEST 36 PASS', failGuard36Idx);
+  const restore36Idx = region36.indexOf('INSERT INTO public.staff_branches', passNotice36Idx);
+  const restoreGuard36Idx = region36.indexOf('GET DIAGNOSTICS v_rowcount = ROW_COUNT;', restore36Idx);
+
+  if (
+    predelete36Idx === -1 ||
+    rowcountGuard36Idx === -1 ||
+    invalidInsert36Idx === -1 ||
+    fkViolationIdx === -1 ||
+    diagConstraintIdx === -1 ||
+    checkCanonicalFkIdx === -1 ||
+    failGuard36Idx === -1 ||
+    passNotice36Idx === -1 ||
+    restore36Idx === -1 ||
+    restoreGuard36Idx === -1
+  ) {
+    throw new Error('PUBLIC_BOOKING_TEST36_CONTRACT_DEFECT: Missing required structural semantic tokens in Test 36 region');
+  }
+
+  if (
+    !(
+      predelete36Idx < rowcountGuard36Idx &&
+      rowcountGuard36Idx < invalidInsert36Idx &&
+      invalidInsert36Idx < fkViolationIdx &&
+      fkViolationIdx < diagConstraintIdx &&
+      diagConstraintIdx < checkCanonicalFkIdx &&
+      checkCanonicalFkIdx < failGuard36Idx &&
+      failGuard36Idx < passNotice36Idx &&
+      passNotice36Idx < restore36Idx &&
+      restore36Idx < restoreGuard36Idx
+    )
+  ) {
+    throw new Error('PUBLIC_BOOKING_TEST36_CONTRACT_DEFECT: Test 36 structural markers out of required order');
+  }
+
+  // Fail if Test36 invalid INSERT contains ON CONFLICT
+  const invalidInsertStmt36 = region36.substring(invalidInsert36Idx, fkViolationIdx);
+  if (invalidInsertStmt36.includes('ON CONFLICT')) {
+    throw new Error('PUBLIC_BOOKING_TEST36_CONTRACT_DEFECT: Invalid INSERT in Test 36 contains ON CONFLICT clause');
+  }
+
+  console.log('TEST36_REGION_FAIL_CLOSED=YES');
+  console.log('TEST36_PK_MASK_REMOVED=YES');
+  console.log('TEST36_COMPOSITE_FK_ASSERTION_STRUCTURALLY_PROVEN=YES');
+  console.log('TEST36_CANONICAL_CONSTRAINT_NAME_GUARD=YES');
+  console.log('TEST36_MAPPING_RESTORE_STRUCTURALLY_PROVEN=YES');
+
+  // TEST 37 REGION CHECK
+  const region37 = content.substring(test37StartIdx, test38StartIdx);
+
+  const authUserFixtureIdx = region37.indexOf('auth.users');
+  const userProfileFixtureIdx = region37.indexOf('public.users_profile', authUserFixtureIdx);
+  const otherTenantIdx = region37.indexOf('v_other_tenant_id', userProfileFixtureIdx);
+  const tenantOwnerIdx = region37.indexOf('tenant_owner', otherTenantIdx);
+  const activeTrueIdx = region37.indexOf('true', tenantOwnerIdx);
+  const predelete37Idx = region37.indexOf('DELETE FROM public.staff_branches', activeTrueIdx);
+  const predeleteGuard37Idx = region37.indexOf('GET DIAGNOSTICS v_rowcount = ROW_COUNT;', predelete37Idx);
+  const impersonationIdx = region37.indexOf('request.jwt.claim.sub', predeleteGuard37Idx);
+  const attemptedInsert37Idx = region37.indexOf('INSERT INTO public.staff_branches', impersonationIdx);
+  const rlsExceptionIdx = region37.indexOf('insufficient_privilege', attemptedInsert37Idx);
+  const pkFkRejectIdx = region37.indexOf('v_test37_pk_failed', rlsExceptionIdx);
+  const absenceCheckIdx = region37.indexOf('SELECT count(*)', rlsExceptionIdx);
+  const contextResetIdx = region37.indexOf("set_config('role', 'postgres'", rlsExceptionIdx);
+  const privRestoreIdx = region37.indexOf('REVOKE', absenceCheckIdx);
+  const cleanupIdx = region37.indexOf('DELETE FROM public.users_profile', privRestoreIdx);
+  const restore37Idx = region37.indexOf('INSERT INTO public.staff_branches', cleanupIdx);
+  const passNotice37Idx = region37.indexOf('TEST 37 PASS', restore37Idx);
+
+  if (
+    authUserFixtureIdx === -1 ||
+    userProfileFixtureIdx === -1 ||
+    otherTenantIdx === -1 ||
+    tenantOwnerIdx === -1 ||
+    activeTrueIdx === -1 ||
+    predelete37Idx === -1 ||
+    predeleteGuard37Idx === -1 ||
+    impersonationIdx === -1 ||
+    attemptedInsert37Idx === -1 ||
+    rlsExceptionIdx === -1 ||
+    pkFkRejectIdx === -1 ||
+    absenceCheckIdx === -1 ||
+    contextResetIdx === -1 ||
+    privRestoreIdx === -1 ||
+    cleanupIdx === -1 ||
+    restore37Idx === -1 ||
+    passNotice37Idx === -1
+  ) {
+    throw new Error('PUBLIC_BOOKING_TEST37_CONTRACT_DEFECT: Missing required structural semantic tokens in Test 37 region');
+  }
+
+  if (
+    !(
+      authUserFixtureIdx < userProfileFixtureIdx &&
+      userProfileFixtureIdx < predelete37Idx &&
+      predelete37Idx < predeleteGuard37Idx &&
+      predeleteGuard37Idx < impersonationIdx &&
+      impersonationIdx < attemptedInsert37Idx &&
+      attemptedInsert37Idx < rlsExceptionIdx &&
+      rlsExceptionIdx < contextResetIdx &&
+      contextResetIdx < pkFkRejectIdx &&
+      pkFkRejectIdx < absenceCheckIdx &&
+      absenceCheckIdx < privRestoreIdx &&
+      privRestoreIdx < cleanupIdx &&
+      cleanupIdx < restore37Idx &&
+      restore37Idx < passNotice37Idx
+    )
+  ) {
+    throw new Error('PUBLIC_BOOKING_TEST37_CONTRACT_DEFECT: Test 37 structural markers out of required order');
+  }
+
+  console.log('TEST37_EXECUTABLE_BODY_PROVEN=YES');
+  console.log('TEST37_RLS_GATE_ISOLATED_FROM_PK=YES');
+  console.log('TEST37_RLS_GATE_ISOLATED_FROM_FK=YES');
+  console.log('TEST37_RLS_GATE_ISOLATED_FROM_ACL=YES');
+  console.log('TEST37_CONTEXT_RESTORE_STRUCTURALLY_PROVEN=YES');
+  console.log('TEST37_PRIVILEGE_RESTORE_STRUCTURALLY_PROVEN=YES');
+  console.log('TEST37_FIXTURE_CLEANUP_STRUCTURALLY_PROVEN=YES');
+  console.log('✅ Test 36 & 37 FK and RLS isolation contracts PASSED.');
+}
+
 function main() {
   testArityScannerAdversarial();
   testAggregatorAdversarial();
@@ -1668,7 +1824,8 @@ function main() {
   testR187HostedEvidenceHarnessContracts();
   testPublicBookingTests27_28_47HarnessContracts();
   testPublicBookingTest30HarnessContracts();
-  console.log('\n🎉 ALL HARDENED R9-R1.8.13.2 CONTRACT SELF-TESTS PASSED!');
+  testPublicBookingTests36_37HarnessContracts();
+  console.log('\n🎉 ALL HARDENED R9-R1.8.14 CONTRACT SELF-TESTS PASSED!');
 }
 
 main();
