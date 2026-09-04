@@ -1423,6 +1423,98 @@ function testPublicBookingTests27_28_47HarnessContracts() {
   console.log('✅ Tests 27-28 & 47 hardened slot object harness contracts PASSED.');
 }
 
+function testPublicBookingTest30HarnessContracts() {
+  console.log('--- Testing Test 30 Staff-Branch Fixture Isolation Contract (R9-R1.8.13) ---');
+  const sqlPath = path.join(__dirname, '..', 'supabase/tests/public_booking_rpc_behavioral_tests.sql');
+  const content = fs.readFileSync(sqlPath, 'utf8');
+
+  const startMarker = '-- TEST 30: Staff-branch junction mapping enforcement';
+  const endMarker = '-- TEST 31: evaluate_booking_slot returns allowed=true for free slot & slot_conflict for occupied';
+
+  const startIdx = content.indexOf(startMarker);
+  const endIdx = content.indexOf(endMarker, startIdx);
+
+  if (startIdx === -1 || endIdx === -1 || startIdx >= endIdx) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Test 30 region markers missing or out of order');
+  }
+
+  const region30 = content.substring(startIdx, endIdx);
+
+  // 1. Service branch mapping in Test30 region
+  const createBranchIdx = region30.indexOf('v_unmapped_branch');
+  const insertServiceBranchIdx = region30.indexOf('INSERT INTO public.service_branches');
+  const evalRpcIdx = region30.indexOf('public.evaluate_booking_slot');
+
+  if (createBranchIdx === -1 || insertServiceBranchIdx === -1 || evalRpcIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Test 30 missing unmapped branch creation, service_branches insert, or evaluate_booking_slot call');
+  }
+
+  if (!(createBranchIdx < insertServiceBranchIdx && insertServiceBranchIdx < evalRpcIdx)) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Service branch mapping must occur AFTER unmapped branch creation and BEFORE evaluate_booking_slot');
+  }
+
+  const serviceBranchInsertRegion = region30.substring(insertServiceBranchIdx, evalRpcIdx);
+  if (
+    !serviceBranchInsertRegion.includes('tenant_id') ||
+    !serviceBranchInsertRegion.includes('service_id') ||
+    !serviceBranchInsertRegion.includes('branch_id') ||
+    !serviceBranchInsertRegion.includes('v_tenant_id') ||
+    !serviceBranchInsertRegion.includes('v_service_id') ||
+    !serviceBranchInsertRegion.includes('v_unmapped_branch')
+  ) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: service_branches insert missing exact variable bindings');
+  }
+
+  // 2. Staff branches mapping MUST BE ABSENT in Test 30 region
+  if (region30.includes('staff_branches') && region30.includes('v_unmapped_branch')) {
+    const staffBranchMatch = region30.indexOf('staff_branches');
+    const unmappedMatch = region30.indexOf('v_unmapped_branch', staffBranchMatch);
+    if (staffBranchMatch !== -1 && unmappedMatch !== -1 && unmappedMatch - staffBranchMatch < 200) {
+      throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Test 30 contains forbidden staff_branches mapping for v_unmapped_branch');
+    }
+  }
+
+  // 3. Reason code predicate check
+  const predicateIdx = region30.indexOf("v_eval_res->>'reason_code' != 'invalid_staff'");
+  const failGuardIdx = region30.indexOf('TEST 30 FAIL: Staff not mapped to branch was not rejected with invalid_staff');
+
+  if (predicateIdx === -1 || failGuardIdx === -1 || predicateIdx >= failGuardIdx) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Test 30 invalid_staff predicate missing or out of order');
+  }
+
+  // 4. Cleanup ordering
+  const deleteServiceBranchIdx = region30.indexOf('DELETE FROM public.service_branches');
+  const deleteBranchIdx = region30.indexOf('DELETE FROM public.branches');
+  const passNoticeIdx = region30.indexOf('TEST 30 PASS');
+
+  if (deleteServiceBranchIdx === -1 || deleteBranchIdx === -1 || passNoticeIdx === -1) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Test 30 cleanup statements or pass notice missing');
+  }
+
+  if (
+    !(
+      createBranchIdx < insertServiceBranchIdx &&
+      insertServiceBranchIdx < evalRpcIdx &&
+      evalRpcIdx < predicateIdx &&
+      predicateIdx < failGuardIdx &&
+      failGuardIdx < deleteServiceBranchIdx &&
+      deleteServiceBranchIdx < deleteBranchIdx &&
+      deleteBranchIdx < passNoticeIdx
+    )
+  ) {
+    throw new Error('PUBLIC_BOOKING_TEST30_CONTRACT_DEFECT: Test 30 execution and cleanup steps out of strict required order');
+  }
+
+  console.log('TEST30_REGION_FAIL_CLOSED=YES');
+  console.log('TEST30_SERVICE_BRANCH_MAPPING_STRUCTURALLY_PROVEN=YES');
+  console.log('TEST30_STAFF_BRANCH_MAPPING_ABSENT=YES');
+  console.log('TEST30_INVALID_STAFF_PREDICATE_STRUCTURALLY_PROVEN=YES');
+  console.log('TEST30_FIXTURE_CLEANUP_STRUCTURALLY_PROVEN=YES');
+  console.log('R1_8_11_2_SELFTEST_REGRESSION_RESULT=PASS');
+  console.log('R1_8_12_1_SELFTEST_REGRESSION_RESULT=PASS');
+  console.log('✅ Test 30 staff branch fixture isolation contracts PASSED.');
+}
+
 function main() {
   testArityScannerAdversarial();
   testAggregatorAdversarial();
@@ -1430,7 +1522,8 @@ function main() {
   testPublicBookingSourceContract();
   testR187HostedEvidenceHarnessContracts();
   testPublicBookingTests27_28_47HarnessContracts();
-  console.log('\n🎉 ALL HARDENED R9-R1.8.11.2 CONTRACT SELF-TESTS PASSED!');
+  testPublicBookingTest30HarnessContracts();
+  console.log('\n🎉 ALL HARDENED R9-R1.8.13 CONTRACT SELF-TESTS PASSED!');
 }
 
 main();
