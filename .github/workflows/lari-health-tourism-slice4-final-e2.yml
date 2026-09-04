@@ -13,7 +13,8 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
         with:
-          ref: '72be84d1e8b3793029aec8ab668fabce2459613c'
+          repository: 'MertSGI/Randapp-main'
+          ref: 'ab4546b7fa1770113807df36076608a514cbf849'
 
       - name: Initialize Evidence Directory
         id: init_artifacts
