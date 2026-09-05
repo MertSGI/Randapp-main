@@ -565,16 +565,16 @@ function testPublicBookingSourceContract() {
   const sqlPath = path.join(__dirname, '..', 'supabase/tests/public_booking_rpc_behavioral_tests.sql');
   const content = fs.readFileSync(sqlPath, 'utf8');
 
-  const mig20260813Path = path.join(__dirname, '..', 'supabase/migrations/20260813_h1c_commercial_eligibility_and_quota_enforcement.sql');
+  const mig20260914Path = path.join(__dirname, '..', 'supabase/migrations/20260914_public_booking_branch_id_response_contract_fix.sql');
   const mig20260723Path = path.join(__dirname, '..', 'supabase/migrations/20260723_booking_lifecycle_foundation.sql');
   const mig20260827Path = path.join(__dirname, '..', 'supabase/migrations/20260827_h1e_c_public_booking_release_gate_runtime_fix.sql');
 
-  const mig20260813 = fs.readFileSync(mig20260813Path, 'utf8');
+  const mig20260914 = fs.readFileSync(mig20260914Path, 'utf8');
   const mig20260723 = fs.readFileSync(mig20260723Path, 'utf8');
   const mig20260827 = fs.readFileSync(mig20260827Path, 'utf8');
 
-  // 1. CANONICAL CREATE_PUBLIC_BOOKING IDENTITY (20260813)
-  const normMig20260813 = normalizeSql(mig20260813);
+  // 1. CANONICAL CREATE_PUBLIC_BOOKING IDENTITY (20260914)
+  const normMig20260914 = normalizeSql(mig20260914);
   const expectedCreateRevoke = normalizeSql(
     'REVOKE EXECUTE ON FUNCTION public.create_public_booking(text, uuid, uuid, date, time, text, text, text, boolean, boolean, boolean, text, uuid) FROM PUBLIC;'
   );
@@ -582,22 +582,22 @@ function testPublicBookingSourceContract() {
     'GRANT EXECUTE ON FUNCTION public.create_public_booking(text, uuid, uuid, date, time, text, text, text, boolean, boolean, boolean, text, uuid) TO anon, authenticated;'
   );
 
-  if (!normMig20260813.includes(expectedCreateRevoke)) {
-    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260813 missing REVOKE EXECUTE ON FUNCTION public.create_public_booking(...) with exact 13 parameter types');
+  if (!normMig20260914.includes(expectedCreateRevoke)) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260914 missing REVOKE EXECUTE ON FUNCTION public.create_public_booking(...) with exact 13 parameter types');
   }
-  if (!normMig20260813.includes(expectedCreateGrant)) {
-    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260813 missing GRANT EXECUTE ON FUNCTION public.create_public_booking(...) with exact 13 parameter types');
+  if (!normMig20260914.includes(expectedCreateGrant)) {
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260914 missing GRANT EXECUTE ON FUNCTION public.create_public_booking(...) with exact 13 parameter types');
   }
 
   // Function-local SECURITY DEFINER guard for create_public_booking
-  const createStart = mig20260813.indexOf('CREATE OR REPLACE FUNCTION public.create_public_booking(');
-  const createGrantIdx = mig20260813.indexOf('GRANT EXECUTE ON FUNCTION public.create_public_booking(', createStart);
+  const createStart = mig20260914.indexOf('CREATE OR REPLACE FUNCTION public.create_public_booking(');
+  const createGrantIdx = mig20260914.indexOf('GRANT EXECUTE ON FUNCTION public.create_public_booking(', createStart);
   if (createStart === -1 || createGrantIdx === -1 || createGrantIdx <= createStart) {
-    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260813 could not isolate function region for create_public_booking');
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260914 could not isolate function region for create_public_booking');
   }
-  const createRegion = mig20260813.substring(createStart, createGrantIdx);
+  const createRegion = mig20260914.substring(createStart, createGrantIdx);
   if (!createRegion.includes('SECURITY DEFINER')) {
-    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260813 create_public_booking function region missing SECURITY DEFINER');
+    throw new Error('CANONICAL_PRODUCT_MIGRATION_DEFECT: 20260914 create_public_booking function region missing SECURITY DEFINER');
   }
 
   // 2. GET_PUBLIC_AVAILABLE_SLOTS CANONICAL IDENTITY (20260723)
@@ -2056,6 +2056,50 @@ function testStageAHardeningDeclarationSelftest(originalSqlContent) {
   console.log('TEST36_37_DECLARATION_VALIDATOR_ADVERSARIAL=PASS');
 }
 
+function testPublicBookingBranchIdResponseContractSelftest() {
+  console.log('--- Testing Public Booking branch_id Response Contract (R9-R1.8.16) ---');
+  const mig20260914Path = path.join(__dirname, '..', 'supabase/migrations/20260914_public_booking_branch_id_response_contract_fix.sql');
+  const migContent = fs.readFileSync(mig20260914Path, 'utf8');
+
+  // Verify migration contains initial return with 'branch_id', v_effective_branch
+  const initialReturnIdx = migContent.indexOf("'branch_id',      v_effective_branch");
+  if (initialReturnIdx === -1) {
+    throw new Error('BRANCH_ID_CONTRACT_DEFECT: Initial booking response missing branch_id return');
+  }
+
+  // Verify migration contains replay return with 'branch_id', v_existing_branch_id
+  const replayReturnIdx = migContent.indexOf("'branch_id',      v_existing_branch_id");
+  if (replayReturnIdx === -1) {
+    throw new Error('BRANCH_ID_CONTRACT_DEFECT: Replay response missing branch_id return');
+  }
+
+  // Verify replay lookup queries actual appointment stored branch_id
+  const replayLookupIdx = migContent.indexOf("SELECT branch_id INTO v_existing_branch_id");
+  if (replayLookupIdx === -1) {
+    throw new Error('BRANCH_ID_CONTRACT_DEFECT: Replay response missing SELECT branch_id INTO v_existing_branch_id');
+  }
+
+  const sqlPath = path.join(__dirname, '..', 'supabase/tests/public_booking_rpc_behavioral_tests.sql');
+  const sqlContent = fs.readFileSync(sqlPath, 'utf8');
+
+  // Verify Test 45 asserts branch_id return
+  if (!sqlContent.includes("v_branch_ret := (r->>'branch_id')::uuid;")) {
+    throw new Error('BRANCH_ID_CONTRACT_DEFECT: Test 45 missing v_branch_ret assignment from r->>\'branch_id\'');
+  }
+
+  // Verify Test 5 asserts replay branch_id return
+  if (!sqlContent.includes("IF (r->>'branch_id')::uuid IS DISTINCT FROM v_primary_branch_id THEN")) {
+    throw new Error('BRANCH_ID_CONTRACT_DEFECT: Test 5 missing replay branch_id assertion');
+  }
+
+  console.log('CREATE_PUBLIC_BOOKING_INITIAL_RESPONSE_INCLUDES_BRANCH_ID=YES');
+  console.log('CREATE_PUBLIC_BOOKING_REPLAY_RESPONSE_INCLUDES_STORED_BRANCH_ID=YES');
+  console.log('TEST5_REPLAY_BRANCH_ID_ASSERTION_PRESENT=YES');
+  console.log('TEST45_BRANCH_ID_ASSERTION_PRESENT=YES');
+  console.log('R1_8_16_PUBLIC_BOOKING_BRANCH_ID_RESPONSE_CONTRACT_RESULT=PASS');
+  console.log('✅ Public booking branch_id response contract PASSED.');
+}
+
 function main() {
   testArityScannerAdversarial();
   testAggregatorAdversarial();
@@ -2065,7 +2109,8 @@ function main() {
   testPublicBookingTests27_28_47HarnessContracts();
   testPublicBookingTest30HarnessContracts();
   testPublicBookingTests36_37HarnessContracts();
-  console.log('\n🎉 ALL HARDENED R9-R1.8.13.2 CONTRACT SELF-TESTS PASSED!');
+  testPublicBookingBranchIdResponseContractSelftest();
+  console.log('\n🎉 ALL HARDENED R9-R1.8.16 CONTRACT SELF-TESTS PASSED!');
 }
 
 main();
