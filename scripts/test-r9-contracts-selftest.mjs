@@ -2056,6 +2056,279 @@ function testStageAHardeningDeclarationSelftest(originalSqlContent) {
   console.log('TEST36_37_DECLARATION_VALIDATOR_ADVERSARIAL=PASS');
 }
 
+
+
+function extractFunctionDef(sqlText, funcSignature, endMarker) {
+  const startIdx = sqlText.indexOf(funcSignature);
+  if (startIdx === -1) return null;
+  const secondIdx = sqlText.indexOf(funcSignature, startIdx + funcSignature.length);
+  if (secondIdx !== -1) {
+    throw new Error(`AMBIGUOUS_FUNCTION_REGION: Multiple occurrences of ${funcSignature}`);
+  }
+  const endIdx = sqlText.indexOf(endMarker, startIdx);
+  if (endIdx === -1) {
+    throw new Error(`UNTERMINATED_FUNCTION_REGION: Missing ${endMarker} after ${funcSignature}`);
+  }
+  return sqlText.substring(startIdx, endIdx + endMarker.length);
+}
+
+function validateR18161BranchResponseContract(options) {
+  const h1cSql = options.h1cSql.replace(/\r\n/g, '\n');
+  const candidateMigrationSql = options.candidateMigrationSql.replace(/\r\n/g, '\n');
+  const publicBookingTestSql = options.publicBookingTestSql.replace(/\r\n/g, '\n');
+
+  // 1. Signature / Security / Privilege checks on 20260914 migration
+  const sigMarker = 'CREATE OR REPLACE FUNCTION public.create_public_booking(';
+  const endMarker = 'GRANT EXECUTE ON FUNCTION public.create_public_booking(text, uuid, uuid, date, time, text, text, text, boolean, boolean, boolean, text, uuid) TO anon, authenticated;';
+
+  const candFuncRegion = extractFunctionDef(candidateMigrationSql, sigMarker, endMarker);
+  if (!candFuncRegion) {
+    throw new Error('SIGNATURE_CONTRACT_DEFECT: candidate create_public_booking function region missing');
+  }
+
+  if (!candFuncRegion.includes('RETURNS jsonb')) {
+    throw new Error('SIGNATURE_CONTRACT_DEFECT: RETURNS jsonb missing');
+  }
+  if (!candFuncRegion.includes('LANGUAGE plpgsql')) {
+    throw new Error('SIGNATURE_CONTRACT_DEFECT: LANGUAGE plpgsql missing');
+  }
+  if (!candFuncRegion.includes('SECURITY DEFINER')) {
+    throw new Error('SECURITY_CONTRACT_DEFECT: SECURITY DEFINER missing');
+  }
+  if (!candFuncRegion.includes('SET search_path = pg_catalog, public, extensions')) {
+    throw new Error('SECURITY_CONTRACT_DEFECT: SET search_path missing or invalid');
+  }
+  if (!candFuncRegion.includes('REVOKE EXECUTE ON FUNCTION public.create_public_booking(text, uuid, uuid, date, time, text, text, text, boolean, boolean, boolean, text, uuid) FROM PUBLIC;')) {
+    throw new Error('PRIVILEGE_CONTRACT_DEFECT: REVOKE EXECUTE FROM PUBLIC missing');
+  }
+
+  // 2. Extract H1C baseline function definition
+  const h1cFuncRegion = extractFunctionDef(h1cSql, sigMarker, endMarker);
+  if (!h1cFuncRegion) {
+    throw new Error('BASELINE_CONTRACT_DEFECT: H1C baseline create_public_booking function region missing');
+  }
+
+  // 3. Programmatic transformation of H1C baseline
+  let expectedFunc = h1cFuncRegion;
+
+  // A: Add declaration v_existing_branch_id uuid;
+  const declPattern = '    v_existing_apt_id       uuid;';
+  const declReplacement = '    v_existing_apt_id       uuid;\n    v_existing_branch_id    uuid;';
+  if (expectedFunc.split(declPattern).length - 1 !== 1) {
+    throw new Error('PARITY_TRANSFORMATION_DEFECT: Pattern A (decl) does not match exactly once');
+  }
+  expectedFunc = expectedFunc.replace(declPattern, declReplacement);
+
+  // B: Idempotency replay SELECT branch_id INTO v_existing_branch_id
+  const replayLookupPattern = '        IF FOUND THEN';
+  const replayLookupReplacement = '        IF FOUND THEN\n            SELECT branch_id INTO v_existing_branch_id\n            FROM public.appointments\n            WHERE id = v_existing_apt_id AND tenant_id = v_tenant_id;';
+  if (expectedFunc.split(replayLookupPattern).length - 1 !== 1) {
+    throw new Error('PARITY_TRANSFORMATION_DEFECT: Pattern B (replay lookup) does not match exactly once');
+  }
+  expectedFunc = expectedFunc.replace(replayLookupPattern, replayLookupReplacement);
+
+  // C: Add to replay success response
+  const replayResponsePattern = "                'appointment_id', v_existing_apt_id,\n                'manage_token',   v_token,\n                'reason_code',    'ok'";
+  const replayResponseReplacement = "                'appointment_id', v_existing_apt_id,\n                'manage_token',   v_token,\n                'branch_id',      v_existing_branch_id,\n                'reason_code',    'ok'";
+  if (expectedFunc.split(replayResponsePattern).length - 1 !== 1) {
+    throw new Error('PARITY_TRANSFORMATION_DEFECT: Pattern C (replay response) does not match exactly once');
+  }
+  expectedFunc = expectedFunc.replace(replayResponsePattern, replayResponseReplacement);
+
+  // D: Add to fresh success response
+  const freshResponsePattern = "        'manage_token',   v_token,\n        'reason_code',    'ok'";
+  const freshResponseReplacement = "        'manage_token',   v_token,\n        'branch_id',      v_effective_branch,\n        'reason_code',    'ok'";
+  if (expectedFunc.split(freshResponsePattern).length - 1 !== 1) {
+    throw new Error('PARITY_TRANSFORMATION_DEFECT: Pattern D (fresh response) does not match exactly once');
+  }
+  expectedFunc = expectedFunc.replace(freshResponsePattern, freshResponseReplacement);
+
+  // Normalize whitespace for parity comparison
+  function norm(str) {
+    return str.replace(/\s+/g, ' ').trim();
+  }
+
+  if (norm(candFuncRegion) !== norm(expectedFunc)) {
+    throw new Error('PARITY_CONTRACT_DEFECT: Candidate 20260914 function deviates from H1C baseline with authorized delta');
+  }
+
+  // 4. Executable replay response truth check (stored appointment vs caller echo)
+  const replayFoundStart = candFuncRegion.indexOf('IF p_idempotency_key IS NOT NULL');
+  const replayFoundEnd = candFuncRegion.indexOf('-- Gate 7: Monthly Appointment Quota', replayFoundStart);
+  if (replayFoundStart === -1 || replayFoundEnd === -1 || replayFoundStart >= replayFoundEnd) {
+    throw new Error('REPLAY_REGION_DEFECT: Idempotency replay region not bound');
+  }
+  const replayRegionCode = candFuncRegion.substring(replayFoundStart, replayFoundEnd).replace(/--.*$/gm, '');
+  const normReplayCode = norm(replayRegionCode);
+
+  if (!normReplayCode.includes("SELECT branch_id INTO v_existing_branch_id FROM public.appointments WHERE id = v_existing_apt_id AND tenant_id = v_tenant_id;")) {
+    throw new Error('REPLAY_TRUTH_DEFECT: Replay lookup missing stored appointment SELECT');
+  }
+  if (!normReplayCode.includes("'branch_id', v_existing_branch_id")) {
+    throw new Error('REPLAY_TRUTH_DEFECT: Replay response does not use v_existing_branch_id');
+  }
+  if (normReplayCode.includes("'branch_id', v_effective_branch") || normReplayCode.includes("'branch_id', p_branch_id")) {
+    throw new Error('REPLAY_TRUTH_DEFECT: Replay response echoes caller branch_id instead of stored truth');
+  }
+
+  // 5. Fresh response contract check
+  const freshReturnStart = candFuncRegion.indexOf('-- Gate 13: Idempotency Record');
+  const freshReturnEnd = candFuncRegion.indexOf('EXCEPTION WHEN OTHERS THEN', freshReturnStart);
+  if (freshReturnStart === -1 || freshReturnEnd === -1 || freshReturnStart >= freshReturnEnd) {
+    throw new Error('FRESH_REGION_DEFECT: Fresh booking return region not bound');
+  }
+  const freshRegionCode = candFuncRegion.substring(freshReturnStart, freshReturnEnd).replace(/--.*$/gm, '');
+  const normFreshCode = norm(freshRegionCode);
+  if (!normFreshCode.includes("'branch_id', v_effective_branch")) {
+    throw new Error('FRESH_TRUTH_DEFECT: Fresh booking return missing v_effective_branch');
+  }
+
+  // 6. Test5 executable region validation
+  const test5Start = publicBookingTestSql.indexOf('-- TEST 5: Idempotency Key Replay');
+  const test6Start = publicBookingTestSql.indexOf('-- TEST 6: Invalid slug');
+  if (test5Start === -1 || test6Start === -1 || test5Start >= test6Start) {
+    throw new Error('TEST5_REGION_DEFECT: Test5 region not bound');
+  }
+  const test5Code = publicBookingTestSql.substring(test5Start, test6Start).replace(/--.*$/gm, '');
+  if (!test5Code.includes("IF (r->>'branch_id')::uuid IS DISTINCT FROM v_primary_branch_id THEN")) {
+    throw new Error('TEST5_CONTRACT_DEFECT: Test5 missing executable replay branch_id assertion');
+  }
+
+  // 7. Test45 executable region validation
+  const stageBHeader = publicBookingTestSql.indexOf('=== STARTING STAGE B ACCEPTANCE TESTS 44-48 ===');
+  const test45Start = stageBHeader !== -1 ? publicBookingTestSql.indexOf('TEST 45 & 46:', stageBHeader) : -1;
+  const test47Start = test45Start !== -1 ? publicBookingTestSql.indexOf('TEST 47:', test45Start) : -1;
+  if (stageBHeader === -1 || test45Start === -1 || test47Start === -1 || test45Start >= test47Start) {
+    throw new Error('TEST45_REGION_DEFECT: Test45 region not bound');
+  }
+  const test45Code = publicBookingTestSql.substring(test45Start, test47Start).replace(/--.*$/gm, '');
+  if (!test45Code.includes("v_branch_ret := (r->>'branch_id')::uuid;")) {
+    throw new Error('TEST45_CONTRACT_DEFECT: Test45 missing v_branch_ret assignment');
+  }
+  if (!test45Code.includes("v_branch_ret IS DISTINCT FROM v_branch_id")) {
+    throw new Error('TEST45_CONTRACT_DEFECT: Test45 contract condition v_branch_ret IS DISTINCT FROM v_branch_id missing or weakened');
+  }
+
+  return true;
+}
+
+function testPublicBookingBranchIdResponseContractSelftest() {
+  console.log('--- Testing Public Booking branch_id Response Contract & Parity (R9-R1.8.16.1) ---');
+
+  const h1cPath = path.join(__dirname, '..', 'supabase/migrations/20260813_h1c_commercial_eligibility_and_quota_enforcement.sql');
+  const mig20260914Path = path.join(__dirname, '..', 'supabase/migrations/20260914_public_booking_branch_id_response_contract_fix.sql');
+  const sqlTestPath = path.join(__dirname, '..', 'supabase/tests/public_booking_rpc_behavioral_tests.sql');
+
+  const h1cSql = fs.readFileSync(h1cPath, 'utf8');
+  const candidateMigrationSql = fs.readFileSync(mig20260914Path, 'utf8');
+  const publicBookingTestSql = fs.readFileSync(sqlTestPath, 'utf8');
+
+  // Positive validation
+  validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql, publicBookingTestSql });
+
+  console.log('CREATE_PUBLIC_BOOKING_SIGNATURE_PRESERVED=YES');
+  console.log('CREATE_PUBLIC_BOOKING_SECURITY_DEFINER_PRESERVED=YES');
+  console.log('CREATE_PUBLIC_BOOKING_SEARCH_PATH_PRESERVED=YES');
+  console.log('CREATE_PUBLIC_BOOKING_PRIVILEGE_BOUNDARY_PRESERVED=YES');
+  console.log('R1_8_16_H1C_FUNCTION_PARITY_EXCEPT_AUTHORIZED_DELTA=YES');
+  console.log('FRESH_SUCCESS_BRANCH_ID_PRESENT=YES');
+  console.log('FRESH_SUCCESS_BRANCH_SOURCE_EFFECTIVE_BRANCH=YES');
+  console.log('REPLAY_SUCCESS_BRANCH_ID_PRESENT=YES');
+  console.log('REPLAY_BRANCH_SOURCE_STORED_APPOINTMENT=YES');
+  console.log('REPLAY_BRANCH_SOURCE_CALLER_ECHO=NO');
+  console.log('TEST5_REPLAY_BRANCH_ID_ASSERTION_PRESENT=YES');
+  console.log('TEST45_BRANCH_ID_CONTRACT_PRESERVED=YES');
+  console.log('R1_8_16_COMMENT_ONLY_FALSE_PASS_BLOCKED=YES');
+  console.log('R1_8_16_REGION_BINDING_FAIL_CLOSED=YES');
+
+  // Adversarial Matrix A through I
+  // CASE A: remove fresh-success branch_id pair
+  const caseA = candidateMigrationSql.replace("'branch_id',      v_effective_branch,\n", '');
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql: caseA, publicBookingTestSql });
+    throw new Error('Adversarial Case A FAILED: Validator accepted missing fresh branch_id');
+  } catch (err) {
+    if (!err.message.includes('PARITY_CONTRACT_DEFECT') && !err.message.includes('FRESH_TRUTH_DEFECT')) throw err;
+  }
+
+  // CASE B: remove replay-success branch_id pair
+  const caseB = candidateMigrationSql.replace("'branch_id',      v_existing_branch_id,\n", '');
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql: caseB, publicBookingTestSql });
+    throw new Error('Adversarial Case B FAILED: Validator accepted missing replay branch_id');
+  } catch (err) {
+    if (!err.message.includes('PARITY_CONTRACT_DEFECT') && !err.message.includes('REPLAY_TRUTH_DEFECT')) throw err;
+  }
+
+  // CASE C: replace replay response source v_existing_branch_id -> v_effective_branch
+  const caseC = candidateMigrationSql.replace("'branch_id',      v_existing_branch_id,", "'branch_id',      v_effective_branch,");
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql: caseC, publicBookingTestSql });
+    throw new Error('Adversarial Case C FAILED: Validator accepted v_effective_branch in replay response');
+  } catch (err) {
+    if (!err.message.includes('PARITY_CONTRACT_DEFECT') && !err.message.includes('REPLAY_TRUTH_DEFECT')) throw err;
+  }
+
+  // CASE D: replace replay response source v_existing_branch_id -> p_branch_id
+  const caseD = candidateMigrationSql.replace("'branch_id',      v_existing_branch_id,", "'branch_id',      p_branch_id,");
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql: caseD, publicBookingTestSql });
+    throw new Error('Adversarial Case D FAILED: Validator accepted p_branch_id in replay response');
+  } catch (err) {
+    if (!err.message.includes('PARITY_CONTRACT_DEFECT') && !err.message.includes('REPLAY_TRUTH_DEFECT')) throw err;
+  }
+
+  // CASE E: remove executable branch_id response and place text in SQL comment only
+  const caseE = candidateMigrationSql
+    .replace("'branch_id',      v_effective_branch,\n", '-- \'branch_id\', v_effective_branch\n')
+    .replace("'branch_id',      v_existing_branch_id,\n", '-- \'branch_id\', v_existing_branch_id\n');
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql: caseE, publicBookingTestSql });
+    throw new Error('Adversarial Case E FAILED: Validator accepted comment-only branch_id text');
+  } catch (err) {
+    if (!err.message.includes('PARITY_CONTRACT_DEFECT') && !err.message.includes('REPLAY_TRUTH_DEFECT') && !err.message.includes('FRESH_TRUTH_DEFECT')) throw err;
+  }
+
+  // CASE F: remove/change SECURITY DEFINER
+  const caseF = candidateMigrationSql.replace('SECURITY DEFINER', '-- SECURITY DEFINER');
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql: caseF, publicBookingTestSql });
+    throw new Error('Adversarial Case F FAILED: Validator accepted missing SECURITY DEFINER');
+  } catch (err) {
+    if (!err.message.includes('SECURITY_CONTRACT_DEFECT') && !err.message.includes('PARITY_CONTRACT_DEFECT')) throw err;
+  }
+
+  // CASE G: mutate one unrelated H1C gate (change commercial_allowed to commercial_hacked)
+  const caseG = candidateMigrationSql.replace("'reason_code',    'ok'", "'reason_code',    'hacked'");
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql: caseG, publicBookingTestSql });
+    throw new Error('Adversarial Case G FAILED: Validator accepted mutated H1C reason code');
+  } catch (err) {
+    if (!err.message.includes('PARITY_CONTRACT_DEFECT')) throw err;
+  }
+
+  // CASE H: remove Test5 replay branch assertion
+  const caseH = publicBookingTestSql.replace("IF (r->>'branch_id')::uuid IS DISTINCT FROM v_primary_branch_id THEN", "-- assertion removed");
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql, publicBookingTestSql: caseH });
+    throw new Error('Adversarial Case H FAILED: Validator accepted missing Test5 replay branch_id assertion');
+  } catch (err) {
+    if (!err.message.includes('TEST5_CONTRACT_DEFECT')) throw err;
+  }
+
+  // CASE I: remove or weaken Test45 branch_id comparison
+  const caseI = publicBookingTestSql.replace("v_branch_ret IS DISTINCT FROM v_branch_id", "false");
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql, publicBookingTestSql: caseI });
+    throw new Error('Adversarial Case I FAILED: Validator accepted weakened Test45 branch_id comparison');
+  } catch (err) {
+    if (!err.message.includes('TEST45_CONTRACT_DEFECT')) throw err;
+  }
+
+  console.log('R1_8_16_RESPONSE_CONTRACT_ADVERSARIAL_SELFTEST=PASS');
+  console.log('✅ Public booking branch_id response contract & parity PASSED.');
+}
+
 function main() {
   testArityScannerAdversarial();
   testAggregatorAdversarial();
@@ -2065,7 +2338,8 @@ function main() {
   testPublicBookingTests27_28_47HarnessContracts();
   testPublicBookingTest30HarnessContracts();
   testPublicBookingTests36_37HarnessContracts();
-  console.log('\n🎉 ALL HARDENED R9-R1.8.13.2 CONTRACT SELF-TESTS PASSED!');
+  testPublicBookingBranchIdResponseContractSelftest();
+  console.log('\n🎉 ALL HARDENED R9-R1.8.16.1 CONTRACT SELF-TESTS PASSED!');
 }
 
 main();

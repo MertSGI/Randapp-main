@@ -196,6 +196,9 @@ BEGIN
   IF (r->>'appointment_id')::uuid != v_apt_id1 THEN
     RAISE EXCEPTION 'TEST 5 FAIL: Replay returned different appointment ID.';
   END IF;
+  IF (r->>'branch_id')::uuid IS DISTINCT FROM v_primary_branch_id THEN
+    RAISE EXCEPTION 'TEST 5 FAIL: Replay returned missing or incorrect branch_id: %', r->>'branch_id';
+  END IF;
   IF v_token1 = v_token2 THEN
     RAISE EXCEPTION 'TEST 5 FAIL: Replay returned identical token. Must generate a fresh secure token.';
   END IF;
