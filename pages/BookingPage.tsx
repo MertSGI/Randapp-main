@@ -20,6 +20,13 @@ import { canPreviewTenantSite } from '../utils/previewAuth';
 import SalonWebsiteView from '../components/SalonWebsiteView';
 import SalonWebsiteViewV2 from '../components/SalonWebsiteViewV2';
 import { getDataSourceMode } from '../services/dataSourceConfig';
+import {
+  MELIS_FIXTURE_TENANT_ID,
+  MELIS_FIXTURE_BUSINESS_PROFILE,
+  MELIS_FIXTURE_PRIMARY_BRANCH,
+  MELIS_FIXTURE_SERVICES,
+  MELIS_FIXTURE_STAFF,
+} from '../services/uiV2PilotPreviewFixture';
 
 
 const generateTimeSlots = (): string[] => {
@@ -91,6 +98,11 @@ const BookingPage: React.FC = () => {
 
   useEffect(() => {
     if (tenant && selectedStaff && selectedService && selectedDate) {
+      if (tenant.id === MELIS_FIXTURE_TENANT_ID) {
+        setTimeSlots(generateTimeSlots());
+        setSlotLoadingError(null);
+        return;
+      }
       setSlotLoadingError(null);
       availabilityService.getAvailableSlotsForStaff(tenant.id, selectedStaff.id, selectedService.id, selectedDate)
         .then(slots => {
@@ -141,6 +153,16 @@ const BookingPage: React.FC = () => {
   useEffect(() => {
     if (tenant) {
       setIsCheckingSub(true);
+      if (tenant.id === MELIS_FIXTURE_TENANT_ID) {
+        setSubStatus('active');
+        setIsCheckingSub(false);
+        setStaffList(MELIS_FIXTURE_STAFF);
+        setServicesList(MELIS_FIXTURE_SERVICES);
+        setBusinessProfile(MELIS_FIXTURE_BUSINESS_PROFILE);
+        setBranches([MELIS_FIXTURE_PRIMARY_BRANCH]);
+        setSelectedBranch(MELIS_FIXTURE_PRIMARY_BRANCH);
+        return;
+      }
       const isSupabaseMode = getDataSourceMode() === 'supabase';
       if (!isSupabaseMode) {
         subscriptionService.getCurrentSubscription(tenant.id).then(sub => {
@@ -210,12 +232,17 @@ const BookingPage: React.FC = () => {
 
   useEffect(() => {
     if (tenant && selectedDate && selectedStaff) {
+      if (tenant.id === MELIS_FIXTURE_TENANT_ID) return;
       getBookedSlots(tenant.id, selectedDate, selectedStaff.id).then(setBookedSlots);
     }
   }, [tenant, selectedDate, selectedStaff]);
 
   useEffect(() => {
     if (tenant) {
+      if (tenant.id === MELIS_FIXTURE_TENANT_ID) {
+        setStaffList(MELIS_FIXTURE_STAFF);
+        return;
+      }
       if (selectedService) {
         getStaffListForService(tenant.id, selectedService.id).then(setStaffList);
       } else {
@@ -226,6 +253,7 @@ const BookingPage: React.FC = () => {
 
   useEffect(() => {
     if (tenant && staffList.length > 0 && selectedService) {
+      if (tenant.id === MELIS_FIXTURE_TENANT_ID) return;
       staffList.forEach(staff => {
         availabilityService.getNextAvailableSlotForStaff(tenant.id, staff.id, selectedService.id).then(slot => {
           if (slot) {
@@ -367,6 +395,10 @@ const BookingPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedService || !selectedTime || !selectedStaff || !tenant) return;
+    if (tenant.id === MELIS_FIXTURE_TENANT_ID) {
+      alert(language === 'tr' ? 'Önizleme modunda randevu kaydı oluşturulamaz (salt okunur önizleme).' : 'Appointment booking is disabled in preview mode (read-only preview).');
+      return;
+    }
     const isSupabaseMode = getDataSourceMode() === 'supabase';
     if (isSupabaseMode && (!selectedBranch || !selectedBranch.id)) {
        alert(language === 'tr' ? 'İşletme şube bilgisi alınamadı. Lütfen sayfayı yenileyip tekrar deneyin.' : 'Salon branch information could not be resolved. Please refresh and try again.');

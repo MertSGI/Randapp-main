@@ -3,6 +3,13 @@ import { dataProvider } from './dataProvider';
 import { supabase } from './supabaseClient';
 import { getDataSourceMode } from './dataSourceConfig';
 import { shouldUsePilotLocalBypass } from './pilotBypassPolicy';
+import {
+  isMelisFixtureEligible,
+  MELIS_FIXTURE_TENANT,
+  MELIS_FIXTURE_BRANDING,
+  MELIS_FIXTURE_SLUG,
+  MELIS_FIXTURE_TENANT_ID,
+} from './uiV2PilotPreviewFixture';
 
 const DEMO_TENANT: Tenant = {
   id: 'tenant_demo',
@@ -164,6 +171,9 @@ export const tenantService = {
     }
     
     if (urlSlug) {
+      if (isMelisFixtureEligible(urlSlug, hostname)) {
+        return MELIS_FIXTURE_TENANT;
+      }
       const resolved = await this.getTenantBySlug(urlSlug);
       if (resolved) {
         if ((resolved as any).status !== undefined) {
@@ -280,6 +290,9 @@ export const tenantService = {
   },
 
   async getTenantBranding(tenantId: string): Promise<TenantBranding | null> {
+    if (tenantId === MELIS_FIXTURE_TENANT_ID) {
+      return MELIS_FIXTURE_BRANDING;
+    }
     if (tenantId === 'tenant_pilot_demo') {
       return {
         tenantId: 'tenant_pilot_demo',
