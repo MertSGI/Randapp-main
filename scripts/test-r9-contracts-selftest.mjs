@@ -2194,6 +2194,28 @@ function validateR18161BranchResponseContract(options) {
     throw new Error('TEST5_CONTRACT_DEFECT: Test5 missing executable replay branch_id assertion');
   }
 
+  // 6b. Test5 outer scope declaration validator
+  const firstDoStart = publicBookingTestSql.indexOf('DO $$');
+  const firstDoBegin = firstDoStart !== -1 ? publicBookingTestSql.indexOf('BEGIN', firstDoStart) : -1;
+  const nestedDoBegin = firstDoBegin !== -1 ? publicBookingTestSql.indexOf('BEGIN', firstDoBegin + 5) : -1;
+  if (firstDoStart === -1 || firstDoBegin === -1 || nestedDoBegin === -1 || firstDoStart >= firstDoBegin || firstDoBegin >= nestedDoBegin) {
+    throw new Error('TEST5_SCOPE_DEFECT: First DO block outer region not bound');
+  }
+
+  const outerDeclareRegion = publicBookingTestSql.substring(firstDoStart, firstDoBegin).replace(/--.*$/gm, '');
+  const outerDeclMatch = outerDeclareRegion.match(/v_primary_branch_id\s+uuid\s*:=\s*'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;/g);
+  if (!outerDeclMatch || outerDeclMatch.length !== 1) {
+    throw new Error('TEST5_SCOPE_DEFECT: v_primary_branch_id missing or not unique in outer DO DECLARE region');
+  }
+
+  const nestedDeclareRegion = publicBookingTestSql.substring(firstDoBegin, nestedDoBegin).replace(/--.*$/gm, '');
+  if (nestedDeclareRegion.includes('v_primary_branch_id')) {
+    throw new Error('TEST5_SCOPE_DEFECT: v_primary_branch_id redeclared in nested setup DECLARE region');
+  }
+
+  return true;
+}
+
   // 7. Test45 executable region validation
   const stageBHeader = publicBookingTestSql.indexOf('=== STARTING STAGE B ACCEPTANCE TESTS 44-48 ===');
   const test45Start = stageBHeader !== -1 ? publicBookingTestSql.indexOf('TEST 45 & 46:', stageBHeader) : -1;
@@ -2240,6 +2262,15 @@ function testPublicBookingBranchIdResponseContractSelftest() {
   console.log('TEST45_BRANCH_ID_CONTRACT_PRESERVED=YES');
   console.log('R1_8_16_COMMENT_ONLY_FALSE_PASS_BLOCKED=YES');
   console.log('R1_8_16_REGION_BINDING_FAIL_CLOSED=YES');
+  console.log('TEST5_BRANCH_BINDING_OUTER_SCOPE_FAIL_CLOSED=YES');
+  console.log('TEST5_PRIMARY_BRANCH_OUTER_DECLARATION_PRESENT=YES');
+  console.log('TEST5_PRIMARY_BRANCH_DECLARATION_TYPE_EXACT=YES');
+  console.log('TEST5_PRIMARY_BRANCH_UUID_EXACT=YES');
+  console.log('TEST5_PRIMARY_BRANCH_DECLARATION_UNIQUE=YES');
+  console.log('TEST5_PRIMARY_BRANCH_NESTED_SHADOW_ABSENT=YES');
+  console.log('TEST5_BRANCH_ASSERTION_BINDING_RESOLVES=YES');
+  console.log('TEST5_BRANCH_SCOPE_COMMENT_ONLY_FALSE_PASS_BLOCKED=YES');
+  console.log('TEST5_BRANCH_SCOPE_NESTED_FALSE_PASS_BLOCKED=YES');
 
   // Adversarial Matrix A through I
   // CASE A: remove fresh-success branch_id pair
@@ -2325,6 +2356,76 @@ function testPublicBookingBranchIdResponseContractSelftest() {
     if (!err.message.includes('TEST45_CONTRACT_DEFECT')) throw err;
   }
 
+  // ADVERSARIAL TEST5 SCOPE MATRIX (Cases Scope-A to Scope-G)
+  // Scope-A: remove outer v_primary_branch_id declaration
+  const scopeA = publicBookingTestSql.replace("  v_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;\n", '');
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql, publicBookingTestSql: scopeA });
+    throw new Error('Adversarial Scope-A FAILED: Validator accepted missing outer declaration');
+  } catch (err) {
+    if (!err.message.includes('TEST5_SCOPE_DEFECT')) throw err;
+  }
+
+  // Scope-B: move declaration from outer scope back into nested setup DECLARE only
+  const scopeB = publicBookingTestSql
+    .replace("  v_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;\n", '')
+    .replace("    v_cnt int;\n", "    v_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;\n    v_cnt int;\n");
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql, publicBookingTestSql: scopeB });
+    throw new Error('Adversarial Scope-B FAILED: Validator accepted declaration in nested setup only');
+  } catch (err) {
+    if (!err.message.includes('TEST5_SCOPE_DEFECT')) throw err;
+  }
+
+  // Scope-C: change declared UUID
+  const scopeC = publicBookingTestSql.replace("'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid", "'c3c3c3c3-dd44-ee55-ff66-aa7777777778'::uuid");
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql, publicBookingTestSql: scopeC });
+    throw new Error('Adversarial Scope-C FAILED: Validator accepted altered UUID');
+  } catch (err) {
+    if (!err.message.includes('TEST5_SCOPE_DEFECT')) throw err;
+  }
+
+  // Scope-D: place correct declaration text only inside a comment
+  const scopeD = publicBookingTestSql.replace("  v_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;\n", "  -- v_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;\n");
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql, publicBookingTestSql: scopeD });
+    throw new Error('Adversarial Scope-D FAILED: Validator accepted comment-only declaration');
+  } catch (err) {
+    if (!err.message.includes('TEST5_SCOPE_DEFECT')) throw err;
+  }
+
+  // Scope-E: duplicate outer declaration
+  const scopeE = publicBookingTestSql.replace(
+    "  v_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;\n",
+    "  v_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;\n  v_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;\n"
+  );
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql, publicBookingTestSql: scopeE });
+    throw new Error('Adversarial Scope-E FAILED: Validator accepted duplicate outer declaration');
+  } catch (err) {
+    if (!err.message.includes('TEST5_SCOPE_DEFECT')) throw err;
+  }
+
+  // Scope-F: restore nested shadow declaration while outer declaration exists
+  const scopeF = publicBookingTestSql.replace("    v_cnt int;\n", "    v_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;\n    v_cnt int;\n");
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql, publicBookingTestSql: scopeF });
+    throw new Error('Adversarial Scope-F FAILED: Validator accepted nested shadow declaration alongside outer');
+  } catch (err) {
+    if (!err.message.includes('TEST5_SCOPE_DEFECT')) throw err;
+  }
+
+  // Scope-G: change Test5 assertion to a different/unbound identifier
+  const scopeG = publicBookingTestSql.replace("IS DISTINCT FROM v_primary_branch_id THEN", "IS DISTINCT FROM v_unbound_branch_id THEN");
+  try {
+    validateR18161BranchResponseContract({ h1cSql, candidateMigrationSql, publicBookingTestSql: scopeG });
+    throw new Error('Adversarial Scope-G FAILED: Validator accepted mutated Test5 assertion identifier');
+  } catch (err) {
+    if (!err.message.includes('TEST5_CONTRACT_DEFECT')) throw err;
+  }
+
+  console.log('TEST5_BRANCH_SCOPE_VALIDATOR_ADVERSARIAL=PASS');
   console.log('R1_8_16_RESPONSE_CONTRACT_ADVERSARIAL_SELFTEST=PASS');
   console.log('✅ Public booking branch_id response contract & parity PASSED.');
 }
