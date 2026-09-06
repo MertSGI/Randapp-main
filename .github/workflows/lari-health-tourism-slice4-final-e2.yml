@@ -13,7 +13,7 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
         with:
-          ref: '5a4304c23f4a38c1bb1f5469435efb36f7e85bd5'
+          ref: '546072987789d648a0af85076af2d1e38a475c28'
 
       - name: Initialize Evidence Directory
         id: init_artifacts
@@ -112,7 +112,7 @@ jobs:
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           mapfile -t MIGRATIONS < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)
           MIGRATION_TOTAL=${#MIGRATIONS[@]}
-          if [ "${MIGRATION_TOTAL}" -ne 69 ]; then
+          if [ "${MIGRATION_TOTAL}" -ne 70 ]; then
             echo "MIGRATION_REPLAY_RESULT=FAIL" > /tmp/e2-artifacts/01-migration.env
             echo "MIGRATION_REPLAY_RESULT_FAILURE_REASON=MANIFEST_COUNT_MISMATCH_${MIGRATION_TOTAL}" >> /tmp/e2-artifacts/01-migration.env
             echo "MIGRATION_COUNT=0/${MIGRATION_TOTAL}" >> /tmp/e2-artifacts/01-migration.env
