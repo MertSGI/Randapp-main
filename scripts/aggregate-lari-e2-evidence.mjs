@@ -352,7 +352,7 @@ export function aggregateEvidence(targetDir = artifactsDir) {
   if (kv.get('R9_SELFTEST_RESULT') !== 'PASS') compositePass = false;
 
   // 2. Migration & Commercial Verification
-  if (kv.get('MIGRATION_REPLAY_RESULT') !== 'PASS' || kv.get('MIGRATION_COUNT') !== '69/69') compositePass = false;
+  if (kv.get('MIGRATION_REPLAY_RESULT') !== 'PASS' || kv.get('MIGRATION_COUNT') !== '70/70') compositePass = false;
   const commercialKeys = phaseFragmentOwners['02-commercial.env'];
   for (const k of commercialKeys) {
     if (kv.get(k) !== 'PASS') compositePass = false;
