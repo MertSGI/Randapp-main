@@ -22,12 +22,12 @@ DECLARE
   v_customer_id1 uuid;
   v_customer_id2 uuid;
   v_test_date date := (CURRENT_DATE + 14)::date; -- standard future date
+  v_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;
 BEGIN
   -- Fixed UUID constants for deterministic R9 public-booking test fixture
   v_service_id := 'a1a1a1a1-bb22-cc33-dd44-ee5555555555'::uuid;
   v_staff_id   := 'b2b2b2b2-cc33-dd44-ee55-ff6666666666'::uuid;
   DECLARE
-    v_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;
     v_cnt int;
   BEGIN
     -- Resolve canonical tenant credentials
