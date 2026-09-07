@@ -22,18 +22,18 @@ DECLARE
   v_customer_id1 uuid;
   v_customer_id2 uuid;
   v_test_date date := (CURRENT_DATE + 14)::date; -- standard future date
+  v_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;
 BEGIN
   -- Fixed UUID constants for deterministic R9 public-booking test fixture
   v_service_id := 'a1a1a1a1-bb22-cc33-dd44-ee5555555555'::uuid;
   v_staff_id   := 'b2b2b2b2-cc33-dd44-ee55-ff6666666666'::uuid;
   DECLARE
-    v_primary_branch_id uuid := 'c3c3c3c3-dd44-ee55-ff66-aa7777777777'::uuid;
     v_cnt int;
   BEGIN
     -- Resolve canonical tenant credentials
     SELECT id INTO v_tenant_id FROM public.tenants WHERE slug = v_slug;
     IF NOT FOUND THEN
-      RAISE EXCEPTION 'TEST SETUP FAIL: Melis Güzellik tenant slug not found.';
+      RAISE EXCEPTION 'TEST SETUP FAIL: Melis G??zellik tenant slug not found.';
     END IF;
 
     -- 1. Set canonical disposable tenant state
@@ -1065,7 +1065,7 @@ BEGIN
     RAISE EXCEPTION 'STAGE A TEST SETUP FAIL: tenant melis-guzellik not found.';
   END IF;
 
-  -- Create primary test branch for Melis Güzellik
+  -- Create primary test branch for Melis G??zellik
   INSERT INTO public.branches (tenant_id, name, slug, is_active, is_primary)
   VALUES (v_tenant_id, 'Stage A Primary Branch', 'stage-a-primary', true, true)
   ON CONFLICT (tenant_id, slug) DO UPDATE SET is_primary = true, is_active = true
