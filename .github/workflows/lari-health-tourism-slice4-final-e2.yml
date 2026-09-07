@@ -879,9 +879,14 @@ jobs:
         if: always()
         run: |
           CHECKED_SHA=$(git rev-parse HEAD)
+          EXPECTED_SUPPORT_SHA="8fc6ba0c6c2ba37fba51e5de85d51c93e263777e"
+          if [ "${CHECKED_SHA}" != "${EXPECTED_SUPPORT_SHA}" ]; then
+            echo "PROVENANCE_BINDING_DEFECT: checked_out_sha=${CHECKED_SHA} expected_support_sha=${EXPECTED_SUPPORT_SHA}"
+            exit 1
+          fi
           cat << EOF > /tmp/e2-artifacts/provenance.json
           {
-            "candidate_sha": "e74d097b2ba1160bc852e84503aa6368b23d43eb",
+            "candidate_sha": "${CHECKED_SHA}",
             "evidence_workflow_sha": "${GITHUB_SHA}",
             "checked_out_sha": "${CHECKED_SHA}",
             "run_id": "${GITHUB_RUN_ID}",
