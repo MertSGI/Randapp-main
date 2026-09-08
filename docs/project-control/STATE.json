@@ -1,6 +1,6 @@
 {
     "schema_version": "1.0.0",
-    "updated_at": "2026-09-08T22:35:00+03:00",
+    "updated_at": "2026-09-08T22:40:00+03:00",
     "product": "LARİ SaaS Platform",
     "repository": "MertSGI/Randapp-main",
     "delivery_commitment": {
@@ -625,7 +625,7 @@
         "disposition": "AWAITING_INDEPENDENT_CONTROLLER_PROMOTION"
     },
     "design_intelligence_state": {
-        "active_epic": "Epic 5: Clinic Medical / Patient Surface",
+        "active_epic": "Epic 6: Super Admin Governance & Multi-Tenant Observability",
         "completed_epics": [
             {
                 "epic": 1,
@@ -649,6 +649,12 @@
                 "epic": 4,
                 "name": "Provider Admin & Staff Scheduling Surface",
                 "report": "AOS_DESIGN_EPIC4_REPORT.md",
+                "gate": "HUMAN_READY_VISUAL_GATE"
+            },
+            {
+                "epic": 5,
+                "name": "Clinic & Health Tourism Multilingual Surface",
+                "report": "AOS_DESIGN_EPIC5_REPORT.md",
                 "gate": "HUMAN_READY_VISUAL_GATE"
             }
         ],
