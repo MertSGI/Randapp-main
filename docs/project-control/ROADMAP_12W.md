@@ -1,79 +1,273 @@
-# 12-Week Master Delivery Roadmap & Phase Matrix
+# LARİ Program V2 — Canonical Real-Product Roadmap
+**Version:** 2026-09-08.1  
+**Program ID:** `LARI-PROGRAM-V2-REAL-PRODUCT-20260908-01`  
+**Release effect:** NONE  
+**Production:** NO_GO
 
-## Master Product Delivery Train Priority
+## 1. Program principles
 
-```
-LARİ CORE [FROZEN / CLOSED_PROVEN]
-  └── PACKAGE / CUSTOMER CUSTOMIZATION [CLOSED_PROVEN]
-        └── LARİ CLINIC [CLOSED_PROVEN]
-              └── LARİ HEALTH TOURISM [IN_PROGRESS - SLICE 1 & SLICE 2 CLOSED_PROVEN]
-                    └── FINAL DELIVERY
-```
-*Note: UI V2 is a parallel frontend lane and NOT a separate product roadmap phase.*
+1. Everything must become real. UI presence, localStorage behavior, simulated providers, mock credentials, static-only contracts, and documentation-only readiness do not count as finished product.
+2. Company/legal-entity-dependent activations are deferred to the final provider-activation phase. Their interfaces, schemas, secrets boundaries, webhook/idempotency rules, deterministic test providers, sandbox harnesses and cutover runbooks are built earlier.
+3. AOS runs continuously in parallel as the visual-design and Design Intelligence lane.
+4. Sales claims follow runtime truth. Only capabilities with independently accepted live evidence may be marketed as generally available.
+5. Product work, AOS work, release work, Supabase/Vercel mutation and production promotion stay separately authorized.
+6. Every phase is evidence-gated rather than calendar-gated.
 
----
+## 2. Canonical maturity states
 
-## 12-Week Timeline Overview
+- `REAL_LIVE_VERIFIED`
+- `REAL_CODE_NOT_LIVE_VERIFIED`
+- `PROVIDER_READY_NOT_CONNECTED`
+- `CODE_PRESENT_NOT_PRODUCTIZED`
+- `MOCK_ONLY`
+- `PLANNED`
+- `COMPANY_DEPENDENT_FINALIZATION`
+- `BLOCKED`
 
-- **Duration**: 12 Weeks
-- **Day 0**: `UNKNOWN / NEEDS_RECOVERY` (No historical Day 0 date anchor found in prompt history/docs; resetting from today is strictly forbidden).
-- **Day 0 State**: `NEEDS_RECOVERY`
+## 3. Program lanes
 
----
+### A — Core Platform & Security
+Canonical Supabase environment, Auth/session hardening, tenant isolation/RLS, SECURITY DEFINER/grant audit, rate limiting, secrets, idempotency, audit events, backups/restores, disaster recovery, performance/load/concurrency, deployment/rollback and observability.
 
-## Phase Matrix & Progress
+Immediate known targets:
+- choose/restore an ACTIVE canonical Supabase staging environment;
+- fix or explicitly disposition `public.ht_rate_limit_buckets` RLS;
+- harden exposed helper RPCs such as `get_user_role(user_id)` and `get_user_tenant_id(user_id)`;
+- review mutable `search_path` functions;
+- prove mock auth cannot become a production authority path;
+- enable/assess leaked-password protection;
+- add restore drills and production-style telemetry.
 
-| Phase / Layer | Scope / Milestone | Status | Evidence Level |
-| :--- | :--- | :--- | :--- |
-| **1. LARİ Core** | Technical Staging Browser Acceptance | `CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE` | E4 (Shared Staging Live) |
-| **1. LARİ Core** | Provisioning & Idempotency | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
-| **1. LARİ Core** | Commercial Contracts & Boundaries | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
-| **1. LARİ Core** | Onboarding Contracts & Readiness | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
-| **1. LARİ Core** | Onboarding State Handoff | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
-| **1. LARİ Core** | Baseline Integration | `INTEGRATION_ALREADY_SATISFIED` | E1 (Source Proven) |
-| **1. LARİ Core** | Outbox / Provider Abstraction | `PRESENT_ON_CORE_BASELINE` | E1 (Source Proven) |
-| **1. LARİ Core** | Public Booking Anti-Abuse | `PRESENT_ON_CORE_BASELINE` | E1 (Source Proven) |
-| **1. LARİ Core** | Demo Isolation & Subdomain Readiness | `PRESENT_ON_CORE_BASELINE` | E1 (Source Proven) |
-| **1. LARİ Core** | Core Runtime Proof (`CORE-RC.3`) | `CLOSED_PROVEN` | E3 (Isolated Runtime E2E) |
-| **1. LARİ Core** | Release Candidate Finalization (`CORE-RC.4`) | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
-| **2. Package Customization** | Branch Server Authority (Slice 1) | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
-| **2. Package Customization** | Commercial Source-of-Truth Alignment (Slice 2) | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
-| **3. LARİ Clinic** | Clinical Domain Server Authority (Block 1) | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
-| **3. LARİ Clinic** | Operational Integration & Application Services (Block 2) | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
-| **3. LARİ Clinic** | Clinic Workspace UI & Isolated E3 Acceptance (Block 3) | `CLOSED_PROVEN` | E3 (Isolated Runtime E2E) |
-| **3. LARİ Clinic** | Clinic Core Milestone | `CLOSED_PROVEN` | E3 (Isolated Runtime E2E) |
-| **3. LARİ Clinic** | Speech-to-Text & SOAP Draft Assist (`CLINIC_AI_ASSIST_V1`) | `CLOSED_PROVEN` | E3 (Isolated Runtime E2E) |
-| **4. LARİ Health Tourism** | International Patient & Agency Operations Scope | `CLOSED_ACCEPTED` | E1 (Source Proven) |
-| **4. LARİ Health Tourism** | Server Authority & Lead Domain Core (Foundation Slice 1) | `CLOSED_PROVEN` | E2 (Exact-SHA CI) |
-| **4. LARİ Health Tourism** | Multilingual Public Intake & Surface (Slice 2) | `CLOSED_PROVEN` | E3 (Isolated Runtime E2E) |
-| **5. Final Delivery** | Production Cutover & DNS/Commercial Launch | `NOT_STARTED` | N/A |
+### B — Booking & Business Operations
+Booking, availability, services, staff, branches, resources, cancellation, rescheduling, customer self-service, no-show, waitlist, group appointments, breaks/holidays/time-off, dynamic buffers, capacity rules and deposit/no-show policy hooks.
 
----
+### C — Owner Workspace / CRM / Growth
+Onboarding, dashboard, customer 360/memory, segmentation, referrals, campaigns, share toolkit/QR, reactivation, loyalty, memberships, packages, gift cards, promotions, forms, review/rebooking automation.
 
-## Detailed Milestone Descriptions
+### D — Commerce / Billing / Revenue
+Before company formation:
+- provider-neutral payment adapter;
+- checkout-session contracts;
+- recurring billing state machine;
+- deposit/prepayment domain;
+- token references only, never raw card storage;
+- refund/correction model;
+- webhook signature/replay/idempotency;
+- billing ledger;
+- dunning/retry scheduler;
+- tax/invoice domain interfaces;
+- sandbox/replay harness.
 
-### Phase 1: LARİ Core (FROZEN / CLOSED_PROVEN)
-- **Status**: CLOSED_PROVEN. All core database migrations (59 files), RPCs, entitlement resolvers, onboarding state machine, and release candidate contracts are closed and verified on official RC baseline `release/core-rc4` (`e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a`).
-- **Milestones**:
-  - `CORE-RC.3`: `CLOSED_PROVEN` (`E3_ISOLATED_RUNTIME_E2E`). UI V2 redesign designated as non-blocking parallel workstream (`DEFERRED_PARALLEL_NON_BLOCKING`).
-  - `CORE-RC.4`: `CLOSED_PROVEN` (`E2_EXECUTABLE_EXACT_SHA_CI`, GitHub Actions Run `32134598853`). Cross-layer `pending_onboarding` subscription status contract alignment verified.
+Company-dependent late activation:
+- iyzico production merchant;
+- production API credentials;
+- live recurring collection;
+- invoice/e-archive/tax provider;
+- banking/settlement.
 
-### Phase 2: Package / Customer Customization (FROZEN / CLOSED_PROVEN)
-- **Status**: CLOSED_PROVEN (`E2_EXECUTABLE_EXACT_SHA_CI`, GitHub Actions Run `32363490123`). Integrated Package baseline closed and frozen at exact product SHA `65a53427f52c21e60aa8f92e02a17d693a201601`. Both defined implementation slices are closed and proven together.
-  - `Branch Server Authority` (Slice 1): `CLOSED_PROVEN` (`E2_EXECUTABLE_EXACT_SHA_CI`, GitHub Actions Run `32340331307`). Server-authoritative RPC mutations, 64-bit advisory locks, SELECT-only RLS policies, and 5-session concurrency matrix verified on `feature/package-customer-customization-foundation` at exact SHA `83089a0695e0a5f0cf0fda25c7006df5e6ad4c07`.
-  - `Commercial Source-of-Truth Alignment` (Slice 2): `CLOSED_PROVEN` (`E2_EXECUTABLE_EXACT_SHA_CI`, GitHub Actions Run `32363490123`). Canonical 25 H1A feature keys, explicit legacy mapping matrix, dynamic legacy plan snapshot rendering, explicit unlimited flags without numeric sentinels, registration RPC server authority, and zero frontend price leaks verified on `feature/package-customer-customization-foundation` at exact SHA `65a53427f52c21e60aa8f92e02a17d693a201601`.
+### E — Communications
+Before provider activation:
+- provider-neutral SMS/email/WhatsApp adapters;
+- outbox/retries/dead-letter;
+- delivery callbacks;
+- templates/localization;
+- consent/IYS gates;
+- OTP abstraction;
+- frequency/rate limits;
+- provider failover;
+- deterministic test provider.
 
-### Phase 3: LARİ Clinic Package (CLOSED_PROVEN)
-- **Status**: CLOSED_PROVEN (`008ebac4496d592d271d612713c437d316c416f0` / `451081f2619f0342df2a8c64ae401dffb7697363`). Downstream clinical package extension closed on accepted baselines.
-  - `Clinical Domain Server Authority` (Block 1): `CLOSED_PROVEN` (`E2_EXECUTABLE_EXACT_SHA_CI`, GitHub Actions Run `32395034938`, evidence SHA `78c3e49a1883aafb74ff2e8f18acd9876e74a01b`). Materialized `clinic_staff_profiles`, `clinic_patient_profiles`, `clinic_encounters`, and `clinic_encounter_notes` (61st migration `20260905_lari_clinic_domain_server_authority.sql`), 6 server-authoritative RPCs, strict RLS policies, 64-bit advisory locking for versioned append-only clinical notes, audit privacy protection, cross-tenant isolation, and 3-session concurrency matrix verified at product SHA `2bb2b32d95387e09da06c7442a8617ccd38e4feb`.
-  - `Operational Integration & Application Service Layer` (Block 2): `CLOSED_PROVEN` (`E2_EXECUTABLE_EXACT_SHA_CI`, GitHub Actions Run `32457917961`, evidence SHA `4432d95b7335689242db61ba5562f0560b2d1585`). Materialized migration 62 (`20260906_lari_clinic_operational_integration.sql`), confirmed-only encounter start rule, atomic encounter+appointment completion RPC, operational day read model without SOAP fields, `clinicService.ts`, and `supabaseClinicRepository.ts`.
-  - `Clinic Workspace UI & Isolated Real-Browser Acceptance` (Block 3): `CLOSED_PROVEN` (`E3_ISOLATED_RUNTIME_E2E`, GitHub Actions Run `32624729632`, isolated project `miuecvkkmyvaciticwtm`). Verified workspace UI, authenticated role context switching, read-only evidence recapture (`7E2954A3...`), distinct UI screenshots, and DB immutability.
-  - `Speech-to-Text & SOAP Draft Assist` (`CLINIC_AI_ASSIST_V1`): `CLOSED_PROVEN` (`E3_ISOLATED_RUNTIME_E2E`, GitHub Actions Run `32840780417`, isolated project `miuecvkkmyvaciticwtm`, product SHA `451081f2619f0342df2a8c64ae401dffb7697363`). Real Groq transcription (`whisper-large-v3-turbo`) and SOAP draft (`openai/gpt-oss-120b`) proven under practitioner authority with atomic commercial quota metering, strict human approval boundary, zero raw audio DB persistence, and 0 autonomous clinical completions.
+Late activation:
+- production SMS/OTP;
+- WhatsApp Business production account;
+- production email sender/domain;
+- provider/statutory enrollment where required.
 
-### Phase 4: LARİ Health Tourism Package (IN_PROGRESS)
-- **Status**: IN_PROGRESS. Canonical 37-row scope matrix accepted (24 COMMITTED, 3 DEFERRED, 10 EXPLICITLY_OUT_OF_SCOPE, 0 SUPERSEDED in matrix).
-  - `Health Tourism Foundation Slice 1` (Server Authority & Lead Domain Core): `CLOSED_PROVEN` (`E2_EXECUTABLE_EXACT_SHA_CI`, GitHub Actions Run `32996883374`, Job `98268377731`, Artifact `9616929855`, evidence SHA `93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7`, product SHA `401dbf9a10ffccef594a19c7c1070a256ae279bf`). Materialized 66th migration `20260910_lari_health_tourism_foundation.sql`, `ht_agency_profiles`, `ht_leads`, `ht_lead_audit_logs`, 4 server-authoritative RPCs (`ht_create_public_lead`, `ht_get_lead`, `ht_list_leads`, `ht_update_lead_status`), strict RLS policies denying direct table SELECT for authenticated & anon roles, optional passport storage in DB intake with zero passport exposure in RPC outputs/audits, 100-item pagination limit with negative-offset clamping, lead status lifecycle audit logging (`new` -> `contacted`), zero Clinic/Core side-effect patient/encounter creation, staff quota trigger alignment, and 32/32 pgTAP behavioral tests verified.
-  - `Multilingual Public Intake & Surface` (Slice 2): `CLOSED_PROVEN` (`E3_ISOLATED_RUNTIME_E2E`, product SHA `6e8d423083d44510c8446c7a858c26d1555cac0c`, E2 evidence SHA `c89dab28e9784d400c8643ac9d57a132701a4d82`, GitHub Actions Run `33145277911`, Job `98764791271`, isolated Supabase project `miuecvkkmyvaciticwtm`). Verified 5-language parity (TR, EN, DE, RU, AR), RTL direction for AR, multi-step public intake UI, passport default OFF, ISO-2 country selection, tenant publication gate (ACTIVE + PUBLISHED allowed, INACTIVE/SUSPENDED/DRAFT blocked), source channel & agency attribution, cross-tenant isolation, post-submit PII form clearing, 20/20 E2 exact-SHA named checks, and direct real-browser lead creation (`d49baafa-c144-4a24-9482-804fcdeca4cb`). Zero Clinic patient/encounter/appointment side-effects. Arabic back-button copy polish recorded as `OPEN_NON_BLOCKING_COPY_POLISH`.
+### F — Public Web / Brand / Acquisition
+`randevulari.com`, tenant mini-sites, wildcard subdomains, SEO, public booking, custom-domain workflow, QR/deep links, portfolios, reviews, discovery foundation, marketing/pricing/features/contact/legal pages, accessibility and performance.
 
-### Phase 5: Final Delivery
-- **Status**: Not Started. Final production cutover, wildcard DNS/SSL configuration, SMS/WhatsApp provider account activation, payment activation (Iyzico), and commercial launch mode enablement.
+### G — Multi-Branch / Enterprise
+Server-enforced branch limits, branch-scoped staff/services/resources, central/branch calendars, permissions, cross-branch reporting, reassignment/transfers, enterprise onboarding, branch URLs and brand controls.
+
+### H — Clinic Vertical
+Patient profile, encounter lifecycle, clinical notes/history, practitioner permissions, forms, scheduling/resources, clinical AI transcript/draft, auditability, sensitive-data retention and an explicit Clinic SKU.
+
+### I — Health Tourism Vertical
+Public lead intake, lead scoring, agencies/referrers, coordinators, WhatsApp/AI conversation, human handoff, multilingual funnel, treatment journey/quote/itinerary domain, document/checklist flow, SLA/conversion analytics and explicit Health Tourism SKUs.
+
+### J — AI Product Layer
+Clinic AI, HT AI, customer visual/style assistant, owner assistants, prompt/version governance, server-side quotas, consent/privacy, evaluation sets, hallucination/failure UX, cost telemetry and provider abstraction.
+
+### K — POS / Inventory / Retail
+Products/SKUs, inventory ledger, stock movements, suppliers/purchase orders, mixed service+retail cart, staff commissions/tips, cash register/day close, refunds/adjustments and multi-branch inventory.
+
+### L — Marketplace / Network Effects
+Verified reviews, discovery/search, portfolios, favorites, rebooking, ranking/integrity. Marketplace settlement/payment is deferred until legal/company analysis.
+
+### M — Mobile / PWA
+Responsive-web first, installable PWA, offline-safe boundaries, push abstraction and owner quick actions. Native apps only after usage data justifies them.
+
+### N — Integrations / Public API
+Google Calendar, webhooks, import/export, accounting adapter, support/CRM integrations, API keys/scopes/rate limits/audit and a future integration marketplace.
+
+### O — Analytics / Decision Support
+Booking funnel, revenue, utilization, no-show/cancellation, staff performance, campaign attribution, retention/reactivation, HT funnel, branch comparison and privacy-safe product analytics.
+
+### P — Legal / Privacy / Governance
+Before company formation: consent/version ledger, data-rights requests, retention/deletion/anonymization, export, sensitive-data boundaries, subprocessor registry model and access/audit logs.
+
+Late finalization: lawyer-reviewed policies/contracts, company identifiers, commercial agreements, DPAs and statutory registrations as applicable.
+
+## 4. AOS parallel design lane
+
+AOS is mandatory for every customer-visible milestone and is not a final cosmetic pass.
+
+For each visual epic AOS should produce:
+1. current-state captures at six canonical viewports;
+2. user-journey visual critique;
+3. grounded reference/competitive analysis where useful;
+4. proposed visual direction;
+5. affected tokens/components;
+6. candidate mockups/renders/assets from a real available provider; otherwise `PROVIDER_MISSING`;
+7. accessibility/readability review;
+8. responsive evidence;
+9. implemented-vs-intended visual diff after implementation;
+10. `HUMAN_READY_VISUAL_GATE`.
+
+AOS may keep working autonomously inside read-only/local design scope. Product/release mutations always require a separate child authority.
+
+## 5. Execution phases
+
+### Phase 0 — Canonical Truth & Agent Control Plane
+
+**Mandatory lineage-convergence gate:** accepted product subject and staging/default are currently diverged from merge-base `134c8716c2511c909cd400aee0496ebd70f63bf6`. At the 2026-09-08 audit:
+- accepted subject `09bb1f8d8ce070c33d09099a6d0ae20c93787d11` is 301 commits ahead of default;
+- default `3faeced52939c65bbbc49da2ee6c7f375c0f9e59` contains 34 commits not in subject.
+No broad Program V2 mutation branch may be declared canonical until those 34 commits are semantically reconciled against subject and a single new development base is independently accepted.
+
+Exit:
+- one capability registry;
+- all current features mapped to canonical maturity;
+- stale/contradictory readiness docs classified;
+- dependency graph;
+- company-dependent boundaries;
+- AOS↔Controller autonomous coordination protocol;
+- production remains NO_GO.
+
+### Phase 1 — Production Foundation Hardening
+Exit:
+- canonical Supabase ACTIVE/reproducible;
+- P0 security findings resolved or independently dispositioned;
+- exposed RPC grants audited;
+- production auth fail-closed;
+- restore drill PASS;
+- staging observability/alerts;
+- Vercel deployment noise reduced;
+- real staging E2E smoke PASS.
+
+### Phase 2 — Real Paymentless Pilot Core
+Exit:
+- one real controlled tenant;
+- real auth/data/booking/self-service/admin;
+- real media storage;
+- real communication test channel or explicitly bounded manual fallback;
+- no company-dependent money collection;
+- incident/support rehearsal;
+- AOS customer + owner visual gate.
+
+### Phase 3 — Product Completeness Before External Providers
+Exit:
+- waitlist;
+- advanced scheduling/resources/time-off;
+- server-enforced package limits;
+- CRM/segmentation;
+- reporting;
+- multi-branch GA candidate;
+- Google Calendar adapter;
+- communications adapter;
+- payment adapter;
+- real server background jobs in staging;
+- custom-domain verification provider-ready.
+
+### Phase 4 — Revenue & Retention Suite
+Exit:
+- deposits/no-show domain;
+- memberships;
+- packages;
+- gift cards;
+- loyalty;
+- campaigns/reactivation;
+- client wallet domain;
+- robust analytics;
+- provider-independent sandbox/replay evidence.
+
+### Phase 5 — Clinic & Health Tourism Commercialization
+Exit:
+- explicit vertical SKUs;
+- roles/seats/quotas/AI allowances;
+- privacy/retention evidence;
+- E2E Clinic/HT journeys;
+- multilingual UX;
+- AOS vertical visual acceptance.
+
+### Phase 6 — POS / Inventory / Retail
+Exit:
+- products/inventory;
+- mixed cart;
+- commissions/tips;
+- cash/day-close;
+- refunds/adjustments;
+- multi-branch stock;
+- payment terminal remains adapter-only until activation.
+
+### Phase 7 — Discovery / Marketplace / Network
+Exit:
+- verified reviews;
+- discovery/search;
+- portfolios;
+- favorites/rebooking;
+- integrity model.
+
+### Phase 8 — Company-Dependent Provider Activation
+Only after technical readiness:
+- legal entity/company setup;
+- iyzico production merchant;
+- production SMS/OTP and WhatsApp;
+- production email sender/domain;
+- invoice/tax provider;
+- banking/settlement;
+- final legal/provider contracts.
+
+### Phase 9 — Paid Early Access → GA
+Exit:
+- paid E2E billing;
+- refunds/dunning/invoices;
+- production communication proof;
+- observability/SLO;
+- backup/restore;
+- load/security evidence;
+- 3–10 real pilot tenants with measured outcomes;
+- sales claim matrix equals runtime truth;
+- zero P0/P1 launch blockers;
+- AOS final consistency gate;
+- explicit Independent Controller `PRODUCTION=GO`.
+
+## 6. Current Program V2 priority order
+
+1. Phase 0 truth registry + autonomy/control plane.
+2. Phase 1 security and canonical environment.
+3. AOS evidence completion in parallel.
+4. Real paymentless pilot.
+5. Product-completeness gaps that do not require a company/provider contract.
+6. Revenue/retention modules.
+7. Clinic/HT commercial packaging.
+8. POS/inventory.
+9. Marketplace/network.
+10. Company/provider activation.
+11. Paid early access and GA.
+
+## 7. Sales rule
+Only `REAL_LIVE_VERIFIED` capabilities may be sold as generally available. Bounded pilot claims require explicit scope.
+
+## 8. Current release rule
+`PRODUCTION=NO_GO`.

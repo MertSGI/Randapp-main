@@ -30,9 +30,15 @@ MANDATORY PROTOCOL:
 - **Clinic Core Baseline**: `feature/lari-clinic-foundation` (`008ebac4496d592d271d612713c437d316c416f0`) — `CLOSED_PROVEN`
 - **Clinic AI Assist V1 Baseline**: `feature/clinic-ai-assist-v1-provider-resilience` (`451081f2619f0342df2a8c64ae401dffb7697363`) — `CLOSED_PROVEN`
 - **Isolated E3 Acceptance Project**: `miuecvkkmyvaciticwtm` — `ACCEPTED_CLOSED_PROVEN` (Current Schema Baseline: 66 migrations / `20260910_lari_health_tourism_foundation.sql`; Clinic AI Assist V1 E2 Run: `32840780417`, Artifact: `9560421750`; HT Slice 2 E2 Run: `33145277911`, E3 lead: `d49baafa-c144-4a24-9482-804fcdeca4cb`)
-- **Active Milestone**: `LARİ Health Tourism` — `HEALTH_TOURISM_SLICE2_CLOSED_PROVEN`
-  - **Foundation Slice 1**: `CLOSED_PROVEN` (`E2_EXECUTABLE_EXACT_SHA_CI`, Product SHA `401dbf9a10ffccef594a19c7c1070a256ae279bf`, Evidence SHA `93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7`, GitHub Actions Run `32996883374`, Job `98268377731`, Artifact `9616929855` digest `sha256:b3cca4afd2620080d3b2237a811f3f99cd281e345a6bfcb90b193aa197e0680d`). 66 migrations applied, staff quota trigger O->D->O aligned, 32/32 pgTAP assertions, 17/17 named behavioral proofs verified.
-  - **Multilingual Public Intake & Surface (Slice 2)**: `CLOSED_PROVEN` (`E3_ISOLATED_RUNTIME_E2E`, Product SHA `6e8d423083d44510c8446c7a858c26d1555cac0c`, E2 Evidence SHA `c89dab28e9784d400c8643ac9d57a132701a4d82`, GitHub Actions Run `33145277911`, Job `98764791271`, isolated Supabase project `miuecvkkmyvaciticwtm`). Verified 5-language parity, RTL, passport OFF, tenant publication gate, agency attribution, PII clearing, and direct real-browser lead creation (`d49baafa-c144-4a24-9482-804fcdeca4cb`).
-  - **Scope Reconciliation**: `ACCEPTED_CLOSED` (37/37 numbered items classified: 24 COMMITTED, 3 DEFERRED to Final Delivery, 10 EXPLICITLY_OUT_OF_SCOPE, 0 SUPERSEDED in matrix; 2 cross-cutting superseded items). Canonically persisted in [HEALTH_TOURISM_SCOPE_MATRIX.md](./HEALTH_TOURISM_SCOPE_MATRIX.md). EV-030 ACCEPTED by controller.
-  - **Next Gate**: Awaiting Controller approval for next cohesive Health Tourism customer-value slice (Coordinator Lead Workflow, Scoring, AI Assist, and Handoff to Clinic).
-  - **Non-Blocking Security & UX Follow-up**: Recorded `OBSERVED_DEPENDENCY_AUDIT_RISK / REVIEW_REQUIRED_BEFORE_PRODUCTION` (6 vulnerabilities: 1 low, 5 high) and `OPEN_NON_BLOCKING_COPY_POLISH` (Arabic back-button copy polish).
+- **Active Milestone**: `LARİ Health Tourism` — `HEALTH_TOURISM_SLICE3_CLOSED_PROVEN` (Historical evidence accepted, superseded by Program V2 canonical activation under DECISION-020)
+- **Active Program**: `LARI-PROGRAM-V2-REAL-PRODUCT-20260908-01`
+  - **Operator**: AOS (Autonomous Program Operator with standing authority under `LARI-AOS-PROGRAM-V2-BOOTSTRAP-20260908-01`)
+  - **Current Phase**: `Phase 0 — Canonical Truth & Agent Control Plane`
+  - **First Execution Gate**: `PHASE_0_1_CANONICAL_LINEAGE_RECONCILIATION`
+  - **Review Candidate Branch**: `aos/program-v2-reconcile-candidate-01`
+  - **Production Status**: `NO_GO`
+  - **Company-Dependent Activations**: Deferred to Phase 8
+  - **AOS Design Lane**: Continuously active in parallel with `RELEASE_GATE_EFFECT=NONE`
+- **Scope Reconciliation**: `ACCEPTED_CLOSED` (37/37 numbered items classified: 24 COMMITTED, 3 DEFERRED to Final Delivery, 10 EXPLICITLY_OUT_OF_SCOPE, 0 SUPERSEDED in matrix; 2 cross-cutting superseded items). Canonically persisted in [HEALTH_TOURISM_SCOPE_MATRIX.md](./HEALTH_TOURISM_SCOPE_MATRIX.md). EV-030 ACCEPTED by controller.
+- **Non-Blocking Security & UX Follow-up**: Recorded `OBSERVED_DEPENDENCY_AUDIT_RISK / REVIEW_REQUIRED_BEFORE_PRODUCTION` (6 vulnerabilities: 1 low, 5 high) and `OPEN_NON_BLOCKING_COPY_POLISH` (Arabic back-button copy polish).
+
