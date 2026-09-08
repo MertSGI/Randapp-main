@@ -33,10 +33,12 @@ MANDATORY PROTOCOL:
 - **Active Milestone**: `LARİ Health Tourism` — `HEALTH_TOURISM_SLICE3_CLOSED_PROVEN` (Historical evidence accepted, superseded by Program V2 canonical activation under DECISION-020)
 - **Active Program**: `LARI-PROGRAM-V2-REAL-PRODUCT-20260908-01`
   - **Operator**: AOS (Autonomous Program Operator with standing authority under `LARI-AOS-PROGRAM-V2-BOOTSTRAP-20260908-01`)
-  - **Current Phase**: `Phase 0 — Canonical Truth & Agent Control Plane`
-  - **First Execution Gate**: `PHASE_0_1_CANONICAL_LINEAGE_RECONCILIATION`
-  - **Review Candidate Branch**: `aos/program-v2-reconcile-candidate-01`
+  - **Current Phase**: `Phase 0.2 — Canonical Program V2 Product Base Established`
+  - **Canonical Product Base**: `09bb1f8d8ce070c33d09099a6d0ae20c93787d11`
+  - **Phase 0.1 Result**: `INDEPENDENTLY_CORRECTED_NO_PRODUCT_DELTA_REQUIRED` (0 product/app/migration deltas; 34 default-only commits classified as CLASS A [14] and CLASS C [20]; candidate 86897ab7cd07 not pushed, superseded diagnostic only)
+  - **First Active Execution Gate**: `PHASE_0_2_CANONICAL_BASE_ESTABLISHED` (advancing to Phase 1.0 read-only security dependency analysis)
   - **Production Status**: `NO_GO`
+
   - **Company-Dependent Activations**: Deferred to Phase 8
   - **AOS Design Lane**: Continuously active in parallel with `RELEASE_GATE_EFFECT=NONE`
 - **Scope Reconciliation**: `ACCEPTED_CLOSED` (37/37 numbered items classified: 24 COMMITTED, 3 DEFERRED to Final Delivery, 10 EXPLICITLY_OUT_OF_SCOPE, 0 SUPERSEDED in matrix; 2 cross-cutting superseded items). Canonically persisted in [HEALTH_TOURISM_SCOPE_MATRIX.md](./HEALTH_TOURISM_SCOPE_MATRIX.md). EV-030 ACCEPTED by controller.
