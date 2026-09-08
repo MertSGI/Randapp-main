@@ -1,0 +1,661 @@
+{
+  "program_id": "LARI-PROGRAM-V2-REAL-PRODUCT-20260908-01",
+  "generated_at": "2026-09-08",
+  "production": "NO_GO",
+  "maturity_states": [
+    "REAL_LIVE_VERIFIED",
+    "REAL_CODE_NOT_LIVE_VERIFIED",
+    "PROVIDER_READY_NOT_CONNECTED",
+    "CODE_PRESENT_NOT_PRODUCTIZED",
+    "MOCK_ONLY",
+    "PLANNED",
+    "COMPANY_DEPENDENT_FINALIZATION",
+    "BLOCKED"
+  ],
+  "current_live_commercial_registry": [
+    {
+      "key": "core_booking",
+      "label": "Online Randevu Sistemi",
+      "category": "core",
+      "source_maturity": "LIVE_ENFORCED",
+      "source_publicly_claimable": true,
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
+      "target_phase": 1,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "customer_cancellation",
+      "label": "Randevu İptal Hakkı",
+      "category": "core",
+      "source_maturity": "LIVE_ENFORCED",
+      "source_publicly_claimable": true,
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
+      "target_phase": 1,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "customer_reschedule_request",
+      "label": "Randevu Değişiklik Talebi",
+      "category": "core",
+      "source_maturity": "LIVE_ENFORCED",
+      "source_publicly_claimable": true,
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
+      "target_phase": 1,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "customer_self_service",
+      "label": "Müşteri Self-Servis Portalı",
+      "category": "core",
+      "source_maturity": "LIVE_ENFORCED",
+      "source_publicly_claimable": true,
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
+      "target_phase": 1,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "lari_minisite",
+      "label": "LARİ Mini-Site ve Profili",
+      "category": "customization",
+      "source_maturity": "LIVE_ENFORCED",
+      "source_publicly_claimable": true,
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
+      "target_phase": 2,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "admin_appointment_operations",
+      "label": "İşletme Randevu Yönetimi",
+      "category": "operations",
+      "source_maturity": "LIVE_ENFORCED",
+      "source_publicly_claimable": true,
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
+      "target_phase": 2,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "service_management",
+      "label": "Hizmet Kataloğu Yönetimi",
+      "category": "operations",
+      "source_maturity": "LIVE_ENFORCED",
+      "source_publicly_claimable": true,
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
+      "target_phase": 2,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "staff_management",
+      "label": "Personel Yönetimi",
+      "category": "operations",
+      "source_maturity": "LIVE_ENFORCED",
+      "source_publicly_claimable": true,
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
+      "target_phase": 2,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "priority_support",
+      "label": "Öncelikli Destek",
+      "category": "support",
+      "source_maturity": "LIVE_ENFORCED",
+      "source_publicly_claimable": true,
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
+      "target_phase": 2,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "dedicated_support",
+      "label": "Özel Müşteri Temsilcisi",
+      "category": "support",
+      "source_maturity": "LIVE_ENFORCED",
+      "source_publicly_claimable": true,
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
+      "target_phase": 2,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "max_branches",
+      "label": "Maksimum Şube Sayısı",
+      "category": "limits",
+      "source_maturity": "LIVE_NOT_PACKAGE_ENFORCED",
+      "source_publicly_claimable": true,
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "max_monthly_appointments",
+      "label": "Aylık Randevu Limiti",
+      "category": "limits",
+      "source_maturity": "LIVE_NOT_PACKAGE_ENFORCED",
+      "source_publicly_claimable": true,
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "max_services",
+      "label": "Maksimum Aktif Hizmet",
+      "category": "limits",
+      "source_maturity": "LIVE_NOT_PACKAGE_ENFORCED",
+      "source_publicly_claimable": true,
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "max_staff",
+      "label": "Maksimum Aktif Personel",
+      "category": "limits",
+      "source_maturity": "LIVE_NOT_PACKAGE_ENFORCED",
+      "source_publicly_claimable": true,
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "notification_allowance",
+      "label": "Dış Bildirim Kotası",
+      "category": "channels",
+      "source_maturity": "CODE_PRESENT",
+      "source_publicly_claimable": false,
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "calendar_integration",
+      "label": "Google Takvim Entegrasyonu",
+      "category": "integrations",
+      "source_maturity": "CODE_PRESENT",
+      "source_publicly_claimable": false,
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "advanced_reporting",
+      "label": "Gelişmiş Raporlama",
+      "category": "operations",
+      "source_maturity": "CODE_PRESENT",
+      "source_publicly_claimable": false,
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "ai_allowance",
+      "label": "Yapay Zeka Kullanım Kotası",
+      "category": "operations",
+      "source_maturity": "CODE_PRESENT",
+      "source_publicly_claimable": false,
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "crm_level",
+      "label": "Müşteri Hafızası (CRM)",
+      "category": "operations",
+      "source_maturity": "CODE_PRESENT",
+      "source_publicly_claimable": false,
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "data_export",
+      "label": "Veri Dışa Aktarma",
+      "category": "operations",
+      "source_maturity": "CODE_PRESENT",
+      "source_publicly_claimable": false,
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "multi_branch",
+      "label": "Çoklu Şube Desteği",
+      "category": "operations",
+      "source_maturity": "CODE_PRESENT",
+      "source_publicly_claimable": false,
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "custom_domain_eligible",
+      "label": "Özel Alan Adı Desteği",
+      "category": "customization",
+      "source_maturity": "MOCK_ONLY",
+      "source_publicly_claimable": false,
+      "program_maturity": "MOCK_ONLY",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "custom_domain_included",
+      "label": "Dahili Özel Alan Adı",
+      "category": "customization",
+      "source_maturity": "MOCK_ONLY",
+      "source_publicly_claimable": false,
+      "program_maturity": "MOCK_ONLY",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "white_label",
+      "label": "Beyaz Etiket",
+      "category": "customization",
+      "source_maturity": "MOCK_ONLY",
+      "source_publicly_claimable": false,
+      "program_maturity": "MOCK_ONLY",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "public_api",
+      "label": "Geliştirici API Erişimi",
+      "category": "integrations",
+      "source_maturity": "ABSENT",
+      "source_publicly_claimable": false,
+      "program_maturity": "PLANNED",
+      "target_phase": 7,
+      "external_provider_or_company_dependency": false
+    }
+  ],
+  "additional_program_capabilities": [
+    {
+      "key": "canonical_lineage_convergence",
+      "label": "Canonical Product Lineage Convergence",
+      "category": "program_control",
+      "source_state": "DIVERGED",
+      "program_maturity": "BLOCKED",
+      "target_phase": 0,
+      "external_provider_or_company_dependency": false,
+      "evidence": {
+        "merge_base": "134c8716c2511c909cd400aee0496ebd70f63bf6",
+        "subject": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+        "default": "3faeced52939c65bbbc49da2ee6c7f375c0f9e59",
+        "subject_ahead_of_default": 301,
+        "subject_behind_default": 34
+      }
+    },
+    {
+      "key": "canonical_supabase",
+      "label": "Canonical Supabase Staging",
+      "category": "platform",
+      "source_state": "PLANNED",
+      "program_maturity": "BLOCKED",
+      "target_phase": 1,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "production_auth_hardening",
+      "label": "Production Auth Hardening",
+      "category": "security",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 1,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "security_rpc_surface",
+      "label": "RPC / SECURITY DEFINER Hardening",
+      "category": "security",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 1,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "backup_restore",
+      "label": "Backup & Restore Drill",
+      "category": "reliability",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 1,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "observability",
+      "label": "External Observability & Alerts",
+      "category": "reliability",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 1,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "real_media_storage",
+      "label": "Real Media Storage",
+      "category": "media",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 2,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "waitlist",
+      "label": "Waitlist",
+      "category": "booking",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "resource_management",
+      "label": "Resources / Rooms / Equipment",
+      "category": "booking",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "time_off_holidays",
+      "label": "Staff Time Off & Holiday Calendar",
+      "category": "booking",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "group_booking",
+      "label": "Group Appointments",
+      "category": "booking",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "no_show_protection",
+      "label": "No-show Protection",
+      "category": "booking",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 4,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "deposits",
+      "label": "Booking Deposits / Prepayments",
+      "category": "commerce",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 4,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "memberships",
+      "label": "Memberships",
+      "category": "retention",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 4,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "packages",
+      "label": "Service Packages",
+      "category": "retention",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 4,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "gift_cards",
+      "label": "Gift Cards",
+      "category": "retention",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 4,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "loyalty",
+      "label": "Loyalty Program",
+      "category": "retention",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 4,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "client_wallet",
+      "label": "Client Wallet",
+      "category": "retention",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 4,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "reactivation",
+      "label": "Automated Client Reactivation",
+      "category": "growth",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 4,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "clinic_workspace",
+      "label": "Clinic Workspace",
+      "category": "clinic",
+      "source_state": "LIVE_ACCEPTANCE_ONLY",
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
+      "target_phase": 5,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "clinic_ai",
+      "label": "Clinic AI Transcribe & Draft",
+      "category": "clinic",
+      "source_state": "LIVE_ACCEPTANCE_ONLY",
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
+      "target_phase": 5,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "ht_lead_ops",
+      "label": "Health Tourism Lead Operations",
+      "category": "health_tourism",
+      "source_state": "LIVE_ACCEPTANCE_ONLY",
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
+      "target_phase": 5,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "ht_ai_chat",
+      "label": "Health Tourism AI Chat",
+      "category": "health_tourism",
+      "source_state": "LIVE_ACCEPTANCE_ONLY",
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
+      "target_phase": 5,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "ht_agency_network",
+      "label": "Health Tourism Agency / Referrer Network",
+      "category": "health_tourism",
+      "source_state": "CODE_PRESENT",
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 5,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "ht_journey_quote",
+      "label": "Treatment Journey / Quote / Itinerary",
+      "category": "health_tourism",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 5,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "pos",
+      "label": "Point of Sale",
+      "category": "retail",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 6,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "inventory",
+      "label": "Inventory / Stock Ledger",
+      "category": "retail",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 6,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "purchase_orders",
+      "label": "Suppliers / Purchase Orders",
+      "category": "retail",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 6,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "commissions_tips",
+      "label": "Staff Commissions & Tips",
+      "category": "retail",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 6,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "verified_reviews",
+      "label": "Verified Reviews",
+      "category": "marketplace",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 7,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "discovery_marketplace",
+      "label": "Discovery Marketplace",
+      "category": "marketplace",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 7,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "favorites_rebooking",
+      "label": "Favorites & Fast Rebooking",
+      "category": "marketplace",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 7,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "pwa",
+      "label": "Installable PWA",
+      "category": "mobile",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "push_notifications",
+      "label": "Push Notifications",
+      "category": "mobile",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 4,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "webhooks",
+      "label": "Outbound Webhooks",
+      "category": "integrations",
+      "source_state": "PLANNED",
+      "program_maturity": "PLANNED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": false
+    },
+    {
+      "key": "payment_adapter",
+      "label": "Provider-neutral Payment Adapter",
+      "category": "commerce",
+      "source_state": "CODE_PRESENT",
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "real_recurring_billing",
+      "label": "Real Recurring Billing",
+      "category": "commerce",
+      "source_state": "PLANNED",
+      "program_maturity": "COMPANY_DEPENDENT_FINALIZATION",
+      "target_phase": 8,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "iyzico_live",
+      "label": "iyzico Production Merchant",
+      "category": "commerce",
+      "source_state": "PLANNED",
+      "program_maturity": "COMPANY_DEPENDENT_FINALIZATION",
+      "target_phase": 8,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "sms_email_whatsapp_adapters",
+      "label": "Communication Provider Adapters",
+      "category": "communications",
+      "source_state": "CODE_PRESENT",
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 3,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "live_sms_whatsapp",
+      "label": "Live SMS/OTP/WhatsApp Provider",
+      "category": "communications",
+      "source_state": "PLANNED",
+      "program_maturity": "COMPANY_DEPENDENT_FINALIZATION",
+      "target_phase": 8,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "tax_invoicing",
+      "label": "Tax / Invoice Provider Activation",
+      "category": "commerce",
+      "source_state": "PLANNED",
+      "program_maturity": "COMPANY_DEPENDENT_FINALIZATION",
+      "target_phase": 8,
+      "external_provider_or_company_dependency": true
+    },
+    {
+      "key": "aos_design_system",
+      "label": "AOS Continuous Design System",
+      "category": "design",
+      "source_state": "IN_PROGRESS",
+      "program_maturity": "CODE_PRESENT_NOT_PRODUCTIZED",
+      "target_phase": 0,
+      "external_provider_or_company_dependency": false
+    }
+  ],
+  "rules": {
+    "general_sales_claim_requires": "REAL_LIVE_VERIFIED",
+    "company_dependent_activation_phase": 8,
+    "aos_runs_in_parallel": true,
+    "release_gate_effect": "NONE",
+    "production_go_requires_explicit_controller_decision": true
+  }
+}
