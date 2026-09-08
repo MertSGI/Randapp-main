@@ -1,6 +1,6 @@
 {
     "schema_version": "1.0.0",
-    "updated_at": "2026-09-08T22:30:00+03:00",
+    "updated_at": "2026-09-08T22:35:00+03:00",
     "product": "LARİ SaaS Platform",
     "repository": "MertSGI/Randapp-main",
     "delivery_commitment": {
@@ -625,7 +625,7 @@
         "disposition": "AWAITING_INDEPENDENT_CONTROLLER_PROMOTION"
     },
     "design_intelligence_state": {
-        "active_epic": "Epic 4: Provider Admin & Staff Scheduling Surface",
+        "active_epic": "Epic 5: Clinic Medical / Patient Surface",
         "completed_epics": [
             {
                 "epic": 1,
@@ -643,6 +643,12 @@
                 "epic": 3,
                 "name": "Customer Self-Service & Appointment Management",
                 "report": "AOS_DESIGN_EPIC3_REPORT.md",
+                "gate": "HUMAN_READY_VISUAL_GATE"
+            },
+            {
+                "epic": 4,
+                "name": "Provider Admin & Staff Scheduling Surface",
+                "report": "AOS_DESIGN_EPIC4_REPORT.md",
                 "gate": "HUMAN_READY_VISUAL_GATE"
             }
         ],
