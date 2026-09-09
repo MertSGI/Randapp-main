@@ -39,7 +39,7 @@ const MarketingLayout: React.FC = () => {
                 <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold tracking-tighter">{marketConfigService.getBrandName().charAt(0)}</div>
                 <span className="font-semibold text-xl text-primary dark:text-white whitespace-nowrap">{marketConfigService.getBrandName()}</span>
               </Link>
-              <nav className="hidden md:ml-8 md:flex md:space-x-8">
+              <nav className="hidden lg:ml-8 lg:flex lg:space-x-8">
                 <Link to="/features" className={`border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-1 py-5 border-b-2 text-sm font-medium ${location.pathname === '/features' ? 'text-gray-900 border-blue-500' : ''}`}>{language === 'tr' ? 'Özellikler' : 'Features'}</Link>
                 <Link to="/mobile-app" className={`border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-1 py-5 border-b-2 text-sm font-medium ${location.pathname === '/mobile-app' ? 'text-gray-900 border-accent' : ''}`}>{language === 'tr' ? 'Mobil Uygulama' : 'Mobile App'}</Link>
                 <Link to="/pricing" className={`border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-1 py-5 border-b-2 text-sm font-medium ${location.pathname === '/pricing' ? 'text-gray-900 border-blue-500' : ''}`}>{language === 'tr' ? 'Fiyatlar' : 'Pricing'}</Link>
@@ -47,7 +47,7 @@ const MarketingLayout: React.FC = () => {
               </nav>
             </div>
             
-            <div className="hidden md:flex items-center gap-4">
+            <div className="hidden lg:flex items-center gap-4">
               <ThemeToggle />
               <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
                 <button onClick={() => setLanguage('en')} className={`px-3 py-1 rounded-md text-xs font-semibold ${language === 'en' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 dark:text-gray-300'}`}>EN</button>
@@ -57,7 +57,7 @@ const MarketingLayout: React.FC = () => {
               <Link to="/demo" className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm hover:bg-blue-700 transition whitespace-nowrap">{language === 'tr' ? 'İşletmeni Önizle' : 'Preview Your Business'}</Link>
             </div>
 
-            <div className="flex items-center md:hidden gap-2">
+            <div className="flex items-center lg:hidden gap-2">
                <ThemeToggle />
                <button
                  onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -76,7 +76,7 @@ const MarketingLayout: React.FC = () => {
         
         {/* Mobile Navigation Menu */}
         {mobileMenuOpen && (
-          <div className="md:hidden border-t border-gray-100 dark:border-slate-700 bg-white dark:bg-slate-800 absolute w-full left-0 shadow-lg top-16">
+          <div className="lg:hidden border-t border-gray-100 dark:border-slate-700 bg-white dark:bg-slate-800 absolute w-full left-0 shadow-lg top-16">
             <div className="flex flex-col px-4 pt-2 pb-6 space-y-1">
               <Link to="/" className={`block px-3 py-2 rounded-md text-base font-medium ${location.pathname === '/' ? 'bg-blue-50 text-blue-600 dark:bg-slate-700 dark:text-blue-400' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-slate-700'}`}>{language === 'tr' ? 'Ana Sayfa' : 'Home'}</Link>
               <Link to="/features" className={`block px-3 py-2 rounded-md text-base font-medium ${location.pathname === '/features' ? 'bg-blue-50 text-blue-600 dark:bg-slate-700 dark:text-blue-400' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-slate-700'}`}>{language === 'tr' ? 'Özellikler' : 'Features'}</Link>
