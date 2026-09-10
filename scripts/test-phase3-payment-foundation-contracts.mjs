@@ -46,13 +46,16 @@ const tests = [
                 /REVOKE\s+ALL\s+ON\s+public\.payments\s+FROM\s+authenticated;/i.test(sql)
   },
   {
-    name: '7. Existing public.payments reconciled with intent_id and amount_minor',
+    name: '7. Existing public.payments reconciled with intent_id, amount_minor and NO unproven amount*100 backfill (EV058-R1)',
     test: () => /ALTER\s+TABLE\s+public\.payments[\s\S]*?ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+intent_id/i.test(sql) &&
-                /ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+amount_minor\s+BIGINT/i.test(sql)
+                /ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+amount_minor\s+BIGINT/i.test(sql) &&
+                !/amount\s*\*\s*100/i.test(sql) &&
+                /amount_unit_classification/i.test(sql)
   },
   {
-    name: '8. Provider-scoped atomic replay protection constraint on public.payment_events',
-    test: () => /CONSTRAINT\s+payment_events_provider_event_unique\s+UNIQUE\s*\(\s*provider\s*,\s*provider_event_id\s*\)/i.test(sql)
+    name: '8. Provider-scoped atomic replay protection and legacy constraint reconciliation on public.payment_events (EV058-R1)',
+    test: () => /ALTER\s+TABLE\s+public\.payment_events\s+DROP\s+CONSTRAINT\s+IF\s+EXISTS/i.test(sql) &&
+                /CONSTRAINT\s+payment_events_provider_event_unique\s+UNIQUE\s*\(\s*provider\s*,\s*provider_event_id\s*\)/i.test(sql)
   },
   {
     name: '9. Direct table privileges revoked on public.payment_events from PUBLIC, anon, authenticated',
@@ -61,9 +64,9 @@ const tests = [
                 /REVOKE\s+ALL\s+ON\s+public\.payment_events\s+FROM\s+authenticated;/i.test(sql)
   },
   {
-    name: '10. create_payment_intent computes request_fingerprint and detects IDEMPOTENCY_CONFLICT',
+    name: '10. create_payment_intent computes request_fingerprint and performs atomic idempotency conflict resolution (EV058-R1)',
     test: () => /v_fingerprint\s*:=\s*encode\(sha256\(/i.test(sql) &&
-                /v_existing_intent\.request_fingerprint\s*!=\s*v_fingerprint/i.test(sql) &&
+                /ON\s+CONFLICT\s*\(\s*tenant_id\s*,\s*idempotency_key\s*\)\s*DO\s+NOTHING/i.test(sql) &&
                 /IDEMPOTENCY_CONFLICT/i.test(sql) &&
                 /idempotent_duplicate/i.test(sql)
   },
@@ -74,14 +77,18 @@ const tests = [
                 /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.create_payment_intent.*FROM\s+authenticated;/i.test(sql)
   },
   {
-    name: '12. process_verified_payment_event detects INTEGRITY_CONFLICT on altered duplicate payload digest',
+    name: '12. process_verified_payment_event detects INTEGRITY_CONFLICT and verifies canonical binding (EV058-R1)',
     test: () => /INTEGRITY_CONFLICT/i.test(sql) &&
                 /EVENT_ID_PAYLOAD_MISMATCH/i.test(sql) &&
-                /IDEMPOTENT_SUCCESS/i.test(sql)
+                /IDEMPOTENT_SUCCESS/i.test(sql) &&
+                /PROVIDER_BINDING_MISMATCH/i.test(sql) &&
+                /PROVIDER_REFERENCE_MISMATCH/i.test(sql)
   },
   {
-    name: '13. process_verified_payment_event prevents regression of terminal succeeded payment intents',
-    test: () => /TERMINAL_SUCCESS_PRESERVED_AGAINST_REGRESSION/i.test(sql)
+    name: '13. process_verified_payment_event protects monotonic event progression and terminal state (EV058-R1)',
+    test: () => /TERMINAL_SUCCESS_PRESERVED_AGAINST_REGRESSION/i.test(sql) &&
+                /STALE_EVENT_IGNORED_AGAINST_NEWER_STATE/i.test(sql) &&
+                /last_applied_event_timestamp/i.test(sql)
   },
   {
     name: '14. process_verified_payment_event execution revoked from browser roles (trusted adapter only)',
