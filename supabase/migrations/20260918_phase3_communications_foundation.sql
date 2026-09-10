@@ -36,42 +36,67 @@
 -- 1. Table: public.communication_outbox
 -- =========================================================================
 
+-- Safely ensure base table exists with canonical base columns
 CREATE TABLE IF NOT EXISTS public.communication_outbox (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id               UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    channel                 TEXT NOT NULL CHECK (channel IN ('email', 'sms', 'whatsapp', 'otp')),
-    recipient_address       TEXT NOT NULL,  -- phone number or email (server-side only)
-    template_id             TEXT NOT NULL,
-    payload                 JSONB NOT NULL DEFAULT '{}'::jsonb,
-    request_fingerprint     TEXT NOT NULL,  -- SHA-256 fingerprint of (channel, recipient, template, payload)
-    idempotency_key         TEXT NOT NULL,
-    status                  TEXT NOT NULL DEFAULT 'queued'
-                            CHECK (status IN (
-                                'queued',
-                                'processing',
-                                'sent_to_provider',
-                                'delivered',
-                                'failed_retryable',
-                                'failed_terminal',
-                                'dead_letter',
-                                'cancelled'
-                            )),
-    attempt_count           INTEGER NOT NULL DEFAULT 0,
-    max_attempts            INTEGER NOT NULL DEFAULT 3,
-    next_attempt_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_attempt_at         TIMESTAMPTZ DEFAULT NULL,
-    last_event_timestamp    TIMESTAMPTZ DEFAULT NULL, -- Monotonic provider event timestamp tracking
-    locked_by               TEXT DEFAULT NULL,
-    lease_until             TIMESTAMPTZ DEFAULT NULL,
-    provider_id             TEXT DEFAULT NULL,
-    provider_msg_ref        TEXT DEFAULT NULL,
-    error_code              TEXT DEFAULT NULL,
-    error_message           TEXT DEFAULT NULL,
+    tenant_id               TEXT NOT NULL,
+    recipient               TEXT,
+    channel                 TEXT NOT NULL,
+    message                 TEXT,
+    status                  TEXT NOT NULL DEFAULT 'queued',
+    metadata                JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    CONSTRAINT comms_outbox_tenant_idempotency_unique UNIQUE (tenant_id, idempotency_key)
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Safely reconcile / evolve columns for provider-neutral lifecycle & worker engine
+ALTER TABLE public.communication_outbox
+    ADD COLUMN IF NOT EXISTS recipient_address TEXT,
+    ADD COLUMN IF NOT EXISTS template_id TEXT,
+    ADD COLUMN IF NOT EXISTS payload JSONB DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS request_fingerprint TEXT,
+    ADD COLUMN IF NOT EXISTS idempotency_key TEXT,
+    ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS max_attempts INTEGER NOT NULL DEFAULT 3,
+    ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMPTZ DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS last_event_timestamp TIMESTAMPTZ DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS locked_by TEXT DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS provider_id TEXT DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS provider_msg_ref TEXT DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS error_code TEXT DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS error_message TEXT DEFAULT NULL;
+
+-- Backfill recipient_address from legacy recipient if null
+UPDATE public.communication_outbox
+SET recipient_address = recipient
+WHERE recipient_address IS NULL AND recipient IS NOT NULL;
+
+-- Backfill payload from legacy metadata if null
+UPDATE public.communication_outbox
+SET payload = metadata
+WHERE (payload IS NULL OR payload = '{}'::jsonb) AND metadata IS NOT NULL AND metadata != '{}'::jsonb;
+
+-- Backfill template_id if null
+UPDATE public.communication_outbox
+SET template_id = COALESCE(metadata->>'event_type', 'legacy_message')
+WHERE template_id IS NULL;
+
+-- Backfill request_fingerprint if null
+UPDATE public.communication_outbox
+SET request_fingerprint = encode(sha256((COALESCE(channel, '') || ':' || COALESCE(recipient, recipient_address, '') || ':' || COALESCE(message, payload::text, ''))::bytea), 'hex')
+WHERE request_fingerprint IS NULL;
+
+-- Backfill idempotency_key if null
+UPDATE public.communication_outbox
+SET idempotency_key = 'legacy_' || id::text
+WHERE idempotency_key IS NULL;
+
+-- Partial unique index on tenant_id + idempotency_key (works safely with text/uuid tenant_id)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_comms_outbox_tenant_idempotency_unique
+    ON public.communication_outbox (tenant_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_comms_outbox_queue_dispatch 
     ON public.communication_outbox(status, next_attempt_at) 
@@ -81,9 +106,16 @@ CREATE INDEX IF NOT EXISTS idx_comms_outbox_tenant ON public.communication_outbo
 CREATE INDEX IF NOT EXISTS idx_comms_outbox_provider_msg ON public.communication_outbox(provider_id, provider_msg_ref)
     WHERE provider_id IS NOT NULL AND provider_msg_ref IS NOT NULL;
 
-CREATE TRIGGER update_comms_outbox_modtime
-    BEFORE UPDATE ON public.communication_outbox
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger WHERE tgname = 'update_comms_outbox_modtime'
+    ) THEN
+        CREATE TRIGGER update_comms_outbox_modtime
+            BEFORE UPDATE ON public.communication_outbox
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
 
 ALTER TABLE public.communication_outbox ENABLE ROW LEVEL SECURITY;
 
@@ -92,7 +124,7 @@ REVOKE ALL ON public.communication_outbox FROM PUBLIC;
 REVOKE ALL ON public.communication_outbox FROM anon;
 REVOKE ALL ON public.communication_outbox FROM authenticated;
 
--- Service role has full access by default. No browser client can query raw outbox.
+-- Service role retains full access by default. No browser client can query raw outbox.
 
 -- =========================================================================
 -- 2. Table: public.communication_delivery_callbacks
@@ -196,10 +228,13 @@ BEGIN
         );
     END IF;
 
-    -- Insert new entry
+    -- Insert new entry (populates both modern columns and legacy columns for complete backward compatibility)
     INSERT INTO public.communication_outbox (
         tenant_id,
+        recipient,
         channel,
+        message,
+        metadata,
         recipient_address,
         template_id,
         payload,
@@ -208,8 +243,11 @@ BEGIN
         max_attempts,
         status
     ) VALUES (
-        p_tenant_id,
+        p_tenant_id::text,
+        v_clean_recipient,
         p_channel,
+        COALESCE(p_payload->>'message', p_payload->>'body', p_template_id),
+        COALESCE(p_payload, '{}'::jsonb),
         v_clean_recipient,
         p_template_id,
         COALESCE(p_payload, '{}'::jsonb),
@@ -351,34 +389,7 @@ BEGIN
 
     v_payload_hash := encode(sha256(COALESCE(p_raw_payload, '')::bytea), 'hex');
 
-    -- Replay verification: atomic check on (provider_id, replay_token)
-    SELECT id, raw_payload_hash INTO v_existing_cb
-    FROM public.communication_delivery_callbacks
-    WHERE provider_id = v_clean_provider AND replay_token = v_clean_replay;
-
-    IF FOUND THEN
-        IF v_existing_cb.raw_payload_hash != v_payload_hash THEN
-            RETURN jsonb_build_object(
-                'success', false,
-                'error', 'EVENT_ID_PAYLOAD_MISMATCH',
-                'message', 'Duplicate event ID received with altered payload digest'
-            );
-        END IF;
-
-        RETURN jsonb_build_object(
-            'success', true,
-            'duplicate', true,
-            'message', 'CALLBACK_ALREADY_PROCESSED'
-        );
-    END IF;
-
-    -- Find matching outbox record by compound provider_id + provider_msg_ref
-    SELECT * INTO v_outbox_rec
-    FROM public.communication_outbox
-    WHERE provider_id = v_clean_provider AND provider_msg_ref = v_clean_msg_ref
-    FOR UPDATE;
-
-    -- Atomic insertion into callback audit table
+    -- Atomic insertion into callback audit table with deterministic conflict detection
     INSERT INTO public.communication_delivery_callbacks (
         outbox_id,
         provider_id,
@@ -388,7 +399,7 @@ BEGIN
         replay_token,
         raw_payload_hash
     ) VALUES (
-        v_outbox_rec.id,
+        (SELECT id FROM public.communication_outbox WHERE provider_id = v_clean_provider AND provider_msg_ref = v_clean_msg_ref LIMIT 1),
         v_clean_provider,
         v_clean_msg_ref,
         p_event_type,
@@ -396,7 +407,38 @@ BEGIN
         v_clean_replay,
         v_payload_hash
     )
-    ON CONFLICT (provider_id, replay_token) DO NOTHING;
+    ON CONFLICT (provider_id, replay_token) DO NOTHING
+    RETURNING id INTO v_existing_cb;
+
+    -- If conflict occurred (v_existing_cb is NULL), authoritatively re-read persisted record and compare digests
+    IF v_existing_cb.id IS NULL THEN
+        SELECT id, raw_payload_hash INTO v_existing_cb
+        FROM public.communication_delivery_callbacks
+        WHERE provider_id = v_clean_provider AND replay_token = v_clean_replay;
+
+        IF v_existing_cb.raw_payload_hash != v_payload_hash THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'error', 'EVENT_ID_PAYLOAD_MISMATCH',
+                'classification', 'EVENT_ID_PAYLOAD_MISMATCH',
+                'message', 'Duplicate event ID received with altered payload digest'
+            );
+        END IF;
+
+        -- Exact payload match: return idempotent duplicate success without mutating delivery state
+        RETURN jsonb_build_object(
+            'success', true,
+            'duplicate', true,
+            'classification', 'DUPLICATE_EXACT',
+            'message', 'CALLBACK_ALREADY_PROCESSED'
+        );
+    END IF;
+
+    -- Only the winning insert proceeds to lock outbox and mutate delivery state
+    SELECT * INTO v_outbox_rec
+    FROM public.communication_outbox
+    WHERE provider_id = v_clean_provider AND provider_msg_ref = v_clean_msg_ref
+    FOR UPDATE;
 
     -- If outbox record found, apply state transition enforcing monotonic timestamp & terminal precedence
     IF v_outbox_rec.id IS NOT NULL THEN
