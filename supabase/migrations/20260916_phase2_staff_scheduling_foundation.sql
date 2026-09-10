@@ -681,5 +681,6 @@ END;
 $$;
 
 REVOKE EXECUTE ON FUNCTION public.check_staff_slot_availability(UUID, UUID, UUID, DATE, TIME, UUID) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.check_staff_slot_availability(UUID, UUID, UUID, DATE, TIME, UUID) TO anon;
+REVOKE EXECUTE ON FUNCTION public.check_staff_slot_availability(UUID, UUID, UUID, DATE, TIME, UUID) FROM anon;
 GRANT EXECUTE ON FUNCTION public.check_staff_slot_availability(UUID, UUID, UUID, DATE, TIME, UUID) TO authenticated;
+

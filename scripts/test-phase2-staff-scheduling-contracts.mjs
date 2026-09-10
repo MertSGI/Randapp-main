@@ -71,9 +71,9 @@ const tests = [
                 /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.evaluate_booking_slot.*FROM\s+PUBLIC;/i.test(sql)
   },
   {
-    name: '15. REVOKE EXECUTE FROM PUBLIC on check_staff_slot_availability before explicit grants',
+    name: '15. REVOKE EXECUTE from PUBLIC and anon on check_staff_slot_availability (authenticated/internal only in R3)',
     test: () => /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.check_staff_slot_availability.*FROM\s+PUBLIC;/i.test(sql) &&
-                /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.check_staff_slot_availability.*TO\s+anon;/i.test(sql) &&
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.check_staff_slot_availability.*FROM\s+anon;/i.test(sql) &&
                 /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.check_staff_slot_availability.*TO\s+authenticated;/i.test(sql)
   },
   {
