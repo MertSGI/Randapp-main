@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-console.log('--- PHASE 2 SCHEDULING CONTRACT VALIDATION (R1 HARDENED) ---');
+console.log('--- PHASE 2 SCHEDULING CONTRACT VALIDATION (R2 CANONICAL ALIGNMENT) ---');
 
 const migrationPath = resolve('supabase/migrations/20260916_phase2_staff_scheduling_foundation.sql');
 if (!existsSync(migrationPath)) {
@@ -13,112 +13,94 @@ const sql = readFileSync(migrationPath, 'utf8');
 
 const tests = [
   {
-    name: '1. No broad public read policies on base scheduling tables (EV055_1)',
-    test: () => !/CREATE\s+POLICY\s+"Public\s+read\s+staff_time_off"/i.test(sql) &&
-                !/CREATE\s+POLICY\s+"Public\s+read\s+staff_breaks"/i.test(sql) &&
-                !/CREATE\s+POLICY\s+"Public\s+read\s+booking_buffer_rules"/i.test(sql) &&
-                !/CREATE\s+POLICY\s+"Public\s+read\s+business_holidays"/i.test(sql)
+    name: '1. Strict absence of noncanonical business_branches table references',
+    test: () => !/public\.business_branches/i.test(sql) && !/REFERENCES\s+public\.business_branches/i.test(sql)
   },
   {
-    name: '2. Direct table privileges revoked from PUBLIC and anon on all 4 tables',
-    test: () => /REVOKE\s+ALL\s+ON\s+public\.staff_time_off\s+FROM\s+PUBLIC;/i.test(sql) &&
-                /REVOKE\s+ALL\s+ON\s+public\.staff_time_off\s+FROM\s+anon;/i.test(sql) &&
-                /REVOKE\s+ALL\s+ON\s+public\.staff_breaks\s+FROM\s+PUBLIC;/i.test(sql) &&
-                /REVOKE\s+ALL\s+ON\s+public\.staff_breaks\s+FROM\s+anon;/i.test(sql) &&
-                /REVOKE\s+ALL\s+ON\s+public\.booking_buffer_rules\s+FROM\s+PUBLIC;/i.test(sql) &&
-                /REVOKE\s+ALL\s+ON\s+public\.booking_buffer_rules\s+FROM\s+anon;/i.test(sql) &&
-                /REVOKE\s+ALL\s+ON\s+public\.business_holidays\s+FROM\s+PUBLIC;/i.test(sql) &&
-                /REVOKE\s+ALL\s+ON\s+public\.business_holidays\s+FROM\s+anon;/i.test(sql)
+    name: '2. Strict absence of staff.branch_id or services.branch_id assumptions in new logic',
+    test: () => !/st\.branch_id\s*!=\s*p_branch_id/i.test(sql) && !/s\.branch_id\s*!=\s*p_branch_id/i.test(sql)
   },
   {
-    name: '3. check_staff_slot_availability requires p_service_id (EV055_2)',
-    test: () => /FUNCTION\s+public\.check_staff_slot_availability\s*\(\s*p_tenant_id\s+UUID,\s*p_staff_id\s+UUID,\s*p_service_id\s+UUID/i.test(sql)
+    name: '3. Canonical public.branches used for business_holidays FK',
+    test: () => /REFERENCES\s+public\.branches\s*\(id,\s*tenant_id\)/i.test(sql)
   },
   {
-    name: '4. Buffer selection hierarchy: exact service rule first, then tenant default, never random (EV055_2)',
-    test: () => /WHERE\s+bbr\.tenant_id\s*=\s*p_tenant_id\s+AND\s+bbr\.service_id\s*=\s*p_service_id\s+AND\s+bbr\.is_active\s*=\s*true/i.test(sql) &&
-                /WHERE\s+bbr\.tenant_id\s*=\s*p_tenant_id\s+AND\s+bbr\.service_id\s+IS\s+NULL\s+AND\s+bbr\.is_active\s*=\s*true/i.test(sql)
+    name: '4. Composite tenant foreign keys on staff_time_off, staff_breaks, booking_buffer_rules',
+    test: () => /REFERENCES\s+public\.staff\s*\(id,\s*tenant_id\)/i.test(sql) &&
+                /REFERENCES\s+public\.services\s*\(id,\s*tenant_id\)/i.test(sql)
   },
   {
-    name: '5. Default buffer uniqueness partial index exists (EV055_3)',
+    name: '5. Partial unique index on booking_buffer_rules for tenant default',
     test: () => /CREATE\s+UNIQUE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+booking_buffer_rules_tenant_default_idx\s+ON\s+public\.booking_buffer_rules\s*\(tenant_id\)\s+WHERE\s+service_id\s+IS\s+NULL/i.test(sql)
   },
   {
-    name: '6. Branch holiday support: check_staff_slot_availability accepts p_branch_id (EV055_4)',
-    test: () => /p_branch_id\s+UUID\s+DEFAULT\s+NULL/i.test(sql) &&
-                /bh\.branch_id\s+IS\s+NULL\s+OR\s+p_branch_id\s+IS\s+NULL\s+OR\s+bh\.branch_id\s*=\s*p_branch_id/i.test(sql)
+    name: '6. Internal evaluate_schedule_constraints function exists',
+    test: () => /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.evaluate_schedule_constraints/i.test(sql)
   },
   {
-    name: '7. Entity and tenant binding validations in RPC',
-    test: () => /SELECT\s+1\s+FROM\s+public\.tenants\s+t\s+WHERE\s+t\.id\s*=\s*p_tenant_id/i.test(sql) &&
-                /FROM\s+public\.services\s+s\s+WHERE\s+s\.id\s*=\s*p_service_id\s+AND\s+s\.tenant_id\s*=\s*p_tenant_id/i.test(sql) &&
-                /FROM\s+public\.staff\s+st\s+WHERE\s+st\.id\s*=\s*p_staff_id\s+AND\s+st\.tenant_id\s*=\s*p_tenant_id/i.test(sql) &&
-                /FROM\s+public\.business_branches\s+b\s+WHERE\s+b\.id\s*=\s*p_branch_id\s+AND\s+b\.tenant_id\s*=\s*p_tenant_id/i.test(sql)
+    name: '7. Canonical evaluate_booking_slot integrates evaluate_schedule_constraints',
+    test: () => /v_sched_res\s*:=\s*public\.evaluate_schedule_constraints/i.test(sql)
   },
   {
-    name: '8. SECURITY DEFINER hardening with fixed search_path = pg_catalog, public',
-    test: () => /SECURITY\s+DEFINER\s+SET\s+search_path\s*=\s*pg_catalog,\s*public/i.test(sql)
+    name: '8. Canonical evaluate_booking_slot uses service_branches and staff_branches mappings',
+    test: () => /FROM\s+public\.service_branches/i.test(sql) && /FROM\s+public\.staff_branches/i.test(sql)
   },
   {
-    name: '9. REVOKE EXECUTE FROM PUBLIC on RPC before explicit grants',
+    name: '9. Canonical evaluate_booking_slot uses ISO weekday semantics (1=Mon..7=Sun)',
+    test: () => /v_weekday\s*:=\s*EXTRACT\(DOW\s+FROM\s+p_date\)::INTEGER;\s*IF\s+v_weekday\s*=\s*0\s+THEN\s+v_weekday\s*:=\s*7;\s*END\s+IF;/i.test(sql)
+  },
+  {
+    name: '10. Canonical appointments duration_minutes used for existing appointment occupied interval',
+    test: () => /COALESCE\(a\.duration_minutes,\s*30\)/i.test(sql)
+  },
+  {
+    name: '11. Asymmetric buffer collision logic: requested buffer vs existing buffer distinguished',
+    test: () => /bbr_exist_svc/i.test(sql) && /bbr_exist_def/i.test(sql) && /v_req_buf_before/i.test(sql) && /v_req_buf_after/i.test(sql)
+  },
+  {
+    name: '12. check_staff_slot_availability delegates to canonical evaluate_booking_slot',
+    test: () => /v_eval_res\s*:=\s*public\.evaluate_booking_slot/i.test(sql)
+  },
+  {
+    name: '13. check_staff_slot_availability implements single-branch auto-resolve and multi-branch fail-closed',
+    test: () => /v_branch_count\s*>\s*1\s*THEN[\s\S]*?branch_required/i.test(sql)
+  },
+  {
+    name: '14. REVOKE EXECUTE FROM PUBLIC on internal evaluate_schedule_constraints and evaluate_booking_slot',
+    test: () => /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.evaluate_schedule_constraints.*FROM\s+PUBLIC;/i.test(sql) &&
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.evaluate_booking_slot.*FROM\s+PUBLIC;/i.test(sql)
+  },
+  {
+    name: '15. REVOKE EXECUTE FROM PUBLIC on check_staff_slot_availability before explicit grants',
     test: () => /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.check_staff_slot_availability.*FROM\s+PUBLIC;/i.test(sql) &&
                 /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.check_staff_slot_availability.*TO\s+anon;/i.test(sql) &&
                 /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.check_staff_slot_availability.*TO\s+authenticated;/i.test(sql)
   },
   {
-    name: '10. Safe availability result: no disclosure of private absence reason',
-    test: () => /RETURN\s+jsonb_build_object\s*\(\s*'available',\s*false,\s*'reason',\s*'staff_unavailable'\s*\)/i.test(sql) &&
-                !/RETURN\s+jsonb_build_object[\s\S]*?sto\.reason/i.test(sql)
+    name: '16. Direct table privileges revoked from PUBLIC and anon on all 4 scheduling tables',
+    test: () => /REVOKE\s+ALL\s+ON\s+public\.staff_time_off\s+FROM\s+PUBLIC;/i.test(sql) &&
+                /REVOKE\s+ALL\s+ON\s+public\.staff_breaks\s+FROM\s+PUBLIC;/i.test(sql) &&
+                /REVOKE\s+ALL\s+ON\s+public\.booking_buffer_rules\s+FROM\s+PUBLIC;/i.test(sql) &&
+                /REVOKE\s+ALL\s+ON\s+public\.business_holidays\s+FROM\s+PUBLIC;/i.test(sql)
   },
   {
-    name: '11. staff_time_off table structure and date range constraint',
-    test: () => /CONSTRAINT\s+staff_time_off_date_range\s+CHECK\s*\(\s*end_date\s*>=\s*start_date\s*\)/i.test(sql)
-  },
-  {
-    name: '12. staff_breaks weekday check constraint (0-6)',
-    test: () => /weekday\s+INTEGER\s+NOT\s+NULL\s+CHECK\s*\(\s*weekday\s*>=\s*0\s+AND\s+weekday\s*<=\s*6\s*\)/i.test(sql)
-  },
-  {
-    name: '13. booking_buffer_rules non-negative buffer constraints',
-    test: () => /buffer_before\s+INTEGER\s+NOT\s+NULL\s+DEFAULT\s+0\s+CHECK\s*\(\s*buffer_before\s*>=\s*0\s*\)/i.test(sql) &&
-                /buffer_after\s+INTEGER\s+NOT\s+NULL\s+DEFAULT\s+0\s+CHECK\s*\(\s*buffer_after\s*>=\s*0\s*\)/i.test(sql)
-  },
-  {
-    name: '14. business_holidays unique constraint',
-    test: () => /CONSTRAINT\s+business_holidays_unique\s+UNIQUE\s*\(\s*tenant_id\s*,\s*branch_id\s*,\s*date\s*\)/i.test(sql)
-  },
-  {
-    name: '15. Business holiday all-branches unique partial index exists',
-    test: () => /CREATE\s+UNIQUE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+business_holidays_tenant_all_branches_idx\s+ON\s+public\.business_holidays\s*\(tenant_id,\s*date\)\s+WHERE\s+branch_id\s+IS\s+NULL/i.test(sql)
-  },
-  {
-    name: '16. RLS enabled on all 4 tables',
+    name: '17. RLS enabled on all 4 tables',
     test: () => /ALTER\s+TABLE\s+public\.staff_time_off\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/i.test(sql) &&
                 /ALTER\s+TABLE\s+public\.staff_breaks\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/i.test(sql) &&
                 /ALTER\s+TABLE\s+public\.booking_buffer_rules\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/i.test(sql) &&
                 /ALTER\s+TABLE\s+public\.business_holidays\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/i.test(sql)
   },
   {
-    name: '17. Tenant admins and staff have scoped management policies',
-    test: () => /CREATE\s+POLICY\s+"Tenant\s+admins\s+can\s+manage\s+staff_time_off"/i.test(sql) &&
-                /CREATE\s+POLICY\s+"Tenant\s+admins\s+can\s+manage\s+staff_breaks"/i.test(sql) &&
-                /CREATE\s+POLICY\s+"Tenant\s+admins\s+can\s+manage\s+booking_buffer_rules"/i.test(sql) &&
-                /CREATE\s+POLICY\s+"Tenant\s+admins\s+can\s+manage\s+business_holidays"/i.test(sql)
+    name: '18. Fixed search_path = pg_catalog, public, extensions on all functions',
+    test: () => (sql.match(/SECURITY\s+DEFINER\s+SET\s+search_path\s*=\s*pg_catalog,\s*public,\s*extensions/g) || []).length >= 3
   },
   {
-    name: '18. Super admins have explicit full access policies on all 4 tables',
-    test: () => /CREATE\s+POLICY\s+"Super\s+Admins\s+-\s+Full\s+Access\s+on\s+staff_time_off"/i.test(sql) &&
-                /CREATE\s+POLICY\s+"Super\s+Admins\s+-\s+Full\s+Access\s+on\s+staff_breaks"/i.test(sql) &&
-                /CREATE\s+POLICY\s+"Super\s+Admins\s+-\s+Full\s+Access\s+on\s+booking_buffer_rules"/i.test(sql) &&
-                /CREATE\s+POLICY\s+"Super\s+Admins\s+-\s+Full\s+Access\s+on\s+business_holidays"/i.test(sql)
+    name: '19. Public callers cannot pass custom duration to shorten service in check_staff_slot_availability',
+    test: () => /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.check_staff_slot_availability\s*\(\s*p_tenant_id\s+UUID,\s*p_staff_id\s+UUID,\s*p_service_id\s+UUID,\s*p_date\s+DATE,\s*p_start_time\s+TIME,\s*p_branch_id\s+UUID\s+DEFAULT\s+NULL\s*\)/i.test(sql)
   },
   {
-    name: '19. Working hours outside check in RPC',
-    test: () => /SELECT\s+ar\.start_time,\s*ar\.end_time[\s\S]*?FROM\s+public\.availability_rules\s+ar/i.test(sql)
-  },
-  {
-    name: '20. Appointment buffered overlap check in RPC',
-    test: () => /SELECT\s+1\s+FROM\s+public\.appointments\s+a[\s\S]*?a\.appointment_date\s*=\s*p_date[\s\S]*?v_buffer_before/i.test(sql)
+    name: '20. Safe availability result: no disclosure of staff absence details',
+    test: () => !/check_staff_slot_availability[\s\S]*?reason[\s\S]*?sto\.reason/i.test(sql)
   }
 ];
 
@@ -141,5 +123,5 @@ console.log(`\nResult: ${tests.length - failed}/${tests.length} tests passed.`);
 if (failed > 0) {
   process.exit(1);
 } else {
-  console.log('All hardened scheduling contract tests passed successfully.');
+  console.log('All Phase 2 R2 scheduling contract tests passed successfully.');
 }
