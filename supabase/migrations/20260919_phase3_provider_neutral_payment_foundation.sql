@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS public.payment_intents (
     metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
     error_code          TEXT DEFAULT NULL,
     error_message       TEXT DEFAULT NULL,
+    last_applied_event_timestamp TIMESTAMPTZ DEFAULT NULL,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -86,14 +87,16 @@ REVOKE ALL ON public.payment_intents FROM authenticated;
 ALTER TABLE public.payments 
     ADD COLUMN IF NOT EXISTS intent_id UUID REFERENCES public.payment_intents(id) ON DELETE SET NULL,
     ADD COLUMN IF NOT EXISTS amount_minor BIGINT DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS last_event_timestamp TIMESTAMPTZ DEFAULT NULL;
+    ADD COLUMN IF NOT EXISTS last_event_timestamp TIMESTAMPTZ DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS amount_unit_classification TEXT DEFAULT NULL;
 
--- Backfill amount_minor from amount if amount_minor is null and amount exists
+-- DO NOT silently backfill amount_minor from legacy amount because legacy amount unit is unproven.
+-- Classify existing legacy rows explicitly:
 UPDATE public.payments 
-SET amount_minor = (amount * 100)::bigint 
-WHERE amount_minor IS NULL AND amount IS NOT NULL;
+SET amount_unit_classification = 'LEGACY_UNPROVEN_UNIT' 
+WHERE amount_minor IS NULL AND amount IS NOT NULL AND amount_unit_classification IS NULL;
 
--- Enforce positive amount constraint if present
+-- Enforce positive amount constraint if amount_minor is provided
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -120,9 +123,26 @@ ALTER TABLE public.payment_events
     ADD COLUMN IF NOT EXISTS payload_digest TEXT DEFAULT NULL,
     ADD COLUMN IF NOT EXISTS event_timestamp TIMESTAMPTZ DEFAULT NOW();
 
--- Add composite unique constraint for provider-scoped event replay if not existing
+-- Safely reconcile legacy global UNIQUE constraint on provider_event_id to provider-scoped UNIQUE(provider, provider_event_id)
 DO $$
+DECLARE
+    r RECORD;
 BEGIN
+    -- Drop existing global unique constraint/index on provider_event_id alone if present
+    FOR r IN (
+        SELECT conname 
+        FROM pg_constraint 
+        WHERE conrelid = 'public.payment_events'::regclass 
+          AND contype = 'u' 
+          AND conkey = ARRAY[(
+              SELECT attnum FROM pg_attribute 
+              WHERE attrelid = 'public.payment_events'::regclass AND attname = 'provider_event_id'
+          )]
+    ) LOOP
+        EXECUTE 'ALTER TABLE public.payment_events DROP CONSTRAINT IF EXISTS ' || quote_ident(r.conname);
+    END LOOP;
+
+    -- Add composite unique constraint for provider-scoped event replay if not existing
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint WHERE conname = 'payment_events_provider_event_unique'
     ) THEN
@@ -197,32 +217,7 @@ BEGIN
         (p_tenant_id::text || ':' || v_clean_purpose || ':' || p_amount_minor::text || ':' || v_norm_currency || ':' || COALESCE(p_resource_id, '') || ':' || COALESCE(p_metadata::text, '{}'))::bytea
     ), 'hex');
 
-    -- Idempotency check: unique (tenant_id, idempotency_key)
-    SELECT id, request_fingerprint, status, amount_minor, currency INTO v_existing_intent
-    FROM public.payment_intents
-    WHERE tenant_id = p_tenant_id AND idempotency_key = v_clean_key;
-
-    IF FOUND THEN
-        IF v_existing_intent.request_fingerprint != v_fingerprint THEN
-            RETURN jsonb_build_object(
-                'success', false,
-                'error', 'IDEMPOTENCY_CONFLICT',
-                'message', 'Same idempotency key supplied with altered financial amount, currency, or purpose'
-            );
-        END IF;
-
-        -- Same key + identical fingerprint: return existing logical intent
-        RETURN jsonb_build_object(
-            'success', true,
-            'intent_id', v_existing_intent.id,
-            'status', v_existing_intent.status,
-            'amount_minor', v_existing_intent.amount_minor,
-            'currency', v_existing_intent.currency,
-            'idempotent_duplicate', true
-        );
-    END IF;
-
-    -- Insert new intent
+    -- Atomic insert with unique constraint conflict handling
     INSERT INTO public.payment_intents (
         tenant_id,
         purpose,
@@ -243,7 +238,34 @@ BEGIN
         v_fingerprint,
         COALESCE(p_metadata, '{}'::jsonb),
         'created'
-    ) RETURNING id INTO v_new_id;
+    )
+    ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
+    RETURNING id INTO v_new_id;
+
+    -- If conflict occurred, authoritatively re-read persisted intent and compare request fingerprints
+    IF v_new_id IS NULL THEN
+        SELECT id, request_fingerprint, status, amount_minor, currency INTO v_existing_intent
+        FROM public.payment_intents
+        WHERE tenant_id = p_tenant_id AND idempotency_key = v_clean_key;
+
+        IF v_existing_intent.request_fingerprint != v_fingerprint THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'error', 'IDEMPOTENCY_CONFLICT',
+                'message', 'Same idempotency key supplied with altered financial amount, currency, or purpose'
+            );
+        END IF;
+
+        -- Same key + identical fingerprint: return existing logical intent
+        RETURN jsonb_build_object(
+            'success', true,
+            'intent_id', v_existing_intent.id,
+            'status', v_existing_intent.status,
+            'amount_minor', v_existing_intent.amount_minor,
+            'currency', v_existing_intent.currency,
+            'idempotent_duplicate', true
+        );
+    END IF;
 
     RETURN jsonb_build_object(
         'success', true,
@@ -297,29 +319,7 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'INVALID_EVENT_IDENTIFIERS');
     END IF;
 
-    -- Replay verification on (provider, provider_event_id)
-    SELECT id, payload_digest, status INTO v_existing_ev
-    FROM public.payment_events
-    WHERE provider = v_clean_provider AND provider_event_id = v_clean_event_id;
-
-    IF FOUND THEN
-        IF p_raw_payload_hash IS NOT NULL AND v_existing_ev.payload_digest IS NOT NULL AND v_existing_ev.payload_digest != p_raw_payload_hash THEN
-            RETURN jsonb_build_object(
-                'success', false,
-                'error', 'INTEGRITY_CONFLICT',
-                'message', 'EVENT_ID_PAYLOAD_MISMATCH: Same provider event ID received with altered payload digest'
-            );
-        END IF;
-
-        RETURN jsonb_build_object(
-            'success', true,
-            'duplicate', true,
-            'message', 'IDEMPOTENT_SUCCESS',
-            'event_id', v_existing_ev.id
-        );
-    END IF;
-
-    -- Insert into payment_events atomically
+    -- Atomic insert into payment_events with winner/loser conflict detection
     INSERT INTO public.payment_events (
         provider,
         provider_event_id,
@@ -339,9 +339,35 @@ BEGIN
         p_status,
         NOW()
     )
-    ON CONFLICT (provider, provider_event_id) DO NOTHING;
+    ON CONFLICT (provider, provider_event_id) DO NOTHING
+    RETURNING id INTO v_existing_ev;
 
-    -- If intent_id is bound, evaluate and apply monotonic state machine transitions
+    -- If conflict occurred (loser of concurrent race), authoritatively re-read persisted event
+    IF v_existing_ev.id IS NULL THEN
+        SELECT id, payload_digest, status INTO v_existing_ev
+        FROM public.payment_events
+        WHERE provider = v_clean_provider AND provider_event_id = v_clean_event_id;
+
+        IF p_raw_payload_hash IS NOT NULL AND v_existing_ev.payload_digest IS NOT NULL AND v_existing_ev.payload_digest != p_raw_payload_hash THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'error', 'INTEGRITY_CONFLICT',
+                'classification', 'INTEGRITY_CONFLICT',
+                'message', 'EVENT_ID_PAYLOAD_MISMATCH: Same provider event ID received with altered payload digest'
+            );
+        END IF;
+
+        -- Same event + identical digest: return idempotent success without mutating financial truth
+        RETURN jsonb_build_object(
+            'success', true,
+            'duplicate', true,
+            'classification', 'IDEMPOTENT_SUCCESS',
+            'message', 'IDEMPOTENT_SUCCESS',
+            'event_id', v_existing_ev.id
+        );
+    END IF;
+
+    -- Only the winning insert proceeds to lock intent and apply financial state transitions
     IF p_intent_id IS NOT NULL THEN
         SELECT * INTO v_intent_rec
         FROM public.payment_intents
@@ -349,6 +375,24 @@ BEGIN
         FOR UPDATE;
 
         IF FOUND THEN
+            -- Canonical Binding Verification:
+            -- If intent already bound to a provider or provider_reference, verify event matches binding
+            IF v_intent_rec.provider_id IS NOT NULL AND v_intent_rec.provider_id != v_clean_provider THEN
+                RETURN jsonb_build_object(
+                    'success', false,
+                    'error', 'PROVIDER_BINDING_MISMATCH',
+                    'message', 'Verified event provider does not match bound intent provider'
+                );
+            END IF;
+
+            IF v_intent_rec.provider_reference IS NOT NULL AND p_provider_ref IS NOT NULL AND v_intent_rec.provider_reference != p_provider_ref THEN
+                RETURN jsonb_build_object(
+                    'success', false,
+                    'error', 'PROVIDER_REFERENCE_MISMATCH',
+                    'message', 'Verified event reference does not match bound intent provider reference'
+                );
+            END IF;
+
             -- Monotonic Rule 1: Succeeded intent cannot regress to failed, processing, or created
             IF v_intent_rec.status = 'succeeded' THEN
                 RETURN jsonb_build_object(
@@ -369,20 +413,30 @@ BEGIN
                 );
             END IF;
 
-            -- Apply transition
+            -- Monotonic Rule 3: Event ordering protection via last_applied_event_timestamp
+            IF v_intent_rec.last_applied_event_timestamp IS NOT NULL AND p_event_timestamp < v_intent_rec.last_applied_event_timestamp THEN
+                RETURN jsonb_build_object(
+                    'success', true,
+                    'intent_id', v_intent_rec.id,
+                    'status_preserved', v_intent_rec.status,
+                    'message', 'STALE_EVENT_IGNORED_AGAINST_NEWER_STATE'
+                );
+            END IF;
+
+            -- Apply transition with monotonic timestamp progression
             IF p_status = 'succeeded' THEN
                 UPDATE public.payment_intents
                 SET status = 'succeeded',
                     provider_id = v_clean_provider,
                     provider_reference = COALESCE(p_provider_ref, provider_reference),
+                    last_applied_event_timestamp = p_event_timestamp,
                     updated_at = NOW()
                 WHERE id = v_intent_rec.id;
 
-                -- Record or update payment record in public.payments
+                -- Record or update payment record in public.payments (source of truth amount_minor)
                 INSERT INTO public.payments (
                     tenant_id,
                     intent_id,
-                    amount,
                     amount_minor,
                     currency,
                     status,
@@ -393,7 +447,6 @@ BEGIN
                 ) VALUES (
                     v_intent_rec.tenant_id,
                     v_intent_rec.id,
-                    (v_intent_rec.amount_minor / 100)::integer,
                     v_intent_rec.amount_minor,
                     v_intent_rec.currency,
                     'paid',
@@ -408,16 +461,19 @@ BEGIN
                 SET status = 'failed',
                     error_code = p_error_code,
                     error_message = p_error_message,
+                    last_applied_event_timestamp = p_event_timestamp,
                     updated_at = NOW()
                 WHERE id = v_intent_rec.id;
             ELSIF p_status = 'requires_action' THEN
                 UPDATE public.payment_intents
                 SET status = 'requires_action',
+                    last_applied_event_timestamp = p_event_timestamp,
                     updated_at = NOW()
                 WHERE id = v_intent_rec.id;
             ELSIF p_status = 'processing' THEN
                 UPDATE public.payment_intents
                 SET status = 'processing',
+                    last_applied_event_timestamp = p_event_timestamp,
                     updated_at = NOW()
                 WHERE id = v_intent_rec.id;
             END IF;
