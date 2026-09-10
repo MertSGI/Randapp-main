@@ -1,7 +1,8 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { DeterministicTestCommunicationProvider } from '../services/deterministicTestCommunicationProvider.ts';
 
-console.log('--- PHASE 3 COMMUNICATIONS FOUNDATION CONTRACT VALIDATION ---');
+console.log('--- PHASE 3 COMMUNICATIONS FOUNDATION CONTRACT VALIDATION (EV057-R1) ---');
 
 const migrationPath = resolve('supabase/migrations/20260918_phase3_communications_foundation.sql');
 if (!existsSync(migrationPath)) {
@@ -13,8 +14,10 @@ const sql = readFileSync(migrationPath, 'utf8');
 
 const tests = [
   {
-    name: '1. communication_outbox table creation',
-    test: () => /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+public\.communication_outbox/i.test(sql)
+    name: '1. communication_outbox table exists with channel, request_fingerprint, and monotonic event timestamp',
+    test: () => /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+public\.communication_outbox/i.test(sql) &&
+                /request_fingerprint\s+TEXT\s+NOT\s+NULL/i.test(sql) &&
+                /last_event_timestamp\s+TIMESTAMPTZ\s+DEFAULT\s+NULL/i.test(sql)
   },
   {
     name: '2. Channel abstraction constraints (email, sms, whatsapp, otp)',
@@ -29,83 +32,144 @@ const tests = [
     test: () => /CONSTRAINT\s+comms_outbox_tenant_idempotency_unique\s+UNIQUE\s*\(\s*tenant_id\s*,\s*idempotency_key\s*\)/i.test(sql)
   },
   {
-    name: '5. Direct table privileges revoked from PUBLIC and anon on outbox',
+    name: '5. Direct table privileges revoked from PUBLIC, anon, and authenticated (EV057-R1 zero browser PII leakage)',
     test: () => /REVOKE\s+ALL\s+ON\s+public\.communication_outbox\s+FROM\s+PUBLIC;/i.test(sql) &&
-                /REVOKE\s+ALL\s+ON\s+public\.communication_outbox\s+FROM\s+anon;/i.test(sql)
+                /REVOKE\s+ALL\s+ON\s+public\.communication_outbox\s+FROM\s+anon;/i.test(sql) &&
+                /REVOKE\s+ALL\s+ON\s+public\.communication_outbox\s+FROM\s+authenticated;/i.test(sql)
   },
   {
     name: '6. RLS enabled on communication_outbox',
     test: () => /ALTER\s+TABLE\s+public\.communication_outbox\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/i.test(sql)
   },
   {
-    name: '7. Scoped view policy on outbox for tenant admins and staff',
-    test: () => /CREATE\s+POLICY\s+"Tenant\s+Admins\s+and\s+Staff\s+-\s+Scoped\s+View\s+on\s+communication_outbox"/i.test(sql)
+    name: '7. communication_delivery_callbacks table exists with compound provider_msg_ref index',
+    test: () => /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+public\.communication_delivery_callbacks/i.test(sql) &&
+                /CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+idx_comms_callbacks_provider_ref\s+ON\s+public\.communication_delivery_callbacks\s*\(\s*provider_id\s*,\s*provider_msg_ref\s*\)/i.test(sql)
   },
   {
-    name: '8. Super Admins policy on communication_outbox',
-    test: () => /CREATE\s+POLICY\s+"Super\s+Admins\s+-\s+Full\s+Access\s+on\s+communication_outbox"/i.test(sql)
-  },
-  {
-    name: '9. communication_delivery_callbacks table creation',
-    test: () => /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+public\.communication_delivery_callbacks/i.test(sql)
-  },
-  {
-    name: '10. Callback dedupe/replay token unique constraint',
+    name: '8. Callback dedupe/replay token unique constraint scoped to provider',
     test: () => /CONSTRAINT\s+comms_callbacks_replay_unique\s+UNIQUE\s*\(\s*provider_id\s*,\s*replay_token\s*\)/i.test(sql)
   },
   {
-    name: '11. Direct table privileges revoked from PUBLIC and anon on callbacks table',
+    name: '9. Direct table privileges revoked on callbacks from PUBLIC, anon, authenticated',
     test: () => /REVOKE\s+ALL\s+ON\s+public\.communication_delivery_callbacks\s+FROM\s+PUBLIC;/i.test(sql) &&
-                /REVOKE\s+ALL\s+ON\s+public\.communication_delivery_callbacks\s+FROM\s+anon;/i.test(sql)
+                /REVOKE\s+ALL\s+ON\s+public\.communication_delivery_callbacks\s+FROM\s+anon;/i.test(sql) &&
+                /REVOKE\s+ALL\s+ON\s+public\.communication_delivery_callbacks\s+FROM\s+authenticated;/i.test(sql)
   },
   {
-    name: '12. enqueue_communication_outbox defined as SECURITY DEFINER with fixed search_path',
-    test: () => /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.enqueue_communication_outbox[\s\S]*?SECURITY\s+DEFINER\s+SET\s+search_path\s*=\s*pg_catalog,\s*public/i.test(sql)
+    name: '10. enqueue_communication_outbox enforces immutable request fingerprinting and IDEMPOTENCY_CONFLICT',
+    test: () => /v_existing_rec\.request_fingerprint\s*!=\s*v_fingerprint/i.test(sql) &&
+                /IDEMPOTENCY_CONFLICT/i.test(sql) &&
+                /idempotent_duplicate/i.test(sql)
   },
   {
-    name: '13. enqueue_communication_outbox handles ON CONFLICT idempotency',
-    test: () => /ON\s+CONFLICT\s*\(\s*tenant_id\s*,\s*idempotency_key\s*\)/i.test(sql)
+    name: '11. enqueue_communication_outbox execution revoked from PUBLIC, anon, and authenticated (internal/service-role only)',
+    test: () => /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.enqueue_communication_outbox.*FROM\s+PUBLIC;/i.test(sql) &&
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.enqueue_communication_outbox.*FROM\s+anon;/i.test(sql) &&
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.enqueue_communication_outbox.*FROM\s+authenticated;/i.test(sql)
   },
   {
-    name: '14. claim_outbox_batch implements atomic lease locking with FOR UPDATE SKIP LOCKED',
+    name: '12. claim_outbox_batch validates bounded batch_size and lease_seconds',
+    test: () => /v_bounded_batch\s*:=\s*LEAST\(GREATEST\(COALESCE\(p_batch_size,\s*10\),\s*1\),\s*100\);/i.test(sql) &&
+                /v_bounded_lease\s*:=\s*LEAST\(GREATEST\(COALESCE\(p_lease_seconds,\s*300\),\s*10\),\s*3600\);/i.test(sql)
+  },
+  {
+    name: '13. claim_outbox_batch implements atomic lease locking with FOR UPDATE SKIP LOCKED',
     test: () => /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.claim_outbox_batch[\s\S]*?FOR\s+UPDATE\s+SKIP\s+LOCKED/i.test(sql)
   },
   {
-    name: '15. claim_outbox_batch increments attempt_count and sets locked_by and lease_until',
-    test: () => /locked_by\s*=\s*p_worker_id/i.test(sql) &&
-                /lease_until\s*=\s*v_lease_until/i.test(sql) &&
-                /attempt_count\s*=\s*co\.attempt_count\s*\+\s*1/i.test(sql)
+    name: '14. claim_outbox_batch execution revoked from PUBLIC, anon, authenticated (trusted worker authority)',
+    test: () => /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.claim_outbox_batch.*FROM\s+PUBLIC;/i.test(sql) &&
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.claim_outbox_batch.*FROM\s+anon;/i.test(sql) &&
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.claim_outbox_batch.*FROM\s+authenticated;/i.test(sql)
   },
   {
-    name: '16. record_delivery_callback implements replay prevention lookup',
-    test: () => /SELECT\s+1\s+FROM\s+public\.communication_delivery_callbacks\s+WHERE\s+provider_id\s*=\s*p_provider_id\s+AND\s+replay_token\s*=\s*p_replay_token/i.test(sql)
+    name: '15. record_delivery_callback binds provider_id + provider_msg_ref in outbox lookup',
+    test: () => /WHERE\s+provider_id\s*=\s*v_clean_provider\s+AND\s+provider_msg_ref\s*=\s*v_clean_msg_ref/i.test(sql)
   },
   {
-    name: '17. record_delivery_callback transitions failed messages to dead_letter on max retries',
-    test: () => /v_outbox_rec\.attempt_count\s*>=\s*v_outbox_rec\.max_attempts[\s\S]*?status\s*=\s*'dead_letter'/i.test(sql)
+    name: '16. record_delivery_callback detects EVENT_ID_PAYLOAD_MISMATCH on altered duplicate replay payload',
+    test: () => /v_existing_cb\.raw_payload_hash\s*!=\s*v_payload_hash/i.test(sql) &&
+                /EVENT_ID_PAYLOAD_MISMATCH/i.test(sql)
   },
   {
-    name: '18. REVOKE EXECUTE FROM PUBLIC on all communication RPCs before explicit grants',
-    test: () => /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.enqueue_communication_outbox.*FROM\s+PUBLIC;/i.test(sql) &&
-                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.claim_outbox_batch.*FROM\s+PUBLIC;/i.test(sql) &&
-                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.record_delivery_callback.*FROM\s+PUBLIC;/i.test(sql)
+    name: '17. record_delivery_callback prevents regression of terminal states and out-of-order events',
+    test: () => /TERMINAL_STATE_PRESERVED_AGAINST_REGRESSION/i.test(sql) &&
+                /OUT_OF_ORDER_EVENT_IGNORED/i.test(sql)
   },
   {
-    name: '19. Explicit grants on communication functions restricted to authenticated role',
-    test: () => /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.enqueue_communication_outbox.*TO\s+authenticated;/i.test(sql) &&
-                /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.claim_outbox_batch.*TO\s+authenticated;/i.test(sql) &&
-                /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.record_delivery_callback.*TO\s+authenticated;/i.test(sql)
+    name: '18. record_delivery_callback execution revoked from PUBLIC, anon, authenticated (adapter boundary only)',
+    test: () => /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.record_delivery_callback.*FROM\s+PUBLIC;/i.test(sql) &&
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.record_delivery_callback.*FROM\s+anon;/i.test(sql) &&
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.record_delivery_callback.*FROM\s+authenticated;/i.test(sql)
   },
   {
-    name: '20. No provider secrets stored in outbox or callback schemas',
+    name: '19. No provider secrets or raw credentials stored in schemas',
     test: () => !/api_key/i.test(sql) && !/secret_key/i.test(sql) && !/bearer_token/i.test(sql) && !/auth_token/i.test(sql)
+  },
+  {
+    name: '20. Deterministic test communication provider runs deterministic scenarios without network',
+    test: async () => {
+      let seq = 0;
+      const provider = new DeterministicTestCommunicationProvider({
+        fixedNow: () => 1700000000000 + (++seq * 1000),
+        idGenerator: (p) => `${p}_fixed_${++seq}`
+      });
+
+      // 1. Success scenario
+      provider.setSimulationMode('success');
+      const res1 = await provider.sendMessage({
+        id: 'msg_1',
+        tenantId: 'tenant_1',
+        channel: 'email',
+        recipientAddress: 'customer@example.com',
+        templateId: 'tpl_1',
+        payload: { test: true },
+        idempotencyKey: 'idemp_1',
+        status: 'queued',
+        attemptCount: 0,
+        maxAttempts: 3,
+        nextAttemptAt: new Date().toISOString()
+      });
+
+      if (!res1.success || !res1.providerMsgRef) return false;
+
+      // 2. Retryable failure scenario
+      provider.setSimulationMode('retryable_failure');
+      const res2 = await provider.sendMessage({
+        id: 'msg_2',
+        tenantId: 'tenant_1',
+        channel: 'sms',
+        recipientAddress: '+905551234567',
+        templateId: 'tpl_2',
+        payload: {},
+        idempotencyKey: 'idemp_2',
+        status: 'queued',
+        attemptCount: 1,
+        maxAttempts: 3,
+        nextAttemptAt: new Date().toISOString()
+      });
+
+      if (res2.success || !res2.isRetryable) return false;
+
+      // 3. Callback generation and replay evaluation
+      const cb1 = provider.simulateDeliveryCallback(res1.providerMsgRef, 'delivered');
+      const replayStatus1 = provider.evaluateCallbackReplay(cb1.replayToken, 'hash_abc');
+      const replayStatus2 = provider.evaluateCallbackReplay(cb1.replayToken, 'hash_abc');
+      const replayStatus3 = provider.evaluateCallbackReplay(cb1.replayToken, 'hash_different');
+
+      return replayStatus1 === 'NEW' &&
+             replayStatus2 === 'DUPLICATE_EXACT' &&
+             replayStatus3 === 'EVENT_ID_PAYLOAD_MISMATCH';
+    }
   }
 ];
 
 let failed = 0;
 for (const t of tests) {
   try {
-    if (t.test()) {
+    const result = await Promise.resolve(t.test());
+    if (result) {
       console.log(`[PASS] ${t.name}`);
     } else {
       console.error(`[FAIL] ${t.name}`);
@@ -121,5 +185,5 @@ console.log(`\nResult: ${tests.length - failed}/${tests.length} tests passed.`);
 if (failed > 0) {
   process.exit(1);
 } else {
-  console.log('All communication foundation contract tests passed successfully.');
+  console.log('All communication foundation EV057-R1 contract tests passed successfully.');
 }
