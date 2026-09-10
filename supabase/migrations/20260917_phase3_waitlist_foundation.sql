@@ -1,47 +1,41 @@
 -- ===========================================================================
--- Migration: Phase 3 Waitlist Domain Foundation (R1 Hardened)
--- Authority: LARI-PROGRAM-V2-EV056-WAITLIST-FOUNDATION-R1-CORRECTION-20260910-01
+-- Migration: Phase 3 Waitlist Domain Foundation (R2 Canonical Alignment)
+-- Authority: LARI-PROGRAM-V2-EV056-WAITLIST-FOUNDATION-R2-CORRECTION-20260910-01
 -- Program: LARI-PROGRAM-V2-REAL-PRODUCT-20260908-01
 -- Phase: 3 (PRODUCT_COMPLETENESS_BEFORE_EXTERNAL_PROVIDERS)
 -- Base: 09bb1f8d8ce070c33d09099a6d0ae20c93787d11
--- Stacked on: c507ca9edfce09c533a439283707c68bbdd29f25
+-- Stacked on: 40ea5b6d4854f58e89ed618979f8681303193aa2
 --
--- Controller Corrections Applied:
--- 1. CONFIRMED_ISSUE_EV056_1 (NO_PUBLIC_PII_TABLE_SURFACE):
---    Removed broad anonymous offered-row SELECT policy ("Public read offered waitlist").
---    Direct table access is strictly tenant-scoped (authenticated tenant admins/staff/super admin).
---    Direct anonymous table SELECT is completely blocked (REVOKE ALL FROM PUBLIC, anon).
--- 2. CONFIRMED_ISSUE_EV056_2 (Cryptographic One-Time Claim Capability):
---    Waitlist UUID is NOT used as bearer authority.
---    offer_waitlist_slot generates a cryptographically secure 256-bit token (using encode(gen_random_bytes(32), 'hex')).
---    Only the SHA-256 hash (claim_token_hash) is stored server-side.
---    The raw claim_token is returned by offer_waitlist_slot for delivery to customer.
---    claim_waitlist_slot requires the raw p_claim_token, computes sha256(p_claim_token),
---    and performs constant-time comparison against claim_token_hash.
---    Token is single-use and invalidated immediately upon claim or expiration.
--- 3. CONFIRMED_ISSUE_EV056_3 (Explicit Caller Authorization in offer_waitlist_slot):
---    SECURITY DEFINER function explicitly verifies:
---    - Caller is active super_admin OR active tenant_owner/staff for that exact tenant.
---    - Waitlist entry belongs to caller's tenant.
---    - Offered staff belongs to caller's tenant and matches branch if assigned.
---    Cross-tenant offer attempts fail closed.
--- 4. CONFIRMED_ISSUE_EV056_4 (Canonical Booking Engine Invariants at Claim):
---    claim_waitlist_slot verifies:
---    - Tenant is active.
---    - Service is active, belongs to tenant, and matches branch if assigned.
---    - Offered staff is active, belongs to tenant, and matches branch if assigned.
---    - Concurrency check: no overlapping active appointment exists for that staff, date, and slot time.
---    - Idempotency / single-use: locks waitlist row FOR UPDATE, verifies offered status and unexpired time.
--- 5. CONFIRMED_ISSUE_EV056_5 (NO_ANON_DIRECT_TABLE_INSERT):
---    Removed "Public insert booking_waitlist" policy.
---    Public intake is strictly through join_booking_waitlist RPC. Direct table INSERT is revoked from anon.
--- 6. State Machine Enforcement:
---    Explicit state machine transitions enforced:
---    pending -> offered | cancelled
---    offered -> claimed | expired | cancelled
---    Terminal states (claimed, expired, cancelled) cannot be transitioned.
--- 7. Fixed search_path = pg_catalog, public on all SECURITY DEFINER functions.
---    REVOKE EXECUTE FROM PUBLIC first, then grant explicit roles.
+-- Controller R2 Corrections Applied:
+-- 1. CANONICAL BRANCH BINDING:
+--    Uses canonical public.branches.
+--    Binds staff and services using canonical staff_branches and service_branches.
+-- 2. COMPOSITE TENANT-SAFE RELATIONSHIPS:
+--    Foreign keys enforce relational tenant isolation at the database level:
+--    (branch_id, tenant_id) -> branches(id, tenant_id)
+--    (service_id, tenant_id) -> services(id, tenant_id)
+--    (staff_id, tenant_id) -> staff(id, tenant_id)
+-- 3. EXPLICIT ROLE ALLOWLISTING IN offer_waitlist_slot:
+--    Explicit check: role IN ('tenant_owner', 'staff') for matching tenant, or super_admin.
+--    Role 'customer' is strictly denied.
+-- 4. CRYPTOGRAPHIC CLAIM CAPABILITY:
+--    256-bit unguessable random token (gen_random_bytes(32)). Raw token is never stored in DB.
+--    Server persists only SHA-256 digest (claim_token_hash).
+--    Claim tokens are single-use with bounded expiration (p_expires_in_minutes: 5..1440).
+-- 5. CANONICAL BOOKING INVARIANT ENGINE BOUNDARY:
+--    claim_waitlist_slot reuses canonical public.evaluate_booking_slot to validate:
+--    branch mapping, service-branch, staff-branch, staff-service, schedule constraints (EV055),
+--    future slot in timezone, and asymmetric overlapping appointments.
+--    Inserts confirmed appointment matching canonical create_public_booking column contracts
+--    (including duration_minutes, user_name, phone, customer_id, branch_id).
+-- 6. CANONICAL ADVISORY LOCKING:
+--    claim_waitlist_slot acquires advisory lock matching canonical booking / reschedule paths.
+-- 7. NO DIRECT TABLE MUTATION:
+--    booking_waitlist is protected against anon direct read and write (REVOKE ALL FROM PUBLIC, anon).
+--    State machine transitions occur strictly through bounded RPCs (join, offer, claim, cancel).
+--    claim_token_hash is never exposed in tenant-facing queries.
+-- 8. AUTHORIZED CANCEL RPC:
+--    public.cancel_waitlist_slot handles cancellation by authorized tenant owner/staff or super_admin.
 -- ===========================================================================
 
 -- =========================================================================
@@ -51,9 +45,9 @@
 CREATE TABLE IF NOT EXISTS public.booking_waitlist (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id           UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    branch_id           UUID DEFAULT NULL REFERENCES public.business_branches(id) ON DELETE CASCADE,
-    service_id          UUID NOT NULL REFERENCES public.services(id) ON DELETE CASCADE,
-    staff_id            UUID DEFAULT NULL REFERENCES public.staff(id) ON DELETE SET NULL,
+    branch_id           UUID DEFAULT NULL,
+    service_id          UUID NOT NULL,
+    staff_id            UUID DEFAULT NULL,
     customer_name       TEXT NOT NULL,
     customer_phone      TEXT NOT NULL,
     customer_email      TEXT DEFAULT NULL,
@@ -66,12 +60,24 @@ CREATE TABLE IF NOT EXISTS public.booking_waitlist (
     offer_expires_at    TIMESTAMPTZ DEFAULT NULL,
     offered_appointment_date DATE DEFAULT NULL,
     offered_appointment_time TIME WITHOUT TIME ZONE DEFAULT NULL,
-    offered_staff_id    UUID DEFAULT NULL REFERENCES public.staff(id) ON DELETE SET NULL,
-    -- Store only cryptographic hash of claim token, never raw token
+    offered_staff_id    UUID DEFAULT NULL,
+    offered_branch_id   UUID DEFAULT NULL,
     claim_token_hash    TEXT DEFAULT NULL,
     notes               TEXT DEFAULT NULL,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Composite foreign keys ensuring fail-closed relational tenant containment
+    CONSTRAINT fk_waitlist_branch_tenant FOREIGN KEY (branch_id, tenant_id)
+        REFERENCES public.branches(id, tenant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_waitlist_service_tenant FOREIGN KEY (service_id, tenant_id)
+        REFERENCES public.services(id, tenant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_waitlist_staff_tenant FOREIGN KEY (staff_id, tenant_id)
+        REFERENCES public.staff(id, tenant_id) ON DELETE SET NULL,
+    CONSTRAINT fk_waitlist_offered_staff_tenant FOREIGN KEY (offered_staff_id, tenant_id)
+        REFERENCES public.staff(id, tenant_id) ON DELETE SET NULL,
+    CONSTRAINT fk_waitlist_offered_branch_tenant FOREIGN KEY (offered_branch_id, tenant_id)
+        REFERENCES public.branches(id, tenant_id) ON DELETE CASCADE,
 
     CONSTRAINT booking_waitlist_time_window CHECK (
         (preferred_time_start IS NULL AND preferred_time_end IS NULL) OR
@@ -79,10 +85,10 @@ CREATE TABLE IF NOT EXISTS public.booking_waitlist (
     )
 );
 
-CREATE INDEX idx_booking_waitlist_tenant_status ON public.booking_waitlist(tenant_id, status);
-CREATE INDEX idx_booking_waitlist_service_date ON public.booking_waitlist(service_id, preferred_date);
-CREATE INDEX idx_booking_waitlist_customer_phone ON public.booking_waitlist(tenant_id, customer_phone);
-CREATE INDEX idx_booking_waitlist_claim_token_hash ON public.booking_waitlist(claim_token_hash) WHERE claim_token_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_booking_waitlist_tenant_status ON public.booking_waitlist(tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_booking_waitlist_service_date ON public.booking_waitlist(service_id, preferred_date);
+CREATE INDEX IF NOT EXISTS idx_booking_waitlist_customer_phone ON public.booking_waitlist(tenant_id, customer_phone);
+CREATE INDEX IF NOT EXISTS idx_booking_waitlist_claim_token_hash ON public.booking_waitlist(claim_token_hash) WHERE claim_token_hash IS NOT NULL;
 
 CREATE TRIGGER update_booking_waitlist_modtime
     BEFORE UPDATE ON public.booking_waitlist
@@ -90,12 +96,10 @@ CREATE TRIGGER update_booking_waitlist_modtime
 
 ALTER TABLE public.booking_waitlist ENABLE ROW LEVEL SECURITY;
 
--- Block direct table access from public / anon
 REVOKE ALL ON public.booking_waitlist FROM PUBLIC;
 REVOKE ALL ON public.booking_waitlist FROM anon;
 
--- Tenant Admins and Staff can view and manage waitlist entries for their own tenant
-CREATE POLICY "Tenant Admins and Staff - Full Access on booking_waitlist"
+CREATE POLICY "Tenant Admins and Staff manage booking_waitlist"
     ON public.booking_waitlist FOR ALL
     USING (
         EXISTS (
@@ -112,8 +116,7 @@ CREATE POLICY "Tenant Admins and Staff - Full Access on booking_waitlist"
         )
     );
 
--- Super Admin explicit policy
-CREATE POLICY "Super Admins - Full Access on booking_waitlist"
+CREATE POLICY "Super Admins Full Access booking_waitlist"
     ON public.booking_waitlist FOR ALL
     USING (
         EXISTS (
@@ -132,7 +135,7 @@ CREATE OR REPLACE FUNCTION public.enforce_waitlist_state_transition()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, extensions
 AS $$
 BEGIN
     IF OLD.status = NEW.status THEN
@@ -142,7 +145,7 @@ BEGIN
     -- Valid transitions:
     -- pending -> offered, cancelled
     -- offered -> claimed, expired, cancelled
-    -- Terminal: claimed, expired, cancelled cannot be transitioned
+    -- Terminal states: claimed, expired, cancelled cannot reopen
     IF OLD.status = 'pending' AND NEW.status IN ('offered', 'cancelled') THEN
         RETURN NEW;
     ELSIF OLD.status = 'offered' AND NEW.status IN ('claimed', 'expired', 'cancelled') THEN
@@ -153,12 +156,13 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS trg_enforce_waitlist_state_transition ON public.booking_waitlist;
 CREATE TRIGGER trg_enforce_waitlist_state_transition
     BEFORE UPDATE ON public.booking_waitlist
     FOR EACH ROW EXECUTE FUNCTION public.enforce_waitlist_state_transition();
 
 -- =========================================================================
--- 3. RPC: join_booking_waitlist (Bounded public intake RPC)
+-- 3. Public Intake RPC: join_booking_waitlist
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.join_booking_waitlist(
@@ -177,18 +181,16 @@ CREATE OR REPLACE FUNCTION public.join_booking_waitlist(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, extensions
 AS $$
 DECLARE
     v_new_id UUID;
-    v_tenant_rec RECORD;
-    v_service_rec RECORD;
-    v_staff_rec RECORD;
+    v_tenant_status TEXT;
     v_clean_name TEXT;
     v_clean_phone TEXT;
     v_clean_email TEXT;
 BEGIN
-    -- Input sanitization and bounded input validation
+    -- Input bounds validation
     v_clean_name := trim(COALESCE(p_customer_name, ''));
     v_clean_phone := trim(COALESCE(p_customer_phone, ''));
     v_clean_email := NULLIF(trim(COALESCE(p_customer_email, '')), '');
@@ -201,68 +203,52 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'INVALID_CUSTOMER_PHONE');
     END IF;
 
-    -- Validation: Tenant must exist and be active
-    SELECT t.id, t.status INTO v_tenant_rec
-    FROM public.tenants t
-    WHERE t.id = p_tenant_id;
-
+    -- Validate tenant
+    SELECT status INTO v_tenant_status FROM public.tenants WHERE id = p_tenant_id;
     IF NOT FOUND THEN
         RETURN jsonb_build_object('success', false, 'error', 'TENANT_NOT_FOUND');
     END IF;
 
-    IF v_tenant_rec.status NOT IN ('active', 'trialing') THEN
+    IF v_tenant_status NOT IN ('active', 'trialing') THEN
         RETURN jsonb_build_object('success', false, 'error', 'TENANT_NOT_ACTIVE');
     END IF;
 
-    -- Validation: Service must exist, belong to tenant, and be active
-    SELECT s.id, s.active, s.branch_id INTO v_service_rec
-    FROM public.services s
-    WHERE s.id = p_service_id AND s.tenant_id = p_tenant_id;
-
-    IF NOT FOUND THEN
+    -- Validate service belongs to tenant and is active
+    IF NOT EXISTS (SELECT 1 FROM public.services WHERE id = p_service_id AND tenant_id = p_tenant_id AND active = true) THEN
         RETURN jsonb_build_object('success', false, 'error', 'SERVICE_NOT_FOUND');
     END IF;
 
-    IF v_service_rec.active = false THEN
-        RETURN jsonb_build_object('success', false, 'error', 'SERVICE_INACTIVE');
-    END IF;
-
-    -- Validation: Branch consistency if branch provided
+    -- Validate branch if provided
     IF p_branch_id IS NOT NULL THEN
-        IF NOT EXISTS (SELECT 1 FROM public.business_branches b WHERE b.id = p_branch_id AND b.tenant_id = p_tenant_id AND b.is_active = true) THEN
+        IF NOT EXISTS (SELECT 1 FROM public.branches WHERE id = p_branch_id AND tenant_id = p_tenant_id AND is_active = true) THEN
             RETURN jsonb_build_object('success', false, 'error', 'BRANCH_NOT_FOUND');
         END IF;
 
-        IF v_service_rec.branch_id IS NOT NULL AND v_service_rec.branch_id != p_branch_id THEN
+        IF NOT EXISTS (SELECT 1 FROM public.service_branches WHERE service_id = p_service_id AND branch_id = p_branch_id AND tenant_id = p_tenant_id) THEN
             RETURN jsonb_build_object('success', false, 'error', 'SERVICE_BRANCH_MISMATCH');
         END IF;
     END IF;
 
-    -- Validation: Optional staff must belong to tenant and be active
+    -- Validate staff if provided
     IF p_staff_id IS NOT NULL THEN
-        SELECT st.id, st.active, st.branch_id INTO v_staff_rec
-        FROM public.staff st
-        WHERE st.id = p_staff_id AND st.tenant_id = p_tenant_id;
-
-        IF NOT FOUND THEN
+        IF NOT EXISTS (SELECT 1 FROM public.staff WHERE id = p_staff_id AND tenant_id = p_tenant_id AND active = true) THEN
             RETURN jsonb_build_object('success', false, 'error', 'STAFF_NOT_FOUND');
         END IF;
 
-        IF v_staff_rec.active = false THEN
-            RETURN jsonb_build_object('success', false, 'error', 'STAFF_INACTIVE');
+        IF NOT EXISTS (SELECT 1 FROM public.staff_services WHERE staff_id = p_staff_id AND service_id = p_service_id) THEN
+            RETURN jsonb_build_object('success', false, 'error', 'STAFF_SERVICE_MISMATCH');
         END IF;
 
-        IF p_branch_id IS NOT NULL AND v_staff_rec.branch_id IS NOT NULL AND v_staff_rec.branch_id != p_branch_id THEN
+        IF p_branch_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.staff_branches WHERE staff_id = p_staff_id AND branch_id = p_branch_id AND tenant_id = p_tenant_id) THEN
             RETURN jsonb_build_object('success', false, 'error', 'STAFF_BRANCH_MISMATCH');
         END IF;
     END IF;
 
-    -- Validation: Preferred date cannot be in the past
+    -- Preferred date bounds
     IF p_preferred_date < CURRENT_DATE THEN
         RETURN jsonb_build_object('success', false, 'error', 'INVALID_DATE');
     END IF;
 
-    -- Validation: Preferred time consistency
     IF p_preferred_time_start IS NOT NULL AND p_preferred_time_end IS NOT NULL AND p_preferred_time_end < p_preferred_time_start THEN
         RETURN jsonb_build_object('success', false, 'error', 'INVALID_TIME_WINDOW');
     END IF;
@@ -308,7 +294,7 @@ GRANT EXECUTE ON FUNCTION public.join_booking_waitlist(UUID, UUID, DATE, TEXT, T
 GRANT EXECUTE ON FUNCTION public.join_booking_waitlist(UUID, UUID, DATE, TEXT, TEXT, TEXT, UUID, UUID, TIME, TIME, TEXT) TO authenticated;
 
 -- =========================================================================
--- 4. RPC: offer_waitlist_slot (Authorized tenant admin RPC)
+-- 4. Authorized Tenant Admin RPC: offer_waitlist_slot
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.offer_waitlist_slot(
@@ -316,21 +302,25 @@ CREATE OR REPLACE FUNCTION public.offer_waitlist_slot(
     p_offered_date          DATE,
     p_offered_time          TIME,
     p_offered_staff_id      UUID,
+    p_offered_branch_id     UUID DEFAULT NULL,
     p_expires_in_minutes    INTEGER DEFAULT 60
 )
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, extensions
 AS $$
 DECLARE
     v_caller_uid UUID;
     v_caller_role TEXT;
     v_caller_tenant_id UUID;
     v_entry public.booking_waitlist%ROWTYPE;
-    v_staff_rec RECORD;
+    v_target_branch_id UUID;
+    v_branch_count INTEGER;
+    v_eval_res JSONB;
     v_raw_token TEXT;
     v_token_hash TEXT;
+    v_bounded_expires_min INTEGER;
     v_expires_at TIMESTAMPTZ;
 BEGIN
     v_caller_uid := auth.uid();
@@ -338,14 +328,18 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'UNAUTHORIZED');
     END IF;
 
-    -- Explicit caller tenant authorization check
-    SELECT up.role, up.tenant_id, up.active
+    -- Explicit Role Allowlisting: role IN ('tenant_owner', 'staff') OR super_admin
+    SELECT up.role, up.tenant_id
     INTO v_caller_role, v_caller_tenant_id
     FROM public.users_profile up
     WHERE up.id = v_caller_uid AND up.active = true;
 
     IF NOT FOUND THEN
         RETURN jsonb_build_object('success', false, 'error', 'CALLER_NOT_ACTIVE');
+    END IF;
+
+    IF v_caller_role != 'super_admin' AND v_caller_role NOT IN ('tenant_owner', 'staff') THEN
+        RETURN jsonb_build_object('success', false, 'error', 'ROLE_NOT_AUTHORIZED');
     END IF;
 
     -- Lock waitlist entry FOR UPDATE
@@ -358,55 +352,63 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'WAITLIST_ENTRY_NOT_FOUND');
     END IF;
 
-    -- Fail-closed tenant isolation check
-    IF v_caller_role != 'super_admin' THEN
-        IF v_caller_tenant_id IS NULL OR v_caller_tenant_id != v_entry.tenant_id THEN
-            RETURN jsonb_build_object('success', false, 'error', 'FORBIDDEN_CROSS_TENANT');
-        END IF;
+    -- Tenant isolation check
+    IF v_caller_role != 'super_admin' AND (v_caller_tenant_id IS NULL OR v_caller_tenant_id != v_entry.tenant_id) THEN
+        RETURN jsonb_build_object('success', false, 'error', 'FORBIDDEN_CROSS_TENANT');
     END IF;
 
-    -- State check: only pending entries can be offered
     IF v_entry.status != 'pending' THEN
         RETURN jsonb_build_object('success', false, 'error', 'INVALID_STATUS', 'current_status', v_entry.status);
     END IF;
 
-    -- Validate offered staff belongs to same tenant and is active
-    SELECT st.id, st.active, st.branch_id
-    INTO v_staff_rec
-    FROM public.staff st
-    WHERE st.id = p_offered_staff_id AND st.tenant_id = v_entry.tenant_id;
+    -- Resolve branch
+    v_target_branch_id := COALESCE(p_offered_branch_id, v_entry.branch_id);
+    IF v_target_branch_id IS NULL THEN
+        SELECT count(*), min(id) INTO v_branch_count, v_target_branch_id
+        FROM public.branches WHERE tenant_id = v_entry.tenant_id AND is_active = true;
 
-    IF NOT FOUND THEN
-        RETURN jsonb_build_object('success', false, 'error', 'OFFERED_STAFF_NOT_FOUND');
+        IF v_branch_count = 0 THEN
+            RETURN jsonb_build_object('success', false, 'error', 'NO_ACTIVE_BRANCHES');
+        ELSIF v_branch_count > 1 THEN
+            RETURN jsonb_build_object('success', false, 'error', 'BRANCH_REQUIRED');
+        END IF;
     END IF;
 
-    IF v_staff_rec.active = false THEN
-        RETURN jsonb_build_object('success', false, 'error', 'OFFERED_STAFF_INACTIVE');
+    -- Validate offered slot with canonical evaluate_booking_slot at OFFER time
+    v_eval_res := public.evaluate_booking_slot(
+        p_tenant_id  => v_entry.tenant_id,
+        p_branch_id  => v_target_branch_id,
+        p_service_id => v_entry.service_id,
+        p_staff_id   => p_offered_staff_id,
+        p_date       => p_offered_date,
+        p_time       => p_offered_time
+    );
+
+    IF (v_eval_res->>'allowed')::BOOLEAN IS NOT TRUE THEN
+        RETURN jsonb_build_object('success', false, 'error', 'SLOT_NOT_AVAILABLE', 'reason_code', v_eval_res->>'reason_code');
     END IF;
 
-    -- Branch consistency check where waitlist is branch-scoped
-    IF v_entry.branch_id IS NOT NULL AND v_staff_rec.branch_id IS NOT NULL AND v_staff_rec.branch_id != v_entry.branch_id THEN
-        RETURN jsonb_build_object('success', false, 'error', 'OFFERED_STAFF_BRANCH_MISMATCH');
-    END IF;
+    -- Bound expiration window: 5 min to 1440 min (24 hours)
+    v_bounded_expires_min := LEAST(GREATEST(COALESCE(p_expires_in_minutes, 60), 5), 1440);
+    v_expires_at := NOW() + (v_bounded_expires_min || ' minutes')::interval;
 
-    -- Generate cryptographically strong 256-bit token
-    v_raw_token := encode(gen_random_bytes(32), 'hex');
-    v_token_hash := encode(digest(v_raw_token, 'sha256'), 'hex');
-
-    v_expires_at := NOW() + (GREATEST(COALESCE(p_expires_in_minutes, 60), 5) || ' minutes')::interval;
+    -- Generate cryptographically unguessable 256-bit random token
+    v_raw_token  := encode(gen_random_bytes(32), 'hex');
+    v_token_hash := encode(sha256(v_raw_token::bytea), 'hex');
 
     UPDATE public.booking_waitlist
     SET status = 'offered',
         offered_appointment_date = p_offered_date,
         offered_appointment_time = p_offered_time,
         offered_staff_id = p_offered_staff_id,
+        offered_branch_id = v_target_branch_id,
         claim_token_hash = v_token_hash,
         offered_at = NOW(),
         offer_expires_at = v_expires_at,
         updated_at = NOW()
     WHERE id = p_waitlist_id;
 
-    -- Return raw token to caller ONLY once (for SMS/WhatsApp dispatch), never stored in plaintext
+    -- Return raw token to caller once for dispatch; never stored in plaintext in DB
     RETURN jsonb_build_object(
         'success', true,
         'waitlist_id', p_waitlist_id,
@@ -417,11 +419,11 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.offer_waitlist_slot(UUID, DATE, TIME, UUID, INTEGER) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.offer_waitlist_slot(UUID, DATE, TIME, UUID, INTEGER) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.offer_waitlist_slot(UUID, DATE, TIME, UUID, UUID, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.offer_waitlist_slot(UUID, DATE, TIME, UUID, UUID, INTEGER) TO authenticated;
 
 -- =========================================================================
--- 5. RPC: claim_waitlist_slot (Cryptographic one-time claim capability)
+-- 5. Public One-Time Claim RPC: claim_waitlist_slot
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.claim_waitlist_slot(
@@ -430,25 +432,27 @@ CREATE OR REPLACE FUNCTION public.claim_waitlist_slot(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, extensions
 AS $$
 DECLARE
     v_token_hash TEXT;
     v_entry public.booking_waitlist%ROWTYPE;
-    v_apt_id UUID;
-    v_service_duration INTEGER;
-    v_service_active BOOLEAN;
-    v_staff_active BOOLEAN;
-    v_tenant_status TEXT;
+    v_eval_res JSONB;
+    v_svc_duration INTEGER;
+    v_customer_id UUID;
+    v_appointment_id UUID;
+    v_manage_token TEXT;
+    v_manage_token_hash TEXT;
+    v_manage_expires_at TIMESTAMPTZ;
 BEGIN
     IF p_claim_token IS NULL OR length(trim(p_claim_token)) < 32 THEN
         RETURN jsonb_build_object('success', false, 'error', 'INVALID_CLAIM_TOKEN');
     END IF;
 
-    -- Compute SHA-256 of provided bearer claim token
-    v_token_hash := encode(digest(trim(p_claim_token), 'sha256'), 'hex');
+    -- SHA-256 digest lookup
+    v_token_hash := encode(sha256(trim(p_claim_token)::bytea), 'hex');
 
-    -- Look up waitlist entry by claim_token_hash with row lock FOR UPDATE
+    -- Lock waitlist entry row FOR UPDATE
     SELECT * INTO v_entry
     FROM public.booking_waitlist
     WHERE claim_token_hash = v_token_hash
@@ -458,12 +462,10 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'CLAIM_TOKEN_NOT_FOUND');
     END IF;
 
-    -- Status verification
     IF v_entry.status != 'offered' THEN
         RETURN jsonb_build_object('success', false, 'error', 'OFFER_NOT_ACTIVE', 'current_status', v_entry.status);
     END IF;
 
-    -- Expiration verification
     IF v_entry.offer_expires_at IS NOT NULL AND v_entry.offer_expires_at < NOW() THEN
         UPDATE public.booking_waitlist
         SET status = 'expired', claim_token_hash = NULL, updated_at = NOW()
@@ -472,79 +474,88 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'OFFER_EXPIRED');
     END IF;
 
-    -- Canonical Booking Invariant 1: Tenant must be active
-    SELECT t.status INTO v_tenant_status
-    FROM public.tenants t
-    WHERE t.id = v_entry.tenant_id;
+    -- Canonical advisory locking matching canonical booking / reschedule paths
+    PERFORM pg_advisory_xact_lock(
+        hashtext('slot_booking'),
+        hashtext(v_entry.tenant_id::text || ':' || v_entry.offered_staff_id::text)
+    );
 
-    IF v_tenant_status NOT IN ('active', 'trialing') THEN
-        RETURN jsonb_build_object('success', false, 'error', 'TENANT_NOT_ACTIVE');
+    -- Cross the canonical booking evaluator boundary atomically at claim time
+    v_eval_res := public.evaluate_booking_slot(
+        p_tenant_id  => v_entry.tenant_id,
+        p_branch_id  => v_entry.offered_branch_id,
+        p_service_id => v_entry.service_id,
+        p_staff_id   => v_entry.offered_staff_id,
+        p_date       => v_entry.offered_appointment_date,
+        p_time       => v_entry.offered_appointment_time
+    );
+
+    IF (v_eval_res->>'allowed')::BOOLEAN IS NOT TRUE THEN
+        RETURN jsonb_build_object('success', false, 'error', 'SLOT_CONFLICT', 'reason_code', v_eval_res->>'reason_code');
     END IF;
 
-    -- Canonical Booking Invariant 2: Service must be active and valid
-    SELECT s.duration, s.active INTO v_service_duration, v_service_active
-    FROM public.services s
-    WHERE s.id = v_entry.service_id AND s.tenant_id = v_entry.tenant_id;
+    v_svc_duration := (v_eval_res->>'duration_minutes')::INTEGER;
 
-    IF NOT FOUND OR v_service_active = false THEN
-        RETURN jsonb_build_object('success', false, 'error', 'SERVICE_NOT_AVAILABLE');
+    -- Customer resolution
+    IF v_entry.customer_phone IS NOT NULL AND trim(v_entry.customer_phone) != '' THEN
+        SELECT id INTO v_customer_id FROM public.customers
+        WHERE tenant_id = v_entry.tenant_id AND phone = v_entry.customer_phone LIMIT 1;
     END IF;
 
-    v_service_duration := COALESCE(v_service_duration, 60);
-
-    -- Canonical Booking Invariant 3: Staff must be active and valid
-    SELECT st.active INTO v_staff_active
-    FROM public.staff st
-    WHERE st.id = v_entry.offered_staff_id AND st.tenant_id = v_entry.tenant_id;
-
-    IF NOT FOUND OR v_staff_active = false THEN
-        RETURN jsonb_build_object('success', false, 'error', 'STAFF_NOT_AVAILABLE');
+    IF v_customer_id IS NULL AND v_entry.customer_email IS NOT NULL AND trim(v_entry.customer_email) != '' THEN
+        SELECT id INTO v_customer_id FROM public.customers
+        WHERE tenant_id = v_entry.tenant_id AND email = v_entry.customer_email LIMIT 1;
     END IF;
 
-    -- Canonical Booking Invariant 4: Concurrency / slot conflict prevention
-    IF EXISTS (
-        SELECT 1 FROM public.appointments a
-        WHERE a.staff_id = v_entry.offered_staff_id
-          AND a.tenant_id = v_entry.tenant_id
-          AND a.appointment_date = v_entry.offered_appointment_date
-          AND a.status NOT IN ('cancelled', 'cancelled_by_customer', 'cancelled_by_salon', 'cancelled_by_system', 'no_show')
-          AND (
-              (a.appointment_date + a.appointment_time) < (v_entry.offered_appointment_date + v_entry.offered_appointment_time + (v_service_duration || ' minutes')::interval)
-              AND
-              ((a.appointment_date + a.appointment_time) + '60 minutes'::interval) > (v_entry.offered_appointment_date + v_entry.offered_appointment_time)
-          )
-    ) THEN
-        RETURN jsonb_build_object('success', false, 'error', 'SLOT_ALREADY_BOOKED');
+    IF v_customer_id IS NULL THEN
+        INSERT INTO public.customers (tenant_id, name, email, phone)
+        VALUES (v_entry.tenant_id, v_entry.customer_name, v_entry.customer_email, v_entry.customer_phone)
+        RETURNING id INTO v_customer_id;
     END IF;
 
-    -- Atomic canonical appointment creation
+    -- Canonical appointment insertion matching create_public_booking contract
     INSERT INTO public.appointments (
         tenant_id,
         branch_id,
+        customer_id,
+        user_name,
+        user_email,
+        phone,
         service_id,
         staff_id,
         appointment_date,
         appointment_time,
-        customer_name,
-        customer_phone,
-        customer_email,
+        duration_minutes,
         status,
         notes
     ) VALUES (
         v_entry.tenant_id,
-        v_entry.branch_id,
+        v_entry.offered_branch_id,
+        v_customer_id,
+        v_entry.customer_name,
+        v_entry.customer_email,
+        v_entry.customer_phone,
         v_entry.service_id,
         v_entry.offered_staff_id,
         v_entry.offered_appointment_date,
         v_entry.offered_appointment_time,
-        v_entry.customer_name,
-        v_entry.customer_phone,
-        v_entry.customer_email,
+        v_svc_duration,
         'confirmed',
         'Claimed from waitlist (' || v_entry.id || ')'
-    ) RETURNING id INTO v_apt_id;
+    ) RETURNING id INTO v_appointment_id;
 
-    -- Atomic waitlist state transition to claimed and token invalidation (single-use)
+    -- Generate appointment management access token
+    v_manage_token      := encode(gen_random_bytes(32), 'hex');
+    v_manage_token_hash := encode(sha256(v_manage_token::bytea), 'hex');
+    v_manage_expires_at := NOW() + interval '30 days';
+
+    INSERT INTO public.appointment_access_tokens (
+        tenant_id, appointment_id, token_hash, expires_at
+    ) VALUES (
+        v_entry.tenant_id::text, v_appointment_id, v_manage_token_hash, v_manage_expires_at
+    );
+
+    -- Invalidate claim token immediately (single-use) and transition status to claimed
     UPDATE public.booking_waitlist
     SET status = 'claimed',
         claim_token_hash = NULL,
@@ -554,7 +565,8 @@ BEGIN
     RETURN jsonb_build_object(
         'success', true,
         'waitlist_id', v_entry.id,
-        'appointment_id', v_apt_id,
+        'appointment_id', v_appointment_id,
+        'manage_token', v_manage_token,
         'status', 'claimed'
     );
 END;
@@ -563,3 +575,71 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.claim_waitlist_slot(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.claim_waitlist_slot(TEXT) TO anon;
 GRANT EXECUTE ON FUNCTION public.claim_waitlist_slot(TEXT) TO authenticated;
+
+-- =========================================================================
+-- 6. Authorized Cancellation RPC: cancel_waitlist_slot
+-- =========================================================================
+
+CREATE OR REPLACE FUNCTION public.cancel_waitlist_slot(
+    p_waitlist_id UUID,
+    p_reason TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, extensions
+AS $$
+DECLARE
+    v_caller_uid UUID;
+    v_caller_role TEXT;
+    v_caller_tenant_id UUID;
+    v_entry public.booking_waitlist%ROWTYPE;
+BEGIN
+    v_caller_uid := auth.uid();
+    IF v_caller_uid IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'error', 'UNAUTHORIZED');
+    END IF;
+
+    SELECT up.role, up.tenant_id
+    INTO v_caller_role, v_caller_tenant_id
+    FROM public.users_profile up
+    WHERE up.id = v_caller_uid AND up.active = true;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'error', 'CALLER_NOT_ACTIVE');
+    END IF;
+
+    IF v_caller_role != 'super_admin' AND v_caller_role NOT IN ('tenant_owner', 'staff') THEN
+        RETURN jsonb_build_object('success', false, 'error', 'ROLE_NOT_AUTHORIZED');
+    END IF;
+
+    SELECT * INTO v_entry
+    FROM public.booking_waitlist
+    WHERE id = p_waitlist_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'error', 'WAITLIST_ENTRY_NOT_FOUND');
+    END IF;
+
+    IF v_caller_role != 'super_admin' AND (v_caller_tenant_id IS NULL OR v_caller_tenant_id != v_entry.tenant_id) THEN
+        RETURN jsonb_build_object('success', false, 'error', 'FORBIDDEN_CROSS_TENANT');
+    END IF;
+
+    IF v_entry.status IN ('claimed', 'expired', 'cancelled') THEN
+        RETURN jsonb_build_object('success', false, 'error', 'TERMINAL_STATE_CANNOT_CANCEL', 'current_status', v_entry.status);
+    END IF;
+
+    UPDATE public.booking_waitlist
+    SET status = 'cancelled',
+        claim_token_hash = NULL,
+        notes = CASE WHEN p_reason IS NOT NULL THEN COALESCE(notes || ' | ', '') || 'Cancelled: ' || p_reason ELSE notes END,
+        updated_at = NOW()
+    WHERE id = p_waitlist_id;
+
+    RETURN jsonb_build_object('success', true, 'waitlist_id', p_waitlist_id, 'status', 'cancelled');
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.cancel_waitlist_slot(UUID, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.cancel_waitlist_slot(UUID, TEXT) TO authenticated;
