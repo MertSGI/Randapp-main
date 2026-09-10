@@ -16,8 +16,8 @@
         "LARİ Health Tourism",
         "Final Delivery"
     ],
-    "current_milestone": "Program V2 Multi-Lane: EV055-R2, EV056-R2, EV057-R1 Hardened & Payment Foundation Complete",
-    "current_status": "MULTILANE_ACTIVE_EV055_R2_EV056_R2_EV057_R1_AND_PAYMENT_PUBLISHED",
+    "current_milestone": "Program V2 Multi-Lane: EV055-R3, EV056-R3, EV057-R2, EV058-R1 Hardened & CR2-Lite Relay Operationalized",
+    "current_status": "MULTILANE_ACTIVE_EV055_R3_EV056_R3_EV057_R2_EV058_R1_AND_RELAY_OPERATIONALIZED",
     "production_status": "NO_GO",
     "candidate_release": {
         "branch": "staging/supabase-staging-consistency",
@@ -906,6 +906,105 @@
         "tsc_no_emit_result": "PASS",
         "push_preflight_verified": true,
         "push_branch": "origin/aos/phase3-provider-neutral-payment-foundation",
+        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+    },
+    "phase2_state_r3": {
+        "candidate_branch": "aos/phase2-staff-scheduling-foundation-r3",
+        "candidate_sha": "ab6e6924b17e452655060ee693358356c9a30ebc",
+        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+        "stacked_on": "1e865bcdba85ae30a48fe159b03dda9c1f2b0181",
+        "corrections_applied": [
+            "authenticated_only_check_staff_slot_availability_revoke_public_anon",
+            "get_public_available_slots_preserved_as_sole_anonymous_surface",
+            "complete_eligibility_boundary_tenant_release_commercial_preserved",
+            "zero_divergent_eligibility_semantics",
+            "canonical_branches_and_buffer_rules_preserved"
+        ],
+        "contracts_tested": 20,
+        "contracts_result": "PASS",
+        "push_preflight_verified": true,
+        "push_branch": "origin/aos/phase2-staff-scheduling-foundation-r3",
+        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+    },
+    "phase3_waitlist_state_r3": {
+        "candidate_branch": "aos/phase3-waitlist-foundation-r3",
+        "candidate_sha": "5149a86bce5c088ef7e5da864e43e7458fe8fe48",
+        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+        "stacked_on": "e68eb4a2091abf89cba99fd4731f308c518e0dcd",
+        "corrections_applied": [
+            "revoked_direct_raw_mutation_authority_from_browser_roles",
+            "claim_waitlist_slot_reused_canonical_booking_transaction_primitive",
+            "shared_advisory_lock_hashtextextended_order_preserved",
+            "full_tenant_onboarding_public_site_commercial_quota_checks",
+            "bounded_inputs_customer_email_notes_preferred_date_horizon",
+            "reusable_anti_abuse_rate_limit_boundary_integrated",
+            "canonical_consent_ledger_insertion_contract",
+            "single_use_raw_token_sha256_digest_only_storage"
+        ],
+        "contracts_tested": 20,
+        "contracts_result": "PASS",
+        "push_preflight_verified": true,
+        "push_branch": "origin/aos/phase3-waitlist-foundation-r3",
+        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+    },
+    "phase3_comms_state_r2": {
+        "candidate_branch": "aos/phase3-communications-foundation-r2",
+        "candidate_sha": "a328414ae5b8744129b01511c5836a941f176662",
+        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+        "stacked_on": "b38309c815ebdc3b63bc69a74646063db220a252",
+        "corrections_applied": [
+            "outbox_existing_consumer_manifest_produced",
+            "reconciled_existing_canonical_communication_outbox_table",
+            "preserved_legacy_columns_with_backward_compatible_dual_write",
+            "atomic_insert_on_conflict_returning_id_pattern",
+            "digest_comparison_detecting_duplicate_exact_vs_event_id_payload_mismatch",
+            "proven_trusted_execution_acls_zero_browser_execution_service_role_strictly"
+        ],
+        "contracts_tested": 20,
+        "contracts_result": "PASS",
+        "tsc_no_emit_result": "PASS",
+        "push_preflight_verified": true,
+        "push_branch": "origin/aos/phase3-communications-foundation-r2",
+        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+    },
+    "phase3_payment_state_r1": {
+        "candidate_branch": "aos/phase3-provider-neutral-payment-foundation-r1",
+        "candidate_sha": "9b5080a996dc80f305c48b0665b169527ecb8f41",
+        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+        "stacked_on": "4a65e74f4d538bfd87156f7ba917595e1d296062",
+        "corrections_applied": [
+            "removed_unproven_migration_assumption_amount_times_100",
+            "explicit_legacy_unproven_unit_classification",
+            "safely_reconciled_existing_payment_events_uniqueness_to_provider_scoped",
+            "atomic_idempotency_via_insert_on_conflict_with_deterministic_reread",
+            "canonical_binding_between_provider_reference_tenant_and_intent",
+            "monotonic_provider_event_timestamp_and_state_progression_ordering",
+            "amount_minor_bigint_preserved_as_sole_financial_truth"
+        ],
+        "contracts_tested": 20,
+        "contracts_result": "PASS",
+        "tsc_no_emit_result": "PASS",
+        "push_preflight_verified": true,
+        "push_branch": "origin/aos/phase3-provider-neutral-payment-foundation-r1",
+        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+    },
+    "cr2_lite_relay_operationalization": {
+        "candidate_branch": "aos/controller-relay-cr2-lite-operationalization",
+        "candidate_sha": "8bf3f9ea2d7611138129f7d632cdd4fc9d6de4f1",
+        "repository": "MertSGI/AOS",
+        "capabilities_implemented": [
+            "controller_relay_service_operationalized_with_git_data_cas_transport",
+            "lari_controller_chatgpt_mcp_ingress_surface_implemented",
+            "immutable_lari_controller_principal_binding_enforced",
+            "narrow_tool_allowlist_6_relay_ops_plus_authority_fetch_verify_and_publish",
+            "bounded_authority_store_to_docs_project_control_controller_authorities",
+            "zero_generic_git_operations_zero_product_branch_writes",
+            "relay_message_not_equal_authority_invariant_preserved"
+        ],
+        "tests_tested": 133,
+        "tests_result": "PASS",
+        "push_preflight_verified": true,
+        "push_branch": "origin/aos/controller-relay-cr2-lite-operationalization",
         "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
     }
 }
