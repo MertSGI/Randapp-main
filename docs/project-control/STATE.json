@@ -1,6 +1,6 @@
 {
     "schema_version": "1.0.0",
-    "updated_at": "2026-09-10T14:12:00+03:00",
+    "updated_at": "2026-09-10T12:57:41.804Z",
     "product": "LARİ SaaS Platform",
     "repository": "MertSGI/Randapp-main",
     "delivery_commitment": {
@@ -17,7 +17,7 @@
         "Final Delivery"
     ],
     "current_milestone": "Program V2 Multi-Lane: Security Hold + Design Remediation + Phase 2 Preparation",
-    "current_status": "MULTILANE_ACTIVE_SECURITY_HOLD_DESIGN_REMEDIATION_PUBLISHED_PHASE2_IN_PROGRESS",
+    "current_status": "MULTILANE_ACTIVE_SECURITY_HOLD_PHASE2_STAFF_SCHEDULING_PUBLISHED",
     "production_status": "NO_GO",
     "candidate_release": {
         "branch": "staging/supabase-staging-consistency",
@@ -643,14 +643,20 @@
         "lint_base_errors": 10,
         "lint_candidate_errors": 10,
         "lint_error_file": "services/uiV2PilotPreviewFixture.ts",
-        "candidate_changed_files": ["components/layouts/SalonBookingLayout.tsx", "index.html"]
+        "candidate_changed_files": [
+            "components/layouts/SalonBookingLayout.tsx",
+            "index.html"
+        ]
     },
     "design_remediation": {
         "branch": "aos/design-remediation-768px-overflow-20260909",
         "sha": "c0b3a95d17f97714794eefd6e3ba2da2a7c59316",
         "parent_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
         "merge_base": "e74d097b2ba1160bc852e84503aa6368b23d43eb",
-        "changed_files": ["components/layouts/MarketingLayout.tsx", "pages/MarketingHomePage.tsx"],
+        "changed_files": [
+            "components/layouts/MarketingLayout.tsx",
+            "pages/MarketingHomePage.tsx"
+        ],
         "remote_state": "PUBLISHED",
         "target_materialization_allowed": false,
         "disposition": "AWAITING_INDEPENDENT_CONTROLLER_REVIEW"
@@ -659,8 +665,20 @@
         "active_epic": "CORRECTED_SHA_RECAPTURE_COMPLETE",
         "authoritative_product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
         "baseline_classification": "SUPERSEDED_PRE_CORRECTION_BASELINE",
-        "baseline_evidence": ["EV-042", "EV-043", "EV-044", "EV-045", "EV-046", "EV-047"],
-        "corrected_sha_evidence": ["EV-049", "EV-050", "EV-051", "EV-052"],
+        "baseline_evidence": [
+            "EV-042",
+            "EV-043",
+            "EV-044",
+            "EV-045",
+            "EV-046",
+            "EV-047"
+        ],
+        "corrected_sha_evidence": [
+            "EV-049",
+            "EV-050",
+            "EV-051",
+            "EV-052"
+        ],
         "completed_epics": [
             {
                 "epic": 1,
@@ -713,5 +731,22 @@
         ],
         "lane_status": "CORRECTED_SHA_COMPLETE_PENDING_CONTROLLER_REVIEW",
         "release_gate_effect": "NONE"
+    },
+    "phase2_state": {
+        "candidate_branch": "aos/phase2-staff-scheduling-foundation",
+        "candidate_sha": "a29c7e7db10484e413f239f5885d99fb07bed9f4",
+        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+        "capabilities_implemented": [
+            "staff_time_off",
+            "staff_breaks",
+            "booking_buffer_rules",
+            "business_holidays",
+            "check_staff_slot_availability_rpc"
+        ],
+        "contracts_tested": 20,
+        "contracts_result": "PASS",
+        "push_preflight_verified": true,
+        "push_branch": "origin/aos/phase2-staff-scheduling-foundation",
+        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
     }
 }
