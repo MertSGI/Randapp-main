@@ -107,6 +107,19 @@ const tests = [
     name: '17. Administrative RPCs revoke execute from public/anon and grant to authenticated/service_role',
     test: () => /REVOKE\s+ALL\s+ON\s+FUNCTION\s+public\.admin_create_resource.*FROM\s+PUBLIC,\s*anon;/i.test(sql) &&
                 /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.admin_create_resource.*TO\s+authenticated,\s*service_role;/i.test(sql)
+  },
+  {
+    name: '18. ZERO_QUOTA_LEAKAGE: evaluate_booking_slot and resource_plan_locking execute strictly BEFORE appointment_quota consumption',
+    test: () => {
+      const slotPos = sql.indexOf("v_stage := 'evaluate_booking_slot'");
+      const resLockPos = sql.indexOf("v_stage := 'resource_plan_locking'");
+      const quotaPos = sql.indexOf("v_stage := 'appointment_quota'");
+      return slotPos !== -1 && resLockPos !== -1 && quotaPos !== -1 && slotPos < quotaPos && resLockPos < quotaPos;
+    }
+  },
+  {
+    name: '19. ATOMIC_ROLLBACK: Raises exception on post-quota mutation failure to force total rollback and zero leakage',
+    test: () => /RAISE\s+EXCEPTION\s+'BOOKING_MUTATION_FAILED/i.test(sql)
   }
 ];
 

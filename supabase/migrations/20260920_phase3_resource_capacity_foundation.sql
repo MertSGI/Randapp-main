@@ -785,15 +785,7 @@ BEGIN
         END IF;
     END IF;
 
-    -- Gate 7: Monthly Appointment Quota (H1C)
-    v_stage := 'appointment_quota';
-    v_period_key := public.resolve_quota_period_key(v_tenant_id, 'max_monthly_appointments');
-    v_usage_res := public.consume_commercial_usage(v_tenant_id, 'max_monthly_appointments', v_period_key);
-    IF NOT (v_usage_res->>'success')::boolean THEN
-        RETURN jsonb_build_object('success', false, 'reason_code', 'booking_unavailable');
-    END IF;
-
-    -- Gate 8: Shared Slot Evaluator Engine Execution (Schedule Constraints)
+    -- Gate 7: Shared Slot Evaluator Engine Execution (Schedule Constraints & Availability)
     v_stage := 'evaluate_booking_slot';
     v_eval_res := public.evaluate_booking_slot(
         p_tenant_id  => v_tenant_id,
@@ -810,7 +802,7 @@ BEGIN
 
     v_svc_duration := (v_eval_res->>'duration_minutes')::integer;
 
-    -- Gate 8b: Resource Plan Locking (Transactional Advisory Locks in Stable Order)
+    -- Gate 8: Resource Plan Locking (Transactional Advisory Locks in Stable Order)
     v_stage := 'resource_plan_locking';
     v_res_eval := public.evaluate_and_lock_resource_plan(
         v_tenant_id,
@@ -827,7 +819,16 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', v_res_eval->>'reason_code');
     END IF;
 
-    -- Gate 9: Customer Upsert
+    -- Gate 9: Monthly Appointment Quota (H1C) - Executed only after all validation and locking succeed!
+    -- Ensures ZERO_QUOTA_LEAKAGE_ON_FAILED_BOOKING.
+    v_stage := 'appointment_quota';
+    v_period_key := public.resolve_quota_period_key(v_tenant_id, 'max_monthly_appointments');
+    v_usage_res := public.consume_commercial_usage(v_tenant_id, 'max_monthly_appointments', v_period_key);
+    IF NOT (v_usage_res->>'success')::boolean THEN
+        RETURN jsonb_build_object('success', false, 'reason_code', 'booking_unavailable');
+    END IF;
+
+    -- Gate 10: Customer Upsert
     v_stage := 'customer_upsert';
     IF p_customer_phone IS NOT NULL AND trim(p_customer_phone) != '' THEN
         SELECT id INTO v_customer_id FROM public.customers
@@ -907,6 +908,11 @@ BEGIN
         'allocation_plan', v_res_eval->'allocation_plan'
     );
 EXCEPTION WHEN OTHERS THEN
+    -- If failure occurred after quota consumption, raise exception to ensure total transaction rollback
+    -- and prevent quota leakage!
+    IF v_stage IN ('customer_upsert', 'consent_ledger_insert', 'appointment_insert', 'resource_allocation', 'token_generation', 'idempotency_record') THEN
+        RAISE EXCEPTION 'BOOKING_MUTATION_FAILED: Stage %, Error: %', v_stage, SQLERRM;
+    END IF;
     RETURN jsonb_build_object('success', false, 'reason_code', 'temporary_failure', 'debug_stage', v_stage, 'debug_sqlerrm', SQLERRM);
 END;
 $$;
