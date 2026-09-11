@@ -25,6 +25,17 @@
 -- 1. Tables: public.customer_segments & public.customer_segment_members
 -- =========================================================================
 
+-- Ensure composite uniqueness on customers(id, tenant_id) if not present
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'uq_customers_id_tenant'
+    ) THEN
+        ALTER TABLE public.customers ADD CONSTRAINT uq_customers_id_tenant UNIQUE (id, tenant_id);
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS public.customer_segments (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
@@ -36,7 +47,8 @@ CREATE TABLE IF NOT EXISTS public.customer_segments (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    CONSTRAINT customer_segments_tenant_name_unique UNIQUE (tenant_id, name)
+    CONSTRAINT customer_segments_tenant_name_unique UNIQUE (tenant_id, name),
+    CONSTRAINT uq_customer_segments_id_tenant UNIQUE (id, tenant_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_customer_segments_tenant ON public.customer_segments(tenant_id);
@@ -47,16 +59,24 @@ REVOKE ALL ON public.customer_segments FROM PUBLIC;
 REVOKE ALL ON public.customer_segments FROM anon;
 REVOKE ALL ON public.customer_segments FROM authenticated;
 
--- Segment memberships link directly to canonical public.customers(id)
+-- Segment memberships enforce tenant-composite integrity:
+-- (segment_id, tenant_id) REFERENCES public.customer_segments(id, tenant_id)
+-- (customer_id, tenant_id) REFERENCES public.customers(id, tenant_id)
 CREATE TABLE IF NOT EXISTS public.customer_segment_members (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    segment_id      UUID NOT NULL REFERENCES public.customer_segments(id) ON DELETE CASCADE,
-    customer_id     UUID NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,
+    segment_id      UUID NOT NULL,
+    customer_id     UUID NOT NULL,
     assigned_by     TEXT NOT NULL DEFAULT 'system',
     assigned_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    CONSTRAINT customer_segment_members_unique UNIQUE (segment_id, customer_id)
+    CONSTRAINT customer_segment_members_unique UNIQUE (segment_id, customer_id),
+    CONSTRAINT fk_customer_segment_members_segment 
+        FOREIGN KEY (segment_id, tenant_id) 
+        REFERENCES public.customer_segments(id, tenant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_customer_segment_members_customer 
+        FOREIGN KEY (customer_id, tenant_id) 
+        REFERENCES public.customers(id, tenant_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_customer_segment_members_lookup 
@@ -85,23 +105,111 @@ REVOKE ALL ON public.customer_memory FROM authenticated;
 
 CREATE OR REPLACE FUNCTION public.is_tenant_staff(p_tenant_id UUID)
 RETURNS BOOLEAN
-LANGUAGE sql
+LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
-SET search_path = public, auth
+SET search_path = pg_catalog, public
 AS $$
-    SELECT EXISTS (
-        SELECT 1 
-        FROM public.users_profile up
-        WHERE up.id = auth.uid()
-          AND up.tenant_id = p_tenant_id
-          AND up.role IN ('admin', 'staff', 'owner')
-    );
+DECLARE
+    v_uid UUID;
+    v_role TEXT;
+    v_tenant_id UUID;
+BEGIN
+    v_uid := auth.uid();
+    IF v_uid IS NULL THEN
+        RETURN FALSE;
+    END IF;
+
+    SELECT up.role, up.tenant_id
+    INTO v_role, v_tenant_id
+    FROM public.users_profile up
+    WHERE up.id = v_uid;
+
+    IF v_role = 'super_admin' THEN
+        RETURN TRUE;
+    END IF;
+
+    IF v_tenant_id = p_tenant_id AND v_role IN ('tenant_owner', 'staff') THEN
+        RETURN TRUE;
+    END IF;
+
+    RETURN FALSE;
+END;
 $$;
 
 REVOKE ALL ON FUNCTION public.is_tenant_staff(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.is_tenant_staff(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_tenant_staff(UUID) TO service_role;
+
+-- Helper to check caller branch permission for staff
+CREATE OR REPLACE FUNCTION public.is_staff_assigned_to_branch(
+    p_tenant_id UUID,
+    p_branch_id UUID
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_uid UUID;
+    v_role TEXT;
+    v_tenant_id UUID;
+    v_staff_id UUID;
+    v_has_access BOOLEAN;
+BEGIN
+    v_uid := auth.uid();
+    IF v_uid IS NULL THEN
+        RETURN FALSE;
+    END IF;
+
+    SELECT up.role, up.tenant_id
+    INTO v_role, v_tenant_id
+    FROM public.users_profile up
+    WHERE up.id = v_uid;
+
+    IF v_role = 'super_admin' THEN
+        RETURN TRUE;
+    END IF;
+
+    IF v_tenant_id <> p_tenant_id THEN
+        RETURN FALSE;
+    END IF;
+
+    IF v_role = 'tenant_owner' THEN
+        RETURN TRUE;
+    END IF;
+
+    -- If branch is NULL (unassigned/tenant-wide), tenant_owner has access, staff does not have branch restriction
+    IF p_branch_id IS NULL THEN
+        RETURN TRUE;
+    END IF;
+
+    -- Map auth.uid() to staff.id via canonical staff.user_profile_id
+    SELECT s.id INTO v_staff_id
+    FROM public.staff s
+    WHERE s.user_profile_id = v_uid
+      AND s.tenant_id = p_tenant_id;
+
+    IF v_staff_id IS NULL THEN
+        RETURN FALSE;
+    END IF;
+
+    -- Check staff_branches assignment
+    SELECT EXISTS (
+        SELECT 1 FROM public.staff_branches sb
+        WHERE sb.staff_id = v_staff_id
+          AND sb.branch_id = p_branch_id
+    ) INTO v_has_access;
+
+    RETURN v_has_access;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.is_staff_assigned_to_branch(UUID, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_staff_assigned_to_branch(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_staff_assigned_to_branch(UUID, UUID) TO service_role;
 
 -- =========================================================================
 -- 3. RPC: get_customer_360_view (Sanitized Tenant Read RPC)
@@ -114,7 +222,7 @@ CREATE OR REPLACE FUNCTION public.get_customer_360_view(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, auth
+SET search_path = pg_catalog, public
 AS $$
 DECLARE
     v_customer       RECORD;
@@ -185,6 +293,7 @@ BEGIN
                 'status', a.status,
                 'service_id', a.service_id,
                 'staff_id', a.staff_id,
+                'branch_id', a.branch_id,
                 'created_at', a.created_at
             ) ORDER BY a.appointment_date DESC, a.appointment_time DESC
         ),
@@ -192,7 +301,7 @@ BEGIN
     )
     INTO v_recent_appts
     FROM (
-        SELECT id, appointment_date, appointment_time, status, service_id, staff_id, created_at
+        SELECT id, appointment_date, appointment_time, status, service_id, staff_id, branch_id, created_at
         FROM public.appointments
         WHERE customer_id = p_customer_id
           AND tenant_id = p_tenant_id
@@ -214,7 +323,7 @@ BEGIN
     )
     INTO v_segments
     FROM public.customer_segment_members csm
-    JOIN public.customer_segments s ON s.id = csm.segment_id
+    JOIN public.customer_segments s ON s.id = csm.segment_id AND s.tenant_id = csm.tenant_id
     WHERE csm.customer_id = p_customer_id
       AND csm.tenant_id = p_tenant_id
       AND s.is_active = TRUE;
@@ -267,7 +376,7 @@ CREATE OR REPLACE FUNCTION public.assign_customer_to_segment(
 RETURNS BOOLEAN
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, auth
+SET search_path = pg_catalog, public
 AS $$
 DECLARE
     v_segment_exists BOOLEAN;
@@ -300,7 +409,7 @@ BEGIN
             USING ERRCODE = 'P0002';
     END IF;
 
-    -- Upsert segment membership
+    -- Upsert segment membership (composite integrity guaranteed)
     INSERT INTO public.customer_segment_members (tenant_id, segment_id, customer_id, assigned_by, assigned_at)
     VALUES (p_tenant_id, p_segment_id, p_customer_id, p_assigned_by, NOW())
     ON CONFLICT (segment_id, customer_id) DO UPDATE
@@ -328,7 +437,7 @@ CREATE OR REPLACE FUNCTION public.remove_customer_from_segment(
 RETURNS BOOLEAN
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, auth
+SET search_path = pg_catalog, public
 AS $$
 BEGIN
     IF auth.role() <> 'service_role' AND NOT public.is_tenant_staff(p_tenant_id) THEN
@@ -370,7 +479,7 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, auth
+SET search_path = pg_catalog, public
 AS $$
 BEGIN
     IF auth.role() <> 'service_role' AND NOT public.is_tenant_staff(p_tenant_id) THEN
@@ -402,3 +511,39 @@ REVOKE ALL ON FUNCTION public.list_tenant_customer_segments(UUID) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.list_tenant_customer_segments(UUID) FROM anon;
 GRANT EXECUTE ON FUNCTION public.list_tenant_customer_segments(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.list_tenant_customer_segments(UUID) TO service_role;
+
+-- =========================================================================
+-- 7. RPC: evaluate_dynamic_customer_segments (Explicit Source-Truth Classification)
+-- =========================================================================
+
+CREATE OR REPLACE FUNCTION public.evaluate_dynamic_customer_segments(
+    p_tenant_id UUID,
+    p_segment_id UUID DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+    IF auth.role() <> 'service_role' AND NOT public.is_tenant_staff(p_tenant_id) THEN
+        RAISE EXCEPTION 'PERMISSION_DENIED: Tenant staff access required to evaluate dynamic segments'
+            USING ERRCODE = '42501';
+    END IF;
+
+    -- Dynamic rule evaluation is currently classified as NOT_IMPLEMENTED
+    -- rather than falsely claiming full rule execution from an enum and JSON column alone.
+    RETURN jsonb_build_object(
+        'status', 'DYNAMIC_RULE_EVALUATION_NOT_IMPLEMENTED',
+        'tenant_id', p_tenant_id,
+        'segment_id', p_segment_id,
+        'message', 'Automated dynamic segmentation rule evaluation engine requires Phase 4 background worker integration.'
+    );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.evaluate_dynamic_customer_segments(UUID, UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.evaluate_dynamic_customer_segments(UUID, UUID) FROM anon;
+GRANT EXECUTE ON FUNCTION public.evaluate_dynamic_customer_segments(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.evaluate_dynamic_customer_segments(UUID, UUID) TO service_role;
+
