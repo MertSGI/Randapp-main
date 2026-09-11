@@ -179,3 +179,70 @@ export interface HtLeadListResult {
   offset?: number;
   message?: string;
 }
+
+export type HtJourneyStatus = 'inquiry' | 'quote_sent' | 'booked' | 'in_travel' | 'in_treatment' | 'completed' | 'cancelled';
+export type HtQuoteStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
+export type HtItineraryEventType =
+  | 'airport_pickup'
+  | 'hotel_checkin'
+  | 'clinical_consultation'
+  | 'procedure'
+  | 'recovery'
+  | 'hotel_checkout'
+  | 'airport_dropoff'
+  | 'custom';
+
+export interface HtTreatmentJourney {
+  id: string;
+  tenant_id: string;
+  lead_id?: string | null;
+  customer_id?: string | null;
+  coordinator_staff_id?: string | null;
+  status: HtJourneyStatus;
+  title: string;
+  target_treatment_category?: string | null;
+  arrival_date?: string | null;
+  departure_date?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HtQuoteItem {
+  description: string;
+  category: string;
+  amount_minor_units: number;
+}
+
+export interface HtJourneyQuote {
+  id: string;
+  tenant_id: string;
+  journey_id: string;
+  version: number;
+  status: HtQuoteStatus;
+  currency: string;
+  total_amount_minor_units: number;
+  items: HtQuoteItem[];
+  valid_until?: string | null;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HtJourneyItineraryEvent {
+  id: string;
+  tenant_id: string;
+  journey_id: string;
+  appointment_id?: string | null;
+  event_type: HtItineraryEventType;
+  title: string;
+  scheduled_start: string;
+  scheduled_end?: string | null;
+  location?: string | null;
+  assigned_coordinator_staff_id?: string | null;
+  notes?: string | null;
+  status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+  created_at: string;
+  updated_at: string;
+}
+
