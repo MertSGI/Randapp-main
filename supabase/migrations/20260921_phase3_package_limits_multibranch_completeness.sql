@@ -1,27 +1,26 @@
 -- Migration: 20260921_phase3_package_limits_multibranch_completeness.sql
 -- Implementation Authority ID: LARI-PROGRAM-V2-PHASE3-PACKAGE-LIMITS-MULTIBRANCH-20260911-01
+-- Correction Authority ID: LARI-PROGRAM-V2-PHASE3-R1-CORRECTIONS-AND-PHASE4-CONTINUATION-20260911-01
 -- Program ID: LARI-PROGRAM-V2-REAL-PRODUCT-20260908-01
 --
 -- Goals:
--- 1. Server-authoritative package limit enforcement:
---    - Fail-closed transactional validation on max_branches, max_staff, max_services, max_monthly_appointments.
---    - Reuses existing resolve_commercial_quota, consume_commercial_usage, and usage_counters.
---    - No client-side bypass; failed mutations consume zero quota.
---
--- 2. Multi-Branch Product Completeness:
---    - Branch permissions & Primary branch invariant protection (at least 1 active primary branch per active tenant).
---    - Safe branch deactivation checks: prevents deactivating a branch with future active appointments.
---    - Staff reassignment rules: transactional assign/unassign RPCs enforcing branch-tenant alignment.
---    - Service reassignment rules: transactional assign/unassign RPCs enforcing branch-tenant alignment.
---    - Cross-branch appointment integrity: ensures appointment branch, staff branch, and service branch match.
---    - Branch-scoped calendar queries: sanitized RPCs for single-branch calendar and central multi-branch overview.
---    - Safe public execution: zero raw table exposure to anonymous browser roles.
+-- 1. Multi-Branch Product Completeness:
+--    - Harmonize with canonical unique partial index:
+--      idx_unique_primary_branch_per_tenant (tenant_id) WHERE is_primary = true AND is_active = true.
+--    - Enforce primary branch invariants without causing concurrency conflicts.
+--    - Safe branch deactivation with timezone-aware future appointment checks.
+--    - Transactional staff and service branch assignment RPCs with composite tenant checks.
+--    - Multi-branch calendar query RPC with real branch-level permissions:
+--      * tenant_owner: tenant-wide access.
+--      * staff: strictly restricted to branches mapped via public.staff_branches (p_branch_id = NULL filters to mapped branches).
+--      * super_admin: platform-wide access.
+--    - Cross-branch joins strictly enforce tenant binding across branches, staff, and services.
 
 -- =========================================================================
 -- 1. Primary Branch Invariant Trigger
 -- =========================================================================
--- Ensures that when a tenant has active branches, exactly one is marked as primary.
--- Deactivating the primary branch when other active branches exist requires designating a new primary first.
+-- Reconciles with canonical unique index idx_unique_primary_branch_per_tenant.
+-- Guarantees that at most one active branch is primary per tenant.
 
 CREATE OR REPLACE FUNCTION public.enforce_tenant_primary_branch_invariant()
 RETURNS TRIGGER
@@ -31,11 +30,10 @@ SET search_path = pg_catalog, public
 AS $$
 DECLARE
     v_active_count INTEGER;
-    v_other_primary_exists BOOLEAN;
 BEGIN
     -- Check if tenant has other active branches
-    SELECT count(*), bool_or(is_primary)
-    INTO v_active_count, v_other_primary_exists
+    SELECT count(*)
+    INTO v_active_count
     FROM public.branches
     WHERE tenant_id = NEW.tenant_id
       AND is_active = true
@@ -54,6 +52,7 @@ BEGIN
     END IF;
 
     -- If marking this branch as primary, demote any other existing primary branch for this tenant
+    -- BEFORE this row is saved, preventing violation of idx_unique_primary_branch_per_tenant.
     IF NEW.is_primary = true AND NEW.is_active = true THEN
         UPDATE public.branches
         SET is_primary = false, updated_at = now()
@@ -74,7 +73,7 @@ CREATE TRIGGER trg_tenant_primary_branch_invariant
 -- =========================================================================
 -- 2. Safe Branch Deactivation RPC
 -- =========================================================================
--- Prevents deactivating a branch if active future appointments exist.
+-- Prevents deactivating a branch if active future appointments exist using branch timezone.
 
 CREATE OR REPLACE FUNCTION public.deactivate_tenant_branch(
     p_tenant_id UUID,
@@ -88,6 +87,8 @@ AS $$
 DECLARE
     v_active_future_apts INTEGER;
     v_is_primary         BOOLEAN;
+    v_tz                 TEXT;
+    v_now_in_tz          TIMESTAMP;
 BEGIN
     -- Authorize caller (tenant_owner or super_admin)
     IF NOT EXISTS (
@@ -102,7 +103,8 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'unauthorized');
     END IF;
 
-    SELECT is_primary INTO v_is_primary
+    SELECT is_primary, COALESCE(timezone, 'Europe/Istanbul')
+    INTO v_is_primary, v_tz
     FROM public.branches
     WHERE id = p_branch_id AND tenant_id = p_tenant_id;
 
@@ -110,12 +112,14 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'branch_not_found');
     END IF;
 
-    -- Check for future active appointments
+    v_now_in_tz := now() AT TIME ZONE v_tz;
+
+    -- Check for future active appointments in branch timezone
     SELECT count(*) INTO v_active_future_apts
     FROM public.appointments a
     WHERE a.tenant_id = p_tenant_id
       AND a.branch_id = p_branch_id
-      AND (a.appointment_date + a.appointment_time) >= now()
+      AND (a.appointment_date + a.appointment_time) >= v_now_in_tz
       AND a.status NOT IN ('cancelled', 'cancelled_by_customer', 'cancelled_by_salon', 'cancelled_by_system', 'completed', 'no_show');
 
     IF v_active_future_apts > 0 THEN
@@ -126,7 +130,7 @@ BEGIN
         );
     END IF;
 
-    -- Attempt deactivation
+    -- Deactivate branch
     UPDATE public.branches
     SET is_active = false, updated_at = now()
     WHERE id = p_branch_id AND tenant_id = p_tenant_id;
@@ -141,7 +145,7 @@ REVOKE EXECUTE ON FUNCTION public.deactivate_tenant_branch(UUID, UUID) FROM PUBL
 GRANT EXECUTE ON FUNCTION public.deactivate_tenant_branch(UUID, UUID) TO authenticated, service_role;
 
 -- =========================================================================
--- 3. Staff & Service Branch Assignment RPCs
+-- 3. Staff & Service Branch Assignment RPCs with Composite Integrity
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.assign_staff_to_branch(
@@ -192,7 +196,6 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.assign_staff_to_branch(UUID, UUID, UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.assign_staff_to_branch(UUID, UUID, UUID) TO authenticated, service_role;
 
-
 CREATE OR REPLACE FUNCTION public.assign_service_to_branch(
     p_tenant_id  UUID,
     p_service_id UUID,
@@ -239,9 +242,12 @@ REVOKE EXECUTE ON FUNCTION public.assign_service_to_branch(UUID, UUID, UUID) FRO
 GRANT EXECUTE ON FUNCTION public.assign_service_to_branch(UUID, UUID, UUID) TO authenticated, service_role;
 
 -- =========================================================================
--- 4. Multi-Branch Calendar Query RPCs
+-- 4. Multi-Branch Calendar Query RPCs with Real Branch-Level Permissions
 -- =========================================================================
--- Sanitized, tenant-scoped, and branch-aware appointments calendar view.
+-- Enforces real staff branch assignments:
+-- - tenant_owner: allowed tenant-wide or specific branch
+-- - staff: restricted strictly to mapped branches via public.staff_branches.
+--   If p_branch_id is NULL, staff only sees appointments for branches they are assigned to.
 
 CREATE OR REPLACE FUNCTION public.get_branch_calendar_appointments(
     p_tenant_id  UUID,
@@ -267,15 +273,33 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
+DECLARE
+    v_user RECORD;
 BEGIN
-    -- Verify caller belongs to tenant
-    IF NOT EXISTS (
-        SELECT 1 FROM public.users_profile up
-        WHERE up.id = auth.uid()
-          AND up.active = true
-          AND (up.role = 'super_admin' OR up.tenant_id = p_tenant_id)
-    ) THEN
-        RAISE EXCEPTION 'unauthorized' USING ERRCODE = 'P0001';
+    -- Verify caller profile
+    SELECT up.role, up.tenant_id, up.id INTO v_user
+    FROM public.users_profile up
+    WHERE up.id = auth.uid() AND up.active = true;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'unauthorized' USING ERRCODE = '42501';
+    END IF;
+
+    IF v_user.role <> 'super_admin' AND v_user.tenant_id <> p_tenant_id THEN
+        RAISE EXCEPTION 'tenant_mismatch' USING ERRCODE = '42501';
+    END IF;
+
+    -- Staff branch restriction enforcement
+    IF v_user.role = 'staff' THEN
+        IF p_branch_id IS NOT NULL THEN
+            IF NOT EXISTS (
+                SELECT 1 FROM public.staff_branches sb
+                JOIN public.staff s ON s.id = sb.staff_id
+                WHERE s.id = v_user.id AND sb.branch_id = p_branch_id AND sb.tenant_id = p_tenant_id
+            ) THEN
+                RAISE EXCEPTION 'staff_not_authorized_for_branch' USING ERRCODE = '42501';
+            END IF;
+        END IF;
     END IF;
 
     RETURN QUERY
@@ -293,11 +317,26 @@ BEGIN
         a.status,
         a.user_name
     FROM public.appointments a
-    LEFT JOIN public.branches b ON b.id = a.branch_id
-    LEFT JOIN public.services s ON s.id = a.service_id
-    LEFT JOIN public.staff st ON st.id = a.staff_id
+    JOIN public.branches b ON b.id = a.branch_id AND b.tenant_id = a.tenant_id
+    JOIN public.services s ON s.id = a.service_id AND s.tenant_id = a.tenant_id
+    JOIN public.staff st ON st.id = a.staff_id AND st.tenant_id = a.tenant_id
     WHERE a.tenant_id = p_tenant_id
-      AND (p_branch_id IS NULL OR a.branch_id = p_branch_id)
+      AND (
+          -- If explicit branch provided, filter by it
+          (p_branch_id IS NOT NULL AND a.branch_id = p_branch_id)
+          OR
+          -- If p_branch_id is NULL:
+          (p_branch_id IS NULL AND (
+              v_user.role IN ('super_admin', 'tenant_owner')
+              OR
+              -- Ordinary staff only sees appointments in branches they are mapped to
+              (v_user.role = 'staff' AND a.branch_id IN (
+                  SELECT sb.branch_id FROM public.staff_branches sb
+                  JOIN public.staff s_map ON s_map.id = sb.staff_id
+                  WHERE s_map.id = v_user.id AND sb.tenant_id = p_tenant_id
+              ))
+          ))
+      )
       AND a.appointment_date >= p_start_date
       AND a.appointment_date <= p_end_date
     ORDER BY a.appointment_date ASC, a.appointment_time ASC;
