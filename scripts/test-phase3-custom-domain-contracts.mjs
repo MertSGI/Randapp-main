@@ -58,10 +58,13 @@ const assertions = [
       migrationSql.includes('ALTER TABLE public.custom_domains ENABLE ROW LEVEL SECURITY;')
   },
   {
-    name: '6. Reconciles pre-existing tenants.custom_domain values safely into custom_domains',
+    name: '6. Reconciles pre-existing tenants.custom_domain values safely into custom_domains as non-live LEGACY_UNVERIFIED',
     test: () =>
       migrationSql.includes('INSERT INTO public.custom_domains') &&
       migrationSql.includes('FROM public.tenants') &&
+      migrationSql.includes('pending_verification') &&
+      migrationSql.includes('DOMAIN_PROVIDER_READY_NOT_CONNECTED') &&
+      migrationSql.includes('LEGACY_UNVERIFIED') &&
       migrationSql.includes('ON CONFLICT (normalized_hostname) DO NOTHING')
   },
   {
