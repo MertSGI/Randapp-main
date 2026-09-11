@@ -86,7 +86,7 @@ BEGIN
         FROM public.tenants
         WHERE custom_domain IS NOT NULL AND trim(custom_domain) <> ''
     LOOP
-        -- Insert into custom_domains if not already tracked
+        -- Insert into custom_domains if not already tracked as non-live LEGACY_UNVERIFIED
         INSERT INTO public.custom_domains (
             tenant_id,
             requested_hostname,
@@ -97,18 +97,20 @@ BEGIN
             verification_record_name,
             verification_expected_value,
             provider_status,
-            verified_at
+            verified_at,
+            metadata
         ) VALUES (
             v_rec.t_id,
             v_rec.c_dom,
             v_rec.c_dom,
-            'verified',
+            'pending_verification',
             'dns_txt',
             'lari-legacy-migrated',
             '_lari-challenge.' || v_rec.c_dom,
-            'legacy-migrated',
-            'REAL_PROVIDER_VERIFIED',
-            now()
+            'legacy-migrated-unverified',
+            'DOMAIN_PROVIDER_READY_NOT_CONNECTED',
+            NULL,
+            jsonb_build_object('source', 'legacy_tenants_custom_domain', 'verification_status', 'LEGACY_UNVERIFIED')
         )
         ON CONFLICT (normalized_hostname) DO NOTHING;
     END LOOP;
