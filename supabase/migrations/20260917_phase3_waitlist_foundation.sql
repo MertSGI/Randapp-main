@@ -194,6 +194,27 @@ BEGIN
     FROM public.booking_waitlist w
     WHERE w.tenant_id = p_tenant_id
       AND (p_status IS NULL OR w.status = p_status)
+      AND (
+          v_caller_role IN ('super_admin', 'tenant_owner')
+          OR (
+              v_caller_role = 'staff'
+              AND (
+                  -- Staff must only access waitlist entries for branches they are assigned to
+                  w.branch_id IN (
+                      SELECT sb.branch_id FROM public.staff_branches sb
+                      JOIN public.staff s ON s.id = sb.staff_id
+                      WHERE s.user_profile_id = v_caller_uid AND sb.tenant_id = p_tenant_id
+                  )
+                  OR (
+                      w.offered_branch_id IN (
+                          SELECT sb.branch_id FROM public.staff_branches sb
+                          JOIN public.staff s ON s.id = sb.staff_id
+                          WHERE s.user_profile_id = v_caller_uid AND sb.tenant_id = p_tenant_id
+                      )
+                  )
+              )
+          )
+      )
     ORDER BY w.created_at DESC
     LIMIT v_bounded_limit
     OFFSET GREATEST(COALESCE(p_offset, 0), 0);
@@ -290,6 +311,7 @@ BEGIN
     END IF;
 
     -- Anti-abuse / rate limiting: max 5 waitlist submissions per phone/tenant per hour
+    -- Fail-closed anti-abuse enforcement (no silent bypass on missing infrastructure)
     DECLARE
         v_rate_limit_res JSONB;
     BEGIN
@@ -307,8 +329,7 @@ BEGIN
         END IF;
     EXCEPTION
         WHEN undefined_function OR undefined_table THEN
-            -- Reusable fallback if ht_check_rate_limit is not present in local test env
-            NULL;
+            RAISE EXCEPTION 'RATE_LIMITER_UNAVAILABLE: Required anti-abuse infrastructure missing' USING ERRCODE = '55000';
     END;
 
     -- Validate tenant

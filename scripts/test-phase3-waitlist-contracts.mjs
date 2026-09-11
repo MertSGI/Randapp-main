@@ -124,6 +124,17 @@ const tests = [
                 /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.claim_waitlist_slot.*FROM\s+PUBLIC;/i.test(sql) &&
                 /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.cancel_waitlist_slot.*FROM\s+PUBLIC;/i.test(sql) &&
                 /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.get_sanitized_waitlist_entries.*FROM\s+PUBLIC;/i.test(sql)
+  },
+  {
+    name: '21. Fail-closed anti-abuse: no silent fallback in join_booking_waitlist (EV056-R5)',
+    test: () => sql.includes('RATE_LIMITER_UNAVAILABLE') &&
+                !/WHEN\s+undefined_function\s+OR\s+undefined_table\s+THEN\s+NULL/i.test(sql)
+  },
+  {
+    name: '22. Sanitized waitlist listing restricts staff to mapped branches via staff.user_profile_id (EV056-R5)',
+    test: () => sql.includes('w.branch_id IN') &&
+                sql.includes('public.staff_branches sb') &&
+                sql.includes('s.user_profile_id = v_caller_uid')
   }
 ];
 
