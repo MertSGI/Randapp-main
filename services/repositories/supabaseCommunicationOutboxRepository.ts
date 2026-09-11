@@ -4,7 +4,12 @@ import { fetchSupabase } from './supabaseClient';
 export class SupabaseCommunicationOutboxRepository implements CommunicationOutboxRepository {
   async listEvents(tenantId: string): Promise<any[]> {
     try {
-      const res = await fetchSupabase(`/rest/v1/communication_outbox?tenant_id=eq.${tenantId}&select=*`);
+      // Use sanitized tenant-scoped projection RPC (EV057-R3: raw outbox direct SELECT revoked)
+      const res = await fetchSupabase(`/rest/v1/rpc/get_tenant_communication_outbox`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_tenant_id: tenantId, p_limit: 100, p_offset: 0 })
+      });
       if (!res.ok) return [];
       const data = await res.json();
       return data.map((e: any) => ({

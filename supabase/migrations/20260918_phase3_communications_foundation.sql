@@ -1,6 +1,6 @@
 -- ===========================================================================
--- Migration: Phase 3 Provider-Neutral Communications Foundation (R1 Hardened)
--- Authority: LARI-PROGRAM-V2-EV057-COMMUNICATIONS-FOUNDATION-R1-CORRECTION-20260910-01
+-- Migration: Phase 3 Provider-Neutral Communications Foundation (R3 Reconciled & Hardened)
+-- Authority: LARI-PROGRAM-V2-LARI-AOS-PROGRAM-V2-CONTINUATION-AND-LIVE-RELAY-R1-20260911-01
 -- Program: LARI-PROGRAM-V2-REAL-PRODUCT-20260908-01
 -- Phase: 3 (PRODUCT_COMPLETENESS_BEFORE_EXTERNAL_PROVIDERS)
 -- Base: fcfca154e0a9e57cd8f6ab007cd6d88771f8b16a
@@ -67,6 +67,41 @@ ALTER TABLE public.communication_outbox
     ADD COLUMN IF NOT EXISTS provider_msg_ref TEXT DEFAULT NULL,
     ADD COLUMN IF NOT EXISTS error_code TEXT DEFAULT NULL,
     ADD COLUMN IF NOT EXISTS error_message TEXT DEFAULT NULL;
+
+-- =========================================================================
+-- Reconcile / Replace Legacy CHECK Constraints Safely (EV057-R3)
+-- Discovers and replaces legacy inline check constraints:
+--   communication_outbox_channel_check (legacy: sms, whatsapp, email)
+--   communication_outbox_status_check (legacy: queued, sent, failed)
+-- Expanded domain preserves legacy values while supporting provider-neutral states.
+-- =========================================================================
+DO $
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN (
+        SELECT conname
+        FROM pg_constraint
+        WHERE conrelid = 'public.communication_outbox'::regclass
+          AND contype = 'c'
+          AND (conname LIKE '%channel%' OR conname LIKE '%status%')
+    ) LOOP
+        EXECUTE 'ALTER TABLE public.communication_outbox DROP CONSTRAINT IF EXISTS ' || quote_ident(r.conname);
+    END LOOP;
+END $;
+
+ALTER TABLE public.communication_outbox
+    ADD CONSTRAINT communication_outbox_channel_check
+    CHECK (channel IN ('sms', 'whatsapp', 'email', 'otp', 'push', 'webhook'));
+
+ALTER TABLE public.communication_outbox
+    ADD CONSTRAINT communication_outbox_status_check
+    CHECK (status IN (
+        'queued', 'sent', 'failed',
+        'processing', 'delivered', 'failed_retryable',
+        'failed_terminal', 'dead_letter', 'cancelled'
+    ));
+
 
 -- Backfill recipient_address from legacy recipient if null
 UPDATE public.communication_outbox
@@ -270,6 +305,7 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.enqueue_communication_outbox(UUID, TEXT, TEXT, TEXT, JSONB, TEXT, INTEGER) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.enqueue_communication_outbox(UUID, TEXT, TEXT, TEXT, JSONB, TEXT, INTEGER) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.enqueue_communication_outbox(UUID, TEXT, TEXT, TEXT, JSONB, TEXT, INTEGER) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.enqueue_communication_outbox(UUID, TEXT, TEXT, TEXT, JSONB, TEXT, INTEGER) TO service_role;
 
 -- =========================================================================
 -- 4. Server-Side RPC: claim_outbox_batch
@@ -345,6 +381,7 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.claim_outbox_batch(TEXT, INTEGER, INTEGER) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.claim_outbox_batch(TEXT, INTEGER, INTEGER) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.claim_outbox_batch(TEXT, INTEGER, INTEGER) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_outbox_batch(TEXT, INTEGER, INTEGER) TO service_role;
 
 -- =========================================================================
 -- 5. Server-Side RPC: record_delivery_callback
@@ -440,6 +477,21 @@ BEGIN
     WHERE provider_id = v_clean_provider AND provider_msg_ref = v_clean_msg_ref
     FOR UPDATE;
 
+    -- Unmatched provider callback check (EV057-R3):
+    -- If no corresponding outbox message exists for this provider reference,
+    -- record the callback audit but explicitly classify as UNMATCHED_PROVIDER_REFERENCE.
+    -- Do not claim successful delivery-state application.
+    IF v_outbox_rec.id IS NULL THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', 'UNMATCHED_PROVIDER_REFERENCE',
+            'classification', 'UNMATCHED_PROVIDER_REFERENCE',
+            'provider_id', v_clean_provider,
+            'provider_msg_ref', v_clean_msg_ref,
+            'message', 'No matching outbox entry found for provider reference; callback audited but delivery state not applied'
+        );
+    END IF;
+
     -- If outbox record found, apply state transition enforcing monotonic timestamp & terminal precedence
     IF v_outbox_rec.id IS NOT NULL THEN
         -- Check if current outbox is already in a terminal state
@@ -515,3 +567,80 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.record_delivery_callback(TEXT, TEXT, TEXT, TIMESTAMPTZ, TEXT, TEXT) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.record_delivery_callback(TEXT, TEXT, TEXT, TIMESTAMPTZ, TEXT, TEXT) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.record_delivery_callback(TEXT, TEXT, TEXT, TIMESTAMPTZ, TEXT, TEXT) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.record_delivery_callback(TEXT, TEXT, TEXT, TIMESTAMPTZ, TEXT, TEXT) TO service_role;
+
+-- =========================================================================
+-- 6. Sanitized Tenant-Scoped Outbox Projection RPC: get_tenant_communication_outbox (EV057-R3)
+-- Browser clients MUST NOT access raw communication_outbox directly.
+-- This authorized RPC projects only sanitized tenant-scoped records,
+-- strictly omitting internal request fingerprints, lease locks, and raw payloads.
+-- =========================================================================
+
+CREATE OR REPLACE FUNCTION public.get_tenant_communication_outbox(
+    p_tenant_id UUID,
+    p_limit     INTEGER DEFAULT 50,
+    p_offset    INTEGER DEFAULT 0
+)
+RETURNS TABLE (
+    id                  UUID,
+    tenant_id           TEXT,
+    recipient           TEXT,
+    channel             TEXT,
+    message             TEXT,
+    status              TEXT,
+    metadata            JSONB,
+    created_at          TIMESTAMPTZ,
+    updated_at          TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, extensions
+AS $$
+DECLARE
+    v_caller_role TEXT;
+    v_caller_tenant TEXT;
+BEGIN
+    v_caller_role := COALESCE(auth.jwt() ->> 'role', 'anon');
+    v_caller_tenant := COALESCE(auth.jwt() ->> 'tenant_id', '');
+
+    -- Service role can read any tenant; authenticated staff/admin can only read their own tenant
+    IF v_caller_role != 'service_role' THEN
+        IF v_caller_role != 'authenticated' THEN
+            RAISE EXCEPTION 'UNAUTHORIZED: Authentication required';
+        END IF;
+
+        IF v_caller_tenant IS DISTINCT FROM p_tenant_id::text THEN
+            -- Check user_profiles tenant binding for staff/owner
+            IF NOT EXISTS (
+                SELECT 1 FROM public.user_profiles up
+                WHERE up.id = auth.uid()
+                  AND (up.tenant_id = p_tenant_id::uuid OR up.role = 'super_admin')
+            ) THEN
+                RAISE EXCEPTION 'FORBIDDEN: Tenant boundary violation';
+            END IF;
+        END IF;
+    END IF;
+
+    RETURN QUERY
+    SELECT
+        co.id,
+        co.tenant_id,
+        co.recipient,
+        co.channel,
+        co.message,
+        co.status,
+        co.metadata,
+        co.created_at,
+        co.updated_at
+    FROM public.communication_outbox co
+    WHERE co.tenant_id = p_tenant_id::text
+    ORDER BY co.created_at DESC
+    LIMIT LEAST(GREATEST(COALESCE(p_limit, 50), 1), 100)
+    OFFSET GREATEST(COALESCE(p_offset, 0), 0);
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.get_tenant_communication_outbox(UUID, INTEGER, INTEGER) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.get_tenant_communication_outbox(UUID, INTEGER, INTEGER) FROM anon;
+GRANT EXECUTE ON FUNCTION public.get_tenant_communication_outbox(UUID, INTEGER, INTEGER) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_tenant_communication_outbox(UUID, INTEGER, INTEGER) TO service_role;

@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DeterministicTestCommunicationProvider } from '../services/deterministicTestCommunicationProvider.ts';
 
-console.log('--- PHASE 3 COMMUNICATIONS FOUNDATION CONTRACT VALIDATION (EV057-R2) ---');
+console.log('--- PHASE 3 COMMUNICATIONS FOUNDATION CONTRACT VALIDATION (EV057-R3) ---');
 
 const migrationPath = resolve('supabase/migrations/20260918_phase3_communications_foundation.sql');
 if (!existsSync(migrationPath)) {
@@ -14,15 +14,17 @@ const sql = readFileSync(migrationPath, 'utf8');
 
 const tests = [
   {
-    name: '1. communication_outbox schema reconciled safely without dropping existing table (EV057-R2)',
+    name: '1. communication_outbox schema reconciled safely without dropping existing table (EV057-R2/R3)',
     test: () => /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+public\.communication_outbox/i.test(sql) &&
                 /ALTER\s+TABLE\s+public\.communication_outbox[\s\S]*?ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+recipient_address/i.test(sql) &&
                 /ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+request_fingerprint/i.test(sql) &&
                 /ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+last_event_timestamp/i.test(sql)
   },
   {
-    name: '2. Channel abstraction constraints (email, sms, whatsapp, otp)',
-    test: () => /channel/i.test(sql)
+    name: '2. Legacy CHECK constraints safely reconciled dynamically preserving legacy values (EV057-R3)',
+    test: () => /FROM\s+pg_constraint[\s\S]*?public\.communication_outbox[\s\S]*?DROP\s+CONSTRAINT/i.test(sql) &&
+                /ADD\s+CONSTRAINT\s+communication_outbox_channel_check[\s\S]*?sms[\s\S]*?whatsapp[\s\S]*?email[\s\S]*?otp/i.test(sql) &&
+                /ADD\s+CONSTRAINT\s+communication_outbox_status_check[\s\S]*?queued[\s\S]*?sent[\s\S]*?failed[\s\S]*?processing[\s\S]*?delivered/i.test(sql)
   },
   {
     name: '3. Status lifecycle state machine constraint or values',
@@ -64,10 +66,11 @@ const tests = [
                 /idempotent_duplicate/i.test(sql)
   },
   {
-    name: '11. enqueue_communication_outbox execution revoked from PUBLIC, anon, and authenticated (internal/service-role only)',
+    name: '11. enqueue_communication_outbox revoked from PUBLIC/anon/authenticated and explicitly granted to service_role (EV057-R3)',
     test: () => /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.enqueue_communication_outbox.*FROM\s+PUBLIC;/i.test(sql) &&
                 /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.enqueue_communication_outbox.*FROM\s+anon;/i.test(sql) &&
-                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.enqueue_communication_outbox.*FROM\s+authenticated;/i.test(sql)
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.enqueue_communication_outbox.*FROM\s+authenticated;/i.test(sql) &&
+                /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.enqueue_communication_outbox.*TO\s+service_role;/i.test(sql)
   },
   {
     name: '12. claim_outbox_batch validates bounded batch_size and lease_seconds',
@@ -79,10 +82,11 @@ const tests = [
     test: () => /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.claim_outbox_batch[\s\S]*?FOR\s+UPDATE\s+SKIP\s+LOCKED/i.test(sql)
   },
   {
-    name: '14. claim_outbox_batch execution revoked from PUBLIC, anon, authenticated (trusted worker authority)',
+    name: '14. claim_outbox_batch revoked from PUBLIC/anon/authenticated and explicitly granted to service_role (EV057-R3)',
     test: () => /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.claim_outbox_batch.*FROM\s+PUBLIC;/i.test(sql) &&
                 /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.claim_outbox_batch.*FROM\s+anon;/i.test(sql) &&
-                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.claim_outbox_batch.*FROM\s+authenticated;/i.test(sql)
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.claim_outbox_batch.*FROM\s+authenticated;/i.test(sql) &&
+                /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.claim_outbox_batch.*TO\s+service_role;/i.test(sql)
   },
   {
     name: '15. record_delivery_callback binds provider_id + provider_msg_ref in outbox lookup',
@@ -99,17 +103,31 @@ const tests = [
                 /OUT_OF_ORDER_EVENT_IGNORED/i.test(sql)
   },
   {
-    name: '18. record_delivery_callback execution revoked from PUBLIC, anon, authenticated (adapter boundary only)',
-    test: () => /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.record_delivery_callback.*FROM\s+PUBLIC;/i.test(sql) &&
+    name: '18. record_delivery_callback explicitly classifies UNMATCHED_PROVIDER_REFERENCE without claiming success (EV057-R3)',
+    test: () => /UNMATCHED_PROVIDER_REFERENCE/i.test(sql) &&
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.record_delivery_callback.*FROM\s+PUBLIC;/i.test(sql) &&
                 /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.record_delivery_callback.*FROM\s+anon;/i.test(sql) &&
-                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.record_delivery_callback.*FROM\s+authenticated;/i.test(sql)
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.record_delivery_callback.*FROM\s+authenticated;/i.test(sql) &&
+                /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.record_delivery_callback.*TO\s+service_role;/i.test(sql)
   },
   {
-    name: '19. No provider secrets or raw credentials stored in schemas',
+    name: '19. Sanitized projection RPC get_tenant_communication_outbox exists and is wired in repository adapter (EV057-R3)',
+    test: () => {
+      const rpcCheck = /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.get_tenant_communication_outbox/i.test(sql) &&
+                       /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.get_tenant_communication_outbox.*TO\s+authenticated;/i.test(sql) &&
+                       /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.get_tenant_communication_outbox.*TO\s+service_role;/i.test(sql);
+      const repoPath = resolve('services/repositories/supabaseCommunicationOutboxRepository.ts');
+      const repoCode = readFileSync(repoPath, 'utf8');
+      const repoUsesRpc = /get_tenant_communication_outbox/i.test(repoCode) && !/\.from\('communication_outbox'\)/i.test(repoCode);
+      return rpcCheck && repoUsesRpc;
+    }
+  },
+  {
+    name: '20. No provider secrets or raw credentials stored in schemas',
     test: () => !/api_key/i.test(sql) && !/secret_key/i.test(sql) && !/bearer_token/i.test(sql) && !/auth_token/i.test(sql)
   },
   {
-    name: '20. Deterministic test communication provider runs deterministic scenarios without network',
+    name: '21. Deterministic test communication provider runs deterministic scenarios without network',
     test: async () => {
       let seq = 0;
       const provider = new DeterministicTestCommunicationProvider({
@@ -186,5 +204,6 @@ console.log(`\nResult: ${tests.length - failed}/${tests.length} tests passed.`);
 if (failed > 0) {
   process.exit(1);
 } else {
-  console.log('All communication foundation EV057-R1 contract tests passed successfully.');
+  console.log('All communication foundation EV057-R3 contract tests passed successfully.');
 }
+
