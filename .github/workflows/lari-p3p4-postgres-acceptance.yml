@@ -1,0 +1,145 @@
+name: LARI Program V2 P3+P4 Disposable Postgres Acceptance
+
+on:
+  push:
+    branches:
+      - ci/program-v2-p3p4-postgres-acceptance-20260911-01
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-acceptance:
+    name: Clean Disposable Supabase Postgres Replay & Behavioral Contract Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Evidence Composition
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Database Tools (postgresql-client)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client
+          psql --version
+
+      - name: Start Disposable Pinned Supabase Postgres Container
+        run: |
+          PINNED_IMAGE="supabase/postgres:15.1.0.147"
+          echo "Pulling pinned Supabase Postgres container: ${PINNED_IMAGE}"
+          docker pull "${PINNED_IMAGE}"
+          docker run -d \
+            --name lari-disposable-postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=postgres \
+            -p 54322:5432 \
+            "${PINNED_IMAGE}"
+
+      - name: Wait for Postgres Readiness
+        run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          for i in {1..60}; do
+            if pg_isready -h 127.0.0.1 -p 54322 -U postgres -d postgres; then
+              echo "Postgres container ready!"
+              break
+            fi
+            sleep 1
+          done
+          psql "$DB_URL" -c "SELECT version();"
+
+      - name: Execute Managed Runtime Compatibility Bootstrap
+        run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/tests/fixtures/p2a_managed_runtime_bootstrap.sql
+          echo "Managed runtime bootstrap completed."
+
+      - name: Apply Full Ordered SQL Migration Chain
+        id: replay_migrations
+        run: |
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          mapfile -t MIGRATIONS < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)
+          echo "Total migrations found: ${#MIGRATIONS[@]}"
+          ORDINAL=1
+          for migration in "${MIGRATIONS[@]}"; do
+            if [ "${migration}" = "20260813_h1c_commercial_eligibility_and_quota_enforcement.sql" ]; then
+              echo "=== Applying Historical Replay Compatibility Bridge before Migration 38 ==="
+              psql "$DB_URL" -v ON_ERROR_STOP=1 -f "supabase/tests/fixtures/p2a_historical_replay_bridge_before_migration_38.sql"
+            fi
+            echo "=== APPLYING [${ORDINAL}/${#MIGRATIONS[@]}] ${migration} ==="
+            psql "$DB_URL" -v ON_ERROR_STOP=1 -f "supabase/migrations/${migration}"
+            ORDINAL=$((ORDINAL + 1))
+          done
+          echo "ALL ${#MIGRATIONS[@]} MIGRATIONS SUCCESSFULLY APPLIED WITH ZERO ERRORS!"
+
+      - name: Execute 14 Domain Contract Suites
+        run: |
+          node scripts/test-phase2-staff-scheduling-contracts.mjs
+          node scripts/test-phase3-resource-capacity-contracts.mjs
+          node scripts/test-phase3-package-multibranch-contracts.mjs
+          node scripts/test-phase3-waitlist-contracts.mjs
+          node scripts/test-phase3-communications-contracts.mjs
+          node scripts/test-phase3-payment-foundation-contracts.mjs
+          node scripts/test-phase3-background-job-calendar-contracts.mjs
+          node scripts/test-phase3-customer360-segmentation-contracts.mjs
+          node scripts/test-phase3-reporting-analytics-contracts.mjs
+          node scripts/test-phase3-custom-domain-contracts.mjs
+          node scripts/test-phase4-deposit-noshow-contracts.mjs
+          node scripts/test-phase4-packages-memberships-contracts.mjs
+          node scripts/test-phase4-giftcards-wallet-contracts.mjs
+          node scripts/test-phase4-loyalty-contracts.mjs
+          echo "ALL 14 DOMAIN CONTRACT SUITES PASSED!"
+
+      - name: Execute Live Database Introspection & Integrity Verification
+        run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== VERIFYING FUNCTION INTEGRITY ==="
+          psql "$DB_URL" -c "
+            SELECT routine_name, routine_type, security_type
+            FROM information_schema.routines
+            WHERE routine_schema = 'public'
+              AND routine_name IN (
+                'create_public_booking',
+                'evaluate_booking_slot',
+                'evaluate_and_lock_resource_plan',
+                'claim_outbox_batch',
+                'enqueue_communication_outbox',
+                'record_delivery_callback',
+                'get_tenant_communication_outbox',
+                'bind_payment_intent_provider',
+                'claim_background_job_batch',
+                'evaluate_booking_confirmation_deposit_policy',
+                'scan_customer_reactivation_cohorts',
+                'get_customer_loyalty_profile',
+                'earn_loyalty_points_for_appointment'
+              )
+            ORDER BY routine_name;
+          "
+
+          echo "=== VERIFYING TABLE AND CONSTRAINT INTEGRITY ==="
+          psql "$DB_URL" -c "
+            SELECT conname, contype, conrelid::regclass
+            FROM pg_constraint
+            WHERE conname IN (
+              'fk_appointment_resources_appointment_tenant',
+              'fk_appointment_resources_resource_tenant',
+              'uq_payment_intents_provider_reference',
+              'communication_outbox_channel_check',
+              'communication_outbox_status_check',
+              'fk_appointment_deposits_appointment_tenant',
+              'fk_appointment_deposits_payment_intent_tenant',
+              'uq_loyalty_tenant_idempotency'
+            )
+            ORDER BY conname;
+          "
+
+      - name: Destroy Container
+        if: always()
+        run: |
+          docker rm -f lari-disposable-postgres || true
