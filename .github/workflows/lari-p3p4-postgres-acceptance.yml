@@ -1,8 +1,9 @@
-name: LARI Program V2 P3+P4 Disposable Postgres Acceptance
+name: LARI Program V2 P3+P4 Disposable Postgres Live Behavioral Acceptance
 
 on:
   push:
     branches:
+      - ci/program-v2-p3p4-live-behavioral-acceptance-20260911-01
       - ci/program-v2-p3p4-postgres-acceptance-20260911-01
   workflow_dispatch:
 
@@ -11,7 +12,7 @@ permissions:
 
 jobs:
   postgres-acceptance:
-    name: Clean Disposable Supabase Postgres Replay & Behavioral Contract Validation
+    name: Clean Disposable Supabase Postgres Replay & Live Behavioral Acceptance
     runs-on: ubuntu-latest
 
     steps:
@@ -142,6 +143,12 @@ jobs:
             )
             ORDER BY conname;
           "
+
+      - name: Execute Live PostgreSQL Behavioral Acceptance Matrix
+        run: |
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== EXECUTING LIVE POSTGRESQL BEHAVIORAL MATRIX (ALL 15 DOMAINS + EV079-R3) ==="
+          node supabase/tests/program-v2/p3p4-live/test-live-behavioral-matrix.mjs
 
       - name: Destroy Container
         if: always()
