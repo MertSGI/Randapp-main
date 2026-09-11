@@ -143,3 +143,29 @@ export interface SuperAdminCommercialCatalog {
     }>;
   }>;
 }
+
+export interface VerticalQuotas {
+  limit: number;
+  is_unlimited: boolean;
+  active?: number;
+}
+
+export interface TenantVerticalCommercialContext {
+  success: boolean;
+  tenant_id: string;
+  eligible: boolean;
+  subscription_status?: string;
+  plan_code?: string;
+  plan_name?: string;
+  reason_code?: string;
+  verticals: {
+    clinic_enabled: boolean;
+    health_tourism_enabled: boolean;
+  };
+  quotas: {
+    max_practitioners: VerticalQuotas;
+    max_coordinators: VerticalQuotas;
+    max_active_journeys: VerticalQuotas;
+    ai_allowance: VerticalQuotas;
+  };
+}
