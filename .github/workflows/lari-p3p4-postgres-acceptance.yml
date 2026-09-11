@@ -78,22 +78,26 @@ jobs:
           done
           echo "ALL ${#MIGRATIONS[@]} MIGRATIONS SUCCESSFULLY APPLIED WITH ZERO ERRORS!"
 
+      - name: Install Node Dependencies
+        run: |
+          npm ci
+
       - name: Execute 14 Domain Contract Suites
         run: |
-          node scripts/test-phase2-staff-scheduling-contracts.mjs
-          node scripts/test-phase3-resource-capacity-contracts.mjs
-          node scripts/test-phase3-package-multibranch-contracts.mjs
-          node scripts/test-phase3-waitlist-contracts.mjs
-          node scripts/test-phase3-communications-contracts.mjs
-          node scripts/test-phase3-payment-foundation-contracts.mjs
-          node scripts/test-phase3-background-job-calendar-contracts.mjs
-          node scripts/test-phase3-customer360-segmentation-contracts.mjs
-          node scripts/test-phase3-reporting-analytics-contracts.mjs
-          node scripts/test-phase3-custom-domain-contracts.mjs
-          node scripts/test-phase4-deposit-noshow-contracts.mjs
-          node scripts/test-phase4-packages-memberships-contracts.mjs
-          node scripts/test-phase4-giftcards-wallet-contracts.mjs
-          node scripts/test-phase4-loyalty-contracts.mjs
+          npx tsx scripts/test-phase2-staff-scheduling-contracts.mjs
+          npx tsx scripts/test-phase3-resource-capacity-contracts.mjs
+          npx tsx scripts/test-phase3-package-multibranch-contracts.mjs
+          npx tsx scripts/test-phase3-waitlist-contracts.mjs
+          npx tsx scripts/test-phase3-communications-contracts.mjs
+          npx tsx scripts/test-phase3-payment-foundation-contracts.mjs
+          npx tsx scripts/test-phase3-background-job-calendar-contracts.mjs
+          npx tsx scripts/test-phase3-customer360-segmentation-contracts.mjs
+          npx tsx scripts/test-phase3-reporting-analytics-contracts.mjs
+          npx tsx scripts/test-phase3-custom-domain-contracts.mjs
+          npx tsx scripts/test-phase4-deposit-noshow-contracts.mjs
+          npx tsx scripts/test-phase4-packages-memberships-contracts.mjs
+          npx tsx scripts/test-phase4-giftcards-wallet-contracts.mjs
+          npx tsx scripts/test-phase4-loyalty-contracts.mjs
           echo "ALL 14 DOMAIN CONTRACT SUITES PASSED!"
 
       - name: Execute Live Database Introspection & Integrity Verification
