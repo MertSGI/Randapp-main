@@ -1043,5 +1043,25 @@
         "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
         "push_branch": "origin/aos/phase5-vertical-skus-commercial-packaging",
         "evidence_id": "EV-081"
+    },
+    "phase5_node2_clinic_state": {
+        "candidate_branch": "aos/phase5-clinic-practitioners-workspace",
+        "candidate_sha": "278737303be10da0ce9d89efe54d948a7fb46671",
+        "upstream_base_sha": "0368c9d17eba52049fe3e78a203282656b27af14",
+        "contracts_tested": 9,
+        "contracts_result": "PASS",
+        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+        "push_branch": "origin/aos/phase5-clinic-practitioners-workspace",
+        "evidence_id": "EV-082"
+    },
+    "phase5_node3_ht_state": {
+        "candidate_branch": "aos/phase5-ht-journey-domain",
+        "candidate_sha": "920fdd05cf3073d675b34f878a2c5df3211bf9b7",
+        "upstream_base_sha": "0368c9d17eba52049fe3e78a203282656b27af14",
+        "contracts_tested": 9,
+        "contracts_result": "PASS",
+        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+        "push_branch": "origin/aos/phase5-ht-journey-domain",
+        "evidence_id": "EV-082"
     }
 }
