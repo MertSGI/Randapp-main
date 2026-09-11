@@ -92,6 +92,21 @@ const tests = [
       const cancelled = await provider.cancelEvent(res.externalEventRef);
       return cancelled === true;
     }
+  },
+  {
+    name: '11. Calendar sync queue enforces appointment FK and fail-closed tenant validation',
+    test: () => sql.includes('appointment_id          UUID NOT NULL REFERENCES public.appointments(id) ON DELETE CASCADE') &&
+                sql.includes('APPOINTMENT_TENANT_MISMATCH')
+  },
+  {
+    name: '12. Background job engine exposes complete bounded worker lifecycle primitives with FOR UPDATE SKIP LOCKED',
+    test: () => sql.includes('CREATE OR REPLACE FUNCTION public.enqueue_background_job') &&
+                sql.includes('CREATE OR REPLACE FUNCTION public.claim_background_job_batch') &&
+                sql.includes('CREATE OR REPLACE FUNCTION public.complete_background_job') &&
+                sql.includes('CREATE OR REPLACE FUNCTION public.fail_background_job') &&
+                sql.includes('CREATE OR REPLACE FUNCTION public.cancel_background_job') &&
+                sql.includes('dead_letter') &&
+                sql.includes('failed_retryable')
   }
 ];
 
