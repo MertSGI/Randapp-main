@@ -1022,5 +1022,26 @@
     "phase4_node1_deposit_noshow_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
     "phase4_node2_packages_memberships_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
     "phase4_node3_giftcards_wallet_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
-    "phase4_node4_loyalty_reactivation_gate": "AOS_STANDING_AUTHORITY_ACCEPTED"
+    "phase4_node4_loyalty_reactivation_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "p3p4_postgres_acceptance": {
+        "status": "ACCEPTED_WITH_EVIDENCE_METADATA_CORRECTIONS",
+        "runtime_gate": "ACCEPTED_QUALIFIED_E2_EXECUTABLE_CI",
+        "github_actions_run": "34620971501",
+        "github_actions_job": "103334549721",
+        "total_migrations": 84,
+        "final_migration": "20260926_phase4_giftcards_wallet_foundation.sql",
+        "product_test_node_runtime": "v20.20.2",
+        "disposable_postgres_image": "supabase/postgres:15.1.0.147",
+        "classification": "REAL_POSTGRES_RUNTIME_PROOF_WITH_MANAGED_RUNTIME_AND_HISTORICAL_REPLAY_FIXTURES"
+    },
+    "phase5_node1_vertical_skus_state": {
+        "candidate_branch": "aos/phase5-vertical-skus-commercial-packaging",
+        "candidate_sha": "0368c9d17eba52049fe3e78a203282656b27af14",
+        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+        "contracts_tested": 13,
+        "contracts_result": "PASS",
+        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+        "push_branch": "origin/aos/phase5-vertical-skus-commercial-packaging",
+        "evidence_id": "EV-081"
+    }
 }
