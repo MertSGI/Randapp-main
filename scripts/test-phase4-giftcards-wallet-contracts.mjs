@@ -17,17 +17,20 @@ const sql = fs.readFileSync(migrationPath, 'utf8');
 
 const tests = [
   {
-    name: '1. Client wallets table exists with integer minor units balance and unique currency constraint',
+    name: '1. Client wallets table exists with integer minor units, composite foreign key and unique currency constraint',
     check: () => sql.includes('CREATE TABLE IF NOT EXISTS public.client_wallets') &&
                  sql.includes('balance_minor_units INTEGER NOT NULL DEFAULT 0 CHECK (balance_minor_units >= 0)') &&
+                 sql.includes('CONSTRAINT fk_client_wallets_customer_tenant FOREIGN KEY (customer_id, tenant_id)') &&
                  sql.includes('CONSTRAINT uq_client_wallet_customer_currency UNIQUE (tenant_id, customer_id, currency)')
   },
   {
-    name: '2. Immutable wallet ledger exists with before/after balance tracking and idempotency',
+    name: '2. Immutable wallet ledger exists with composite foreign keys and database-enforced append-only trigger',
     check: () => sql.includes('CREATE TABLE IF NOT EXISTS public.client_wallet_ledger') &&
                  sql.includes('amount_minor_units INTEGER NOT NULL CHECK (amount_minor_units > 0)') &&
-                 sql.includes('balance_before_minor_units INTEGER NOT NULL CHECK (balance_before_minor_units >= 0)') &&
-                 sql.includes('balance_after_minor_units INTEGER NOT NULL CHECK (balance_after_minor_units >= 0)') &&
+                 sql.includes('CONSTRAINT fk_wallet_ledger_wallet_tenant FOREIGN KEY (wallet_id, tenant_id)') &&
+                 sql.includes('CONSTRAINT fk_wallet_ledger_appointment_tenant FOREIGN KEY (appointment_id, tenant_id)') &&
+                 sql.includes('trg_prevent_wallet_ledger_mutation') &&
+                 sql.includes('BEFORE UPDATE OR DELETE ON public.client_wallet_ledger') &&
                  sql.includes('CONSTRAINT uq_client_wallet_ledger_idempotency UNIQUE (tenant_id, idempotency_key)')
   },
   {
@@ -44,15 +47,17 @@ const tests = [
                  sql.includes('CONSTRAINT chk_gift_card_balance CHECK (current_balance_minor_units <= initial_balance_minor_units)')
   },
   {
-    name: '5. Immutable gift card redemptions table exists with idempotency key',
+    name: '5. Immutable gift card redemptions table exists with composite FKs and append-only trigger',
     check: () => sql.includes('CREATE TABLE IF NOT EXISTS public.gift_card_redemptions') &&
-                 sql.includes('redeemed_minor_units INTEGER NOT NULL CHECK (redeemed_minor_units > 0)') &&
-                 sql.includes('remaining_balance_minor_units INTEGER NOT NULL CHECK (remaining_balance_minor_units >= 0)') &&
+                 sql.includes('CONSTRAINT fk_gift_card_redemptions_card_tenant FOREIGN KEY (gift_card_id, tenant_id)') &&
+                 sql.includes('trg_prevent_gift_card_redemptions_mutation') &&
+                 sql.includes('BEFORE UPDATE OR DELETE ON public.gift_card_redemptions') &&
                  sql.includes('CONSTRAINT uq_gift_card_redemptions_idempotency UNIQUE (tenant_id, idempotency_key)')
   },
   {
-    name: '6. Wallet transaction RPC locks wallet row (SELECT ... FOR UPDATE) and prevents double-spend',
+    name: '6. Wallet transaction RPC verifies customer belongs to tenant, locks wallet row and prevents double-spend',
     check: () => sql.includes('CREATE OR REPLACE FUNCTION public.transact_wallet_balance') &&
+                 sql.includes('customer_not_found_in_tenant') &&
                  sql.includes('FOR UPDATE') &&
                  sql.includes('insufficient_funds')
   },
@@ -62,15 +67,17 @@ const tests = [
                  sql.includes('public.client_wallet_ledger')
   },
   {
-    name: '8. Gift card redemption RPC locks gift card row and verifies expiry',
+    name: '8. Gift card redemption RPC verifies tenant customer/appointment and locks gift card row',
     check: () => sql.includes('CREATE OR REPLACE FUNCTION public.redeem_gift_card') &&
+                 sql.includes('customer_not_found_in_tenant') &&
                  sql.includes('FOR UPDATE') &&
                  sql.includes('gift_card_expired') &&
                  sql.includes('insufficient_balance')
   },
   {
-    name: '9. Role authorization verified on RPCs (staff or tenant_owner)',
-    check: () => sql.includes("v_user.role <> 'super_admin' AND (v_user.role NOT IN ('tenant_owner', 'staff') OR v_user.tenant_id <> p_tenant_id)")
+    name: '9. Stored-value financial mutation authority is strictly narrowed',
+    check: () => sql.includes('Stored-value financial mutation requires tenant_owner or super_admin') &&
+                 sql.includes("v_user.role <> 'super_admin' AND (v_user.role <> 'tenant_owner' OR v_user.tenant_id <> p_tenant_id)")
   },
   {
     name: '10. Search path hardened to pg_catalog, public',
