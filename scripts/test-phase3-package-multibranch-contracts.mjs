@@ -115,6 +115,13 @@ const tests = [
                 manifest.includes('max_monthly_appointments') &&
                 manifest.includes('resolve_commercial_quota') &&
                 manifest.includes('consume_commercial_usage')
+  },
+  {
+    name: '19. Branch calendar authorization uses canonical staff.user_profile_id mapping',
+    test: () => sql.includes('s.user_profile_id = v_user.id') &&
+                sql.includes('s_map.user_profile_id = v_user.id') &&
+                !/s\.id = v_user\.id/i.test(sql) &&
+                !/s_map\.id = v_user\.id/i.test(sql)
   }
 ];
 

@@ -295,7 +295,7 @@ BEGIN
             IF NOT EXISTS (
                 SELECT 1 FROM public.staff_branches sb
                 JOIN public.staff s ON s.id = sb.staff_id
-                WHERE s.id = v_user.id AND sb.branch_id = p_branch_id AND sb.tenant_id = p_tenant_id
+                WHERE s.user_profile_id = v_user.id AND sb.branch_id = p_branch_id AND sb.tenant_id = p_tenant_id
             ) THEN
                 RAISE EXCEPTION 'staff_not_authorized_for_branch' USING ERRCODE = '42501';
             END IF;
@@ -333,7 +333,7 @@ BEGIN
               (v_user.role = 'staff' AND a.branch_id IN (
                   SELECT sb.branch_id FROM public.staff_branches sb
                   JOIN public.staff s_map ON s_map.id = sb.staff_id
-                  WHERE s_map.id = v_user.id AND sb.tenant_id = p_tenant_id
+                  WHERE s_map.user_profile_id = v_user.id AND sb.tenant_id = p_tenant_id
               ))
           ))
       )
