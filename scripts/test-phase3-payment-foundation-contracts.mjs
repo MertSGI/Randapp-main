@@ -152,6 +152,13 @@ const tests = [
 
       return r1 === 'NEW' && r2 === 'IDEMPOTENT_SUCCESS' && r3 === 'INTEGRITY_CONFLICT';
     }
+  },
+  {
+    name: '21. Unique provider reference owner enforced via index and fail-closed check in bind_payment_intent_provider (EV058-R3)',
+    test: () => sql.includes('CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_intents_provider_reference') &&
+                sql.includes('ON public.payment_intents(provider_id, provider_reference)') &&
+                sql.includes('PROVIDER_REFERENCE_ALREADY_BOUND') &&
+                sql.includes('Another payment intent already owns this provider reference')
   }
 ];
 
