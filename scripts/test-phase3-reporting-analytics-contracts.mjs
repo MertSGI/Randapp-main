@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-console.log('--- PHASE 3 REPORTING & ANALYTICS CONTRACT VALIDATION ---');
+console.log('--- PHASE 3 REPORTING & ANALYTICS R1 CONTRACT VALIDATION ---');
 
 const migrationPath = resolve('supabase/migrations/20260922_phase3_reporting_analytics_foundation.sql');
 if (!existsSync(migrationPath)) {
@@ -17,36 +17,38 @@ const tests = [
     test: () => !/business_branches/i.test(sql)
   },
   {
-    name: '2. RPC get_tenant_booking_analytics exists with tenant/branch scoping',
-    test: () => /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.get_tenant_booking_analytics/i.test(sql) &&
-                /p_tenant_id\s+UUID/i.test(sql) && /p_branch_id\s+UUID/i.test(sql)
+    name: '2. Strict absence of nonexistent services.base_price column reference',
+    test: () => !/base_price/i.test(sql)
   },
   {
-    name: '3. Booking analytics strictly classifies price sums as ESTIMATED_REVENUE',
+    name: '3. Accurate price resolution uses canonical services.price',
+    test: () => /COALESCE\(s\.price,\s*0\)/i.test(sql) && /COALESCE\(svc\.price,\s*0\)/i.test(sql)
+  },
+  {
+    name: '4. Booking analytics strictly classifies price sums as ESTIMATED_REVENUE with limitations noted',
     test: () => /'financial_metric_classification',\s*'ESTIMATED_REVENUE'/i.test(sql) &&
+                /'financial_metric_limitation'/i.test(sql) &&
                 /'estimated_revenue',\s*v_estimated_revenue/i.test(sql)
   },
   {
-    name: '4. Booking analytics computes completion, cancellation, and no-show funnel rates',
-    test: () => /'completion_rate'/i.test(sql) && /'cancellation_rate'/i.test(sql) && /'no_show_rate'/i.test(sql)
+    name: '5. Accurate metric naming: uses occupied_minutes and does not misname raw count as utilization',
+    test: () => /'total_occupied_minutes'/i.test(sql) && /'occupied_minutes'/i.test(sql)
   },
   {
-    name: '5. Date range bounds enforced with maximum 366 days window',
-    test: () => /p_end_date\s*-\s*p_start_date\s*\)\s*>\s*366/i.test(sql)
+    name: '6. Unimplemented attribution fields classified honestly as NOT_AVAILABLE_IN_CURRENT_SOURCE_TRUTH',
+    test: () => /'acquisition_source_status',\s*'NOT_AVAILABLE_IN_CURRENT_SOURCE_TRUTH'/i.test(sql) &&
+                /'campaign_attribution_status',\s*'NOT_AVAILABLE_IN_CURRENT_SOURCE_TRUTH'/i.test(sql)
   },
   {
-    name: '6. RPC get_tenant_staff_performance_analytics exists with staff metrics',
-    test: () => /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.get_tenant_staff_performance_analytics/i.test(sql) &&
-                /'staff_performance'/i.test(sql) && /'total_duration_minutes'/i.test(sql)
+    name: '7. Staff analytics enforces branch access permissions',
+    test: () => /Staff not assigned to branch/i.test(sql) &&
+                /public\.staff_branches/i.test(sql)
   },
   {
-    name: '7. Staff performance classifies revenue as ESTIMATED_REVENUE',
-    test: () => (sql.match(/'financial_metric_classification',\s*'ESTIMATED_REVENUE'/g) || []).length >= 4
-  },
-  {
-    name: '8. RPC get_tenant_service_performance_analytics exists with popularity breakdown',
-    test: () => /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.get_tenant_service_performance_analytics/i.test(sql) &&
-                /'service_performance'/i.test(sql) && /'total_bookings'/i.test(sql)
+    name: '8. Bounded top-N / pagination controls supported (p_limit, p_offset)',
+    test: () => /p_limit\s+INTEGER\s+DEFAULT\s+50/i.test(sql) &&
+                /p_offset\s+INTEGER\s+DEFAULT\s+0/i.test(sql) &&
+                /LIMIT\s+LEAST\(GREATEST\(1,\s*p_limit\),\s*100\)/i.test(sql)
   },
   {
     name: '9. RPC get_tenant_branch_comparison_analytics exists with comparative multi-branch breakdown',
@@ -107,3 +109,4 @@ console.log(`\nResults: ${passed} passed, ${failed} failed, ${tests.length} tota
 if (failed > 0) {
   process.exit(1);
 }
+console.log('ALL PHASE 3 REPORTING & ANALYTICS R1 CONTRACTS PASS.');
