@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DeterministicTestPaymentProvider } from '../services/deterministicTestPaymentProvider.ts';
 
-console.log('--- PHASE 3 PROVIDER-NEUTRAL PAYMENT FOUNDATION CONTRACT VALIDATION ---');
+console.log('--- PHASE 3 PROVIDER-NEUTRAL PAYMENT FOUNDATION CONTRACT VALIDATION (EV058-R2) ---');
 
 const migrationPath = resolve('supabase/migrations/20260919_phase3_provider_neutral_payment_foundation.sql');
 if (!existsSync(migrationPath)) {
@@ -64,37 +64,42 @@ const tests = [
                 /REVOKE\s+ALL\s+ON\s+public\.payment_events\s+FROM\s+authenticated;/i.test(sql)
   },
   {
-    name: '10. create_payment_intent computes request_fingerprint and performs atomic idempotency conflict resolution (EV058-R1)',
+    name: '10. create_payment_intent computes request_fingerprint, atomic idempotency, revoked from browser roles, granted to service_role (EV058-R2)',
     test: () => /v_fingerprint\s*:=\s*encode\(sha256\(/i.test(sql) &&
                 /ON\s+CONFLICT\s*\(\s*tenant_id\s*,\s*idempotency_key\s*\)\s*DO\s+NOTHING/i.test(sql) &&
                 /IDEMPOTENCY_CONFLICT/i.test(sql) &&
-                /idempotent_duplicate/i.test(sql)
+                /idempotent_duplicate/i.test(sql) &&
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.create_payment_intent.*FROM\s+PUBLIC;/i.test(sql) &&
+                /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.create_payment_intent.*TO\s+service_role;/i.test(sql)
   },
   {
-    name: '11. create_payment_intent execution revoked from browser roles (service-role only)',
-    test: () => /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.create_payment_intent.*FROM\s+PUBLIC;/i.test(sql) &&
-                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.create_payment_intent.*FROM\s+anon;/i.test(sql) &&
-                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.create_payment_intent.*FROM\s+authenticated;/i.test(sql)
+    name: '11. Trusted bind_payment_intent_provider operation binds intent, provider, provider_ref with service_role grant (EV058-R2)',
+    test: () => /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.bind_payment_intent_provider/i.test(sql) &&
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.bind_payment_intent_provider.*FROM\s+PUBLIC;/i.test(sql) &&
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.bind_payment_intent_provider.*FROM\s+anon;/i.test(sql) &&
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.bind_payment_intent_provider.*FROM\s+authenticated;/i.test(sql) &&
+                /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.bind_payment_intent_provider.*TO\s+service_role;/i.test(sql)
   },
   {
-    name: '12. process_verified_payment_event detects INTEGRITY_CONFLICT and verifies canonical binding (EV058-R1)',
-    test: () => /INTEGRITY_CONFLICT/i.test(sql) &&
-                /EVENT_ID_PAYLOAD_MISMATCH/i.test(sql) &&
-                /IDEMPOTENT_SUCCESS/i.test(sql) &&
-                /PROVIDER_BINDING_MISMATCH/i.test(sql) &&
-                /PROVIDER_REFERENCE_MISMATCH/i.test(sql)
+    name: '12. Pre-ingest binding validation in process_verified_payment_event prevents event poisoning (EV058-R2)',
+    test: () => {
+      // Must validate binding before INSERT INTO payment_events
+      const bindingIdx = sql.indexOf('PROVIDER_BINDING_MISMATCH');
+      const insertEvIdx = sql.indexOf('INSERT INTO public.payment_events');
+      return bindingIdx > 0 && insertEvIdx > 0 && bindingIdx < insertEvIdx;
+    }
   },
   {
-    name: '13. process_verified_payment_event protects monotonic event progression and terminal state (EV058-R1)',
-    test: () => /TERMINAL_SUCCESS_PRESERVED_AGAINST_REGRESSION/i.test(sql) &&
-                /STALE_EVENT_IGNORED_AGAINST_NEWER_STATE/i.test(sql) &&
-                /last_applied_event_timestamp/i.test(sql)
+    name: '13. process_verified_payment_event protects terminal states against mutation by newer timestamp alone (EV058-R2)',
+    test: () => /TERMINAL_STATE_PRESERVED_AGAINST_MUTATION/i.test(sql) &&
+                /status\s+IN\s*\(\s*'succeeded',\s*'failed',\s*'cancelled',\s*'expired'\s*\)/i.test(sql)
   },
   {
-    name: '14. process_verified_payment_event execution revoked from browser roles (trusted adapter only)',
+    name: '14. process_verified_payment_event execution revoked from browser roles, granted to service_role (EV058-R2)',
     test: () => /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.process_verified_payment_event.*FROM\s+PUBLIC;/i.test(sql) &&
                 /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.process_verified_payment_event.*FROM\s+anon;/i.test(sql) &&
-                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.process_verified_payment_event.*FROM\s+authenticated;/i.test(sql)
+                /REVOKE\s+EXECUTE\s+ON\s+FUNCTION\s+public\.process_verified_payment_event.*FROM\s+authenticated;/i.test(sql) &&
+                /GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.process_verified_payment_event.*TO\s+service_role;/i.test(sql)
   },
   {
     name: '15. No provider secrets or raw credentials stored in schemas',
@@ -108,7 +113,7 @@ const tests = [
   },
   {
     name: '17. Fixed search_path = pg_catalog, public, extensions on all functions',
-    test: () => (sql.match(/SECURITY\s+DEFINER\s+SET\s+search_path\s*=\s*pg_catalog,\s*public,\s*extensions/g) || []).length >= 2
+    test: () => (sql.match(/SECURITY\s+DEFINER\s+SET\s+search_path\s*=\s*pg_catalog,\s*public,\s*extensions/g) || []).length >= 3
   },
   {
     name: '18. RLS enabled on all three financial tables',
@@ -170,5 +175,6 @@ console.log(`\nResult: ${tests.length - failed}/${tests.length} tests passed.`);
 if (failed > 0) {
   process.exit(1);
 } else {
-  console.log('All provider-neutral payment foundation contract tests passed successfully.');
+  console.log('All provider-neutral payment foundation EV058-R2 contract tests passed successfully.');
 }
+

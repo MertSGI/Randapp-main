@@ -280,12 +280,93 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.create_payment_intent(UUID, TEXT, BIGINT, TEXT, TEXT, TEXT, JSONB) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.create_payment_intent(UUID, TEXT, BIGINT, TEXT, TEXT, TEXT, JSONB) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.create_payment_intent(UUID, TEXT, BIGINT, TEXT, TEXT, TEXT, JSONB) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.create_payment_intent(UUID, TEXT, BIGINT, TEXT, TEXT, TEXT, JSONB) TO service_role;
 
 -- =========================================================================
--- 5. Server-Side RPC: process_verified_payment_event
+-- 5. Server-Side RPC: bind_payment_intent_provider (EV058-R2 Trusted Binding)
+-- An arbitrary unauthenticated webhook must NOT establish provider ownership
+-- of an unbound intent. This trusted operation binds intent, provider, and
+-- provider_reference before provider callbacks may mutate financial truth.
+-- Internal / service-role execution only.
+-- =========================================================================
+
+CREATE OR REPLACE FUNCTION public.bind_payment_intent_provider(
+    p_intent_id         UUID,
+    p_provider_id       TEXT,
+    p_provider_reference TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, extensions
+AS $$
+DECLARE
+    v_clean_provider    TEXT;
+    v_clean_ref         TEXT;
+    v_intent_rec        RECORD;
+BEGIN
+    v_clean_provider := trim(COALESCE(p_provider_id, ''));
+    v_clean_ref := trim(COALESCE(p_provider_reference, ''));
+
+    IF length(v_clean_provider) < 1 OR length(v_clean_ref) < 1 THEN
+        RETURN jsonb_build_object('success', false, 'error', 'INVALID_BINDING_IDENTIFIERS');
+    END IF;
+
+    SELECT * INTO v_intent_rec
+    FROM public.payment_intents
+    WHERE id = p_intent_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'error', 'INTENT_NOT_FOUND');
+    END IF;
+
+    -- If already bound, ensure idempotent match
+    IF v_intent_rec.provider_id IS NOT NULL AND v_intent_rec.provider_id != v_clean_provider THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', 'PROVIDER_BINDING_MISMATCH',
+            'message', 'Intent is already bound to a different payment provider'
+        );
+    END IF;
+
+    IF v_intent_rec.provider_reference IS NOT NULL AND v_intent_rec.provider_reference != v_clean_ref THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', 'PROVIDER_REFERENCE_MISMATCH',
+            'message', 'Intent is already bound to a different provider reference'
+        );
+    END IF;
+
+    -- Update binding
+    UPDATE public.payment_intents
+    SET provider_id = v_clean_provider,
+        provider_reference = v_clean_ref,
+        updated_at = NOW()
+    WHERE id = v_intent_rec.id;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'intent_id', v_intent_rec.id,
+        'provider_id', v_clean_provider,
+        'provider_reference', v_clean_ref
+    );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.bind_payment_intent_provider(UUID, TEXT, TEXT) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.bind_payment_intent_provider(UUID, TEXT, TEXT) FROM anon;
+REVOKE EXECUTE ON FUNCTION public.bind_payment_intent_provider(UUID, TEXT, TEXT) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.bind_payment_intent_provider(UUID, TEXT, TEXT) TO service_role;
+
+-- =========================================================================
+-- 6. Server-Side RPC: process_verified_payment_event (EV058-R2 Hardened)
 -- Ingests normalized, verified payment events from trusted provider adapters.
--- Enforces provider-scoped atomic replay protection, mismatch detection,
--- and monotonic state progression (e.g. late failure cannot regress succeeded payment).
+-- Enforces:
+-- 1. Pre-ingest binding validation to prevent event poisoning.
+-- 2. Provider-scoped atomic replay protection (winner/loser conflict detection).
+-- 3. Strict legal state transitions and monotonic terminal state preservation.
+-- 4. Internal / service-role execution only.
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.process_verified_payment_event(
@@ -308,18 +389,75 @@ AS $$
 DECLARE
     v_clean_provider    TEXT;
     v_clean_event_id    TEXT;
+    v_clean_ref         TEXT;
     v_existing_ev       RECORD;
     v_intent_rec        RECORD;
     v_payment_id        UUID;
 BEGIN
     v_clean_provider := trim(COALESCE(p_provider, ''));
     v_clean_event_id := trim(COALESCE(p_provider_event_id, ''));
+    v_clean_ref := trim(COALESCE(p_provider_ref, ''));
 
     IF length(v_clean_provider) < 1 OR length(v_clean_event_id) < 1 THEN
         RETURN jsonb_build_object('success', false, 'error', 'INVALID_EVENT_IDENTIFIERS');
     END IF;
 
-    -- Atomic insert into payment_events with winner/loser conflict detection
+    -- =====================================================================
+    -- 1. PRE-INGEST BINDING VALIDATION (EV058-R2 EVENT POISONING PREVENTION)
+    -- Do NOT permanently consume (provider, provider_event_id) before validating
+    -- that a state-mutating event is correctly bound to its intended payment intent.
+    -- A PROVIDER_BINDING_MISMATCH, PROVIDER_REFERENCE_MISMATCH, or INTENT_NOT_BOUND
+    -- must abort before inserting into public.payment_events so legitimate events are not blocked.
+    -- =====================================================================
+    IF p_intent_id IS NOT NULL THEN
+        SELECT * INTO v_intent_rec
+        FROM public.payment_intents
+        WHERE id = p_intent_id
+        FOR UPDATE;
+
+        IF NOT FOUND THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'error', 'INTENT_NOT_FOUND',
+                'message', 'Payment intent specified in callback does not exist'
+            );
+        END IF;
+
+        -- Provider binding verification
+        IF v_intent_rec.provider_id IS NOT NULL AND v_intent_rec.provider_id != v_clean_provider THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'error', 'PROVIDER_BINDING_MISMATCH',
+                'classification', 'PROVIDER_BINDING_MISMATCH',
+                'message', 'Verified event provider does not match bound intent provider'
+            );
+        END IF;
+
+        -- Provider reference verification
+        IF v_intent_rec.provider_reference IS NOT NULL AND length(v_clean_ref) > 0 AND v_intent_rec.provider_reference != v_clean_ref THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'error', 'PROVIDER_REFERENCE_MISMATCH',
+                'classification', 'PROVIDER_REFERENCE_MISMATCH',
+                'message', 'Verified event reference does not match bound intent provider reference'
+            );
+        END IF;
+
+        -- Untrusted webhook cannot establish provider ownership on an unbound intent without prior trusted binding
+        IF v_intent_rec.provider_id IS NULL THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'error', 'INTENT_NOT_BOUND',
+                'classification', 'INTENT_NOT_BOUND',
+                'message', 'Payment intent is not bound to a provider; bind_payment_intent_provider must be called first'
+            );
+        END IF;
+    END IF;
+
+    -- =====================================================================
+    -- 2. ATOMIC EVENT REPLAY PROTECTION
+    -- Only reached if binding validation has fully passed.
+    -- =====================================================================
     INSERT INTO public.payment_events (
         provider,
         provider_event_id,
@@ -342,7 +480,7 @@ BEGIN
     ON CONFLICT (provider, provider_event_id) DO NOTHING
     RETURNING id INTO v_existing_ev;
 
-    -- If conflict occurred (loser of concurrent race), authoritatively re-read persisted event
+    -- If conflict occurred (loser of concurrent race or duplicate replay)
     IF v_existing_ev.id IS NULL THEN
         SELECT id, payload_digest, status INTO v_existing_ev
         FROM public.payment_events
@@ -367,116 +505,86 @@ BEGIN
         );
     END IF;
 
-    -- Only the winning insert proceeds to lock intent and apply financial state transitions
-    IF p_intent_id IS NOT NULL THEN
-        SELECT * INTO v_intent_rec
-        FROM public.payment_intents
-        WHERE id = p_intent_id
-        FOR UPDATE;
+    -- =====================================================================
+    -- 3. PAYMENT STATE MACHINE & MONOTONIC PROGRESSION
+    -- Legal transitions enforced. Terminal states (succeeded, failed, cancelled, expired)
+    -- must NOT be reopened by a newer timestamp alone.
+    -- =====================================================================
+    IF v_intent_rec.id IS NOT NULL THEN
+        -- Terminal state enforcement: terminal states are immutable. Newer timestamps CANNOT reopen them.
+        IF v_intent_rec.status IN ('succeeded', 'failed', 'cancelled', 'expired') THEN
+            RETURN jsonb_build_object(
+                'success', true,
+                'intent_id', v_intent_rec.id,
+                'status_preserved', v_intent_rec.status,
+                'message', 'TERMINAL_STATE_PRESERVED_AGAINST_MUTATION'
+            );
+        END IF;
 
-        IF FOUND THEN
-            -- Canonical Binding Verification:
-            -- If intent already bound to a provider or provider_reference, verify event matches binding
-            IF v_intent_rec.provider_id IS NOT NULL AND v_intent_rec.provider_id != v_clean_provider THEN
-                RETURN jsonb_build_object(
-                    'success', false,
-                    'error', 'PROVIDER_BINDING_MISMATCH',
-                    'message', 'Verified event provider does not match bound intent provider'
-                );
-            END IF;
+        -- Out-of-order check: ignore status progression if event timestamp is older than last applied event
+        IF v_intent_rec.last_applied_event_timestamp IS NOT NULL AND p_event_timestamp < v_intent_rec.last_applied_event_timestamp THEN
+            RETURN jsonb_build_object(
+                'success', true,
+                'intent_id', v_intent_rec.id,
+                'status_preserved', v_intent_rec.status,
+                'message', 'STALE_EVENT_IGNORED_AGAINST_NEWER_STATE'
+            );
+        END IF;
 
-            IF v_intent_rec.provider_reference IS NOT NULL AND p_provider_ref IS NOT NULL AND v_intent_rec.provider_reference != p_provider_ref THEN
-                RETURN jsonb_build_object(
-                    'success', false,
-                    'error', 'PROVIDER_REFERENCE_MISMATCH',
-                    'message', 'Verified event reference does not match bound intent provider reference'
-                );
-            END IF;
+        -- Apply valid state transition
+        IF p_status = 'succeeded' THEN
+            UPDATE public.payment_intents
+            SET status = 'succeeded',
+                provider_reference = COALESCE(NULLIF(v_clean_ref, ''), provider_reference),
+                last_applied_event_timestamp = p_event_timestamp,
+                updated_at = NOW()
+            WHERE id = v_intent_rec.id;
 
-            -- Monotonic Rule 1: Succeeded intent cannot regress to failed, processing, or created
-            IF v_intent_rec.status = 'succeeded' THEN
-                RETURN jsonb_build_object(
-                    'success', true,
-                    'intent_id', v_intent_rec.id,
-                    'status_preserved', 'succeeded',
-                    'message', 'TERMINAL_SUCCESS_PRESERVED_AGAINST_REGRESSION'
-                );
-            END IF;
+            -- Record or update payment record in public.payments (source of truth amount_minor)
+            INSERT INTO public.payments (
+                tenant_id,
+                intent_id,
+                amount_minor,
+                currency,
+                status,
+                provider,
+                provider_reference,
+                last_event_timestamp,
+                paid_at
+            ) VALUES (
+                v_intent_rec.tenant_id,
+                v_intent_rec.id,
+                v_intent_rec.amount_minor,
+                v_intent_rec.currency,
+                'paid',
+                v_clean_provider,
+                COALESCE(NULLIF(v_clean_ref, ''), v_intent_rec.provider_reference),
+                p_event_timestamp,
+                NOW()
+            ) RETURNING id INTO v_payment_id;
 
-            -- Monotonic Rule 2: Expired or Cancelled terminal intents cannot reopen
-            IF v_intent_rec.status IN ('expired', 'cancelled') THEN
-                RETURN jsonb_build_object(
-                    'success', true,
-                    'intent_id', v_intent_rec.id,
-                    'status_preserved', v_intent_rec.status,
-                    'message', 'TERMINAL_STATE_PRESERVED'
-                );
-            END IF;
+        ELSIF p_status = 'failed' THEN
+            UPDATE public.payment_intents
+            SET status = 'failed',
+                error_code = p_error_code,
+                error_message = p_error_message,
+                last_applied_event_timestamp = p_event_timestamp,
+                updated_at = NOW()
+            WHERE id = v_intent_rec.id;
 
-            -- Monotonic Rule 3: Event ordering protection via last_applied_event_timestamp
-            IF v_intent_rec.last_applied_event_timestamp IS NOT NULL AND p_event_timestamp < v_intent_rec.last_applied_event_timestamp THEN
-                RETURN jsonb_build_object(
-                    'success', true,
-                    'intent_id', v_intent_rec.id,
-                    'status_preserved', v_intent_rec.status,
-                    'message', 'STALE_EVENT_IGNORED_AGAINST_NEWER_STATE'
-                );
-            END IF;
+        ELSIF p_status = 'requires_action' THEN
+            UPDATE public.payment_intents
+            SET status = 'requires_action',
+                last_applied_event_timestamp = p_event_timestamp,
+                updated_at = NOW()
+            WHERE id = v_intent_rec.id;
 
-            -- Apply transition with monotonic timestamp progression
-            IF p_status = 'succeeded' THEN
-                UPDATE public.payment_intents
-                SET status = 'succeeded',
-                    provider_id = v_clean_provider,
-                    provider_reference = COALESCE(p_provider_ref, provider_reference),
-                    last_applied_event_timestamp = p_event_timestamp,
-                    updated_at = NOW()
-                WHERE id = v_intent_rec.id;
-
-                -- Record or update payment record in public.payments (source of truth amount_minor)
-                INSERT INTO public.payments (
-                    tenant_id,
-                    intent_id,
-                    amount_minor,
-                    currency,
-                    status,
-                    provider,
-                    provider_reference,
-                    last_event_timestamp,
-                    paid_at
-                ) VALUES (
-                    v_intent_rec.tenant_id,
-                    v_intent_rec.id,
-                    v_intent_rec.amount_minor,
-                    v_intent_rec.currency,
-                    'paid',
-                    v_clean_provider,
-                    p_provider_ref,
-                    p_event_timestamp,
-                    NOW()
-                ) RETURNING id INTO v_payment_id;
-
-            ELSIF p_status = 'failed' THEN
-                UPDATE public.payment_intents
-                SET status = 'failed',
-                    error_code = p_error_code,
-                    error_message = p_error_message,
-                    last_applied_event_timestamp = p_event_timestamp,
-                    updated_at = NOW()
-                WHERE id = v_intent_rec.id;
-            ELSIF p_status = 'requires_action' THEN
-                UPDATE public.payment_intents
-                SET status = 'requires_action',
-                    last_applied_event_timestamp = p_event_timestamp,
-                    updated_at = NOW()
-                WHERE id = v_intent_rec.id;
-            ELSIF p_status = 'processing' THEN
-                UPDATE public.payment_intents
-                SET status = 'processing',
-                    last_applied_event_timestamp = p_event_timestamp,
-                    updated_at = NOW()
-                WHERE id = v_intent_rec.id;
-            END IF;
+        ELSIF p_status = 'processing' THEN
+            UPDATE public.payment_intents
+            SET status = 'processing',
+                last_applied_event_timestamp = p_event_timestamp,
+                updated_at = NOW()
+            WHERE id = v_intent_rec.id;
         END IF;
     END IF;
 
@@ -492,3 +600,5 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.process_verified_payment_event(TEXT, TEXT, TEXT, TIMESTAMPTZ, TEXT, UUID, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.process_verified_payment_event(TEXT, TEXT, TEXT, TIMESTAMPTZ, TEXT, UUID, TEXT, TEXT, TEXT, TEXT) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.process_verified_payment_event(TEXT, TEXT, TEXT, TIMESTAMPTZ, TEXT, UUID, TEXT, TEXT, TEXT, TEXT) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.process_verified_payment_event(TEXT, TEXT, TEXT, TIMESTAMPTZ, TEXT, UUID, TEXT, TEXT, TEXT, TEXT) TO service_role;
+
