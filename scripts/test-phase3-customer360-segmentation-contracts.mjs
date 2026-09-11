@@ -29,7 +29,7 @@ const migrationSql = readFileSync(migrationPath, 'utf-8');
 console.log('1. Database Migration Structural Integrity:');
 assert(migrationSql.includes('CREATE TABLE IF NOT EXISTS public.customer_segments'), 'Defines customer_segments table');
 assert(migrationSql.includes('CREATE TABLE IF NOT EXISTS public.customer_segment_members'), 'Defines customer_segment_members table');
-assert(migrationSql.includes('REFERENCES public.customers(id)'), 'Reuses canonical public.customers(id) - no customers_v2');
+assert(migrationSql.includes('REFERENCES public.customers(id, tenant_id)'), 'Reuses canonical public.customers with composite tenant integrity');
 assert(migrationSql.includes('public.customer_memory'), 'Reuses and secures canonical public.customer_memory');
 assert(!migrationSql.includes('CREATE TABLE IF NOT EXISTS public.customers_v2') && !migrationSql.includes('CREATE TABLE public.customers_v2'), 'Zero occurrences of duplicate customers_v2 table creation');
 
@@ -41,6 +41,13 @@ assert(migrationSql.includes('REVOKE ALL ON public.customer_memory FROM authenti
 assert(migrationSql.includes('GRANT EXECUTE ON FUNCTION public.get_customer_360_view(UUID, UUID) TO authenticated'), 'Sanitized read RPC granted to authenticated');
 assert(migrationSql.includes('GRANT EXECUTE ON FUNCTION public.get_customer_360_view(UUID, UUID) TO service_role'), 'Trusted RPC explicitly granted to service_role');
 assert(migrationSql.includes('is_tenant_staff'), 'Enforces tenant staff verification in security definer functions');
+assert(migrationSql.includes("('tenant_owner', 'staff')"), 'Uses canonical application roles tenant_owner and staff');
+assert(!migrationSql.includes("role IN ('admin', 'staff', 'owner')"), 'Eliminates non-canonical role references (admin/owner)');
+assert(migrationSql.includes('SET search_path = pg_catalog, public'), 'Hardens search_path to pg_catalog, public');
+assert(migrationSql.includes('FOREIGN KEY (segment_id, tenant_id)'), 'Enforces composite tenant FK on segment_id');
+assert(migrationSql.includes('FOREIGN KEY (customer_id, tenant_id)'), 'Enforces composite tenant FK on customer_id');
+assert(migrationSql.includes('DYNAMIC_RULE_EVALUATION_NOT_IMPLEMENTED'), 'Explicitly classifies dynamic rule evaluation as NOT_IMPLEMENTED');
+assert(migrationSql.includes('is_staff_assigned_to_branch'), 'Provides branch-sensitive permission checking helper');
 
 console.log('\n3. TypeScript Customer360Service Contract:');
 const servicePath = resolve(process.cwd(), 'services/customer360Service.ts');
