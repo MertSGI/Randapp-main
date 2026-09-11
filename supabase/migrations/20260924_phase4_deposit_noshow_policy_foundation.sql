@@ -102,8 +102,8 @@ CREATE TABLE IF NOT EXISTS public.appointment_deposits (
     currency VARCHAR(3) NOT NULL DEFAULT 'TRY',
     status TEXT NOT NULL DEFAULT 'required'
         CHECK (status IN ('required', 'held', 'applied', 'forfeited', 'refunded', 'waived')),
-    payment_intent_id UUID DEFAULT NULL, -- Real provider-neutral payment intent reference
-    payment_intent_ref TEXT DEFAULT NULL,
+    payment_intent_id UUID DEFAULT NULL, -- Tenant-safe relational binding to provider-neutral payment_intents
+    payment_intent_ref TEXT DEFAULT NULL, -- LEGACY_NON_AUTHORITATIVE_ONLY (unconstrained string reference)
     forfeited_reason TEXT DEFAULT NULL,
     refund_eligibility_state TEXT NOT NULL DEFAULT 'eligible_if_cancelled_in_time'
         CHECK (refund_eligibility_state IN ('eligible_if_cancelled_in_time', 'non_refundable', 'refund_issued', 'forfeited')),
@@ -112,6 +112,8 @@ CREATE TABLE IF NOT EXISTS public.appointment_deposits (
 
     CONSTRAINT fk_appointment_deposits_appointment_tenant FOREIGN KEY (appointment_id, tenant_id)
         REFERENCES public.appointments(id, tenant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_appointment_deposits_payment_intent_tenant FOREIGN KEY (payment_intent_id, tenant_id)
+        REFERENCES public.payment_intents(id, tenant_id) ON DELETE SET NULL,
     CONSTRAINT uq_appointment_deposits_appointment UNIQUE (appointment_id)
 );
 
@@ -192,11 +194,17 @@ BEGIN
     IF v_dep_pol.id IS NOT NULL THEN
         v_currency := v_dep_pol.currency;
         IF v_dep_pol.deposit_type = 'fixed_amount' THEN
+            -- Fixed-amount deposit is explicitly stored in minor units
             v_required_amount := v_dep_pol.deposit_value;
         ELSIF v_dep_pol.deposit_type = 'percentage' THEN
-            -- Percentage of catalog price with explicit source-truth classification
-            -- (v_svc_price * 100 is classified under CATALOG_PRICE_ASSUMED_MAJOR_UNITS)
-            v_required_amount := ROUND(((v_svc_price * 100) * (v_dep_pol.deposit_value::NUMERIC / 100.00)))::INTEGER;
+            -- Until catalog price unit source truth is proven, percentage-based calculation
+            -- fails closed rather than silently assuming major vs minor units.
+            RETURN jsonb_build_object(
+                'success', false,
+                'reason_code', 'PERCENTAGE_DEPOSIT_CALCULATION_UNAVAILABLE',
+                'price_units_source_truth', 'CATALOG_PRICE_UNIT_UNRESOLVED',
+                'detail', 'Catalog price unit is unproven in repository source truth; percentage conversion suspended'
+            );
         END IF;
     END IF;
 
@@ -210,8 +218,7 @@ BEGIN
         'success', true,
         'tenant_id', p_tenant_id,
         'service_id', p_service_id,
-        'service_price_minor_units', (v_svc_price * 100),
-        'price_units_source_truth', v_price_units_classification,
+        'price_units_source_truth', 'CATALOG_PRICE_UNIT_UNRESOLVED',
         'deposit_required', (v_required_amount > 0),
         'deposit_amount_minor_units', v_required_amount,
         'currency', v_currency,

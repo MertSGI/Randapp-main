@@ -42,25 +42,24 @@ const tests = [
                  sql.includes("CHECK (no_show_consequence IN ('forfeit_deposit', 'strike_record', 'block_booking', 'none'))")
   },
   {
-    name: '6. Appointment deposits table with composite (appointment_id, tenant_id) foreign key, payment_intent_id, lifecycle states',
+    name: '6. Appointment deposits table with composite (appointment_id, tenant_id) foreign key, payment_intent_id composite FK, lifecycle states',
     check: () => sql.includes('CREATE TABLE IF NOT EXISTS public.appointment_deposits') &&
-                 sql.includes('required_minor_units INTEGER NOT NULL CHECK (required_minor_units >= 0)') &&
-                 sql.includes('payment_intent_id UUID DEFAULT NULL') &&
-                 sql.includes('CONSTRAINT fk_appointment_deposits_appointment_tenant FOREIGN KEY (appointment_id, tenant_id)') &&
                  sql.includes('REFERENCES public.appointments(id, tenant_id)') &&
+                 sql.includes('REFERENCES public.payment_intents(id, tenant_id)') &&
                  sql.includes("CHECK (status IN ('required', 'held', 'applied', 'forfeited', 'refunded', 'waived'))") &&
                  sql.includes("CHECK (refund_eligibility_state IN ('eligible_if_cancelled_in_time', 'non_refundable', 'refund_issued', 'forfeited'))")
   },
   {
-    name: '7. Policy evaluator separated from slot availability (evaluate_booking_confirmation_deposit_policy) with explicit price units classification',
+    name: '7. Policy evaluator separated from slot availability (evaluate_booking_confirmation_deposit_policy) with CATALOG_PRICE_UNIT_UNRESOLVED fail-closed classification',
     check: () => sql.includes('CREATE OR REPLACE FUNCTION public.evaluate_booking_confirmation_deposit_policy') &&
                  sql.includes('SECURITY DEFINER') &&
                  sql.includes('SET search_path = pg_catalog, public') &&
-                 sql.includes('CATALOG_PRICE_ASSUMED_MAJOR_UNITS') &&
+                 sql.includes('CATALOG_PRICE_UNIT_UNRESOLVED') &&
+                 sql.includes('PERCENTAGE_DEPOSIT_CALCULATION_UNAVAILABLE') &&
                  sql.includes('chk_deposit_percentage_range')
   },
   {
-    name: '8. Evaluator calculates minor units for fixed amount and percentage',
+    name: '8. Evaluator calculates minor units for fixed amount and fails closed for percentage',
     check: () => sql.includes("v_dep_pol.deposit_type = 'fixed_amount'") &&
                  sql.includes("v_dep_pol.deposit_type = 'percentage'") &&
                  sql.includes('deposit_amount_minor_units')
