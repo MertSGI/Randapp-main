@@ -1018,5 +1018,9 @@
         "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
     },
     "calendar_foundation_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
-    "customer360_foundation_gate": "AOS_STANDING_AUTHORITY_ACCEPTED"
+    "customer360_foundation_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "phase4_node1_deposit_noshow_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "phase4_node2_packages_memberships_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "phase4_node3_giftcards_wallet_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "phase4_node4_loyalty_reactivation_gate": "AOS_STANDING_AUTHORITY_ACCEPTED"
 }
