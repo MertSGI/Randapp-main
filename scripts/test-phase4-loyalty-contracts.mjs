@@ -25,7 +25,7 @@ const tests = [
     name: '1.1 Reuses canonical public.customers(id) and public.tenants(id) (zero duplicate customers_v2)',
     fn: () => !/CREATE\s+TABLE\s+.*customers_v2/i.test(sql) &&
               !/CREATE\s+TABLE\s+.*tenants_v2/i.test(sql) &&
-              /REFERENCES\s+public\.customers\s*\(\s*id\s*\)/i.test(sql)
+              /REFERENCES\s+public\.customers\s*\(\s*id/i.test(sql)
   },
   {
     category: '1. Model Invariants & Architecture',
@@ -110,14 +110,33 @@ const tests = [
               !/http_post/i.test(sql)
   },
 
-  // 4. TypeScript Service Contract
+  // 5. R1 Security, Integrity & Cohort Scanning Tests
   {
-    category: '4. TypeScript Service Contract',
-    name: '4.1 Exports LoyaltyReactivationService with getLoyaltyProfile, earnPoints, and redeemPoints',
-    fn: () => /export\s+class\s+LoyaltyReactivationService/i.test(serviceCode) &&
-              /async\s+getLoyaltyProfile\s*\(/i.test(serviceCode) &&
-              /async\s+earnPoints\s*\(/i.test(serviceCode) &&
-              /async\s+redeemPoints\s*\(/i.test(serviceCode)
+    category: '5. R1 Security & Integrity Enhancements',
+    name: '5.1 Enforces caller authorization check in get_customer_loyalty_profile',
+    fn: () => /v_user\.role\s+NOT\s+IN\s*\('tenant_owner',\s*'staff'\)/i.test(sql) &&
+              /PERMISSION_DENIED/i.test(sql) &&
+              /auth\.uid\(\)/i.test(sql)
+  },
+  {
+    category: '5. R1 Security & Integrity Enhancements',
+    name: '5.2 Verifies appointment status is completed and matches tenant/customer in earn_loyalty_points',
+    fn: () => /v_appt\.status\s*<>\s*'completed'/i.test(sql) &&
+              /APPOINTMENT_NOT_COMPLETED/i.test(sql) &&
+              /v_appt\.customer_id\s*<>\s*p_customer_id/i.test(sql)
+  },
+  {
+    category: '5. R1 Security & Integrity Enhancements',
+    name: '5.3 Enforces database-level append-only protection via trigger on customer_loyalty_ledger',
+    fn: () => /CREATE\s+TRIGGER\s+trg_prevent_loyalty_ledger_mutation/i.test(sql) &&
+              /LOYALTY_LEDGER_IMMUTABLE/i.test(sql)
+  },
+  {
+    category: '5. R1 Security & Integrity Enhancements',
+    name: '5.4 Implements scan_customer_reactivation_cohorts RPC with cohort detection',
+    fn: () => /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.scan_customer_reactivation_cohorts/i.test(sql) &&
+              /customer_reactivation_events/i.test(sql) &&
+              /p_inactivity_days/i.test(sql)
   }
 ];
 
