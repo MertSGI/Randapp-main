@@ -78,16 +78,23 @@ CREATE TABLE IF NOT EXISTS public.customer_loyalty_balances (
 );
 
 -- 4. AUTOMATED REACTIVATION CAMPAIGN QUEUE
+-- EV079-R3: Explicit cohort identity ('inactive_60d', 'inactive_90d') permitting
+-- distinct 60d and 90d reactivation events for same customer and last appointment.
 CREATE TABLE IF NOT EXISTS public.customer_reactivation_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
     customer_id UUID NOT NULL,
+    cohort_code TEXT NOT NULL CHECK (cohort_code IN ('inactive_60d', 'inactive_90d')),
     last_appointment_at TIMESTAMPTZ NOT NULL,
     inactivity_days INTEGER NOT NULL,
-    status TEXT NOT NULL DEFAULT 'detected' CHECK (status IN ('detected', 'queued_outbox', 'suppressed', 'converted')),
-    bonus_points_offered INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'detected'
+        CHECK (status IN ('detected', 'queued_outbox', 'suppressed', 'converted')),
+    suppression_reason TEXT DEFAULT NULL,
+    outbox_id UUID DEFAULT NULL,
+    bonus_points_offered INTEGER NOT NULL DEFAULT 50,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-    CONSTRAINT uq_reactivation_tenant_customer_detection UNIQUE (tenant_id, customer_id, last_appointment_at),
+
+    CONSTRAINT uq_reactivation_cohort_event UNIQUE (tenant_id, customer_id, last_appointment_at, cohort_code),
     CONSTRAINT fk_customer_reactivation_customer_tenant FOREIGN KEY (customer_id, tenant_id)
         REFERENCES public.customers(id, tenant_id) ON DELETE CASCADE
 );
@@ -334,7 +341,12 @@ BEGIN
 END;
 $$;
 
--- 8. AUTOMATED REACTIVATION SCAN (COHORT DETECTION & OUTBOX HOOK CLASSIFICATION)
+-- 8. AUTOMATED REACTIVATION SCAN (EV079-R3 HARDENED)
+-- Explicit cohort identity: 'inactive_60d' (>=60d) and 'inactive_90d' (>=90d).
+-- Evaluates current effective marketing consent from canonical consent_ledger (FAIL-CLOSED).
+-- Enforces frequency / cooldown suppression (deterministic campaign identity).
+-- Reuses trusted EV057 public.enqueue_communication_outbox boundary with deterministic idempotency key.
+-- Zero direct provider sends, zero browser bypass, strictly deterministic.
 CREATE OR REPLACE FUNCTION public.scan_customer_reactivation_cohorts(
     p_tenant_id UUID,
     p_inactivity_days INTEGER DEFAULT 60
@@ -346,45 +358,190 @@ SET search_path = pg_catalog, public
 AS $$
 DECLARE
     v_user RECORD;
+    v_cohort_code TEXT;
+    v_cand RECORD;
     v_detected_count INTEGER := 0;
+    v_queued_count INTEGER := 0;
+    v_suppressed_count INTEGER := 0;
+    v_current_consent BOOLEAN;
+    v_event_id UUID;
+    v_idempotency_key TEXT;
+    v_recipient TEXT;
+    v_channel TEXT;
+    v_payload JSONB;
+    v_outbox_res JSONB;
+    v_recent_reactivation_exists BOOLEAN;
+    v_bonus_pts INTEGER := 50;
 BEGIN
-    -- Auth check
+    -- 1. Authority & Tenant Scope Check
     IF auth.role() <> 'service_role' THEN
         SELECT role, tenant_id INTO v_user
         FROM public.users_profile
         WHERE id = auth.uid() AND active = true;
 
         IF NOT FOUND OR (v_user.role <> 'super_admin' AND (v_user.role NOT IN ('tenant_owner', 'staff') OR v_user.tenant_id <> p_tenant_id)) THEN
-            RAISE EXCEPTION 'PERMISSION_DENIED' USING ERRCODE = '42501';
+            RAISE EXCEPTION 'PERMISSION_DENIED: Tenant staff or owner access required' USING ERRCODE = '42501';
         END IF;
     END IF;
 
-    -- Cohort detection for customers inactive for >= p_inactivity_days
-    INSERT INTO public.customer_reactivation_events (
-        tenant_id, customer_id, last_appointment_at, inactivity_days, status, bonus_points_offered
-    )
-    SELECT
-        a.tenant_id,
-        a.customer_id,
-        MAX(a.appointment_date + a.appointment_time) as last_appt,
-        EXTRACT(DAY FROM (now() - MAX(a.appointment_date + a.appointment_time)))::INTEGER as days_inactive,
-        'detected',
-        50 -- Default bonus reactivation points
-    FROM public.appointments a
-    WHERE a.tenant_id = p_tenant_id
-      AND a.status = 'completed'
-    GROUP BY a.tenant_id, a.customer_id
-    HAVING (now() - MAX(a.appointment_date + a.appointment_time)) >= (p_inactivity_days || ' days')::INTERVAL
-    ON CONFLICT (tenant_id, customer_id, last_appointment_at) DO NOTHING;
+    -- 2. Determine explicit cohort_code from requested inactivity boundary
+    IF p_inactivity_days >= 90 THEN
+        v_cohort_code := 'inactive_90d';
+    ELSE
+        v_cohort_code := 'inactive_60d';
+    END IF;
 
-    GET DIAGNOSTICS v_detected_count = ROW_COUNT;
+    -- 3. Iterate over eligible customers whose latest completed appointment is >= p_inactivity_days ago
+    FOR v_cand IN
+        SELECT
+            a.customer_id,
+            MAX(a.appointment_date + a.appointment_time) AS last_appt,
+            EXTRACT(DAY FROM (now() - MAX(a.appointment_date + a.appointment_time)))::INTEGER AS days_inactive,
+            c.name AS customer_name,
+            c.email AS customer_email,
+            c.phone AS customer_phone
+        FROM public.appointments a
+        JOIN public.customers c ON c.id = a.customer_id AND c.tenant_id = a.tenant_id
+        WHERE a.tenant_id = p_tenant_id
+          AND a.status = 'completed'
+        GROUP BY a.customer_id, c.name, c.email, c.phone
+        HAVING (now() - MAX(a.appointment_date + a.appointment_time)) >= (p_inactivity_days || ' days')::INTERVAL
+    LOOP
+        -- Check if event already exists for (tenant_id, customer_id, last_appointment_at, cohort_code)
+        SELECT id INTO v_event_id
+        FROM public.customer_reactivation_events
+        WHERE tenant_id = p_tenant_id
+          AND customer_id = v_cand.customer_id
+          AND last_appointment_at = v_cand.last_appt
+          AND cohort_code = v_cohort_code;
+
+        -- If event already exists, repeat scan: skip (idempotent, delta=0)
+        IF FOUND THEN
+            CONTINUE;
+        END IF;
+
+        -- Candidate detected
+        v_detected_count := v_detected_count + 1;
+
+        -- 4. Canonical Marketing Consent Evaluation (FAIL-CLOSED)
+        -- Query latest authoritative state from canonical consent_ledger.
+        -- If false, missing, ambiguous, or not provable -> SUPPRESSED_NO_CURRENT_MARKETING_CONSENT
+        SELECT is_granted INTO v_current_consent
+        FROM public.consent_ledger
+        WHERE tenant_id = p_tenant_id::text
+          AND customer_id = v_cand.customer_id::text
+          AND consent_type = 'marketing'
+        ORDER BY created_at DESC
+        LIMIT 1;
+
+        IF v_current_consent IS NOT TRUE THEN
+            INSERT INTO public.customer_reactivation_events (
+                tenant_id, customer_id, cohort_code, last_appointment_at, inactivity_days,
+                status, suppression_reason, bonus_points_offered
+            ) VALUES (
+                p_tenant_id, v_cand.customer_id, v_cohort_code, v_cand.last_appt, v_cand.days_inactive,
+                'suppressed', 'SUPPRESSED_NO_CURRENT_MARKETING_CONSENT', v_bonus_pts
+            );
+            v_suppressed_count := v_suppressed_count + 1;
+            CONTINUE;
+        END IF;
+
+        -- 5. Frequency / Cooldown Suppression Check
+        -- Cooldown: prevent any reactivation message if another reactivation was queued within 30 days
+        SELECT EXISTS (
+            SELECT 1 FROM public.customer_reactivation_events
+            WHERE tenant_id = p_tenant_id
+              AND customer_id = v_cand.customer_id
+              AND status = 'queued_outbox'
+              AND created_at > (now() - INTERVAL '30 days')
+        ) INTO v_recent_reactivation_exists;
+
+        IF v_recent_reactivation_exists THEN
+            INSERT INTO public.customer_reactivation_events (
+                tenant_id, customer_id, cohort_code, last_appointment_at, inactivity_days,
+                status, suppression_reason, bonus_points_offered
+            ) VALUES (
+                p_tenant_id, v_cand.customer_id, v_cohort_code, v_cand.last_appt, v_cand.days_inactive,
+                'suppressed', 'SUPPRESSED_COOLDOWN_ACTIVE', v_bonus_pts
+            );
+            v_suppressed_count := v_suppressed_count + 1;
+            CONTINUE;
+        END IF;
+
+        -- 6. Recipient address resolution (prefer email, fallback to phone)
+        IF v_cand.customer_email IS NOT NULL AND length(trim(v_cand.customer_email)) >= 3 THEN
+            v_channel := 'email';
+            v_recipient := trim(v_cand.customer_email);
+        ELSIF v_cand.customer_phone IS NOT NULL AND length(trim(v_cand.customer_phone)) >= 3 THEN
+            v_channel := 'sms';
+            v_recipient := trim(v_cand.customer_phone);
+        ELSE
+            -- No valid recipient address -> suppress
+            INSERT INTO public.customer_reactivation_events (
+                tenant_id, customer_id, cohort_code, last_appointment_at, inactivity_days,
+                status, suppression_reason, bonus_points_offered
+            ) VALUES (
+                p_tenant_id, v_cand.customer_id, v_cohort_code, v_cand.last_appt, v_cand.days_inactive,
+                'suppressed', 'SUPPRESSED_NO_VALID_RECIPIENT_ADDRESS', v_bonus_pts
+            );
+            v_suppressed_count := v_suppressed_count + 1;
+            CONTINUE;
+        END IF;
+
+        -- 7. Deterministic Idempotency Key & EV057 Outbox Integration
+        -- Format: reactivation:<tenant_id>:<customer_id>:<cohort_code>:<last_appointment_epoch>
+        v_idempotency_key := 'reactivation:' || p_tenant_id::text || ':' || v_cand.customer_id::text || ':' || v_cohort_code || ':' || EXTRACT(EPOCH FROM v_cand.last_appt)::BIGINT::text;
+
+        v_payload := jsonb_build_object(
+            'customer_name', v_cand.customer_name,
+            'cohort_code', v_cohort_code,
+            'days_inactive', v_cand.days_inactive,
+            'bonus_points_offered', v_bonus_pts,
+            'message', 'We miss you! Book your next visit and receive ' || v_bonus_pts || ' bonus loyalty points.'
+        );
+
+        -- Enqueue via canonical trusted EV057 communications outbox
+        v_outbox_res := public.enqueue_communication_outbox(
+            p_tenant_id         => p_tenant_id,
+            p_channel           => v_channel,
+            p_recipient_address => v_recipient,
+            p_template_id       => 'customer_reactivation_' || v_cohort_code,
+            p_payload           => v_payload,
+            p_idempotency_key   => v_idempotency_key,
+            p_max_attempts      => 3
+        );
+
+        -- Check outbox result: transition to queued_outbox only after EV057 enqueue succeeds
+        IF (v_outbox_res->>'success')::BOOLEAN IS TRUE THEN
+            INSERT INTO public.customer_reactivation_events (
+                tenant_id, customer_id, cohort_code, last_appointment_at, inactivity_days,
+                status, outbox_id, bonus_points_offered
+            ) VALUES (
+                p_tenant_id, v_cand.customer_id, v_cohort_code, v_cand.last_appt, v_cand.days_inactive,
+                'queued_outbox', (v_outbox_res->>'outbox_id')::UUID, v_bonus_pts
+            );
+            v_queued_count := v_queued_count + 1;
+        ELSE
+            -- Outbox enqueue failed -> record as suppressed with error reason
+            INSERT INTO public.customer_reactivation_events (
+                tenant_id, customer_id, cohort_code, last_appointment_at, inactivity_days,
+                status, suppression_reason, bonus_points_offered
+            ) VALUES (
+                p_tenant_id, v_cand.customer_id, v_cohort_code, v_cand.last_appt, v_cand.days_inactive,
+                'suppressed', 'OUTBOX_ENQUEUE_FAILED:' || COALESCE(v_outbox_res->>'error', 'UNKNOWN'), v_bonus_pts
+            );
+            v_suppressed_count := v_suppressed_count + 1;
+        END IF;
+    END LOOP;
 
     RETURN jsonb_build_object(
         'success', true,
         'tenant_id', p_tenant_id,
+        'cohort_code', v_cohort_code,
         'cohort_inactivity_days', p_inactivity_days,
         'detected_customers', v_detected_count,
-        'outbox_dispatch_classification', 'QUEUED_FOR_COMMUNICATIONS_BOUNDARY'
+        'queued_outbox_count', v_queued_count,
+        'suppressed_count', v_suppressed_count
     );
 END;
 $$;

@@ -144,6 +144,34 @@ const tests = [
     fn: () => /points_per_completed_appointment/i.test(sql) &&
               !/services\.price\s*\*\s*100/i.test(sql) &&
               !/v_svc_price\s*\*\s*100/i.test(sql)
+  },
+  {
+    category: '6. EV079-R3 Reactivation Cohort & Outbox Integration',
+    name: '6.1 customer_reactivation_events defines explicit cohort_code with composite unique constraint',
+    fn: () => /cohort_code\s+TEXT\s+NOT\s+NULL\s+CHECK\s*\(\s*cohort_code\s+IN\s*\(\s*'inactive_60d',\s*'inactive_90d'\s*\)\s*\)/i.test(sql) &&
+              /CONSTRAINT\s+uq_reactivation_cohort_event\s+UNIQUE\s*\(\s*tenant_id,\s*customer_id,\s*last_appointment_at,\s*cohort_code\s*\)/i.test(sql)
+  },
+  {
+    category: '6. EV079-R3 Reactivation Cohort & Outbox Integration',
+    name: '6.2 Evaluates current marketing consent from canonical consent_ledger (fail-closed)',
+    fn: () => /FROM\s+public\.consent_ledger/i.test(sql) &&
+              /consent_type\s*=\s*'marketing'/i.test(sql) &&
+              /SUPPRESSED_NO_CURRENT_MARKETING_CONSENT/i.test(sql)
+  },
+  {
+    category: '6. EV079-R3 Reactivation Cohort & Outbox Integration',
+    name: '6.3 Enforces frequency/cooldown suppression and deterministic campaign identity',
+    fn: () => /SUPPRESSED_COOLDOWN_ACTIVE/i.test(sql) &&
+              /v_idempotency_key\s*:=/i.test(sql) &&
+              /reactivation:/i.test(sql)
+  },
+  {
+    category: '6. EV079-R3 Reactivation Cohort & Outbox Integration',
+    name: '6.4 Reuses canonical EV057 enqueue_communication_outbox boundary with zero direct provider send',
+    fn: () => /public\.enqueue_communication_outbox\s*\(/i.test(sql) &&
+              /queued_outbox/i.test(sql) &&
+              !/tw_api_key/i.test(sql) &&
+              !/sendgrid/i.test(sql)
   }
 ];
 
