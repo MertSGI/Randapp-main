@@ -75,7 +75,7 @@ ALTER TABLE public.communication_outbox
 --   communication_outbox_status_check (legacy: queued, sent, failed)
 -- Expanded domain preserves legacy values while supporting provider-neutral states.
 -- =========================================================================
-DO $
+DO $$
 DECLARE
     r RECORD;
 BEGIN
@@ -88,7 +88,7 @@ BEGIN
     ) LOOP
         EXECUTE 'ALTER TABLE public.communication_outbox DROP CONSTRAINT IF EXISTS ' || quote_ident(r.conname);
     END LOOP;
-END $;
+END $$;
 
 ALTER TABLE public.communication_outbox
     ADD CONSTRAINT communication_outbox_channel_check
