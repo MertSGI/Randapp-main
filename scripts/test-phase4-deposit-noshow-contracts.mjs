@@ -42,17 +42,22 @@ const tests = [
                  sql.includes("CHECK (no_show_consequence IN ('forfeit_deposit', 'strike_record', 'block_booking', 'none'))")
   },
   {
-    name: '6. Appointment deposits table with lifecycle states and integer minor units',
+    name: '6. Appointment deposits table with composite (appointment_id, tenant_id) foreign key, payment_intent_id, lifecycle states',
     check: () => sql.includes('CREATE TABLE IF NOT EXISTS public.appointment_deposits') &&
                  sql.includes('required_minor_units INTEGER NOT NULL CHECK (required_minor_units >= 0)') &&
+                 sql.includes('payment_intent_id UUID DEFAULT NULL') &&
+                 sql.includes('CONSTRAINT fk_appointment_deposits_appointment_tenant FOREIGN KEY (appointment_id, tenant_id)') &&
+                 sql.includes('REFERENCES public.appointments(id, tenant_id)') &&
                  sql.includes("CHECK (status IN ('required', 'held', 'applied', 'forfeited', 'refunded', 'waived'))") &&
                  sql.includes("CHECK (refund_eligibility_state IN ('eligible_if_cancelled_in_time', 'non_refundable', 'refund_issued', 'forfeited'))")
   },
   {
-    name: '7. Policy evaluator separated from slot availability (evaluate_booking_confirmation_deposit_policy)',
+    name: '7. Policy evaluator separated from slot availability (evaluate_booking_confirmation_deposit_policy) with explicit price units classification',
     check: () => sql.includes('CREATE OR REPLACE FUNCTION public.evaluate_booking_confirmation_deposit_policy') &&
                  sql.includes('SECURITY DEFINER') &&
-                 sql.includes('SET search_path = pg_catalog, public')
+                 sql.includes('SET search_path = pg_catalog, public') &&
+                 sql.includes('CATALOG_PRICE_ASSUMED_MAJOR_UNITS') &&
+                 sql.includes('chk_deposit_percentage_range')
   },
   {
     name: '8. Evaluator calculates minor units for fixed amount and percentage',
@@ -67,9 +72,10 @@ const tests = [
                  sql.includes('refund_eligible_window_hours')
   },
   {
-    name: '10. Admin RPCs exist with tenant_owner / super_admin role check',
+    name: '10. Admin RPCs exist with tenant_owner / super_admin role check and safe tenant default upsert',
     check: () => sql.includes('CREATE OR REPLACE FUNCTION public.admin_set_deposit_policy') &&
                  sql.includes('CREATE OR REPLACE FUNCTION public.admin_set_no_show_policy') &&
+                 sql.includes('IF p_service_id IS NULL THEN') &&
                  sql.includes("v_user.role <> 'super_admin' AND (v_user.role <> 'tenant_owner' OR v_user.tenant_id <> p_tenant_id)")
   },
   {

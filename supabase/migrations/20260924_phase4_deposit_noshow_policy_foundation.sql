@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS public.deposit_policies (
 
     CONSTRAINT fk_deposit_policies_service_tenant FOREIGN KEY (service_id, tenant_id)
         REFERENCES public.services(id, tenant_id) ON DELETE CASCADE,
-    CONSTRAINT uq_deposit_policies_tenant_service UNIQUE (tenant_id, service_id)
+    CONSTRAINT uq_deposit_policies_tenant_service UNIQUE (tenant_id, service_id),
+    CONSTRAINT chk_deposit_percentage_range CHECK (deposit_type <> 'percentage' OR (deposit_value >= 0 AND deposit_value <= 100))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_deposit_policies_tenant_default
@@ -96,18 +97,21 @@ CREATE POLICY "Tenant staff and admins read no_show_policies"
 CREATE TABLE IF NOT EXISTS public.appointment_deposits (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    appointment_id UUID NOT NULL REFERENCES public.appointments(id) ON DELETE CASCADE,
+    appointment_id UUID NOT NULL,
     required_minor_units INTEGER NOT NULL CHECK (required_minor_units >= 0),
     currency VARCHAR(3) NOT NULL DEFAULT 'TRY',
     status TEXT NOT NULL DEFAULT 'required'
         CHECK (status IN ('required', 'held', 'applied', 'forfeited', 'refunded', 'waived')),
-    payment_intent_ref TEXT DEFAULT NULL, -- Pointer to provider-neutral payment intent
+    payment_intent_id UUID DEFAULT NULL, -- Real provider-neutral payment intent reference
+    payment_intent_ref TEXT DEFAULT NULL,
     forfeited_reason TEXT DEFAULT NULL,
     refund_eligibility_state TEXT NOT NULL DEFAULT 'eligible_if_cancelled_in_time'
         CHECK (refund_eligibility_state IN ('eligible_if_cancelled_in_time', 'non_refundable', 'refund_issued', 'forfeited')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
+    CONSTRAINT fk_appointment_deposits_appointment_tenant FOREIGN KEY (appointment_id, tenant_id)
+        REFERENCES public.appointments(id, tenant_id) ON DELETE CASCADE,
     CONSTRAINT uq_appointment_deposits_appointment UNIQUE (appointment_id)
 );
 
@@ -138,6 +142,7 @@ CREATE POLICY "Tenant staff and admins read appointment_deposits"
 -- =========================================================================
 -- Evaluates financial requirements that apply to appointment confirmation.
 -- Strictly separated from slot availability. Returns requirement in integer minor units.
+-- Explicitly classifies catalog price units without silent conversion assumption.
 
 CREATE OR REPLACE FUNCTION public.evaluate_booking_confirmation_deposit_policy(
     p_tenant_id  UUID,
@@ -155,8 +160,9 @@ DECLARE
     v_ns_pol            RECORD;
     v_required_amount   INTEGER := 0;
     v_currency          VARCHAR(3) := 'TRY';
+    v_price_units_classification TEXT := 'CATALOG_PRICE_ASSUMED_MAJOR_UNITS';
 BEGIN
-    -- 1. Get service price in minor units (assumes service catalog price is in major units, multiply by 100 for minor units)
+    -- 1. Get service price from catalog
     SELECT price INTO v_svc_price
     FROM public.services
     WHERE id = p_service_id AND tenant_id = p_tenant_id AND active = true;
@@ -188,7 +194,8 @@ BEGIN
         IF v_dep_pol.deposit_type = 'fixed_amount' THEN
             v_required_amount := v_dep_pol.deposit_value;
         ELSIF v_dep_pol.deposit_type = 'percentage' THEN
-            -- Calculate percentage of service price in minor units
+            -- Percentage of catalog price with explicit source-truth classification
+            -- (v_svc_price * 100 is classified under CATALOG_PRICE_ASSUMED_MAJOR_UNITS)
             v_required_amount := ROUND(((v_svc_price * 100) * (v_dep_pol.deposit_value::NUMERIC / 100.00)))::INTEGER;
         END IF;
     END IF;
@@ -204,6 +211,7 @@ BEGIN
         'tenant_id', p_tenant_id,
         'service_id', p_service_id,
         'service_price_minor_units', (v_svc_price * 100),
+        'price_units_source_truth', v_price_units_classification,
         'deposit_required', (v_required_amount > 0),
         'deposit_amount_minor_units', v_required_amount,
         'currency', v_currency,
@@ -254,15 +262,40 @@ BEGIN
         RAISE EXCEPTION 'INVALID_SERVICE' USING ERRCODE = '23503';
     END IF;
 
-    INSERT INTO public.deposit_policies (tenant_id, service_id, deposit_type, deposit_value, currency, is_active)
-    VALUES (p_tenant_id, p_service_id, p_deposit_type, GREATEST(0, COALESCE(p_deposit_val, 0)), upper(COALESCE(p_currency, 'TRY')), COALESCE(p_is_active, true))
-    ON CONFLICT (tenant_id, service_id) DO UPDATE
-    SET deposit_type  = EXCLUDED.deposit_type,
-        deposit_value = EXCLUDED.deposit_value,
-        currency      = EXCLUDED.currency,
-        is_active     = EXCLUDED.is_active,
-        updated_at    = now()
-    RETURNING id INTO v_id;
+    IF p_deposit_type = 'percentage' AND (p_deposit_val < 0 OR p_deposit_val > 100) THEN
+        RAISE EXCEPTION 'INVALID_PERCENTAGE: Must be between 0 and 100' USING ERRCODE = '22003';
+    END IF;
+
+    -- Handle Tenant Default (p_service_id IS NULL) vs Service Override explicitly
+    IF p_service_id IS NULL THEN
+        SELECT id INTO v_id
+        FROM public.deposit_policies
+        WHERE tenant_id = p_tenant_id AND service_id IS NULL;
+
+        IF v_id IS NOT NULL THEN
+            UPDATE public.deposit_policies
+            SET deposit_type  = p_deposit_type,
+                deposit_value = GREATEST(0, COALESCE(p_deposit_val, 0)),
+                currency      = upper(COALESCE(p_currency, 'TRY')),
+                is_active     = COALESCE(p_is_active, true),
+                updated_at    = now()
+            WHERE id = v_id;
+        ELSE
+            INSERT INTO public.deposit_policies (tenant_id, service_id, deposit_type, deposit_value, currency, is_active)
+            VALUES (p_tenant_id, NULL, p_deposit_type, GREATEST(0, COALESCE(p_deposit_val, 0)), upper(COALESCE(p_currency, 'TRY')), COALESCE(p_is_active, true))
+            RETURNING id INTO v_id;
+        END IF;
+    ELSE
+        INSERT INTO public.deposit_policies (tenant_id, service_id, deposit_type, deposit_value, currency, is_active)
+        VALUES (p_tenant_id, p_service_id, p_deposit_type, GREATEST(0, COALESCE(p_deposit_val, 0)), upper(COALESCE(p_currency, 'TRY')), COALESCE(p_is_active, true))
+        ON CONFLICT (tenant_id, service_id) DO UPDATE
+        SET deposit_type  = EXCLUDED.deposit_type,
+            deposit_value = EXCLUDED.deposit_value,
+            currency      = EXCLUDED.currency,
+            is_active     = EXCLUDED.is_active,
+            updated_at    = now()
+        RETURNING id INTO v_id;
+    END IF;
 
     RETURN jsonb_build_object('success', true, 'deposit_policy_id', v_id);
 END;
