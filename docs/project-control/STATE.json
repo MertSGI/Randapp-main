@@ -1006,5 +1006,17 @@
         "push_preflight_verified": true,
         "push_branch": "origin/aos/controller-relay-cr2-lite-operationalization",
         "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    }
+    },
+    "phase4_loyalty_reactivation_state": {
+        "candidate_branch": "aos/phase4-loyalty-reactivation-foundation",
+        "candidate_sha": "b95b1827efc200cd5d701a2de50793bc0d72ada2",
+        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+        "contracts_tested": 13,
+        "contracts_result": "PASS",
+        "push_preflight_verified": true,
+        "push_branch": "origin/aos/phase4-loyalty-reactivation-foundation",
+        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+    },
+    "calendar_foundation_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "customer360_foundation_gate": "AOS_STANDING_AUTHORITY_ACCEPTED"
 }
