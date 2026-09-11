@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS public.payment_intents (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    CONSTRAINT payment_intents_tenant_idempotency_unique UNIQUE (tenant_id, idempotency_key)
+    CONSTRAINT payment_intents_tenant_idempotency_unique UNIQUE (tenant_id, idempotency_key),
+    CONSTRAINT uq_payment_intents_id_tenant UNIQUE (id, tenant_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_payment_intents_tenant_status ON public.payment_intents(tenant_id, status);

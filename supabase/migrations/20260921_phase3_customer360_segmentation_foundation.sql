@@ -51,6 +51,37 @@ CREATE TABLE IF NOT EXISTS public.customer_segments (
     CONSTRAINT uq_customer_segments_id_tenant UNIQUE (id, tenant_id)
 );
 
+-- In case customer_segments was previously created by legacy schema (e.g. 001_initial_schema.sql)
+-- ensure all required columns and constraints are added:
+DO $$
+BEGIN
+    -- Add columns if missing
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'customer_segments' AND column_name = 'description') THEN
+        ALTER TABLE public.customer_segments ADD COLUMN description TEXT DEFAULT NULL;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'customer_segments' AND column_name = 'segment_type') THEN
+        ALTER TABLE public.customer_segments ADD COLUMN segment_type TEXT NOT NULL DEFAULT 'manual' CHECK (segment_type IN ('manual', 'dynamic_rule', 'system'));
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'customer_segments' AND column_name = 'is_active') THEN
+        ALTER TABLE public.customer_segments ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'customer_segments' AND column_name = 'updated_at') THEN
+        ALTER TABLE public.customer_segments ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    END IF;
+
+    -- Add composite unique constraints if missing
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'customer_segments_tenant_name_unique') THEN
+        ALTER TABLE public.customer_segments ADD CONSTRAINT customer_segments_tenant_name_unique UNIQUE (tenant_id, name);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_customer_segments_id_tenant') THEN
+        ALTER TABLE public.customer_segments ADD CONSTRAINT uq_customer_segments_id_tenant UNIQUE (id, tenant_id);
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_customer_segments_tenant ON public.customer_segments(tenant_id);
 
 ALTER TABLE public.customer_segments ENABLE ROW LEVEL SECURITY;
