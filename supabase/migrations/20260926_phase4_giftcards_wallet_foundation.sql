@@ -19,13 +19,16 @@
 CREATE TABLE IF NOT EXISTS public.client_wallets (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    customer_id UUID NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,
+    customer_id UUID NOT NULL,
     currency VARCHAR(3) NOT NULL DEFAULT 'TRY',
     balance_minor_units INTEGER NOT NULL DEFAULT 0 CHECK (balance_minor_units >= 0),
     is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
+    CONSTRAINT uq_client_wallets_id_tenant UNIQUE (id, tenant_id),
+    CONSTRAINT fk_client_wallets_customer_tenant FOREIGN KEY (customer_id, tenant_id)
+        REFERENCES public.customers(id, tenant_id) ON DELETE CASCADE,
     CONSTRAINT uq_client_wallet_customer_currency UNIQUE (tenant_id, customer_id, currency)
 );
 
@@ -36,23 +39,44 @@ CREATE INDEX IF NOT EXISTS idx_client_wallets_lookup ON public.client_wallets(te
 CREATE TABLE IF NOT EXISTS public.client_wallet_ledger (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    wallet_id UUID NOT NULL REFERENCES public.client_wallets(id) ON DELETE CASCADE,
+    wallet_id UUID NOT NULL,
     entry_type TEXT NOT NULL CHECK (entry_type IN ('credit', 'debit', 'adjustment', 'refund', 'gift_card_redemption')),
     amount_minor_units INTEGER NOT NULL CHECK (amount_minor_units > 0),
     balance_before_minor_units INTEGER NOT NULL CHECK (balance_before_minor_units >= 0),
     balance_after_minor_units INTEGER NOT NULL CHECK (balance_after_minor_units >= 0),
     currency VARCHAR(3) NOT NULL DEFAULT 'TRY',
-    appointment_id UUID REFERENCES public.appointments(id) ON DELETE SET NULL,
+    appointment_id UUID DEFAULT NULL,
     idempotency_key TEXT NOT NULL,
     description TEXT,
     metadata JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT uq_client_wallet_ledger_idempotency UNIQUE (tenant_id, idempotency_key)
+    CONSTRAINT uq_client_wallet_ledger_idempotency UNIQUE (tenant_id, idempotency_key),
+    CONSTRAINT fk_wallet_ledger_wallet_tenant FOREIGN KEY (wallet_id, tenant_id)
+        REFERENCES public.client_wallets(id, tenant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_wallet_ledger_appointment_tenant FOREIGN KEY (appointment_id, tenant_id)
+        REFERENCES public.appointments(id, tenant_id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_wallet_ledger_wallet ON public.client_wallet_ledger(wallet_id);
 CREATE INDEX IF NOT EXISTS idx_wallet_ledger_appt ON public.client_wallet_ledger(appointment_id);
+
+-- Database-enforced Append-Only Protection on Wallet Ledger
+CREATE OR REPLACE FUNCTION public.prevent_wallet_ledger_mutation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'WALLET_LEDGER_IMMUTABLE: Updates and deletes are forbidden'
+        USING ERRCODE = '23514';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_prevent_wallet_ledger_mutation ON public.client_wallet_ledger;
+CREATE TRIGGER trg_prevent_wallet_ledger_mutation
+    BEFORE UPDATE OR DELETE ON public.client_wallet_ledger
+    FOR EACH ROW
+    EXECUTE FUNCTION public.prevent_wallet_ledger_mutation();
 
 -- 3. Table: public.gift_cards
 -- Stores gift card vouchers. Secret capability code is stored as a SHA-256 hash.
@@ -66,13 +90,16 @@ CREATE TABLE IF NOT EXISTS public.gift_cards (
     currency VARCHAR(3) NOT NULL DEFAULT 'TRY',
     recipient_name VARCHAR(255),
     recipient_email VARCHAR(255),
-    purchaser_customer_id UUID REFERENCES public.customers(id) ON DELETE SET NULL,
+    purchaser_customer_id UUID DEFAULT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'redeemed', 'expired', 'voided')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
+    CONSTRAINT uq_gift_cards_id_tenant UNIQUE (id, tenant_id),
     CONSTRAINT uq_gift_cards_code_hash UNIQUE (tenant_id, code_hash),
+    CONSTRAINT fk_gift_cards_purchaser_tenant FOREIGN KEY (purchaser_customer_id, tenant_id)
+        REFERENCES public.customers(id, tenant_id) ON DELETE SET NULL,
     CONSTRAINT chk_gift_card_balance CHECK (current_balance_minor_units <= initial_balance_minor_units)
 );
 
@@ -83,18 +110,41 @@ CREATE INDEX IF NOT EXISTS idx_gift_cards_lookup ON public.gift_cards(tenant_id,
 CREATE TABLE IF NOT EXISTS public.gift_card_redemptions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    gift_card_id UUID NOT NULL REFERENCES public.gift_cards(id) ON DELETE CASCADE,
-    customer_id UUID REFERENCES public.customers(id) ON DELETE SET NULL,
-    appointment_id UUID REFERENCES public.appointments(id) ON DELETE SET NULL,
+    gift_card_id UUID NOT NULL,
+    customer_id UUID DEFAULT NULL,
+    appointment_id UUID DEFAULT NULL,
     redeemed_minor_units INTEGER NOT NULL CHECK (redeemed_minor_units > 0),
     remaining_balance_minor_units INTEGER NOT NULL CHECK (remaining_balance_minor_units >= 0),
     idempotency_key TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT uq_gift_card_redemptions_idempotency UNIQUE (tenant_id, idempotency_key)
+    CONSTRAINT uq_gift_card_redemptions_idempotency UNIQUE (tenant_id, idempotency_key),
+    CONSTRAINT fk_gift_card_redemptions_card_tenant FOREIGN KEY (gift_card_id, tenant_id)
+        REFERENCES public.gift_cards(id, tenant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_gift_card_redemptions_customer_tenant FOREIGN KEY (customer_id, tenant_id)
+        REFERENCES public.customers(id, tenant_id) ON DELETE SET NULL,
+    CONSTRAINT fk_gift_card_redemptions_appointment_tenant FOREIGN KEY (appointment_id, tenant_id)
+        REFERENCES public.appointments(id, tenant_id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_gift_card_redemptions_card ON public.gift_card_redemptions(gift_card_id);
+
+-- Database-enforced Append-Only Protection on Gift Card Redemptions Ledger
+CREATE OR REPLACE FUNCTION public.prevent_gift_card_redemptions_mutation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'GIFT_CARD_REDEMPTIONS_IMMUTABLE: Updates and deletes are forbidden'
+        USING ERRCODE = '23514';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_prevent_gift_card_redemptions_mutation ON public.gift_card_redemptions;
+CREATE TRIGGER trg_prevent_gift_card_redemptions_mutation
+    BEFORE UPDATE OR DELETE ON public.gift_card_redemptions
+    FOR EACH ROW
+    EXECUTE FUNCTION public.prevent_gift_card_redemptions_mutation();
 
 -- RLS Configuration
 ALTER TABLE public.client_wallets ENABLE ROW LEVEL SECURITY;
@@ -123,6 +173,8 @@ CREATE POLICY "Staff read gift_card_redemptions" ON public.gift_card_redemptions
 -- =========================================================================
 -- 5. RPC: transact_wallet_balance
 -- Atomic wallet debit or credit with anti-double-spend row-level locking
+-- Proves customer belongs to tenant before creating a wallet.
+-- Narrows authority to tenant_owner, super_admin, or explicit stored_value capability.
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.transact_wallet_balance(
@@ -148,6 +200,7 @@ DECLARE
     v_ledger_id    UUID;
     v_idem_key     TEXT;
     v_curr         VARCHAR(3);
+    v_cust_exists  BOOLEAN;
 BEGIN
     SELECT role, tenant_id INTO v_user
     FROM public.users_profile
@@ -157,8 +210,10 @@ BEGIN
         RAISE EXCEPTION 'UNAUTHORIZED' USING ERRCODE = '42501';
     END IF;
 
-    IF v_user.role <> 'super_admin' AND (v_user.role NOT IN ('tenant_owner', 'staff') OR v_user.tenant_id <> p_tenant_id) THEN
-        RAISE EXCEPTION 'PERMISSION_DENIED' USING ERRCODE = '42501';
+    -- Narrow mutation authority: only super_admin or tenant_owner have stored-value authority by default
+    IF v_user.role <> 'super_admin' AND (v_user.role <> 'tenant_owner' OR v_user.tenant_id <> p_tenant_id) THEN
+        RAISE EXCEPTION 'PERMISSION_DENIED: Stored-value financial mutation requires tenant_owner or super_admin'
+            USING ERRCODE = '42501';
     END IF;
 
     IF p_amount_minor <= 0 THEN
@@ -167,6 +222,22 @@ BEGIN
 
     IF p_operation NOT IN ('debit', 'credit') THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_operation');
+    END IF;
+
+    -- Prove customer belongs to tenant
+    SELECT EXISTS (
+        SELECT 1 FROM public.customers WHERE id = p_customer_id AND tenant_id = p_tenant_id
+    ) INTO v_cust_exists;
+
+    IF NOT v_cust_exists THEN
+        RETURN jsonb_build_object('success', false, 'reason_code', 'customer_not_found_in_tenant');
+    END IF;
+
+    -- Prove appointment belongs to tenant if specified
+    IF p_appointment_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM public.appointments WHERE id = p_appointment_id AND tenant_id = p_tenant_id
+    ) THEN
+        RETURN jsonb_build_object('success', false, 'reason_code', 'appointment_not_found_in_tenant');
     END IF;
 
     v_curr := upper(COALESCE(p_currency, 'TRY'));
@@ -193,7 +264,7 @@ BEGIN
     FOR UPDATE;
 
     IF NOT FOUND THEN
-        -- Create wallet if does not exist
+        -- Create wallet after verifying customer belongs to tenant
         INSERT INTO public.client_wallets (tenant_id, customer_id, currency, balance_minor_units)
         VALUES (p_tenant_id, p_customer_id, v_curr, 0)
         RETURNING * INTO v_wallet;
@@ -255,6 +326,7 @@ GRANT EXECUTE ON FUNCTION public.transact_wallet_balance(UUID, UUID, INTEGER, TE
 -- =========================================================================
 -- 6. RPC: redeem_gift_card
 -- Concurrency-safe gift card redemption against SHA-256 hashed code
+-- Proves customer and appointment belong to tenant if provided.
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.redeem_gift_card(
@@ -293,6 +365,20 @@ BEGIN
 
     IF p_amount_minor <= 0 THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_amount');
+    END IF;
+
+    -- If customer_id provided, verify customer belongs to tenant
+    IF p_customer_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM public.customers WHERE id = p_customer_id AND tenant_id = p_tenant_id
+    ) THEN
+        RETURN jsonb_build_object('success', false, 'reason_code', 'customer_not_found_in_tenant');
+    END IF;
+
+    -- If appointment_id provided, verify appointment belongs to tenant
+    IF p_appointment_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM public.appointments WHERE id = p_appointment_id AND tenant_id = p_tenant_id
+    ) THEN
+        RETURN jsonb_build_object('success', false, 'reason_code', 'appointment_not_found_in_tenant');
     END IF;
 
     v_idem_key := COALESCE(p_idempotency_key, gen_random_uuid()::text);
