@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS public.service_package_definitions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT uq_pkg_def_tenant_name UNIQUE (tenant_id, name)
+    CONSTRAINT uq_pkg_def_tenant_name UNIQUE (tenant_id, name),
+    CONSTRAINT uq_pkg_def_id_tenant UNIQUE (id, tenant_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_pkg_def_tenant ON public.service_package_definitions(tenant_id);
@@ -37,11 +38,13 @@ CREATE INDEX IF NOT EXISTS idx_pkg_def_tenant ON public.service_package_definiti
 CREATE TABLE IF NOT EXISTS public.service_package_eligibility (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    package_definition_id UUID NOT NULL REFERENCES public.service_package_definitions(id) ON DELETE CASCADE,
-    service_id UUID NOT NULL REFERENCES public.services(id) ON DELETE CASCADE,
+    package_definition_id UUID NOT NULL,
+    service_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT uq_pkg_eligibility UNIQUE (package_definition_id, service_id),
+    CONSTRAINT fk_pkg_eligibility_pkg_tenant FOREIGN KEY (package_definition_id, tenant_id)
+        REFERENCES public.service_package_definitions(id, tenant_id) ON DELETE CASCADE,
     CONSTRAINT fk_pkg_eligibility_service_tenant FOREIGN KEY (service_id, tenant_id)
         REFERENCES public.services(id, tenant_id) ON DELETE CASCADE
 );
@@ -54,8 +57,8 @@ CREATE INDEX IF NOT EXISTS idx_pkg_eligibility_svc ON public.service_package_eli
 CREATE TABLE IF NOT EXISTS public.customer_packages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    customer_id UUID NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,
-    package_definition_id UUID NOT NULL REFERENCES public.service_package_definitions(id) ON DELETE RESTRICT,
+    customer_id UUID NOT NULL,
+    package_definition_id UUID NOT NULL,
     initial_credits INTEGER NOT NULL CHECK (initial_credits > 0),
     remaining_credits INTEGER NOT NULL CHECK (remaining_credits >= 0),
     expires_at TIMESTAMPTZ NOT NULL,
@@ -63,6 +66,11 @@ CREATE TABLE IF NOT EXISTS public.customer_packages (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
+    CONSTRAINT uq_customer_packages_id_tenant UNIQUE (id, tenant_id),
+    CONSTRAINT fk_customer_packages_customer_tenant FOREIGN KEY (customer_id, tenant_id)
+        REFERENCES public.customers(id, tenant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_customer_packages_pkg_def_tenant FOREIGN KEY (package_definition_id, tenant_id)
+        REFERENCES public.service_package_definitions(id, tenant_id) ON DELETE RESTRICT,
     CONSTRAINT chk_customer_package_credits CHECK (remaining_credits <= initial_credits)
 );
 
@@ -74,20 +82,43 @@ CREATE INDEX IF NOT EXISTS idx_customer_packages_lookup
 CREATE TABLE IF NOT EXISTS public.customer_package_redemption_ledger (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    customer_package_id UUID NOT NULL REFERENCES public.customer_packages(id) ON DELETE CASCADE,
-    appointment_id UUID REFERENCES public.appointments(id) ON DELETE SET NULL,
-    service_id UUID NOT NULL REFERENCES public.services(id) ON DELETE RESTRICT,
+    customer_package_id UUID NOT NULL,
+    appointment_id UUID DEFAULT NULL,
+    service_id UUID NOT NULL,
     credits_debited INTEGER NOT NULL CHECK (credits_debited > 0),
     credits_after INTEGER NOT NULL CHECK (credits_after >= 0),
     idempotency_key TEXT NOT NULL,
     metadata JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT uq_pkg_redemption_idempotency UNIQUE (tenant_id, idempotency_key)
+    CONSTRAINT uq_pkg_redemption_idempotency UNIQUE (tenant_id, idempotency_key),
+    CONSTRAINT fk_pkg_redemption_customer_pkg_tenant FOREIGN KEY (customer_package_id, tenant_id)
+        REFERENCES public.customer_packages(id, tenant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_pkg_redemption_appointment_tenant FOREIGN KEY (appointment_id, tenant_id)
+        REFERENCES public.appointments(id, tenant_id) ON DELETE SET NULL,
+    CONSTRAINT fk_pkg_redemption_service_tenant FOREIGN KEY (service_id, tenant_id)
+        REFERENCES public.services(id, tenant_id) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_pkg_redemption_pkg ON public.customer_package_redemption_ledger(customer_package_id);
 CREATE INDEX IF NOT EXISTS idx_pkg_redemption_appt ON public.customer_package_redemption_ledger(appointment_id);
+
+-- Database-enforced Append-Only Protection on Redemption Ledger
+CREATE OR REPLACE FUNCTION public.prevent_redemption_ledger_mutation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'REDEMPTION_LEDGER_IMMUTABLE: Updates and deletes are forbidden'
+        USING ERRCODE = '23514';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_prevent_redemption_ledger_mutation ON public.customer_package_redemption_ledger;
+CREATE TRIGGER trg_prevent_redemption_ledger_mutation
+    BEFORE UPDATE OR DELETE ON public.customer_package_redemption_ledger
+    FOR EACH ROW
+    EXECUTE FUNCTION public.prevent_redemption_ledger_mutation();
 
 -- 5. Table: public.membership_plans
 CREATE TABLE IF NOT EXISTS public.membership_plans (
@@ -104,17 +135,19 @@ CREATE TABLE IF NOT EXISTS public.membership_plans (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT uq_membership_plans_name UNIQUE (tenant_id, name)
+    CONSTRAINT uq_membership_plans_name UNIQUE (tenant_id, name),
+    CONSTRAINT uq_membership_plans_id_tenant UNIQUE (id, tenant_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_membership_plans_tenant ON public.membership_plans(tenant_id);
 
 -- 6. Table: public.customer_memberships
+-- Supports historical & resubscribe semantics via partial unique on active state
 CREATE TABLE IF NOT EXISTS public.customer_memberships (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    customer_id UUID NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,
-    membership_plan_id UUID NOT NULL REFERENCES public.membership_plans(id) ON DELETE RESTRICT,
+    customer_id UUID NOT NULL,
+    membership_plan_id UUID NOT NULL,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'cancelled', 'expired')),
     activation_mode TEXT NOT NULL DEFAULT 'manual_test' CHECK (activation_mode IN ('manual_test', 'comped', 'admin_granted')),
     start_date TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -122,8 +155,16 @@ CREATE TABLE IF NOT EXISTS public.customer_memberships (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT uq_customer_active_membership UNIQUE (tenant_id, customer_id, membership_plan_id)
+    CONSTRAINT fk_customer_memberships_customer_tenant FOREIGN KEY (customer_id, tenant_id)
+        REFERENCES public.customers(id, tenant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_customer_memberships_plan_tenant FOREIGN KEY (membership_plan_id, tenant_id)
+        REFERENCES public.membership_plans(id, tenant_id) ON DELETE RESTRICT
 );
+
+-- Partial unique: only 1 ACTIVE membership per customer per plan, allowing past historical records
+CREATE UNIQUE INDEX IF NOT EXISTS uq_customer_active_membership
+    ON public.customer_memberships (tenant_id, customer_id, membership_plan_id)
+    WHERE status = 'active';
 
 CREATE INDEX IF NOT EXISTS idx_customer_memberships_lookup
     ON public.customer_memberships(tenant_id, customer_id, status);
@@ -166,6 +207,7 @@ CREATE POLICY "Staff read customer_memberships" ON public.customer_memberships F
 -- =========================================================================
 -- 7. RPC: redeem_customer_package_credits
 -- Concurrency-safe atomic redemption with row-level locking & idempotency
+-- Validates appointment tenant, customer, and service before mutation.
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.redeem_customer_package_credits(
@@ -190,6 +232,7 @@ DECLARE
     v_new_status        TEXT;
     v_ledger_id         UUID;
     v_idem_key          TEXT;
+    v_appt              RECORD;
 BEGIN
     -- 1. Authorization
     SELECT role, tenant_id INTO v_user
@@ -253,7 +296,26 @@ BEGIN
         );
     END IF;
 
-    -- 4. Verify Service Eligibility
+    -- 4. Validate Appointment if provided (Tenant, Customer, Service match)
+    IF p_appointment_id IS NOT NULL THEN
+        SELECT * INTO v_appt
+        FROM public.appointments
+        WHERE id = p_appointment_id AND tenant_id = p_tenant_id;
+
+        IF NOT FOUND THEN
+            RETURN jsonb_build_object('success', false, 'reason_code', 'appointment_not_found_in_tenant');
+        END IF;
+
+        IF v_appt.customer_id <> v_pkg.customer_id THEN
+            RETURN jsonb_build_object('success', false, 'reason_code', 'appointment_customer_mismatch');
+        END IF;
+
+        IF v_appt.service_id <> p_service_id THEN
+            RETURN jsonb_build_object('success', false, 'reason_code', 'appointment_service_mismatch');
+        END IF;
+    END IF;
+
+    -- 5. Verify Service Eligibility
     SELECT COUNT(*) INTO v_eligibility_count
     FROM public.service_package_eligibility
     WHERE package_definition_id = v_pkg.package_definition_id
@@ -264,7 +326,7 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'service_not_eligible_for_package');
     END IF;
 
-    -- 5. Deduct Credits
+    -- 6. Deduct Credits
     v_new_remaining := v_pkg.remaining_credits - p_credits_to_redeem;
     v_new_status := CASE WHEN v_new_remaining = 0 THEN 'exhausted' ELSE 'active' END;
 
@@ -274,7 +336,7 @@ BEGIN
         updated_at = now()
     WHERE id = v_pkg.id;
 
-    -- 6. Insert Immutable Redemption Ledger Entry
+    -- 7. Insert Immutable Redemption Ledger Entry
     INSERT INTO public.customer_package_redemption_ledger (
         tenant_id,
         customer_package_id,
@@ -312,6 +374,7 @@ GRANT EXECUTE ON FUNCTION public.redeem_customer_package_credits(UUID, UUID, UUI
 
 -- =========================================================================
 -- 8. Admin RPC: grant_customer_package
+-- Proves customer belongs to tenant before creating package instance.
 -- =========================================================================
 
 CREATE OR REPLACE FUNCTION public.admin_grant_customer_package(
@@ -330,6 +393,7 @@ DECLARE
     v_pkg_def RECORD;
     v_inst_id UUID;
     v_days    INTEGER;
+    v_cust_exists BOOLEAN;
 BEGIN
     SELECT role, tenant_id INTO v_user
     FROM public.users_profile
@@ -341,6 +405,15 @@ BEGIN
 
     IF v_user.role <> 'super_admin' AND (v_user.role <> 'tenant_owner' OR v_user.tenant_id <> p_tenant_id) THEN
         RAISE EXCEPTION 'PERMISSION_DENIED' USING ERRCODE = '42501';
+    END IF;
+
+    -- Prove customer belongs to exact tenant
+    SELECT EXISTS (
+        SELECT 1 FROM public.customers WHERE id = p_customer_id AND tenant_id = p_tenant_id
+    ) INTO v_cust_exists;
+
+    IF NOT v_cust_exists THEN
+        RETURN jsonb_build_object('success', false, 'reason_code', 'customer_not_found_in_tenant');
     END IF;
 
     SELECT * INTO v_pkg_def
