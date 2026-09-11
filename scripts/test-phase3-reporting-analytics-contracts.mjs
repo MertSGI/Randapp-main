@@ -84,6 +84,13 @@ const tests = [
   {
     name: '14. Strict absence of settled/collected/accounting revenue misclassifications',
     test: () => !/collected_revenue/i.test(sql) && !/settled_revenue/i.test(sql) && !/accounting_revenue/i.test(sql)
+  },
+  {
+    name: '15. Staff branch authorization uses canonical staff.user_profile_id = v_user.id mapping',
+    test: () => sql.includes('s.user_profile_id = v_user.id') &&
+                sql.includes('st.user_profile_id = v_user.id') &&
+                !/s\.id = v_user\.id/i.test(sql) &&
+                !/st\.id = v_user\.id/i.test(sql)
   }
 ];
 

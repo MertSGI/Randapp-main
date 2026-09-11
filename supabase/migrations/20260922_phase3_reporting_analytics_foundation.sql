@@ -64,7 +64,7 @@ BEGIN
         IF NOT EXISTS (
             SELECT 1 FROM public.staff_branches sb
             JOIN public.staff s ON s.id = sb.staff_id
-            WHERE s.id = v_user.id AND sb.branch_id = p_branch_id AND sb.tenant_id = p_tenant_id
+            WHERE s.user_profile_id = v_user.id AND sb.branch_id = p_branch_id AND sb.tenant_id = p_tenant_id
         ) THEN
             RAISE EXCEPTION 'PERMISSION_DENIED: Staff not assigned to branch' USING ERRCODE = '42501';
         END IF;
@@ -113,7 +113,7 @@ BEGIN
               (v_user.role = 'staff' AND a.branch_id IN (
                   SELECT sb.branch_id FROM public.staff_branches sb
                   JOIN public.staff st ON st.id = sb.staff_id
-                  WHERE st.id = v_user.id AND sb.tenant_id = p_tenant_id
+                  WHERE st.user_profile_id = v_user.id AND sb.tenant_id = p_tenant_id
               ))
           ))
       )
@@ -191,7 +191,7 @@ BEGIN
         IF NOT EXISTS (
             SELECT 1 FROM public.staff_branches sb
             JOIN public.staff s ON s.id = sb.staff_id
-            WHERE s.id = v_user.id AND sb.branch_id = p_branch_id AND sb.tenant_id = p_tenant_id
+            WHERE s.user_profile_id = v_user.id AND sb.branch_id = p_branch_id AND sb.tenant_id = p_tenant_id
         ) THEN
             RAISE EXCEPTION 'PERMISSION_DENIED: Staff not assigned to branch' USING ERRCODE = '42501';
         END IF;
@@ -207,7 +207,7 @@ BEGIN
       AND (
           v_user.role IN ('super_admin', 'tenant_owner')
           OR
-          (v_user.role = 'staff' AND st.id = v_user.id)
+          (v_user.role = 'staff' AND st.user_profile_id = v_user.id)
       );
 
     SELECT jsonb_agg(
@@ -256,7 +256,7 @@ BEGIN
           AND (
               v_user.role IN ('super_admin', 'tenant_owner')
               OR
-              (v_user.role = 'staff' AND st.id = v_user.id)
+              (v_user.role = 'staff' AND st.user_profile_id = v_user.id)
           )
         ORDER BY COALESCE(s_agg.total_appts, 0) DESC, st.name ASC
         LIMIT LEAST(GREATEST(1, p_limit), 100)
