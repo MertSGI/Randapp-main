@@ -21,10 +21,17 @@ const tests = [
                 /ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+last_event_timestamp/i.test(sql)
   },
   {
-    name: '2. Legacy CHECK constraints safely reconciled dynamically preserving legacy values (EV057-R3)',
-    test: () => /FROM\s+pg_constraint[\s\S]*?public\.communication_outbox[\s\S]*?DROP\s+CONSTRAINT/i.test(sql) &&
+    name: '2. Legacy CHECK constraints safely reconciled dynamically preserving legacy values (EV057-R3/R5)',
+    test: () => /FROM\s+pg_constraint[\s\S]*?conname\s+IN\s*\('communication_outbox_channel_check',\s*'communication_outbox_status_check'\)/i.test(sql) &&
                 /ADD\s+CONSTRAINT\s+communication_outbox_channel_check[\s\S]*?sms[\s\S]*?whatsapp[\s\S]*?email[\s\S]*?otp/i.test(sql) &&
                 /ADD\s+CONSTRAINT\s+communication_outbox_status_check[\s\S]*?queued[\s\S]*?sent[\s\S]*?failed[\s\S]*?processing[\s\S]*?delivered/i.test(sql)
+  },
+  {
+    name: '2b. Canonical public.users_profile and explicit tenant_id cast in get_tenant_communication_outbox (EV057-R5)',
+    test: () => /FROM\s+public\.users_profile\s+up/i.test(sql) &&
+                !/public\.user_profiles/i.test(sql) &&
+                /co\.tenant_id\s*=\s*p_tenant_id::text/i.test(sql) &&
+                /tenant_id\s*=\s*p_tenant_id::text/i.test(sql)
   },
   {
     name: '3. Status lifecycle state machine constraint or values',
