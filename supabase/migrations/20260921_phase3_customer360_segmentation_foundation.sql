@@ -72,12 +72,20 @@ BEGIN
         ALTER TABLE public.customer_segments ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     END IF;
 
-    -- Add composite unique constraints if missing
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'customer_segments_tenant_name_unique') THEN
+    -- Add composite unique constraints if missing (scoped to relation conrelid)
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'customer_segments_tenant_name_unique'
+          AND conrelid = 'public.customer_segments'::regclass
+    ) THEN
         ALTER TABLE public.customer_segments ADD CONSTRAINT customer_segments_tenant_name_unique UNIQUE (tenant_id, name);
     END IF;
 
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_customer_segments_id_tenant') THEN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'uq_customer_segments_id_tenant'
+          AND conrelid = 'public.customer_segments'::regclass
+    ) THEN
         ALTER TABLE public.customer_segments ADD CONSTRAINT uq_customer_segments_id_tenant UNIQUE (id, tenant_id);
     END IF;
 END $$;
