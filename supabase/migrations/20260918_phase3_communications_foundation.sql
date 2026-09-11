@@ -84,7 +84,7 @@ BEGIN
         FROM pg_constraint
         WHERE conrelid = 'public.communication_outbox'::regclass
           AND contype = 'c'
-          AND (conname LIKE '%channel%' OR conname LIKE '%status%')
+          AND conname IN ('communication_outbox_channel_check', 'communication_outbox_status_check')
     ) LOOP
         EXECUTE 'ALTER TABLE public.communication_outbox DROP CONSTRAINT IF EXISTS ' || quote_ident(r.conname);
     END LOOP;
@@ -243,7 +243,7 @@ BEGIN
     -- Check if idempotency key already exists for tenant
     SELECT id, request_fingerprint, status INTO v_existing_rec
     FROM public.communication_outbox
-    WHERE tenant_id = p_tenant_id AND idempotency_key = v_clean_idempotency;
+    WHERE tenant_id = p_tenant_id::text AND idempotency_key = v_clean_idempotency;
 
     IF FOUND THEN
         IF v_existing_rec.request_fingerprint != v_fingerprint THEN
@@ -610,11 +610,12 @@ BEGIN
         END IF;
 
         IF v_caller_tenant IS DISTINCT FROM p_tenant_id::text THEN
-            -- Check user_profiles tenant binding for staff/owner
+            -- Check users_profile tenant binding for staff/owner
             IF NOT EXISTS (
-                SELECT 1 FROM public.user_profiles up
+                SELECT 1 FROM public.users_profile up
                 WHERE up.id = auth.uid()
-                  AND (up.tenant_id = p_tenant_id::uuid OR up.role = 'super_admin')
+                  AND up.active = true
+                  AND (up.tenant_id = p_tenant_id OR up.role = 'super_admin')
             ) THEN
                 RAISE EXCEPTION 'FORBIDDEN: Tenant boundary violation';
             END IF;
