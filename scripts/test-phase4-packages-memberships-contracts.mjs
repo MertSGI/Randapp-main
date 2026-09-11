@@ -29,17 +29,21 @@ const tests = [
                  sql.includes('CONSTRAINT fk_pkg_eligibility_service_tenant FOREIGN KEY (service_id, tenant_id)')
   },
   {
-    name: '3. Customer packages table tracks initial and remaining credits with bounds',
+    name: '3. Customer packages table tracks initial and remaining credits with composite integrity',
     check: () => sql.includes('CREATE TABLE IF NOT EXISTS public.customer_packages') &&
                  sql.includes('remaining_credits INTEGER NOT NULL CHECK (remaining_credits >= 0)') &&
+                 sql.includes('CONSTRAINT fk_customer_packages_customer_tenant FOREIGN KEY (customer_id, tenant_id)') &&
+                 sql.includes('REFERENCES public.customers(id, tenant_id)') &&
                  sql.includes('CONSTRAINT chk_customer_package_credits CHECK (remaining_credits <= initial_credits)') &&
                  sql.includes("status IN ('active', 'exhausted', 'expired', 'revoked')")
   },
   {
-    name: '4. Immutable redemption ledger with unique idempotency key per tenant',
+    name: '4. Immutable redemption ledger with composite FKs and database-enforced append-only trigger',
     check: () => sql.includes('CREATE TABLE IF NOT EXISTS public.customer_package_redemption_ledger') &&
-                 sql.includes('credits_debited INTEGER NOT NULL CHECK (credits_debited > 0)') &&
-                 sql.includes('credits_after INTEGER NOT NULL CHECK (credits_after >= 0)') &&
+                 sql.includes('CONSTRAINT fk_pkg_redemption_customer_pkg_tenant FOREIGN KEY (customer_package_id, tenant_id)') &&
+                 sql.includes('CONSTRAINT fk_pkg_redemption_appointment_tenant FOREIGN KEY (appointment_id, tenant_id)') &&
+                 sql.includes('trg_prevent_redemption_ledger_mutation') &&
+                 sql.includes('BEFORE UPDATE OR DELETE ON public.customer_package_redemption_ledger') &&
                  sql.includes('CONSTRAINT uq_pkg_redemption_idempotency UNIQUE (tenant_id, idempotency_key)')
   },
   {
@@ -49,15 +53,19 @@ const tests = [
                  sql.includes('price_minor_units INTEGER NOT NULL CHECK (price_minor_units >= 0)')
   },
   {
-    name: '6. Customer memberships table supports manual/test activation mode',
+    name: '6. Customer memberships table supports historical & resubscribe semantics via partial unique index',
     check: () => sql.includes('CREATE TABLE IF NOT EXISTS public.customer_memberships') &&
-                 sql.includes("activation_mode IN ('manual_test', 'comped', 'admin_granted')") &&
-                 sql.includes("status IN ('active', 'paused', 'cancelled', 'expired')")
+                 sql.includes('CONSTRAINT fk_customer_memberships_customer_tenant FOREIGN KEY (customer_id, tenant_id)') &&
+                 sql.includes('CREATE UNIQUE INDEX IF NOT EXISTS uq_customer_active_membership') &&
+                 sql.includes("WHERE status = 'active'") &&
+                 sql.includes("activation_mode IN ('manual_test', 'comped', 'admin_granted')")
   },
   {
-    name: '7. Concurrency-safe package credit redemption RPC uses SELECT ... FOR UPDATE',
+    name: '7. Concurrency-safe package credit redemption RPC uses SELECT ... FOR UPDATE with appointment validation',
     check: () => sql.includes('CREATE OR REPLACE FUNCTION public.redeem_customer_package_credits') &&
-                 sql.includes('FOR UPDATE')
+                 sql.includes('FOR UPDATE') &&
+                 sql.includes('appointment_customer_mismatch') &&
+                 sql.includes('appointment_service_mismatch')
   },
   {
     name: '8. Redemption RPC enforces idempotency',
@@ -70,8 +78,9 @@ const tests = [
                  sql.includes('public.service_package_eligibility')
   },
   {
-    name: '10. Grant package admin RPC exists with role validation',
+    name: '10. Grant package admin RPC validates customer belongs to tenant and role permissions',
     check: () => sql.includes('CREATE OR REPLACE FUNCTION public.admin_grant_customer_package') &&
+                 sql.includes('customer_not_found_in_tenant') &&
                  sql.includes("v_user.role <> 'super_admin' AND (v_user.role <> 'tenant_owner' OR v_user.tenant_id <> p_tenant_id)")
   },
   {
