@@ -137,6 +137,13 @@ const tests = [
     fn: () => /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.scan_customer_reactivation_cohorts/i.test(sql) &&
               /customer_reactivation_events/i.test(sql) &&
               /p_inactivity_days/i.test(sql)
+  },
+  {
+    category: '5. R1 Security & Integrity Enhancements',
+    name: '5.5 Enforces non-financial completed appointment rule for loyalty earning (zero catalog price or caller money dependency)',
+    fn: () => /points_per_completed_appointment/i.test(sql) &&
+              !/services\.price\s*\*\s*100/i.test(sql) &&
+              !/v_svc_price\s*\*\s*100/i.test(sql)
   }
 ];
 

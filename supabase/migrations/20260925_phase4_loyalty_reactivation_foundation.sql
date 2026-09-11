@@ -16,6 +16,7 @@
 CREATE TABLE IF NOT EXISTS public.tenant_loyalty_configs (
     tenant_id UUID PRIMARY KEY REFERENCES public.tenants(id) ON DELETE CASCADE,
     is_active BOOLEAN NOT NULL DEFAULT true,
+    points_per_completed_appointment INTEGER NOT NULL DEFAULT 50, -- Non-financial deterministic rule per completed appointment
     points_per_minor_unit NUMERIC(10, 4) NOT NULL DEFAULT 0.0100, -- e.g. 1 point per 100 minor units (1 TRY = 1 pt)
     minor_units_per_point NUMERIC(10, 4) NOT NULL DEFAULT 1.0000, -- e.g. 1 point = 1 minor unit discount
     minimum_points_redemption INTEGER NOT NULL DEFAULT 100,
@@ -156,22 +157,12 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason', 'APPOINTMENT_NOT_COMPLETED');
     END IF;
 
-    -- Derive reward basis from accepted canonical source (service catalog price)
-    SELECT price INTO v_svc_price
-    FROM public.services
-    WHERE id = v_appt.service_id AND tenant_id = p_tenant_id;
-
-    IF FOUND AND v_svc_price IS NOT NULL AND v_svc_price > 0 THEN
-        v_effective_amount := v_svc_price * 100;
-    ELSE
-        v_effective_amount := COALESCE(p_amount_minor_units, 0);
-    END IF;
-
-    -- Calculate points
-    v_points_to_award := FLOOR(v_effective_amount * v_config.points_per_minor_unit);
+    -- Derive reward basis strictly from non-financial completed appointment rule.
+    -- In accordance with Controller Directive EV079-R2, monetary reward accounting from
+    -- unproven service catalog prices or caller-supplied amounts is forbidden.
+    v_points_to_award := COALESCE(v_config.points_per_completed_appointment, 50);
     IF v_points_to_award <= 0 THEN
-        -- Fallback: awarding flat completion points if configured or default to 10 points for completion
-        v_points_to_award := 10;
+        v_points_to_award := 50;
     END IF;
 
     -- Lock and update balance
