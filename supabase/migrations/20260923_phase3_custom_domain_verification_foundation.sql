@@ -1,17 +1,20 @@
 -- =========================================================================
 -- MIGRATION: 20260923_phase3_custom_domain_verification_foundation.sql
--- Description: Phase 3 Lane 4 Custom Domain Verification Foundation
+-- Description: Phase 3 Lane 4 Custom Domain Verification Foundation (R1 Hardened)
 -- Target: Supabase / PostgreSQL
--- Authority: LARI-PROGRAM-V2-PHASE3-CUSTOM-DOMAIN-VERIFICATION-20260911-01
+-- Implementation Authority: LARI-PROGRAM-V2-PHASE3-CUSTOM-DOMAIN-VERIFICATION-20260911-01
+-- Correction Authority: LARI-PROGRAM-V2-PHASE3-R1-CORRECTIONS-AND-PHASE4-CONTINUATION-20260911-01
 -- Constraints:
---   - Provider-neutral domain model only
---   - requested hostname, normalized hostname, tenant binding
---   - verification challenge/token, verification status, timestamps
---   - renew/recheck lifecycle, failure state
---   - domain conflict protection, single-domain ownership invariant
---   - deterministic DNS verification test provider (NO real network send, NO real DNS mutation)
---   - strictly DOMAIN_PROVIDER_READY_NOT_CONNECTED state
---   - tenant isolation, role authorized
+--   - public.custom_domains is the single authoritative lifecycle and verification source
+--   - public.tenants.custom_domain is synchronized ONLY as a derived verified value (no split-brain)
+--   - Reconciles any pre-existing tenants.custom_domain rows into public.custom_domains safely
+--   - Explicit application role & tenant checks from public.users_profile (fail closed on NULL)
+--   - Only tenant_owner for exact tenant or super_admin may mutate custom domains
+--   - Fixed search_path = pg_catalog, public
+--   - Sanitized tenant-scoped read RPC (get_tenant_custom_domains) with challenge rows secured
+--   - Deterministic test verification (TEST_PROVIDER_SIMULATED_VERIFIED) is service_role only
+--     and NEVER satisfies public live tenant-domain resolution (only REAL_PROVIDER_VERIFIED resolves)
+--   - No DNS network calls, no Vercel mutations, no randevulari.com changes
 -- =========================================================================
 
 -- 1. CUSTOM DOMAINS TABLE
@@ -47,7 +50,8 @@ CREATE TABLE IF NOT EXISTS public.custom_domains (
         provider_status IN (
             'DOMAIN_PROVIDER_READY_NOT_CONNECTED',
             'TEST_PROVIDER_SIMULATED_VERIFIED',
-            'TEST_PROVIDER_SIMULATED_FAILED'
+            'TEST_PROVIDER_SIMULATED_FAILED',
+            'REAL_PROVIDER_VERIFIED'
         )
     ),
     CONSTRAINT chk_custom_domains_hostname_format CHECK (
@@ -69,23 +73,54 @@ CREATE INDEX IF NOT EXISTS idx_custom_domains_status
 -- Enable RLS
 ALTER TABLE public.custom_domains ENABLE ROW LEVEL SECURITY;
 
--- Deny all direct public/anon access
-DROP POLICY IF EXISTS custom_domains_isolation_policy ON public.custom_domains;
-CREATE POLICY custom_domains_isolation_policy ON public.custom_domains
-    FOR ALL
-    TO authenticated
-    USING (
-        tenant_id = public.current_tenant_id()
-    )
-    WITH CHECK (
-        tenant_id = public.current_tenant_id()
-    );
+-- Deny raw table access from anon and authenticated; internal / RPC access only
+REVOKE ALL ON TABLE public.custom_domains FROM PUBLIC, anon, authenticated;
 
--- 2. DOMAIN NORMALIZATION HELPER FUNCTION
+-- 2. RECONCILE PRE-EXISTING tenants.custom_domain VALUES SAFELY
+DO $$
+DECLARE
+    v_rec RECORD;
+BEGIN
+    FOR v_rec IN
+        SELECT id AS t_id, lower(trim(custom_domain)) AS c_dom
+        FROM public.tenants
+        WHERE custom_domain IS NOT NULL AND trim(custom_domain) <> ''
+    LOOP
+        -- Insert into custom_domains if not already tracked
+        INSERT INTO public.custom_domains (
+            tenant_id,
+            requested_hostname,
+            normalized_hostname,
+            status,
+            verification_method,
+            verification_token,
+            verification_record_name,
+            verification_expected_value,
+            provider_status,
+            verified_at
+        ) VALUES (
+            v_rec.t_id,
+            v_rec.c_dom,
+            v_rec.c_dom,
+            'verified',
+            'dns_txt',
+            'lari-legacy-migrated',
+            '_lari-challenge.' || v_rec.c_dom,
+            'legacy-migrated',
+            'REAL_PROVIDER_VERIFIED',
+            now()
+        )
+        ON CONFLICT (normalized_hostname) DO NOTHING;
+    END LOOP;
+END;
+$$;
+
+-- 3. DOMAIN NORMALIZATION HELPER FUNCTION
 CREATE OR REPLACE FUNCTION public.normalize_custom_hostname(p_hostname TEXT)
 RETURNS TEXT
 LANGUAGE plpgsql
 IMMUTABLE
+SET search_path = pg_catalog, public
 AS $$
 DECLARE
     v_norm TEXT;
@@ -120,7 +155,7 @@ BEGIN
 END;
 $$;
 
--- 3. REQUEST CUSTOM DOMAIN RPC
+-- 4. REQUEST CUSTOM DOMAIN RPC
 CREATE OR REPLACE FUNCTION public.request_custom_domain(
     p_tenant_id UUID,
     p_hostname TEXT
@@ -128,10 +163,10 @@ CREATE OR REPLACE FUNCTION public.request_custom_domain(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = pg_catalog, public
 AS $$
 DECLARE
-    v_caller_role TEXT;
+    v_user RECORD;
     v_normalized TEXT;
     v_token TEXT;
     v_rec_name TEXT;
@@ -141,23 +176,28 @@ DECLARE
     v_existing_tenant UUID;
     v_existing_status TEXT;
 BEGIN
-    -- 1. Authorization check
-    v_caller_role := auth.jwt() ->> 'role';
-    IF v_caller_role IS NULL OR (v_caller_role <> 'authenticated' AND v_caller_role <> 'service_role') THEN
+    -- Fail closed on NULL tenant or caller
+    IF p_tenant_id IS NULL THEN
+        RAISE EXCEPTION 'TENANT_REQUIRED' USING ERRCODE = '42501';
+    END IF;
+
+    -- Authorize against users_profile
+    SELECT role, tenant_id INTO v_user
+    FROM public.users_profile
+    WHERE id = auth.uid() AND active = true;
+
+    IF NOT FOUND THEN
         RAISE EXCEPTION 'UNAUTHORIZED' USING ERRCODE = '42501';
     END IF;
 
-    -- If authenticated, caller must match tenant
-    IF v_caller_role = 'authenticated' THEN
-        IF public.current_tenant_id() IS NOT NULL AND public.current_tenant_id() <> p_tenant_id THEN
-            RAISE EXCEPTION 'TENANT_MISMATCH' USING ERRCODE = '42501';
-        END IF;
+    IF v_user.role <> 'super_admin' AND (v_user.role <> 'tenant_owner' OR v_user.tenant_id <> p_tenant_id) THEN
+        RAISE EXCEPTION 'PERMISSION_DENIED: tenant_owner access required' USING ERRCODE = '42501';
     END IF;
 
-    -- 2. Normalize hostname
+    -- Normalize hostname
     v_normalized := public.normalize_custom_hostname(p_hostname);
 
-    -- 3. Check domain conflict / single-domain ownership invariant
+    -- Check domain conflict / single-domain ownership invariant
     SELECT id, tenant_id, status
     INTO v_existing_id, v_existing_tenant, v_existing_status
     FROM public.custom_domains
@@ -165,14 +205,12 @@ BEGIN
 
     IF v_existing_id IS NOT NULL THEN
         IF v_existing_tenant <> p_tenant_id THEN
-            -- Domain belongs to another tenant
             RAISE EXCEPTION 'DOMAIN_ALREADY_REGISTERED_BY_OTHER_TENANT' USING ERRCODE = '23505';
         ELSE
-            -- Already registered by this tenant
             IF v_existing_status = 'verified' THEN
                 RAISE EXCEPTION 'DOMAIN_ALREADY_VERIFIED' USING ERRCODE = 'P0005';
             END IF;
-            -- If pending or failed, regenerate challenge and return
+
             v_token := 'lari-verify-' || replace(gen_random_uuid()::text, '-', '');
             v_rec_name := '_lari-challenge.' || v_normalized;
             v_expected_val := v_token;
@@ -203,7 +241,6 @@ BEGIN
         END IF;
     END IF;
 
-    -- 4. Generate challenge & token
     v_token := 'lari-verify-' || replace(gen_random_uuid()::text, '-', '');
     v_rec_name := '_lari-challenge.' || v_normalized;
     v_expected_val := v_token;
@@ -246,10 +283,10 @@ BEGIN
 END;
 $$;
 
--- 4. VERIFY CUSTOM DOMAIN RPC (DETERMINISTIC TEST PROVIDER / SIMULATED VERIFIER)
--- Strict Rule: NO real network request, NO real DNS mutation, NO live cloud API call.
--- Provider-neutral test verification accepts deterministic mock token matching or simulation flags.
-CREATE OR REPLACE FUNCTION public.verify_custom_domain(
+-- 5. SIMULATED TEST VERIFIER (SERVICE_ROLE ONLY)
+-- Deterministic test verification; STRICTLY RESTRICTED to service_role test harnesses.
+-- Results in TEST_PROVIDER_SIMULATED_VERIFIED which is NOT live-resolved.
+CREATE OR REPLACE FUNCTION public.simulate_verify_custom_domain_for_testing(
     p_tenant_id UUID,
     p_domain_id UUID,
     p_simulated_txt_value TEXT DEFAULT NULL
@@ -257,27 +294,13 @@ CREATE OR REPLACE FUNCTION public.verify_custom_domain(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = pg_catalog, public
 AS $$
 DECLARE
-    v_caller_role TEXT;
     v_domain RECORD;
     v_is_valid BOOLEAN := false;
 BEGIN
-    -- Authorization check
-    v_caller_role := auth.jwt() ->> 'role';
-    IF v_caller_role IS NULL OR (v_caller_role <> 'authenticated' AND v_caller_role <> 'service_role') THEN
-        RAISE EXCEPTION 'UNAUTHORIZED' USING ERRCODE = '42501';
-    END IF;
-
-    IF v_caller_role = 'authenticated' THEN
-        IF public.current_tenant_id() IS NOT NULL AND public.current_tenant_id() <> p_tenant_id THEN
-            RAISE EXCEPTION 'TENANT_MISMATCH' USING ERRCODE = '42501';
-        END IF;
-    END IF;
-
-    SELECT *
-    INTO v_domain
+    SELECT * INTO v_domain
     FROM public.custom_domains
     WHERE id = p_domain_id AND tenant_id = p_tenant_id;
 
@@ -285,21 +308,6 @@ BEGIN
         RAISE EXCEPTION 'DOMAIN_NOT_FOUND' USING ERRCODE = 'P0006';
     END IF;
 
-    IF v_domain.status = 'verified' THEN
-        RETURN jsonb_build_object(
-            'success', true,
-            'domain_id', v_domain.id,
-            'status', 'verified',
-            'normalized_hostname', v_domain.normalized_hostname,
-            'verified_at', v_domain.verified_at,
-            'provider_status', v_domain.provider_status,
-            'message', 'Domain already verified'
-        );
-    END IF;
-
-    -- Deterministic test verification check:
-    -- In provider-neutral testing mode:
-    -- If p_simulated_txt_value matches verification_expected_value, or if explicit test simulation flag is passed.
     IF p_simulated_txt_value IS NOT NULL AND trim(p_simulated_txt_value) = v_domain.verification_expected_value THEN
         v_is_valid := true;
     END IF;
@@ -322,7 +330,7 @@ BEGIN
             'normalized_hostname', v_domain.normalized_hostname,
             'provider_status', 'TEST_PROVIDER_SIMULATED_VERIFIED',
             'verified_at', now(),
-            'message', 'Domain ownership successfully verified via deterministic test challenge'
+            'message', 'Domain test-verified in simulation mode (not active on live platform)'
         );
     ELSE
         UPDATE public.custom_domains
@@ -340,14 +348,90 @@ BEGIN
             'status', 'failed',
             'normalized_hostname', v_domain.normalized_hostname,
             'provider_status', 'TEST_PROVIDER_SIMULATED_FAILED',
-            'error_code', 'DNS_RECORD_MISMATCH',
-            'error_message', 'Simulated DNS TXT record did not match expected verification challenge value'
+            'error_code', 'DNS_RECORD_MISMATCH'
         );
     END IF;
 END;
 $$;
 
--- 5. RECHECK / RENEW CUSTOM DOMAIN STATUS RPC
+REVOKE ALL ON FUNCTION public.simulate_verify_custom_domain_for_testing(UUID, UUID, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.simulate_verify_custom_domain_for_testing(UUID, UUID, TEXT) TO service_role;
+
+-- Backward compatible verify_custom_domain for test harnesses
+CREATE OR REPLACE FUNCTION public.verify_custom_domain(
+    p_tenant_id UUID,
+    p_domain_id UUID,
+    p_simulated_txt_value TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+    RETURN public.simulate_verify_custom_domain_for_testing(p_tenant_id, p_domain_id, p_simulated_txt_value);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.verify_custom_domain(UUID, UUID, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.verify_custom_domain(UUID, UUID, TEXT) TO service_role;
+
+-- 6. SANITIZED TENANT-SCORED READ RPC
+CREATE OR REPLACE FUNCTION public.get_tenant_custom_domains(
+    p_tenant_id UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_user RECORD;
+    v_domains JSONB;
+BEGIN
+    SELECT role, tenant_id INTO v_user
+    FROM public.users_profile
+    WHERE id = auth.uid() AND active = true;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'UNAUTHORIZED' USING ERRCODE = '42501';
+    END IF;
+
+    IF v_user.role <> 'super_admin' AND (v_user.role <> 'tenant_owner' OR v_user.tenant_id <> p_tenant_id) THEN
+        RAISE EXCEPTION 'PERMISSION_DENIED' USING ERRCODE = '42501';
+    END IF;
+
+    SELECT jsonb_agg(
+        jsonb_build_object(
+            'id', cd.id,
+            'tenant_id', cd.tenant_id,
+            'requested_hostname', cd.requested_hostname,
+            'normalized_hostname', cd.normalized_hostname,
+            'status', cd.status,
+            'provider_status', cd.provider_status,
+            'verification_record_type', 'TXT',
+            'verification_record_name', cd.verification_record_name,
+            'verification_expected_value', cd.verification_expected_value,
+            'last_checked_at', cd.last_checked_at,
+            'verified_at', cd.verified_at,
+            'error_code', cd.error_code,
+            'error_message', cd.error_message,
+            'created_at', cd.created_at
+        )
+    )
+    INTO v_domains
+    FROM public.custom_domains cd
+    WHERE cd.tenant_id = p_tenant_id
+    ORDER BY cd.created_at DESC;
+
+    RETURN jsonb_build_object('success', true, 'domains', COALESCE(v_domains, '[]'::jsonb));
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.get_tenant_custom_domains(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_tenant_custom_domains(UUID) TO authenticated, service_role;
+
+-- 7. RECHECK / RENEW CUSTOM DOMAIN STATUS RPC
 CREATE OR REPLACE FUNCTION public.recheck_custom_domain(
     p_tenant_id UUID,
     p_domain_id UUID
@@ -355,25 +439,25 @@ CREATE OR REPLACE FUNCTION public.recheck_custom_domain(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = pg_catalog, public
 AS $$
 DECLARE
-    v_caller_role TEXT;
+    v_user RECORD;
     v_domain RECORD;
 BEGIN
-    v_caller_role := auth.jwt() ->> 'role';
-    IF v_caller_role IS NULL OR (v_caller_role <> 'authenticated' AND v_caller_role <> 'service_role') THEN
+    SELECT role, tenant_id INTO v_user
+    FROM public.users_profile
+    WHERE id = auth.uid() AND active = true;
+
+    IF NOT FOUND THEN
         RAISE EXCEPTION 'UNAUTHORIZED' USING ERRCODE = '42501';
     END IF;
 
-    IF v_caller_role = 'authenticated' THEN
-        IF public.current_tenant_id() IS NOT NULL AND public.current_tenant_id() <> p_tenant_id THEN
-            RAISE EXCEPTION 'TENANT_MISMATCH' USING ERRCODE = '42501';
-        END IF;
+    IF v_user.role <> 'super_admin' AND (v_user.role <> 'tenant_owner' OR v_user.tenant_id <> p_tenant_id) THEN
+        RAISE EXCEPTION 'PERMISSION_DENIED' USING ERRCODE = '42501';
     END IF;
 
-    SELECT *
-    INTO v_domain
+    SELECT * INTO v_domain
     FROM public.custom_domains
     WHERE id = p_domain_id AND tenant_id = p_tenant_id;
 
@@ -381,7 +465,6 @@ BEGIN
         RAISE EXCEPTION 'DOMAIN_NOT_FOUND' USING ERRCODE = 'P0006';
     END IF;
 
-    -- Return full lifecycle status
     RETURN jsonb_build_object(
         'domain_id', v_domain.id,
         'tenant_id', v_domain.tenant_id,
@@ -399,7 +482,7 @@ BEGIN
 END;
 $$;
 
--- 6. REMOVE / REVOKE CUSTOM DOMAIN RPC
+-- 8. REMOVE / REVOKE CUSTOM DOMAIN RPC
 CREATE OR REPLACE FUNCTION public.remove_custom_domain(
     p_tenant_id UUID,
     p_domain_id UUID
@@ -407,21 +490,22 @@ CREATE OR REPLACE FUNCTION public.remove_custom_domain(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = pg_catalog, public
 AS $$
 DECLARE
-    v_caller_role TEXT;
+    v_user RECORD;
     v_deleted RECORD;
 BEGIN
-    v_caller_role := auth.jwt() ->> 'role';
-    IF v_caller_role IS NULL OR (v_caller_role <> 'authenticated' AND v_caller_role <> 'service_role') THEN
+    SELECT role, tenant_id INTO v_user
+    FROM public.users_profile
+    WHERE id = auth.uid() AND active = true;
+
+    IF NOT FOUND THEN
         RAISE EXCEPTION 'UNAUTHORIZED' USING ERRCODE = '42501';
     END IF;
 
-    IF v_caller_role = 'authenticated' THEN
-        IF public.current_tenant_id() IS NOT NULL AND public.current_tenant_id() <> p_tenant_id THEN
-            RAISE EXCEPTION 'TENANT_MISMATCH' USING ERRCODE = '42501';
-        END IF;
+    IF v_user.role <> 'super_admin' AND (v_user.role <> 'tenant_owner' OR v_user.tenant_id <> p_tenant_id) THEN
+        RAISE EXCEPTION 'PERMISSION_DENIED' USING ERRCODE = '42501';
     END IF;
 
     DELETE FROM public.custom_domains
@@ -432,6 +516,11 @@ BEGIN
         RAISE EXCEPTION 'DOMAIN_NOT_FOUND' USING ERRCODE = 'P0006';
     END IF;
 
+    -- Synchronize derived custom_domain on tenants table (clear if this domain was set)
+    UPDATE public.tenants
+    SET custom_domain = NULL, updated_at = now()
+    WHERE id = p_tenant_id AND lower(custom_domain) = v_deleted.normalized_hostname;
+
     RETURN jsonb_build_object(
         'success', true,
         'domain_id', v_deleted.id,
@@ -441,7 +530,10 @@ BEGIN
 END;
 $$;
 
--- 7. RESOLVE TENANT BY CUSTOM DOMAIN RPC
+-- 9. RESOLVE TENANT BY CUSTOM DOMAIN RPC
+-- Resolves ONLY when domain is REAL_PROVIDER_VERIFIED.
+-- Test simulation state (TEST_PROVIDER_SIMULATED_VERIFIED) or DOMAIN_PROVIDER_READY_NOT_CONNECTED
+-- will NOT be resolved as live public domain truth.
 CREATE OR REPLACE FUNCTION public.resolve_tenant_by_custom_domain(
     p_hostname TEXT
 )
@@ -449,7 +541,7 @@ RETURNS JSONB
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = pg_catalog, public
 AS $$
 DECLARE
     v_norm TEXT;
@@ -462,13 +554,14 @@ BEGIN
     FROM public.custom_domains cd
     JOIN public.tenants t ON t.id = cd.tenant_id
     WHERE cd.normalized_hostname = v_norm
-      AND cd.status = 'verified';
+      AND cd.status = 'verified'
+      AND cd.provider_status = 'REAL_PROVIDER_VERIFIED';
 
     IF v_record.id IS NULL THEN
         RETURN jsonb_build_object(
             'resolved', false,
             'normalized_hostname', v_norm,
-            'message', 'Domain not found or not verified'
+            'message', 'Domain not verified by real connected provider'
         );
     END IF;
 
@@ -483,13 +576,14 @@ BEGIN
 END;
 $$;
 
--- Grant permissions
-REVOKE ALL ON TABLE public.custom_domains FROM anon, public;
-GRANT SELECT ON TABLE public.custom_domains TO authenticated;
+REVOKE ALL ON FUNCTION public.normalize_custom_hostname(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.request_custom_domain(UUID, TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.recheck_custom_domain(UUID, UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.remove_custom_domain(UUID, UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.resolve_tenant_by_custom_domain(TEXT) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION public.normalize_custom_hostname(TEXT) TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.request_custom_domain(UUID, TEXT) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.verify_custom_domain(UUID, UUID, TEXT) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.recheck_custom_domain(UUID, UUID) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.remove_custom_domain(UUID, UUID) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.resolve_tenant_by_custom_domain(TEXT) TO anon, authenticated, service_role;
