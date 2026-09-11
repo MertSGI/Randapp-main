@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS public.payment_intents (
 );
 
 CREATE INDEX IF NOT EXISTS idx_payment_intents_tenant_status ON public.payment_intents(tenant_id, status);
-CREATE INDEX IF NOT EXISTS idx_payment_intents_provider_ref ON public.payment_intents(provider_id, provider_reference)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_intents_provider_reference ON public.payment_intents(provider_id, provider_reference)
     WHERE provider_id IS NOT NULL AND provider_reference IS NOT NULL;
 
 CREATE TRIGGER update_payment_intents_modtime
@@ -335,6 +335,20 @@ BEGIN
             'success', false,
             'error', 'PROVIDER_REFERENCE_MISMATCH',
             'message', 'Intent is already bound to a different provider reference'
+        );
+    END IF;
+
+    -- Fail closed if another intent already owns this provider reference
+    IF EXISTS (
+        SELECT 1 FROM public.payment_intents
+        WHERE provider_id = v_clean_provider
+          AND provider_reference = v_clean_ref
+          AND id != v_intent_rec.id
+    ) THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', 'PROVIDER_REFERENCE_ALREADY_BOUND',
+            'message', 'Another payment intent already owns this provider reference'
         );
     END IF;
 
