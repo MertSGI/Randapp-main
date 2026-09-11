@@ -98,35 +98,110 @@ ALTER TABLE public.booking_waitlist ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON public.booking_waitlist FROM PUBLIC;
 REVOKE ALL ON public.booking_waitlist FROM anon;
-REVOKE INSERT, UPDATE, DELETE ON public.booking_waitlist FROM authenticated;
+REVOKE ALL ON public.booking_waitlist FROM authenticated;
 
-CREATE POLICY "Tenant Admins and Staff view booking_waitlist"
-    ON public.booking_waitlist FOR SELECT
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.users_profile up
-            WHERE up.id = auth.uid()
-              AND up.active = true
-              AND (
-                up.role = 'super_admin'
-                OR (
-                    up.role IN ('tenant_owner', 'staff')
-                    AND up.tenant_id = booking_waitlist.tenant_id
-                )
-              )
-        )
-    );
+-- Service role retains internal access; no direct browser table access.
 
-CREATE POLICY "Super Admins Full Access booking_waitlist"
-    ON public.booking_waitlist FOR SELECT
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.users_profile up
-            WHERE up.id = auth.uid()
-              AND up.role = 'super_admin'
-              AND up.active = true
-        )
-    );
+-- =========================================================================
+-- 1.1. Sanitized Tenant-Scoped Waitlist Listing RPC: get_sanitized_waitlist_entries
+-- =========================================================================
+-- Exposes sanitized projection to authorized tenant admins/staff.
+-- Never exposes claim_token_hash.
+CREATE OR REPLACE FUNCTION public.get_sanitized_waitlist_entries(
+    p_tenant_id UUID,
+    p_status TEXT DEFAULT NULL,
+    p_limit INTEGER DEFAULT 50,
+    p_offset INTEGER DEFAULT 0
+)
+RETURNS TABLE (
+    id UUID,
+    tenant_id UUID,
+    branch_id UUID,
+    service_id UUID,
+    preferred_date DATE,
+    preferred_time_start TIME,
+    preferred_time_end TIME,
+    customer_name TEXT,
+    customer_phone TEXT,
+    customer_email TEXT,
+    notes TEXT,
+    status TEXT,
+    offered_at TIMESTAMPTZ,
+    offer_expires_at TIMESTAMPTZ,
+    offered_staff_id UUID,
+    offered_branch_id UUID,
+    offered_appointment_date DATE,
+    offered_appointment_time TIME,
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, extensions
+AS $$
+DECLARE
+    v_caller_uid UUID;
+    v_caller_role TEXT;
+    v_caller_tenant_id UUID;
+    v_bounded_limit INTEGER;
+BEGIN
+    v_caller_uid := auth.uid();
+    IF v_caller_uid IS NULL THEN
+        RAISE EXCEPTION 'UNAUTHORIZED';
+    END IF;
+
+    SELECT up.role, up.tenant_id
+    INTO v_caller_role, v_caller_tenant_id
+    FROM public.users_profile up
+    WHERE up.id = v_caller_uid AND up.active = true;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'CALLER_NOT_ACTIVE';
+    END IF;
+
+    IF v_caller_role != 'super_admin' AND v_caller_role NOT IN ('tenant_owner', 'staff') THEN
+        RAISE EXCEPTION 'ROLE_NOT_AUTHORIZED';
+    END IF;
+
+    IF v_caller_role != 'super_admin' AND (v_caller_tenant_id IS NULL OR v_caller_tenant_id != p_tenant_id) THEN
+        RAISE EXCEPTION 'FORBIDDEN_CROSS_TENANT';
+    END IF;
+
+    v_bounded_limit := LEAST(GREATEST(COALESCE(p_limit, 50), 1), 200);
+
+    RETURN QUERY
+    SELECT
+        w.id,
+        w.tenant_id,
+        w.branch_id,
+        w.service_id,
+        w.preferred_date,
+        w.preferred_time_start,
+        w.preferred_time_end,
+        w.customer_name,
+        w.customer_phone,
+        w.customer_email,
+        w.notes,
+        w.status,
+        w.offered_at,
+        w.offer_expires_at,
+        w.offered_staff_id,
+        w.offered_branch_id,
+        w.offered_appointment_date,
+        w.offered_appointment_time,
+        w.created_at,
+        w.updated_at
+    FROM public.booking_waitlist w
+    WHERE w.tenant_id = p_tenant_id
+      AND (p_status IS NULL OR w.status = p_status)
+    ORDER BY w.created_at DESC
+    LIMIT v_bounded_limit
+    OFFSET GREATEST(COALESCE(p_offset, 0), 0);
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.get_sanitized_waitlist_entries(UUID, TEXT, INTEGER, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_sanitized_waitlist_entries(UUID, TEXT, INTEGER, INTEGER) TO authenticated;
 
 -- =========================================================================
 -- 2. State Machine Enforcement Trigger
@@ -546,32 +621,19 @@ BEGIN
             RETURN jsonb_build_object('success', false, 'error', 'BOOKING_UNAVAILABLE');
         END IF;
 
-        -- Gate: Commercial Subscription & Feature Entitlement Check
-        BEGIN
-            v_elig := public.resolve_tenant_commercial_eligibility(v_entry.tenant_id);
-            IF NOT (v_elig->>'eligible')::BOOLEAN THEN
-                RETURN jsonb_build_object('success', false, 'error', 'COMMERCIAL_INELIGIBLE', 'reason_code', v_elig->>'reason_code');
-            END IF;
+        -- Gate: Commercial Subscription & Feature Entitlement Check (Fail-closed)
+        v_elig := public.resolve_tenant_commercial_eligibility(v_entry.tenant_id);
+        IF NOT (v_elig->>'eligible')::BOOLEAN THEN
+            RETURN jsonb_build_object('success', false, 'error', 'COMMERCIAL_INELIGIBLE', 'reason_code', v_elig->>'reason_code');
+        END IF;
 
-            v_action := public.assert_tenant_commercial_action_allowed(v_entry.tenant_id, 'core_booking');
-            IF NOT (v_action->>'allowed')::BOOLEAN THEN
-                RETURN jsonb_build_object('success', false, 'error', 'COMMERCIAL_ACTION_DENIED', 'reason_code', v_action->>'reason_code');
-            END IF;
-
-            -- Gate: Consume Commercial Appointment Quota
-            v_period_key := public.resolve_quota_period_key(v_entry.tenant_id, 'max_monthly_appointments');
-            v_quota_res := public.consume_commercial_usage(v_entry.tenant_id, 'max_monthly_appointments', v_period_key);
-            IF NOT (v_quota_res->>'success')::BOOLEAN THEN
-                RETURN jsonb_build_object('success', false, 'error', 'COMMERCIAL_QUOTA_EXCEEDED');
-            END IF;
-        EXCEPTION
-            WHEN undefined_function OR undefined_table THEN
-                -- Reusable fallback if commercial engine tables not present in isolated unit test
-                NULL;
-        END;
+        v_action := public.assert_tenant_commercial_action_allowed(v_entry.tenant_id, 'core_booking');
+        IF NOT (v_action->>'allowed')::BOOLEAN THEN
+            RETURN jsonb_build_object('success', false, 'error', 'COMMERCIAL_ACTION_DENIED', 'reason_code', v_action->>'reason_code');
+        END IF;
     END;
 
-    -- Cross the canonical booking evaluator boundary atomically at claim time
+    -- Cross the canonical booking evaluator boundary atomically at claim time (non-mutating validation)
     v_eval_res := public.evaluate_booking_slot(
         p_tenant_id  => v_entry.tenant_id,
         p_branch_id  => v_entry.offered_branch_id,
@@ -604,16 +666,24 @@ BEGIN
         RETURNING id INTO v_customer_id;
     END IF;
 
-    -- Insert canonical consent ledger entries
+    -- Insert canonical consent ledger entries (Fail-closed)
+    INSERT INTO public.consent_ledger (tenant_id, customer_id, consent_type, is_granted, ip_address)
+    VALUES
+        (v_entry.tenant_id::text, v_customer_id::text, 'booking_terms', true, 'rpc_waitlist_claim'),
+        (v_entry.tenant_id::text, v_customer_id::text, 'marketing', false, 'rpc_waitlist_claim'),
+        (v_entry.tenant_id::text, v_customer_id::text, 'reminders', true, 'rpc_waitlist_claim');
+
+    -- Gate: Consume Commercial Appointment Quota (AFTER all non-mutating validations passed)
+    -- All-or-nothing: quota consumption and appointment creation succeed together or fail together.
+    DECLARE
+        v_period_key TEXT;
+        v_quota_res JSONB;
     BEGIN
-        INSERT INTO public.consent_ledger (tenant_id, customer_id, consent_type, is_granted, ip_address)
-        VALUES
-            (v_entry.tenant_id::text, v_customer_id::text, 'booking_terms', true, 'rpc_waitlist_claim'),
-            (v_entry.tenant_id::text, v_customer_id::text, 'marketing', false, 'rpc_waitlist_claim'),
-            (v_entry.tenant_id::text, v_customer_id::text, 'reminders', true, 'rpc_waitlist_claim');
-    EXCEPTION
-        WHEN undefined_table THEN
-            NULL;
+        v_period_key := public.resolve_quota_period_key(v_entry.tenant_id, 'max_monthly_appointments');
+        v_quota_res := public.consume_commercial_usage(v_entry.tenant_id, 'max_monthly_appointments', v_period_key);
+        IF NOT (v_quota_res->>'success')::BOOLEAN THEN
+            RETURN jsonb_build_object('success', false, 'error', 'COMMERCIAL_QUOTA_EXCEEDED');
+        END IF;
     END;
 
     -- Canonical appointment insertion matching create_public_booking contract
