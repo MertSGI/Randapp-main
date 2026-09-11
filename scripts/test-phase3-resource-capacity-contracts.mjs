@@ -44,8 +44,9 @@ const tests = [
                 /REFERENCES\s+public\.resources\s*\(id,\s*tenant_id\)/i.test(sql)
   },
   {
-    name: '7. Table public.appointment_resources enforces composite (resource_id, tenant_id) and unique (appointment_id, resource_id)',
+    name: '7. Table public.appointment_resources enforces composite (appointment_id, tenant_id) and (resource_id, tenant_id) with unique (appointment_id, resource_id)',
     test: () => /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+public\.appointment_resources/i.test(sql) &&
+                /REFERENCES\s+public\.appointments\s*\(id,\s*tenant_id\)/i.test(sql) &&
                 /REFERENCES\s+public\.resources\s*\(id,\s*tenant_id\)/i.test(sql) &&
                 /CONSTRAINT\s+uq_appointment_resource\s+UNIQUE/i.test(sql)
   },
@@ -83,10 +84,12 @@ const tests = [
                 /RESOURCE_TENANT_MISMATCH/i.test(sql)
   },
   {
-    name: '14. create_booking_with_resources executes atomic booking + resource allocation in one transaction',
-    test: () => /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.create_booking_with_resources/i.test(sql) &&
+    name: '14. Canonical create_public_booking composes resource evaluation, locking, and allocation into single lifecycle (ENGINE COUNT = 1)',
+    test: () => /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.create_public_booking/i.test(sql) &&
+                /resource_plan_locking/i.test(sql) &&
                 /INSERT\s+INTO\s+public\.appointments/i.test(sql) &&
-                /INSERT\s+INTO\s+public\.appointment_resources/i.test(sql)
+                /INSERT\s+INTO\s+public\.appointment_resources/i.test(sql) &&
+                /allocation_plan/i.test(sql)
   },
   {
     name: '15. Administrative RPCs provided: admin_create_resource, admin_update_resource, admin_create_resource_block, admin_set_service_resource_requirement',
