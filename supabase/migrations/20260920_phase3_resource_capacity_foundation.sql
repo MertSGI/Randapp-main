@@ -22,6 +22,23 @@
 --    - admin_set_service_resource_requirement, admin_delete_service_resource_requirement
 
 -- =========================================================================
+-- 0. Prerequisite: composite unique constraint on public.appointments
+--    Required for FOREIGN KEY (appointment_id, tenant_id) REFERENCES
+--    public.appointments(id, tenant_id) in appointment_resources and
+--    downstream Phase 4 tables.
+-- =========================================================================
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'uq_appointments_id_tenant'
+    ) THEN
+        ALTER TABLE public.appointments
+            ADD CONSTRAINT uq_appointments_id_tenant UNIQUE (id, tenant_id);
+    END IF;
+END $$;
+
+-- =========================================================================
 -- 1. Table: public.resources
 -- =========================================================================
 
