@@ -172,6 +172,19 @@ const tests = [
               /queued_outbox/i.test(sql) &&
               !/tw_api_key/i.test(sql) &&
               !/sendgrid/i.test(sql)
+  },
+  {
+    category: '7. EV079-R4 Exact Cohort Boundary & Ambiguous Consent Invariants',
+    name: '7.1 Enforces exact 60d and 90d cohort boundaries with fail-closed rejection for arbitrary thresholds',
+    fn: () => /p_inactivity_days\s*=\s*60/i.test(sql) &&
+              /p_inactivity_days\s*=\s*90/i.test(sql) &&
+              /INVALID_COHORT_INACTIVITY_BOUNDARY/i.test(sql)
+  },
+  {
+    category: '7. EV079-R4 Exact Cohort Boundary & Ambiguous Consent Invariants',
+    name: '7.2 Fails closed on ambiguous or conflicting consent rows at the same authoritative timestamp',
+    fn: () => /SUPPRESSED_AMBIGUOUS_MARKETING_CONSENT/i.test(sql) &&
+              /v_granted_count\s*>\s*0\s+AND\s+v_revoked_count\s*>\s*0/i.test(sql)
   }
 ];
 

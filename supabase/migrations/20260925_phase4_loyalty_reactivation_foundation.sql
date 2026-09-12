@@ -385,10 +385,22 @@ BEGIN
     END IF;
 
     -- 2. Determine explicit cohort_code from requested inactivity boundary
-    IF p_inactivity_days >= 90 THEN
+    -- EV079-R4 CORRECTION 1: Exact cohort boundary enforcement.
+    -- Only exact 60 or 90 allowed; arbitrary day thresholds fail closed immediately.
+    IF p_inactivity_days = 60 THEN
+        v_cohort_code := 'inactive_60d';
+    ELSIF p_inactivity_days = 90 THEN
         v_cohort_code := 'inactive_90d';
     ELSE
-        v_cohort_code := 'inactive_60d';
+        RETURN jsonb_build_object(
+            'success', false,
+            'tenant_id', p_tenant_id,
+            'error', 'INVALID_COHORT_INACTIVITY_BOUNDARY',
+            'message', 'Cohort boundary must be exactly 60 or 90 days',
+            'detected_customers', 0,
+            'queued_outbox_count', 0,
+            'suppressed_count', 0
+        );
     END IF;
 
     -- 3. Iterate over eligible customers whose latest completed appointment is >= p_inactivity_days ago
@@ -424,15 +436,60 @@ BEGIN
         v_detected_count := v_detected_count + 1;
 
         -- 4. Canonical Marketing Consent Evaluation (FAIL-CLOSED)
-        -- Query latest authoritative state from canonical consent_ledger.
-        -- If false, missing, ambiguous, or not provable -> SUPPRESSED_NO_CURRENT_MARKETING_CONSENT
-        SELECT is_granted INTO v_current_consent
-        FROM public.consent_ledger
-        WHERE tenant_id = p_tenant_id::text
-          AND customer_id = v_cand.customer_id::text
-          AND consent_type = 'marketing'
-        ORDER BY created_at DESC
-        LIMIT 1;
+        -- EV079-R4 CORRECTION 2: Deterministic and provable consent evaluation.
+        -- Identifies the latest authoritative timestamp. If multiple conflicting states exist at that same timestamp,
+        -- or if no consent exists, or if latest state is false/unprovable -> fail closed.
+        DECLARE
+            v_max_created_at TIMESTAMPTZ;
+            v_granted_count INTEGER;
+            v_revoked_count INTEGER;
+        BEGIN
+            SELECT MAX(created_at) INTO v_max_created_at
+            FROM public.consent_ledger
+            WHERE tenant_id = p_tenant_id::text
+              AND customer_id = v_cand.customer_id::text
+              AND consent_type = 'marketing';
+
+            IF v_max_created_at IS NULL THEN
+                -- Missing consent -> SUPPRESSED_NO_CURRENT_MARKETING_CONSENT
+                INSERT INTO public.customer_reactivation_events (
+                    tenant_id, customer_id, cohort_code, last_appointment_at, inactivity_days,
+                    status, suppression_reason, bonus_points_offered
+                ) VALUES (
+                    p_tenant_id, v_cand.customer_id, v_cohort_code, v_cand.last_appt, v_cand.days_inactive,
+                    'suppressed', 'SUPPRESSED_NO_CURRENT_MARKETING_CONSENT', v_bonus_pts
+                );
+                v_suppressed_count := v_suppressed_count + 1;
+                CONTINUE;
+            END IF;
+
+            SELECT
+                COUNT(*) FILTER (WHERE is_granted IS TRUE),
+                COUNT(*) FILTER (WHERE is_granted IS NOT TRUE)
+            INTO v_granted_count, v_revoked_count
+            FROM public.consent_ledger
+            WHERE tenant_id = p_tenant_id::text
+              AND customer_id = v_cand.customer_id::text
+              AND consent_type = 'marketing'
+              AND created_at = v_max_created_at;
+
+            IF v_granted_count > 0 AND v_revoked_count > 0 THEN
+                -- Ambiguous / conflicting consent at same authoritative timestamp -> fail closed
+                INSERT INTO public.customer_reactivation_events (
+                    tenant_id, customer_id, cohort_code, last_appointment_at, inactivity_days,
+                    status, suppression_reason, bonus_points_offered
+                ) VALUES (
+                    p_tenant_id, v_cand.customer_id, v_cohort_code, v_cand.last_appt, v_cand.days_inactive,
+                    'suppressed', 'SUPPRESSED_AMBIGUOUS_MARKETING_CONSENT', v_bonus_pts
+                );
+                v_suppressed_count := v_suppressed_count + 1;
+                CONTINUE;
+            ELSIF v_granted_count > 0 AND v_revoked_count = 0 THEN
+                v_current_consent := true;
+            ELSE
+                v_current_consent := false;
+            END IF;
+        END;
 
         IF v_current_consent IS NOT TRUE THEN
             INSERT INTO public.customer_reactivation_events (
