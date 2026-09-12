@@ -1073,5 +1073,17 @@
         "contract_suites_tested": 17,
         "security_matrix_passed": 13,
         "status": "DISPOSABLE_POSTGRES_HARNESS_DISPATCHED"
+    },
+    "phase5_node4_clinic_ai_state": {
+        "candidate_branch": "aos/phase5-clinic-ai-soap-integration",
+        "candidate_sha": "4130ef3220aadd07fb47594589303f65241cc0e8",
+        "upstream_base_sha": "0e6d4a2597517ec81e63e63312e21a7318e21318",
+        "contracts_tested": 8,
+        "contracts_result": "PASS",
+        "behavioral_tested": 25,
+        "behavioral_result": "PASS",
+        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+        "push_branch": "origin/aos/phase5-clinic-ai-soap-integration",
+        "evidence_id": "EV-084"
     }
 }
