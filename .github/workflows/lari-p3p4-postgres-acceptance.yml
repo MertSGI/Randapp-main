@@ -3,6 +3,7 @@ name: LARI Program V2 P3+P4 Disposable Postgres Live Behavioral Acceptance
 on:
   push:
     branches:
+      - ci/program-v2-p3p4-live-behavioral-acceptance-r1-20260911-01
       - ci/program-v2-p3p4-live-behavioral-acceptance-20260911-01
       - ci/program-v2-p3p4-postgres-acceptance-20260911-01
   workflow_dispatch:
@@ -147,8 +148,43 @@ jobs:
       - name: Execute Live PostgreSQL Behavioral Acceptance Matrix
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
-          echo "=== EXECUTING LIVE POSTGRESQL BEHAVIORAL MATRIX (ALL 15 DOMAINS + EV079-R3) ==="
+          echo "=== EXECUTING LIVE POSTGRESQL BEHAVIORAL MATRIX (ALL 15 DOMAINS + EV079-R4) ==="
           node supabase/tests/program-v2/p3p4-live/test-live-behavioral-matrix.mjs
+
+      - name: Application Build
+        run: |
+          echo "=== RUNNING APPLICATION BUILD ==="
+          npm run build
+
+      - name: Typecheck & Lint
+        run: |
+          echo "=== RUNNING TYPECHECK & LINT ==="
+          npm run lint
+
+      - name: Dependency Security Audit Classification
+        run: |
+          echo "=== RUNNING DEPENDENCY SECURITY AUDIT (AUDIT ONLY - NO MUTATION) ==="
+          npm audit --json > npm-audit-report.json || true
+          node -e "
+            const fs = require('fs');
+            const data = JSON.parse(fs.readFileSync('npm-audit-report.json', 'utf8'));
+            const vulns = data.vulnerabilities || {};
+            const summary = {
+              total: Object.keys(vulns).length,
+              direct: 0,
+              transitive: 0,
+              dev: 0,
+              runtime: 0,
+              fixAvailable: 0
+            };
+            for (const [name, v] of Object.entries(vulns)) {
+              if (v.isDirect) summary.direct++; else summary.transitive++;
+              if (v.dev) summary.dev++; else summary.runtime++;
+              if (v.fixAvailable) summary.fixAvailable++;
+            }
+            console.log('DEPENDENCY AUDIT CLASSIFICATION SUMMARY:');
+            console.log(JSON.stringify(summary, null, 2));
+          "
 
       - name: Destroy Container
         if: always()

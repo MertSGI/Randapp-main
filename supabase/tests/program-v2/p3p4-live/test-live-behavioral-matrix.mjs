@@ -83,20 +83,47 @@ async function run() {
       DELETE FROM public.branches WHERE tenant_id IN ('${tenantA}', '${tenantB}');
       DELETE FROM public.tenants WHERE id IN ('${tenantA}', '${tenantB}');
 
-      -- Insert Tenants
+      -- 1. Create Deterministic Test Tenants
       INSERT INTO public.tenants (id, name, slug, status, onboarding_status, public_site_status)
       VALUES 
         ('${tenantA}', 'Tenant A Live Behavioral', 'tenant-a-live', 'active', 'completed', 'published'),
         ('${tenantB}', 'Tenant B Live Cross Tenant', 'tenant-b-live', 'active', 'completed', 'published');
 
-      -- Insert Branches
-      INSERT INTO public.branches (id, tenant_id, name, slug, is_active, is_primary, timezone)
-      VALUES
-        ('${branchA1}', '${tenantA}', 'Branch A1 Primary', 'branch-a1', true, true, 'Europe/Istanbul'),
-        ('${branchA2}', '${tenantA}', 'Branch A2 Secondary', 'branch-a2', true, false, 'Europe/Istanbul'),
-        ('${branchB1}', '${tenantB}', 'Branch B1 Foreign', 'branch-b1', true, true, 'Europe/Istanbul');
+      -- 2. Establish Deterministic Valid Commercial Subscriptions (Unlimited quotas)
+      -- Find published plan version with all core features and unlimited quotas (max_branches, max_staff, max_services, max_monthly_appointments)
+      INSERT INTO public.subscriptions (
+        tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_start, current_period_end
+      )
+      SELECT 
+        '${tenantA}', p.code, pv.id, 'active', 'manual', now() - interval '1 day', now() + interval '1 year'
+      FROM public.plan_versions pv
+      JOIN public.plans p ON p.id = pv.plan_id
+      JOIN public.plan_entitlements pe_core ON pe_core.plan_version_id = pv.id AND pe_core.feature_key = 'core_booking' AND pe_core.boolean_value = true
+      JOIN public.plan_entitlements pe_branch ON pe_branch.plan_version_id = pv.id AND pe_branch.feature_key = 'max_branches' AND pe_branch.is_unlimited = true
+      JOIN public.plan_entitlements pe_staff ON pe_staff.plan_version_id = pv.id AND pe_staff.feature_key = 'max_staff' AND pe_staff.is_unlimited = true
+      JOIN public.plan_entitlements pe_service ON pe_service.plan_version_id = pv.id AND pe_service.feature_key = 'max_services' AND pe_service.is_unlimited = true
+      JOIN public.plan_entitlements pe_appt ON pe_appt.plan_version_id = pv.id AND pe_appt.feature_key = 'max_monthly_appointments' AND pe_appt.is_unlimited = true
+      WHERE pv.lifecycle_status = 'published'
+      ORDER BY pv.created_at DESC
+      LIMIT 1;
 
-      -- Auth users & user profiles
+      INSERT INTO public.subscriptions (
+        tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_start, current_period_end
+      )
+      SELECT 
+        '${tenantB}', p.code, pv.id, 'active', 'manual', now() - interval '1 day', now() + interval '1 year'
+      FROM public.plan_versions pv
+      JOIN public.plans p ON p.id = pv.plan_id
+      JOIN public.plan_entitlements pe_core ON pe_core.plan_version_id = pv.id AND pe_core.feature_key = 'core_booking' AND pe_core.boolean_value = true
+      JOIN public.plan_entitlements pe_branch ON pe_branch.plan_version_id = pv.id AND pe_branch.feature_key = 'max_branches' AND pe_branch.is_unlimited = true
+      JOIN public.plan_entitlements pe_staff ON pe_staff.plan_version_id = pv.id AND pe_staff.feature_key = 'max_staff' AND pe_staff.is_unlimited = true
+      JOIN public.plan_entitlements pe_service ON pe_service.plan_version_id = pv.id AND pe_service.feature_key = 'max_services' AND pe_service.is_unlimited = true
+      JOIN public.plan_entitlements pe_appt ON pe_appt.plan_version_id = pv.id AND pe_appt.feature_key = 'max_monthly_appointments' AND pe_appt.is_unlimited = true
+      WHERE pv.lifecycle_status = 'published'
+      ORDER BY pv.created_at DESC
+      LIMIT 1;
+
+      -- 3. Create Auth Users & User Profiles
       INSERT INTO auth.users (id, email) VALUES
         ('${userOwnerA}', 'ownera@lari.test'),
         ('${userStaffA}', 'staffa@lari.test'),
@@ -107,14 +134,21 @@ async function run() {
         ('${userStaffA}', '${tenantA}', 'Staff A', 'staff', true),
         ('${userOwnerB}', '${tenantB}', 'Owner B', 'tenant_owner', true);
 
-      -- Staff table entity & map to branchA1
+      -- 4. Create Quota-Controlled Branches (Trigger enforce_branch_quota will succeed because subscription exists)
+      INSERT INTO public.branches (id, tenant_id, name, slug, is_active, is_primary, timezone)
+      VALUES
+        ('${branchA1}', '${tenantA}', 'Branch A1 Primary', 'branch-a1', true, true, 'Europe/Istanbul'),
+        ('${branchA2}', '${tenantA}', 'Branch A2 Secondary', 'branch-a2', true, false, 'Europe/Istanbul'),
+        ('${branchB1}', '${tenantB}', 'Branch B1 Foreign', 'branch-b1', true, true, 'Europe/Istanbul');
+
+      -- 5. Create Quota-Controlled Staff
       INSERT INTO public.staff (id, tenant_id, user_profile_id, name, title, active)
       VALUES ('${staffEntityA}', '${tenantA}', '${userStaffA}', 'Staff A Specialist', 'Specialist', true);
 
       INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id)
       VALUES ('${tenantA}', '${staffEntityA}', '${branchA1}');
 
-      -- Service
+      -- 6. Create Quota-Controlled Services
       INSERT INTO public.services (id, tenant_id, name, duration, price, active)
       VALUES ('${serviceA}', '${tenantA}', 'Deep Facial Treatment', 30, 500, true);
 
@@ -126,46 +160,22 @@ async function run() {
       INSERT INTO public.staff_services (staff_id, service_id)
       VALUES ('${staffEntityA}', '${serviceA}');
 
-      -- Staff schedule availability (Monday to Sunday 08:00 - 20:00)
+      -- 7. Staff schedule availability (Monday to Sunday 08:00 - 20:00)
       INSERT INTO public.staff_availability_rules (tenant_id, staff_id, day_of_week, start_time, end_time, is_active)
       SELECT '${tenantA}', '${staffEntityA}', d, '08:00:00'::time, '20:00:00'::time, true
       FROM generate_series(0, 6) AS d;
 
-      -- Resource definition & mapping
+      -- 8. Remaining Resources & Customers
       INSERT INTO public.resources (id, tenant_id, branch_id, name, capacity, is_active)
       VALUES ('${resourceA}', '${tenantA}', '${branchA1}', 'Treatment Bed 1', 1, true);
 
       INSERT INTO public.service_resource_requirements (tenant_id, service_id, resource_id, quantity)
       VALUES ('${tenantA}', '${serviceA}', '${resourceA}', 1);
 
-      -- Customers
       INSERT INTO public.customers (id, tenant_id, name, email, phone)
       VALUES 
         ('${customerA}', '${tenantA}', 'Ayse Customer A', 'ayse@example.com', '+905551112233'),
         ('${customerB}', '${tenantB}', 'Fatma Customer B', 'fatma@example.com', '+905554445566');
-
-      -- Active subscription qualifying H1C unlimited quotas
-      INSERT INTO public.subscriptions (
-        tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_start, current_period_end
-      )
-      SELECT 
-        '${tenantA}', p.code, pv.id, 'active', 'manual', now() - interval '1 day', now() + interval '1 year'
-      FROM public.plan_versions pv
-      JOIN public.plans p ON p.id = pv.plan_id
-      JOIN public.plan_entitlements pe ON pe.plan_version_id = pv.id AND pe.feature_key = 'core_booking' AND pe.boolean_value = true
-      WHERE pv.lifecycle_status = 'published'
-      LIMIT 1;
-
-      INSERT INTO public.subscriptions (
-        tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_start, current_period_end
-      )
-      SELECT 
-        '${tenantB}', p.code, pv.id, 'active', 'manual', now() - interval '1 day', now() + interval '1 year'
-      FROM public.plan_versions pv
-      JOIN public.plans p ON p.id = pv.plan_id
-      JOIN public.plan_entitlements pe ON pe.plan_version_id = pv.id AND pe.feature_key = 'core_booking' AND pe.boolean_value = true
-      WHERE pv.lifecycle_status = 'published'
-      LIMIT 1;
     `);
     console.log('Global deterministic test fixtures seeded successfully.\n');
 
@@ -1529,7 +1539,7 @@ async function run() {
     `);
     const outboxBefore5 = (await mainClient.query(`SELECT count(*) FROM public.communication_outbox WHERE tenant_id = '${tenantA}';`)).rows[0].count;
     const rScan90 = await mainClient.query(`
-      SELECT public.scan_customer_reactivation_cohorts('${tenantA}') AS res;
+      SELECT public.scan_customer_reactivation_cohorts('${tenantA}', 90) AS res;
     `);
     const outboxAfter5 = (await mainClient.query(`SELECT count(*) FROM public.communication_outbox WHERE tenant_id = '${tenantA}';`)).rows[0].count;
     const distinct90 = (await mainClient.query(`
@@ -1543,10 +1553,62 @@ async function run() {
     // Case 6: 90_DAY_REPEAT_SCAN -> event delta=0, outbox delta=0
     const outboxBefore6 = (await mainClient.query(`SELECT count(*) FROM public.communication_outbox WHERE tenant_id = '${tenantA}';`)).rows[0].count;
     const rScan90Repeat = await mainClient.query(`
-      SELECT public.scan_customer_reactivation_cohorts('${tenantA}') AS res;
+      SELECT public.scan_customer_reactivation_cohorts('${tenantA}', 90) AS res;
     `);
     const outboxAfter6 = (await mainClient.query(`SELECT count(*) FROM public.communication_outbox WHERE tenant_id = '${tenantA}';`)).rows[0].count;
     assert(parseInt(outboxAfter6, 10) - parseInt(outboxBefore6, 10) === 0, 'EV079-R3: 90_DAY_REPEAT_SCAN outbox_count_delta=0');
+
+    // -------------------------------------------------------------------------
+    // EV079-R4 LIVE TESTS: Exact Cohort Boundaries & Ambiguous Consent Fail-Closed
+    // -------------------------------------------------------------------------
+    console.log('\n--- EV079-R4 REQUIRED LIVE TESTS ---');
+
+    // R4 Case 1: Arbitrary thresholds fail closed (1, 59, 61, 89)
+    for (const badDays of [1, 59, 61, 89]) {
+      const outboxBeforeBad = (await mainClient.query(`SELECT count(*) FROM public.communication_outbox WHERE tenant_id = '${tenantA}';`)).rows[0].count;
+      const resBad = (await mainClient.query(`
+        SELECT public.scan_customer_reactivation_cohorts('${tenantA}', ${badDays}) AS res;
+      `)).rows[0].res;
+      const outboxAfterBad = (await mainClient.query(`SELECT count(*) FROM public.communication_outbox WHERE tenant_id = '${tenantA}';`)).rows[0].count;
+
+      assert(resBad.success === false, `EV079-R4: ARBITRARY_${badDays}_DAY_THRESHOLD success=false`);
+      assert(resBad.error === 'INVALID_COHORT_INACTIVITY_BOUNDARY', `EV079-R4: ARBITRARY_${badDays}_DAY_THRESHOLD error=INVALID_COHORT_INACTIVITY_BOUNDARY`);
+      assert(parseInt(outboxAfterBad, 10) - parseInt(outboxBeforeBad, 10) === 0, `EV079-R4: ARBITRARY_${badDays}_DAY_THRESHOLD outbox_count_delta=0`);
+    }
+
+    // R4 Case 2: Ambiguous latest consent fail-closed
+    // Create candidate customer with appointment 70 days ago
+    const custAmbiguous = '88888888-7070-4070-8070-888888888888';
+    await mainClient.query(`
+      INSERT INTO public.customers (id, tenant_id, name, email, phone)
+      VALUES ('${custAmbiguous}', '${tenantA}', 'Ambiguous Consent Client', 'ambig@example.com', '+905557070701')
+      ON CONFLICT (id) DO NOTHING;
+
+      INSERT INTO public.appointments (tenant_id, branch_id, customer_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, status)
+      VALUES ('${tenantA}', '${branchA1}', '${custAmbiguous}', '${serviceA}', '${staffEntityA}', 'Ambiguous Consent Client', '+905557070701', (current_date - 70)::date, '11:00:00'::time, 'completed');
+
+      -- Insert 2 conflicting consent rows with EXACT SAME timestamp
+      DELETE FROM public.consent_ledger WHERE customer_id = '${custAmbiguous}';
+      INSERT INTO public.consent_ledger (tenant_id, customer_id, consent_type, is_granted, ip_address, created_at)
+      VALUES 
+        ('${tenantA}', '${custAmbiguous}', 'marketing', true, '127.0.0.1', '2026-09-12 12:00:00+00'),
+        ('${tenantA}', '${custAmbiguous}', 'marketing', false, '127.0.0.1', '2026-09-12 12:00:00+00');
+    `);
+
+    const outboxBeforeAmb = (await mainClient.query(`SELECT count(*) FROM public.communication_outbox WHERE tenant_id = '${tenantA}';`)).rows[0].count;
+    const rScanAmb = await mainClient.query(`
+      SELECT public.scan_customer_reactivation_cohorts('${tenantA}', 60) AS res;
+    `);
+    const outboxAfterAmb = (await mainClient.query(`SELECT count(*) FROM public.communication_outbox WHERE tenant_id = '${tenantA}';`)).rows[0].count;
+
+    const ambEvent = (await mainClient.query(`
+      SELECT status, suppression_reason FROM public.customer_reactivation_events 
+      WHERE customer_id = '${custAmbiguous}';
+    `)).rows[0];
+
+    assert(ambEvent && ambEvent.status === 'suppressed', 'EV079-R4: AMBIGUOUS_LATEST_CONSENT status=suppressed');
+    assert(ambEvent && ambEvent.suppression_reason === 'SUPPRESSED_AMBIGUOUS_MARKETING_CONSENT', 'EV079-R4: AMBIGUOUS_LATEST_CONSENT reason=SUPPRESSED_AMBIGUOUS_MARKETING_CONSENT');
+    assert(parseInt(outboxAfterAmb, 10) - parseInt(outboxBeforeAmb, 10) === 0, 'EV079-R4: AMBIGUOUS_LATEST_CONSENT outbox_count_delta=0');
 
     // Case 7: COOLDOWN_SUPPRESSED -> outbox_count_delta=0
     // Another scan within cooldown is suppressed
@@ -1556,7 +1618,7 @@ async function run() {
       VALUES ('${tenantA}', '${customerA}', 'inactive_60d', now() - interval '95 days', 95, 'queued_outbox', now() - interval '5 days');
     `);
     const outboxBefore7 = (await mainClient.query(`SELECT count(*) FROM public.communication_outbox WHERE tenant_id = '${tenantA}';`)).rows[0].count;
-    await mainClient.query(`SELECT public.scan_customer_reactivation_cohorts('${tenantA}');`);
+    await mainClient.query(`SELECT public.scan_customer_reactivation_cohorts('${tenantA}', 60);`);
     const outboxAfter7 = (await mainClient.query(`SELECT count(*) FROM public.communication_outbox WHERE tenant_id = '${tenantA}';`)).rows[0].count;
     assert(parseInt(outboxAfter7, 10) - parseInt(outboxBefore7, 10) === 0, 'EV079-R3: COOLDOWN_SUPPRESSED outbox_count_delta=0');
 
