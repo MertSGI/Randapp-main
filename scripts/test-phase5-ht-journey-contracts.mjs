@@ -1,4 +1,4 @@
-﻿import fs from 'fs';
+import fs from 'fs';
 import path from 'path';
 
 console.log('--- PHASE 5 NODE 3 HEALTH TOURISM JOURNEYS & QUOTES CONTRACT VALIDATION ---');
@@ -67,6 +67,29 @@ assertRule(9, 'TypeScript types exported in types/healthTourism.ts',
   fs.readFileSync('types/healthTourism.ts', 'utf8').includes('export interface HtJourneyQuote') &&
   fs.readFileSync('types/healthTourism.ts', 'utf8').includes('export interface HtJourneyItineraryEvent'));
 
+assertRule(10, 'ht_assert_caller_ht_authority enforces canonical ht_staff_profiles capabilities',
+  sql.includes('ht_assert_caller_ht_authority') &&
+  sql.includes('public.ht_staff_profiles') &&
+  sql.includes('can_manage_ht_leads'));
+
+assertRule(11, 'ht_create_treatment_journey validates foreign lead, customer and coordinator tenant alignment',
+  sql.includes('Lead does not belong to caller tenant') &&
+  sql.includes('Customer does not belong to caller tenant') &&
+  sql.includes('Assigned coordinator is not an active HT staff member'));
+
+assertRule(12, 'ht_create_or_update_journey_quote locks journey row FOR UPDATE and verifies caller HT authority',
+  sql.includes('SELECT * INTO v_journey') &&
+  sql.includes('FOR UPDATE') &&
+  sql.includes('ht_assert_caller_ht_authority(v_caller_uid, v_journey.tenant_id, true)'));
+
+assertRule(13, 'ht_create_or_update_journey_quote validates currency format and authoritative item total sum',
+  sql.includes("p_currency !~ '^[A-Z]{3}$'") &&
+  sql.includes('Sum of line items (%) does not match total amount (%)'));
+
+assertRule(14, 'ht_add_journey_itinerary_event locks journey and enforces appointment & coordinator tenant integrity',
+  sql.includes('Appointment does not belong to journey tenant') &&
+  sql.includes('Assigned coordinator is not an active HT staff member in journey tenant'));
+
 console.log('\n========================================');
-console.log('PHASE 5 NODE 3 CONTRACTS: 9 | PASSED: 9 | FAILED: 0');
+console.log('PHASE 5 NODE 3 CONTRACTS: 14 | PASSED: 14 | FAILED: 0');
 console.log('========================================\n');

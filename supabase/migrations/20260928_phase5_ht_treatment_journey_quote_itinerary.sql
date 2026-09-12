@@ -1,24 +1,24 @@
 ﻿-- =========================================================================
--- MIGRATION: 20260928_phase5_ht_treatment_journey_quote_itinerary.sql
+-- MIGRATION: 20260928_phase5_ht_treatment_journey_quote_itinerary.sql (R1 SECURITY HARDENED)
 -- Description: Phase 5 Node 3 Health Tourism Treatment Journey, Quote & Itinerary Domain
 -- Authority: LARI-AOS-PROGRAM-V2-BOOTSTRAP-20260908-01 (DECISION-020)
 -- Program: LARI-PROGRAM-V2-REAL-PRODUCT-20260908-01
--- Constraints:
---   1. Reuses canonical ht_leads, customers, tenants, staff, and appointments models.
---   2. Strict tenant isolation on all journey, quote, and itinerary entities.
---   3. Financial quotes stored in explicit minor units (amount_minor_units INTEGER) with currency code.
---   4. Quota check against max_active_journeys in create_treatment_journey RPC.
---   5. Pure server-authoritative RPCs with role enforcement (coordinator / tenant_owner).
---   6. Zero live external travel/flight/hotel booking mutations or payment collections.
+-- Security Hardening Corrections:
+--   1. Strict server-authoritative caller tenant derivation & HT coordinator capability verification.
+--   2. Explicit cross-tenant entity validation for lead_id, customer_id, coordinator_staff_id, appointment_id, assigned_coordinator_staff_id.
+--   3. Quote concurrency row/advisory locking on journey ID to eliminate race conditions on MAX(version)+1.
+--   4. Currency code validation, amount bounds, and authoritative item total sum checks.
+--   5. Quota concurrency transactional row locking on tenant vertical quota evaluation.
+--   6. Fail-closed RLS; revoke from PUBLIC, anon; grant authenticated, service_role.
 -- =========================================================================
 
 -- 1. TABLE: public.ht_treatment_journeys
 CREATE TABLE IF NOT EXISTS public.ht_treatment_journeys (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-    lead_id UUID NULL REFERENCES public.ht_leads(id) ON DELETE SET NULL,
-    customer_id UUID NULL REFERENCES public.customers(id) ON DELETE SET NULL,
-    coordinator_staff_id UUID NULL REFERENCES public.staff(id) ON DELETE SET NULL,
+    lead_id UUID NULL,
+    customer_id UUID NULL,
+    coordinator_staff_id UUID NULL,
     status TEXT NOT NULL DEFAULT 'inquiry' CHECK (
         status IN ('inquiry', 'quote_sent', 'booked', 'in_travel', 'in_treatment', 'completed', 'cancelled')
     ),
@@ -30,7 +30,13 @@ CREATE TABLE IF NOT EXISTS public.ht_treatment_journeys (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
 
-    CONSTRAINT uq_ht_treatment_journeys_id_tenant UNIQUE (id, tenant_id)
+    CONSTRAINT uq_ht_treatment_journeys_id_tenant UNIQUE (id, tenant_id),
+    CONSTRAINT fk_ht_treatment_journeys_lead_tenant FOREIGN KEY (lead_id, tenant_id)
+        REFERENCES public.ht_leads(id, tenant_id) ON DELETE SET NULL,
+    CONSTRAINT fk_ht_treatment_journeys_customer_tenant FOREIGN KEY (customer_id, tenant_id)
+        REFERENCES public.customers(id, tenant_id) ON DELETE SET NULL,
+    CONSTRAINT fk_ht_treatment_journeys_coordinator_tenant FOREIGN KEY (coordinator_staff_id, tenant_id)
+        REFERENCES public.staff(id, tenant_id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_ht_treatment_journeys_tenant_status ON public.ht_treatment_journeys(tenant_id, status);
@@ -48,9 +54,9 @@ CREATE TABLE IF NOT EXISTS public.ht_journey_quotes (
     status TEXT NOT NULL DEFAULT 'draft' CHECK (
         status IN ('draft', 'sent', 'accepted', 'rejected', 'expired')
     ),
-    currency VARCHAR(3) NOT NULL DEFAULT 'EUR',
+    currency VARCHAR(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
     total_amount_minor_units INTEGER NOT NULL CHECK (total_amount_minor_units >= 0),
-    items JSONB NOT NULL DEFAULT '[]'::jsonb, -- Array of { description, category, amount_minor_units }
+    items JSONB NOT NULL DEFAULT '[]'::jsonb,
     valid_until TIMESTAMPTZ NULL,
     created_by UUID NULL REFERENCES public.users_profile(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
@@ -79,7 +85,7 @@ CREATE TABLE IF NOT EXISTS public.ht_journey_itinerary_events (
     scheduled_start TIMESTAMPTZ NOT NULL,
     scheduled_end TIMESTAMPTZ NULL,
     location TEXT NULL,
-    assigned_coordinator_staff_id UUID NULL REFERENCES public.staff(id) ON DELETE SET NULL,
+    assigned_coordinator_staff_id UUID NULL,
     notes TEXT NULL,
     status TEXT NOT NULL DEFAULT 'scheduled' CHECK (
         status IN ('scheduled', 'in_progress', 'completed', 'cancelled')
@@ -90,6 +96,10 @@ CREATE TABLE IF NOT EXISTS public.ht_journey_itinerary_events (
     CONSTRAINT uq_ht_journey_itinerary_events_id_tenant UNIQUE (id, tenant_id),
     CONSTRAINT fk_ht_journey_itinerary_events_journey_tenant FOREIGN KEY (journey_id, tenant_id)
         REFERENCES public.ht_treatment_journeys(id, tenant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_ht_journey_itinerary_events_appointment_tenant FOREIGN KEY (appointment_id, tenant_id)
+        REFERENCES public.appointments(id, tenant_id) ON DELETE SET NULL,
+    CONSTRAINT fk_ht_journey_itinerary_events_staff_tenant FOREIGN KEY (assigned_coordinator_staff_id, tenant_id)
+        REFERENCES public.staff(id, tenant_id) ON DELETE SET NULL,
     CONSTRAINT chk_ht_journey_itinerary_time_order CHECK (
         scheduled_end IS NULL OR scheduled_end >= scheduled_start
     )
@@ -115,7 +125,77 @@ CREATE POLICY "Deny direct browser mutation on ht_journey_itinerary_events"
 ON public.ht_journey_itinerary_events FOR ALL TO authenticated
 USING (false) WITH CHECK (false);
 
--- 5. SERVER-AUTHORITATIVE RPCS
+-- 5. INTERNAL HELPER: VERIFY CALLER HT AUTHORITY
+CREATE OR REPLACE FUNCTION public.ht_assert_caller_ht_authority(
+    p_caller_uid UUID,
+    p_target_tenant_id UUID,
+    p_require_manage BOOLEAN DEFAULT false
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_staff RECORD;
+    v_csp RECORD;
+    v_user RECORD;
+    v_vert_ctx JSONB;
+BEGIN
+    IF p_caller_uid IS NULL THEN
+        RAISE EXCEPTION 'UNAUTHENTICATED: Authentication required.';
+    END IF;
+
+    -- Check active staff identity in the specific tenant
+    SELECT s.* INTO v_staff
+    FROM public.staff s
+    WHERE s.user_profile_id = p_caller_uid
+      AND s.tenant_id = p_target_tenant_id
+      AND s.active = true;
+
+    IF v_staff.id IS NOT NULL THEN
+        -- Check canonical ht_staff_profiles
+        SELECT * INTO v_csp
+        FROM public.ht_staff_profiles
+        WHERE staff_id = v_staff.id
+          AND tenant_id = p_target_tenant_id;
+
+        IF v_csp.staff_id IS NULL THEN
+            RAISE EXCEPTION 'FORBIDDEN: Caller has no Health Tourism staff profile.';
+        END IF;
+
+        IF p_require_manage AND v_csp.can_manage_ht_leads IS NOT TRUE THEN
+            RAISE EXCEPTION 'FORBIDDEN: Caller lacks can_manage_ht_leads capability.';
+        END IF;
+
+        IF NOT p_require_manage AND v_csp.can_view_ht_leads IS NOT TRUE AND v_csp.can_manage_ht_leads IS NOT TRUE THEN
+            RAISE EXCEPTION 'FORBIDDEN: Caller lacks Health Tourism lead/journey permissions.';
+        END IF;
+
+        RETURN v_staff.id;
+    END IF;
+
+    -- Fallback: check active tenant_owner of the exact tenant
+    SELECT * INTO v_user
+    FROM public.users_profile
+    WHERE id = p_caller_uid
+      AND tenant_id = p_target_tenant_id
+      AND role = 'tenant_owner'
+      AND active = true;
+
+    IF v_user.id IS NOT NULL THEN
+        RETURN NULL; -- Tenant owner authorized without specific staff ID
+    END IF;
+
+    RAISE EXCEPTION 'FORBIDDEN: Cross-tenant access denied or insufficient Health Tourism permissions.';
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.ht_assert_caller_ht_authority FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ht_assert_caller_ht_authority TO authenticated, service_role;
+
+
+-- 6. SERVER-AUTHORITATIVE RPCS
 
 -- A. create_treatment_journey
 CREATE OR REPLACE FUNCTION public.ht_create_treatment_journey(
@@ -136,6 +216,7 @@ AS $$
 DECLARE
     v_caller_uid UUID := auth.uid();
     v_staff RECORD;
+    v_user RECORD;
     v_tenant_id UUID;
     v_vert_ctx JSONB;
     v_active_journeys_count INTEGER;
@@ -145,6 +226,10 @@ DECLARE
 BEGIN
     IF v_caller_uid IS NULL THEN
         RAISE EXCEPTION 'UNAUTHENTICATED: Authentication required.';
+    END IF;
+
+    IF p_title IS NULL OR trim(p_title) = '' THEN
+        RAISE EXCEPTION 'INVALID_INPUT: Title is required.';
     END IF;
 
     -- Derive caller active staff and tenant
@@ -157,15 +242,17 @@ BEGIN
 
     IF v_staff.id IS NOT NULL THEN
         v_tenant_id := v_staff.tenant_id;
+        PERFORM public.ht_assert_caller_ht_authority(v_caller_uid, v_tenant_id, true);
     ELSE
-        -- Fallback: check active tenant_owner
-        SELECT tenant_id INTO v_tenant_id
+        SELECT * INTO v_user
         FROM public.users_profile
         WHERE id = v_caller_uid
           AND role = 'tenant_owner'
           AND active = true;
 
-        IF v_tenant_id IS NULL THEN
+        IF v_user.id IS NOT NULL AND v_user.tenant_id IS NOT NULL THEN
+            v_tenant_id := v_user.tenant_id;
+        ELSE
             RAISE EXCEPTION 'FORBIDDEN: Caller has neither active staff nor tenant_owner identity.';
         END IF;
     END IF;
@@ -181,6 +268,35 @@ BEGIN
     IF (v_vert_ctx->'verticals'->>'health_tourism_enabled')::boolean IS NOT TRUE THEN
         RAISE EXCEPTION 'FORBIDDEN: Health Tourism vertical is not enabled for this tenant.';
     END IF;
+
+    -- Validate optional foreign entity tenant integrity
+    IF p_lead_id IS NOT NULL THEN
+        IF NOT EXISTS (SELECT 1 FROM public.ht_leads WHERE id = p_lead_id AND tenant_id = v_tenant_id) THEN
+            RAISE EXCEPTION 'FORBIDDEN: Lead does not belong to caller tenant.';
+        END IF;
+    END IF;
+
+    IF p_customer_id IS NOT NULL THEN
+        IF NOT EXISTS (SELECT 1 FROM public.customers WHERE id = p_customer_id AND tenant_id = v_tenant_id) THEN
+            RAISE EXCEPTION 'FORBIDDEN: Customer does not belong to caller tenant.';
+        END IF;
+    END IF;
+
+    IF p_coordinator_staff_id IS NOT NULL THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM public.staff s
+            JOIN public.ht_staff_profiles csp ON csp.staff_id = s.id AND csp.tenant_id = s.tenant_id
+            WHERE s.id = p_coordinator_staff_id
+              AND s.tenant_id = v_tenant_id
+              AND s.active = true
+              AND csp.can_manage_ht_leads = true
+        ) THEN
+            RAISE EXCEPTION 'FORBIDDEN: Assigned coordinator is not an active HT staff member in caller tenant.';
+        END IF;
+    END IF;
+
+    -- Transactional concurrency advisory lock on tenant for quota enforcement
+    PERFORM pg_advisory_xact_lock(hashtextextended(v_tenant_id::text, 42));
 
     -- Check max_active_journeys quota
     v_is_unlimited := COALESCE((v_vert_ctx->'quotas'->'max_active_journeys'->>'is_unlimited')::boolean, false);
@@ -259,19 +375,55 @@ DECLARE
     v_journey RECORD;
     v_next_version INTEGER := 1;
     v_quote RECORD;
+    v_item RECORD;
+    v_sum_items INTEGER := 0;
 BEGIN
     IF v_caller_uid IS NULL THEN
         RAISE EXCEPTION 'UNAUTHENTICATED: Authentication required.';
     END IF;
 
+    IF p_journey_id IS NULL THEN
+        RAISE EXCEPTION 'INVALID_INPUT: Journey ID is required.';
+    END IF;
+
+    IF p_currency IS NULL OR p_currency !~ '^[A-Z]{3}$' THEN
+        RAISE EXCEPTION 'INVALID_INPUT: Currency must be a 3-letter ISO code.';
+    END IF;
+
+    IF p_total_amount_minor_units IS NULL OR p_total_amount_minor_units < 0 THEN
+        RAISE EXCEPTION 'INVALID_INPUT: Total amount must be a non-negative integer.';
+    END IF;
+
+    -- Concurrency row lock & fetch journey
     SELECT * INTO v_journey
     FROM public.ht_treatment_journeys
-    WHERE id = p_journey_id;
+    WHERE id = p_journey_id
+    FOR UPDATE;
 
     IF v_journey.id IS NULL THEN
         RAISE EXCEPTION 'NOT_FOUND: Treatment journey not found.';
     END IF;
 
+    -- Strict caller tenant & HT capability check (fail closed against cross-tenant attacks)
+    PERFORM public.ht_assert_caller_ht_authority(v_caller_uid, v_journey.tenant_id, true);
+
+    -- Validate items if provided
+    IF p_items IS NOT NULL AND jsonb_typeof(p_items) = 'array' AND jsonb_array_length(p_items) > 0 THEN
+        FOR v_item IN SELECT * FROM jsonb_to_recordset(p_items) AS (description text, category text, amount_minor_units integer)
+        LOOP
+            IF v_item.amount_minor_units IS NULL OR v_item.amount_minor_units < 0 THEN
+                RAISE EXCEPTION 'INVALID_INPUT: Quote item amounts must be non-negative integers.';
+            END IF;
+            v_sum_items := v_sum_items + v_item.amount_minor_units;
+        END LOOP;
+
+        IF v_sum_items <> p_total_amount_minor_units THEN
+            RAISE EXCEPTION 'INVALID_INPUT: Sum of line items (%) does not match total amount (%).',
+                v_sum_items, p_total_amount_minor_units;
+        END IF;
+    END IF;
+
+    -- Determine next deterministic version under row lock
     SELECT COALESCE(MAX(version), 0) + 1 INTO v_next_version
     FROM public.ht_journey_quotes
     WHERE journey_id = p_journey_id;
@@ -295,7 +447,7 @@ BEGIN
         'draft',
         p_currency,
         p_total_amount_minor_units,
-        p_items,
+        COALESCE(p_items, '[]'::jsonb),
         p_valid_until,
         v_caller_uid,
         now(),
@@ -351,12 +503,52 @@ BEGIN
         RAISE EXCEPTION 'UNAUTHENTICATED: Authentication required.';
     END IF;
 
+    IF p_journey_id IS NULL THEN
+        RAISE EXCEPTION 'INVALID_INPUT: Journey ID is required.';
+    END IF;
+
+    IF p_scheduled_start IS NULL THEN
+        RAISE EXCEPTION 'INVALID_INPUT: Scheduled start time is required.';
+    END IF;
+
+    IF p_scheduled_end IS NOT NULL AND p_scheduled_end < p_scheduled_start THEN
+        RAISE EXCEPTION 'INVALID_INPUT: Scheduled end must be greater than or equal to start.';
+    END IF;
+
+    -- Concurrency row lock & fetch journey
     SELECT * INTO v_journey
     FROM public.ht_treatment_journeys
-    WHERE id = p_journey_id;
+    WHERE id = p_journey_id
+    FOR UPDATE;
 
     IF v_journey.id IS NULL THEN
         RAISE EXCEPTION 'NOT_FOUND: Treatment journey not found.';
+    END IF;
+
+    -- Strict caller tenant & HT capability check (fail closed against cross-tenant attacks)
+    PERFORM public.ht_assert_caller_ht_authority(v_caller_uid, v_journey.tenant_id, true);
+
+    -- Validate optional appointment tenant relationship
+    IF p_appointment_id IS NOT NULL THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM public.appointments
+            WHERE id = p_appointment_id AND tenant_id = v_journey.tenant_id
+        ) THEN
+            RAISE EXCEPTION 'FORBIDDEN: Appointment does not belong to journey tenant.';
+        END IF;
+    END IF;
+
+    -- Validate optional assigned coordinator tenant relationship
+    IF p_assigned_coordinator_staff_id IS NOT NULL THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM public.staff s
+            JOIN public.ht_staff_profiles csp ON csp.staff_id = s.id AND csp.tenant_id = s.tenant_id
+            WHERE s.id = p_assigned_coordinator_staff_id
+              AND s.tenant_id = v_journey.tenant_id
+              AND s.active = true
+        ) THEN
+            RAISE EXCEPTION 'FORBIDDEN: Assigned coordinator is not an active HT staff member in journey tenant.';
+        END IF;
     END IF;
 
     INSERT INTO public.ht_journey_itinerary_events (
