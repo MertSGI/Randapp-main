@@ -1,4 +1,4 @@
-﻿import fs from 'fs';
+import fs from 'fs';
 import path from 'path';
 
 console.log('--- PHASE 5 NODE 2 CLINIC PRACTITIONER PERMISSIONS CONTRACT VALIDATION ---');
@@ -49,6 +49,10 @@ assertRule(9, 'Execution revoked from PUBLIC and anon, granted to authenticated 
   sql.includes('GRANT EXECUTE ON FUNCTION public.clinic_set_staff_profile TO authenticated, service_role;') &&
   sql.includes('REVOKE EXECUTE ON FUNCTION public.clinic_get_my_context() FROM PUBLIC, anon;'));
 
+assertRule(10, 'clinic_get_my_context scopes permitted_branch_ids via canonical staff_branches membership',
+  sql.includes('JOIN public.staff_branches sb ON sb.branch_id = b.id') &&
+  sql.includes('sb.staff_id = v_staff.id'));
+
 console.log('\n========================================');
-console.log('PHASE 5 NODE 2 CONTRACTS: 9 | PASSED: 9 | FAILED: 0');
+console.log('PHASE 5 NODE 2 CONTRACTS: 10 | PASSED: 10 | FAILED: 0');
 console.log('========================================\n');

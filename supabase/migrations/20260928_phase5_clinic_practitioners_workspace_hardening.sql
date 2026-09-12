@@ -1,4 +1,4 @@
-﻿-- =========================================================================
+-- =========================================================================
 -- MIGRATION: 20260928_phase5_clinic_practitioners_workspace_hardening.sql
 -- Description: Phase 5 Node 2 Clinic Practitioner Permissions & Clinical Workspace Hardening
 -- Authority: LARI-AOS-PROGRAM-V2-BOOTSTRAP-20260908-01 (DECISION-020)
@@ -209,11 +209,13 @@ BEGIN
         );
     END IF;
 
-    -- Fetch active branch IDs for this tenant
+    -- Fetch active branch IDs explicitly permitted for this staff member via canonical staff_branches
     SELECT jsonb_agg(b.id) INTO v_branches
     FROM public.branches b
+    JOIN public.staff_branches sb ON sb.branch_id = b.id AND sb.tenant_id = v_staff.tenant_id
     WHERE b.tenant_id = v_staff.tenant_id
-      AND b.is_active IS NOT FALSE;
+      AND b.is_active IS NOT FALSE
+      AND sb.staff_id = v_staff.id;
 
     RETURN jsonb_build_object(
         'success', true,
