@@ -1045,23 +1045,33 @@
         "evidence_id": "EV-081"
     },
     "phase5_node2_clinic_state": {
-        "candidate_branch": "aos/phase5-clinic-practitioners-workspace",
-        "candidate_sha": "278737303be10da0ce9d89efe54d948a7fb46671",
+        "candidate_branch": "aos/phase5-clinic-practitioners-workspace-r1",
+        "candidate_sha": "0e6d4a2597517ec81e63e63312e21a7318e21318",
+        "superseded_sha": "278737303be10da0ce9d89efe54d948a7fb46671",
         "upstream_base_sha": "0368c9d17eba52049fe3e78a203282656b27af14",
-        "contracts_tested": 9,
+        "contracts_tested": 10,
         "contracts_result": "PASS",
         "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
-        "push_branch": "origin/aos/phase5-clinic-practitioners-workspace",
-        "evidence_id": "EV-082"
+        "push_branch": "origin/aos/phase5-clinic-practitioners-workspace-r1",
+        "evidence_id": "EV-083"
     },
     "phase5_node3_ht_state": {
-        "candidate_branch": "aos/phase5-ht-journey-domain",
-        "candidate_sha": "920fdd05cf3073d675b34f878a2c5df3211bf9b7",
+        "candidate_branch": "aos/phase5-ht-journey-domain-r1",
+        "candidate_sha": "44c9be621c97a8cadecc23081f1b09d6a1c04e97",
+        "reopened_sha": "920fdd05cf3073d675b34f878a2c5df3211bf9b7",
         "upstream_base_sha": "0368c9d17eba52049fe3e78a203282656b27af14",
-        "contracts_tested": 9,
+        "contracts_tested": 14,
         "contracts_result": "PASS",
         "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
-        "push_branch": "origin/aos/phase5-ht-journey-domain",
-        "evidence_id": "EV-082"
+        "push_branch": "origin/aos/phase5-ht-journey-domain-r1",
+        "evidence_id": "EV-083"
+    },
+    "phase5_disposable_acceptance": {
+        "harness_branch": "ci/phase5-disposable-postgres-acceptance",
+        "harness_sha": "d37ab9f2dd7c37efff71d4fcd9219354fd325888",
+        "total_migrations": 87,
+        "contract_suites_tested": 17,
+        "security_matrix_passed": 13,
+        "status": "DISPOSABLE_POSTGRES_HARNESS_DISPATCHED"
     }
 }
