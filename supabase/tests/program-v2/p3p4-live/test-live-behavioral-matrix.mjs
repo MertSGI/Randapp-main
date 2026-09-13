@@ -416,10 +416,12 @@ async function run() {
     assert(sTimeOff.rows[0].res.reason_code === 'time_off', 'SCHEDULING: time off reason code');
     await mainClient.query(`DELETE FROM public.staff_time_off WHERE tenant_id = '${tenantA}';`);
 
-    // 2.3 Break rejection
+    // 2.3 Break rejection (weekday 1..7, ISO weekday)
+    const schedWeekday = await mainClient.query(`SELECT EXTRACT(ISODOW FROM '${schedDate}'::date)::integer AS wd;`);
+    const isoWd = schedWeekday.rows[0].wd;
     await mainClient.query(`
-      INSERT INTO public.staff_breaks (tenant_id, staff_id, day_of_week, start_time, end_time)
-      VALUES ('${tenantA}', '${staffEntityA}', EXTRACT(DOW FROM '${schedDate}'::date)::integer, '12:00:00'::time, '13:00:00'::time);
+      INSERT INTO public.staff_breaks (tenant_id, staff_id, weekday, start_time, end_time)
+      VALUES ('${tenantA}', '${staffEntityA}', ${isoWd}, '12:00:00'::time, '13:00:00'::time);
     `);
     const sBreak = await mainClient.query(`
       SELECT public.evaluate_booking_slot(
@@ -432,13 +434,13 @@ async function run() {
       ) AS res;
     `);
     assert(sBreak.rows[0].res.allowed === false, 'SCHEDULING: break rejection');
-    assert(sBreak.rows[0].res.reason_code === 'break', 'SCHEDULING: break reason code');
+    assert(sBreak.rows[0].res.reason_code === 'staff_break', 'SCHEDULING: break reason code');
     await mainClient.query(`DELETE FROM public.staff_breaks WHERE tenant_id = '${tenantA}';`);
 
-    // 2.4 Holiday rejection
+    // 2.4 Holiday rejection (canonical public.business_holidays)
     await mainClient.query(`
-      INSERT INTO public.tenant_holidays (tenant_id, holiday_date, name)
-      VALUES ('${tenantA}', '${schedDate}'::date, 'National Holiday');
+      INSERT INTO public.business_holidays (tenant_id, branch_id, date, name)
+      VALUES ('${tenantA}', '${branchA1}', '${schedDate}'::date, 'National Holiday');
     `);
     const sHoliday = await mainClient.query(`
       SELECT public.evaluate_booking_slot(
@@ -451,13 +453,15 @@ async function run() {
       ) AS res;
     `);
     assert(sHoliday.rows[0].res.allowed === false, 'SCHEDULING: holiday rejection');
-    assert(sHoliday.rows[0].res.reason_code === 'holiday', 'SCHEDULING: holiday reason code');
-    await mainClient.query(`DELETE FROM public.tenant_holidays WHERE tenant_id = '${tenantA}';`);
+    assert(sHoliday.rows[0].res.reason_code === 'business_holiday', 'SCHEDULING: holiday reason code');
+    await mainClient.query(`DELETE FROM public.business_holidays WHERE tenant_id = '${tenantA}';`);
 
-    // 2.5 Buffer collision rejection
-    // Staff buffer: 15 min after appointment
+    // 2.5 Buffer collision rejection (canonical public.booking_buffer_rules)
+    // Buffer: 15 min buffer after appointment for serviceA
     await mainClient.query(`
-      UPDATE public.staff SET buffer_after_minutes = 15 WHERE id = '${staffEntityA}';
+      INSERT INTO public.booking_buffer_rules (tenant_id, service_id, buffer_before, buffer_after)
+      VALUES ('${tenantA}', '${serviceA}', 0, 15)
+      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_after = 15;
       INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
       VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Prior Client', '+905551111111', '${schedDate}'::date, '10:00:00'::time, 30, 'confirmed');
     `);
@@ -476,7 +480,7 @@ async function run() {
     assert(sBuffer.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: buffer collision returns slot_conflict');
     await mainClient.query(`
       DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
-      UPDATE public.staff SET buffer_after_minutes = 0 WHERE id = '${staffEntityA}';
+      DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}';
     `);
 
     // 2.6 Past-slot rejection
