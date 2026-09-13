@@ -90,6 +90,15 @@ assertRule(14, 'ht_add_journey_itinerary_event locks journey and enforces appoin
   sql.includes('Appointment does not belong to journey tenant') &&
   sql.includes('Assigned coordinator is not an active HT staff member in journey tenant'));
 
+assertRule(15, 'Prerequisite composite uniqueness uq_ht_leads_id_tenant established on public.ht_leads',
+  sql.includes('uq_ht_leads_id_tenant') &&
+  sql.includes('public.ht_leads') &&
+  sql.includes('ADD CONSTRAINT uq_ht_leads_id_tenant UNIQUE (id, tenant_id)'));
+
+assertRule(16, 'Internal authority helper execution revoked from authenticated and granted to service_role',
+  sql.includes('REVOKE ALL ON FUNCTION public.ht_assert_caller_ht_authority FROM PUBLIC, anon, authenticated;') &&
+  sql.includes('GRANT EXECUTE ON FUNCTION public.ht_assert_caller_ht_authority TO service_role;'));
+
 console.log('\n========================================');
-console.log('PHASE 5 NODE 3 CONTRACTS: 14 | PASSED: 14 | FAILED: 0');
+console.log('PHASE 5 NODE 3 CONTRACTS: 16 | PASSED: 16 | FAILED: 0');
 console.log('========================================\n');
