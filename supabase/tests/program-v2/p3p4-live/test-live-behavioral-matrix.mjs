@@ -166,8 +166,8 @@ async function run() {
       FROM generate_series(1, 7) AS d;
 
       -- 8. Remaining Resources & Customers
-      INSERT INTO public.resources (id, tenant_id, branch_id, name, capacity, is_active)
-      VALUES ('${resourceA}', '${tenantA}', '${branchA1}', 'Treatment Bed 1', 1, true);
+      INSERT INTO public.resources (id, tenant_id, branch_id, name, resource_type, capacity, is_active)
+      VALUES ('${resourceA}', '${tenantA}', '${branchA1}', 'Treatment Bed 1', 'room', 1, true);
 
       INSERT INTO public.service_resource_requirements (tenant_id, service_id, resource_id, quantity)
       VALUES ('${tenantA}', '${serviceA}', '${resourceA}', 1);

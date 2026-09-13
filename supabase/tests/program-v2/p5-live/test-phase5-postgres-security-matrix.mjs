@@ -1,4 +1,4 @@
-﻿import pg from 'pg';
+import pg from 'pg';
 import crypto from 'crypto';
 
 const { Client } = pg;
@@ -113,7 +113,7 @@ async function run() {
       ('${userOwnerB}', 'ownerb@lari.p5'),
       ('${userStaffB}', 'staffb@lari.p5');
 
-    INSERT INTO public.users_profile (id, tenant_id, full_name, role, active) VALUES
+    INSERT INTO public.users_profile (id, tenant_id, name, role, active) VALUES
       ('${userOwnerA}', '${tenantA}', 'Owner A', 'tenant_owner', true),
       ('${userStaffA}', '${tenantA}', 'Staff A HT Coordinator', 'staff', true),
       ('${userOrdinaryStaffA}', '${tenantA}', 'Ordinary Staff A', 'staff', true),
