@@ -75,12 +75,30 @@ async function run() {
     console.log('--- 0. SETUP DETERMINISTIC TENANTS & SEED DATA ---');
 
     await mainClient.query(`
-      -- Clean previous test rows if any
+      -- Clean previous test rows if any (topological cascade order)
+      DELETE FROM public.appointment_resources WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.resource_blocks WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.service_resource_requirements WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.resources WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.availability_rules WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.staff_services WHERE staff_id = '${staffEntityA}' OR service_id = '${serviceA}';
+      DELETE FROM public.service_branches WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.services WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.staff_branches WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.staff WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.customer_reactivation_events WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.customer_loyalty_ledger WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.customer_loyalty_balances WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.tenant_loyalty_configs WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.consent_ledger WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.communication_outbox WHERE tenant_id IN ('${tenantA}', '${tenantB}');
       DELETE FROM public.appointments WHERE tenant_id IN ('${tenantA}', '${tenantB}');
       DELETE FROM public.customers WHERE tenant_id IN ('${tenantA}', '${tenantB}');
       DELETE FROM public.users_profile WHERE id IN ('${userOwnerA}', '${userStaffA}', '${userOwnerB}');
       DELETE FROM auth.users WHERE id IN ('${userOwnerA}', '${userStaffA}', '${userOwnerB}');
       DELETE FROM public.branches WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.subscriptions WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.usage_counters WHERE tenant_id IN ('${tenantA}', '${tenantB}');
       DELETE FROM public.tenants WHERE id IN ('${tenantA}', '${tenantB}');
 
       -- 1. Create Deterministic Test Tenants
