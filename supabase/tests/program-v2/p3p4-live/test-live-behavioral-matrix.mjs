@@ -65,6 +65,7 @@ async function run() {
   const staffEntityA = '11111111-ffff-4111-8111-111111111111';
   const serviceA = '11111111-9999-4111-8111-111111111111';
   const resourceA = '11111111-8888-4111-8111-111111111111';
+  const resourceB = '22222222-8888-4222-8222-222222222222';
   const customerA = '11111111-7777-4111-8111-111111111111';
   const customerB = '22222222-7777-4222-8222-222222222222';
 
@@ -166,10 +167,12 @@ async function run() {
       FROM generate_series(1, 7) AS d;
 
       -- 8. Remaining Resources & Customers
-      INSERT INTO public.resources (id, tenant_id, branch_id, name, capacity, is_active)
-      VALUES ('${resourceA}', '${tenantA}', '${branchA1}', 'Treatment Bed 1', 1, true);
+      INSERT INTO public.resources (id, tenant_id, branch_id, name, resource_type, capacity, is_active)
+      VALUES 
+        ('${resourceA}', '${tenantA}', '${branchA1}', 'Treatment Bed 1', 'room', 1, true),
+        ('${resourceB}', '${tenantB}', '${branchB1}', 'Foreign Bed B1', 'room', 1, true);
 
-      INSERT INTO public.service_resource_requirements (tenant_id, service_id, resource_id, quantity)
+      INSERT INTO public.service_resource_requirements (tenant_id, service_id, resource_id, required_quantity)
       VALUES ('${tenantA}', '${serviceA}', '${resourceA}', 1);
 
       INSERT INTO public.customers (id, tenant_id, name, email, phone)
