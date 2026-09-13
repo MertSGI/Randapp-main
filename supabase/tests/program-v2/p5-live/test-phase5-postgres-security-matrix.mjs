@@ -166,14 +166,18 @@ async function run() {
 
   async function setAuth(c, userId, role = 'authenticated') {
     if (!userId) {
-      await c.query(`RESET ROLE; SELECT set_config('request.jwt.claim.sub', '', false), set_config('request.jwt.claims', '', false);`);
+      await c.query(`RESET ROLE;`);
+      await c.query(`SELECT set_config('request.jwt.claim.sub', '', false);`);
+      await c.query(`SELECT set_config('request.jwt.claims', '', false);`);
       return;
     }
-    await c.query(`
-      SET ROLE ${role};
-      SELECT set_config('request.jwt.claim.sub', '${userId}', false);
-      SELECT set_config('request.jwt.claims', '{"sub": "${userId}", "role": "${role}"}', false);
-    `);
+    await c.query(`SET ROLE ${role};`);
+    await c.query(`SELECT set_config('request.jwt.claim.sub', $1, false);`, [userId]);
+    await c.query(`SELECT set_config('request.jwt.claims', $1, false);`, [JSON.stringify({ sub: userId, role })]);
+    const checkAuth = await c.query(`SELECT auth.uid() AS uid;`);
+    if (!checkAuth.rows[0] || checkAuth.rows[0].uid !== userId) {
+      throw new Error(`setAuth failed: expected ${userId} but got ${checkAuth.rows[0]?.uid}`);
+    }
   }
 
   // TEST 1: Node 2 Branch Scope Security Audit

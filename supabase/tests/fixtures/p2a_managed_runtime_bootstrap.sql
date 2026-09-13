@@ -111,12 +111,12 @@ AS $$
   );
 $$;
 
-GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
-GRANT ALL ON TABLE auth.users TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION auth.jwt() TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION auth.role() TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION auth.email() TO anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role, public;
+GRANT ALL ON TABLE auth.users TO anon, authenticated, service_role, public;
+GRANT EXECUTE ON FUNCTION auth.jwt() TO anon, authenticated, service_role, public;
+GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated, service_role, public;
+GRANT EXECUTE ON FUNCTION auth.role() TO anon, authenticated, service_role, public;
+GRANT EXECUTE ON FUNCTION auth.email() TO anon, authenticated, service_role, public;
 
 -- BOOTSTRAP SELF-TEST
 DO $$

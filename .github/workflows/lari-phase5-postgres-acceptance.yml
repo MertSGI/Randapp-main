@@ -170,7 +170,7 @@ jobs:
           set -euo pipefail
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== EXECUTING LIVE POSTGRESQL BEHAVIORAL MATRIX (ALL 15 DOMAINS + EV079-R4) ==="
-          node supabase/tests/program-v2/p3p4-live/test-live-behavioral-matrix.mjs
+          node supabase/tests/program-v2/p3p4-live/test-live-behavioral-matrix.mjs 2>&1 | tee matrix.log
           echo "=== BEHAVIORAL MATRIX COMPLETED CLEANLY ==="
 
       - name: Execute Phase 5 Live PostgreSQL Security & Concurrency Matrix
@@ -178,7 +178,8 @@ jobs:
           set -euo pipefail
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== EXECUTING PHASE 5 NODE 2 & NODE 3 LIVE POSTGRESQL SECURITY MATRIX ==="
-          node supabase/tests/program-v2/p5-live/test-phase5-postgres-security-matrix.mjs
+          node supabase/tests/program-v2/p5-live/test-phase5-postgres-security-matrix.mjs 2>&1 | tee -a matrix.log
+          echo "=== PHASE 5 SECURITY & CONCURRENCY MATRIX COMPLETED CLEANLY ==="
 
       - name: Application Build
         run: |
