@@ -273,8 +273,8 @@ async function run() {
     // 1.4 Resource allocation failure zero quota leakage
     // Block resourceA for 11:00:00
     await mainClient.query(`
-      INSERT INTO public.resource_blocks (tenant_id, resource_id, start_date, start_time, end_time, reason)
-      VALUES ('${tenantA}', '${resourceA}', '${futureDate}'::date, '11:00:00'::time, '11:30:00'::time, 'Maintenance');
+      INSERT INTO public.resource_blocks (tenant_id, resource_id, start_date, end_date, start_time, end_time, reason)
+      VALUES ('${tenantA}', '${resourceA}', '${futureDate}'::date, '${futureDate}'::date, '11:00:00'::time, '11:30:00'::time, 'Maintenance');
     `);
     const bResBlock = await mainClient.query(`
       SELECT public.create_public_booking(
@@ -527,8 +527,8 @@ async function run() {
 
     // 3.2 Blocked resource
     await mainClient.query(`
-      INSERT INTO public.resource_blocks (tenant_id, resource_id, start_date, start_time, end_time, reason)
-      VALUES ('${tenantA}', '${resourceA}', '${resDate}'::date, '09:00:00'::time, '10:00:00'::time, 'Deep Clean');
+      INSERT INTO public.resource_blocks (tenant_id, resource_id, start_date, end_date, start_time, end_time, reason)
+      VALUES ('${tenantA}', '${resourceA}', '${resDate}'::date, '${resDate}'::date, '09:00:00'::time, '10:00:00'::time, 'Deep Clean');
     `);
     const resBlocked = await mainClient.query(`
       SELECT public.evaluate_and_lock_resource_plan(

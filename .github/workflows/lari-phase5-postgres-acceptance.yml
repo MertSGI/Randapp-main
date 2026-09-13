@@ -3,6 +3,8 @@ name: LARI Program V2 Phase 5 Disposable Postgres Acceptance & Live Security Mat
 on:
   push:
     branches:
+      - ci/phase5-disposable-postgres-acceptance-r4
+      - ci/phase5-disposable-postgres-acceptance-r3
       - ci/phase5-disposable-postgres-acceptance-r2
       - ci/phase5-disposable-postgres-acceptance
       - ci/program-v2-p3p4-live-behavioral-acceptance-r1-20260911-01
@@ -86,8 +88,9 @@ jobs:
         run: |
           npm ci
 
-      - name: Execute 17 Domain Contract Suites (Phase 2, 3, 4 + Phase 5 Nodes 1, 2, 3)
+      - name: Execute 20 Domain Contract Suites (Phase 2, 3, 4 + Phase 5 Nodes 1-6)
         run: |
+          set -euo pipefail
           npx tsx scripts/test-phase2-staff-scheduling-contracts.mjs
           npx tsx scripts/test-phase3-resource-capacity-contracts.mjs
           npx tsx scripts/test-phase3-package-multibranch-contracts.mjs
@@ -105,7 +108,10 @@ jobs:
           npx tsx scripts/test-phase5-vertical-skus-contracts.mjs
           npx tsx scripts/test-phase5-clinic-practitioner-contracts.mjs
           npx tsx scripts/test-phase5-ht-journey-contracts.mjs
-          echo "ALL 17 DOMAIN CONTRACT SUITES PASSED!"
+          npx tsx scripts/test-phase5-node4-clinic-ai-contracts.mjs
+          npx tsx scripts/test-phase5-node5-funnel-contracts.mjs
+          npx tsx scripts/test-phase5-node6-lead-ops-contracts.mjs
+          echo "ALL 20 DOMAIN CONTRACT SUITES PASSED!"
 
       - name: Execute Live Database Introspection & Integrity Verification
         run: |
@@ -161,23 +167,28 @@ jobs:
 
       - name: Execute Live PostgreSQL Behavioral Acceptance Matrix
         run: |
+          set -euo pipefail
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== EXECUTING LIVE POSTGRESQL BEHAVIORAL MATRIX (ALL 15 DOMAINS + EV079-R4) ==="
-          node supabase/tests/program-v2/p3p4-live/test-live-behavioral-matrix.mjs 2>&1 | tee matrix.log
+          node supabase/tests/program-v2/p3p4-live/test-live-behavioral-matrix.mjs | tee matrix.log
+          echo "=== BEHAVIORAL MATRIX COMPLETED CLEANLY ==="
 
       - name: Execute Phase 5 Live PostgreSQL Security & Concurrency Matrix
         run: |
+          set -euo pipefail
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== EXECUTING PHASE 5 NODE 2 & NODE 3 LIVE POSTGRESQL SECURITY MATRIX ==="
           node supabase/tests/program-v2/p5-live/test-phase5-postgres-security-matrix.mjs
 
       - name: Application Build
         run: |
+          set -euo pipefail
           echo "=== RUNNING APPLICATION BUILD ==="
           npm run build
 
       - name: Typecheck & Lint
         run: |
+          set -euo pipefail
           echo "=== RUNNING TYPECHECK & LINT ==="
           npm run lint
 
