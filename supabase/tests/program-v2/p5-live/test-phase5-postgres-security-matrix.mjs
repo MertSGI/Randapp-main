@@ -169,7 +169,8 @@ async function run() {
   await client.query(`SET LOCAL ROLE authenticated; SET LOCAL "request.jwt.claims" = '{"sub": "${userStaffA}"}';`);
   const ctxRes = await client.query(`SELECT public.clinic_get_my_context() AS ctx;`);
   const ctxData = ctxRes.rows[0].ctx;
-  assert(ctxData.success === true, 'clinic_get_my_context returns success for authorized clinic staff');
+  console.log('clinic_get_my_context result:', JSON.stringify(ctxData));
+  assert(ctxData.success === true, 'clinic_get_my_context returns success for authorized clinic staff', JSON.stringify(ctxData));
   assert(ctxData.permitted_branch_ids.length === 1 && ctxData.permitted_branch_ids[0] === branchA1,
     'permitted_branch_ids contains ONLY branchA1 from staff_branches mapping, NOT branchA2');
 
