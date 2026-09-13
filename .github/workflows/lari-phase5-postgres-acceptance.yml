@@ -170,8 +170,11 @@ jobs:
           set -euo pipefail
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== EXECUTING LIVE POSTGRESQL BEHAVIORAL MATRIX (ALL 15 DOMAINS + EV079-R4) ==="
-          node supabase/tests/program-v2/p3p4-live/test-live-behavioral-matrix.mjs 2>&1 | tee matrix.log
-          test ${PIPESTATUS[0]} -eq 0
+          if ! node supabase/tests/program-v2/p3p4-live/test-live-behavioral-matrix.mjs 2>&1 | tee matrix.log; then
+            echo "=== MATRIX EXECUTION FAILED! PRINTING LOG ==="
+            cat matrix.log || true
+            exit 1
+          fi
           echo "=== BEHAVIORAL MATRIX COMPLETED CLEANLY ==="
 
       - name: Execute Phase 5 Live PostgreSQL Security & Concurrency Matrix
