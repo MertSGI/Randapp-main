@@ -478,6 +478,8 @@ async function run() {
     // Existing: 10:00 - 10:30, buffer_after = 15m (occupied until 10:45)
     // Request: 10:35 - 11:05 => DENIED (slot_conflict)
     await mainClient.query(`
+      DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
+      DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}';
       INSERT INTO public.booking_buffer_rules (tenant_id, service_id, buffer_before, buffer_after)
       VALUES ('${tenantA}', '${serviceA}', 0, 15)
       ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_before = 0, buffer_after = 15;
@@ -502,7 +504,10 @@ async function run() {
     // Request ending at 10:50 (e.g. 10:20 - 10:50) => DENIED (slot_conflict)
     await mainClient.query(`
       DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
-      UPDATE public.booking_buffer_rules SET buffer_before = 15, buffer_after = 0 WHERE tenant_id = '${tenantA}' AND service_id = '${serviceA}';
+      DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}';
+      INSERT INTO public.booking_buffer_rules (tenant_id, service_id, buffer_before, buffer_after)
+      VALUES ('${tenantA}', '${serviceA}', 15, 0)
+      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_before = 15, buffer_after = 0;
       INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
       VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Prior Client', '+905551111111', '${schedDate}'::date, '11:00:00'::time, 30, 'confirmed');
     `);
@@ -524,10 +529,12 @@ async function run() {
     // Request: serviceA2 has buffer_before = 15m. Requested start: 10:40 (starts at 10:40, occupied from 10:25) => overlaps existing ending at 10:30 => DENIED
     await mainClient.query(`
       DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
-      UPDATE public.booking_buffer_rules SET buffer_before = 0, buffer_after = 0 WHERE tenant_id = '${tenantA}' AND service_id = '${serviceA}';
+      DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}';
       INSERT INTO public.booking_buffer_rules (tenant_id, service_id, buffer_before, buffer_after)
-      VALUES ('${tenantA}', '${serviceA2}', 15, 0)
-      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_before = 15, buffer_after = 0;
+      VALUES 
+        ('${tenantA}', '${serviceA}', 0, 0),
+        ('${tenantA}', '${serviceA2}', 15, 0)
+      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_before = EXCLUDED.buffer_before, buffer_after = EXCLUDED.buffer_after;
       INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
       VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Prior Client', '+905551111111', '${schedDate}'::date, '10:00:00'::time, 30, 'confirmed');
     `);
@@ -549,7 +556,12 @@ async function run() {
     // Request: serviceA2 has buffer_after = 15m. Requested start: 10:30 (ends 11:00, buffer_after extends to 11:15) => overlaps 11:10 => DENIED
     await mainClient.query(`
       DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
-      UPDATE public.booking_buffer_rules SET buffer_before = 0, buffer_after = 15 WHERE tenant_id = '${tenantA}' AND service_id = '${serviceA2}';
+      DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}';
+      INSERT INTO public.booking_buffer_rules (tenant_id, service_id, buffer_before, buffer_after)
+      VALUES 
+        ('${tenantA}', '${serviceA}', 0, 0),
+        ('${tenantA}', '${serviceA2}', 0, 15)
+      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_before = EXCLUDED.buffer_before, buffer_after = EXCLUDED.buffer_after;
       INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
       VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Following Client', '+905551111111', '${schedDate}'::date, '11:10:00'::time, 30, 'confirmed');
     `);
@@ -566,14 +578,29 @@ async function run() {
     assert(sBuf4.rows[0].res.allowed === false, 'SCHEDULING: requested appointment buffer_after collision rejected', sBuf4.rows[0].res);
     assert(sBuf4.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: requested buffer_after returns slot_conflict', sBuf4.rows[0].res);
 
-    // 2.5.5 Exact boundary condition:
-    // Existing 10:00 - 10:30 with buffer_after = 15m (occupied until 10:45)
-    // Request starting exactly at 10:45:00 (with buffer_before = 0) => ALLOWED
+    // 2.5.5 Exact boundary condition (strictly isolated):
+    // 1. DELETE schedDate appointments for tenantA
+    // 2. DELETE/reset relevant booking_buffer_rules for serviceA/serviceA2
+    // 3. Seed exactly one existing appointment: serviceA 10:00-10:30
+    // 4. Seed existing serviceA rule: buffer_before=0, buffer_after=15
+    // 5. Seed requested serviceA2 rule: buffer_before=0, buffer_after=0
+    // 6. Evaluate serviceA2 request at 10:45 => ALLOWED
+    await mainClient.query(`
+      DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
+      DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}';
+      INSERT INTO public.booking_buffer_rules (tenant_id, service_id, buffer_before, buffer_after)
+      VALUES 
+        ('${tenantA}', '${serviceA}', 0, 15),
+        ('${tenantA}', '${serviceA2}', 0, 0)
+      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_before = EXCLUDED.buffer_before, buffer_after = EXCLUDED.buffer_after;
+      INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
+      VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Exact Boundary Client', '+905551111111', '${schedDate}'::date, '10:00:00'::time, 30, 'confirmed');
+    `);
     const sBuf5 = await mainClient.query(`
       SELECT public.evaluate_booking_slot(
         p_tenant_id => '${tenantA}',
         p_branch_id => '${branchA1}',
-        p_service_id => '${serviceA}',
+        p_service_id => '${serviceA2}',
         p_staff_id => '${staffEntityA}',
         p_date => '${schedDate}'::date,
         p_time => '10:45:00'::time
@@ -588,8 +615,12 @@ async function run() {
     // Request 10:42 with 5m buffer_before = occupied from 10:37 (< 10:40) => DENIED
     await mainClient.query(`
       DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
-      UPDATE public.booking_buffer_rules SET buffer_before = 0, buffer_after = 10 WHERE tenant_id = '${tenantA}' AND service_id = '${serviceA}';
-      UPDATE public.booking_buffer_rules SET buffer_before = 5, buffer_after = 0 WHERE tenant_id = '${tenantA}' AND service_id = '${serviceA2}';
+      DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}';
+      INSERT INTO public.booking_buffer_rules (tenant_id, service_id, buffer_before, buffer_after)
+      VALUES 
+        ('${tenantA}', '${serviceA}', 0, 10),
+        ('${tenantA}', '${serviceA2}', 5, 0)
+      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_before = EXCLUDED.buffer_before, buffer_after = EXCLUDED.buffer_after;
       INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
       VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'ServiceA Client', '+905551111111', '${schedDate}'::date, '10:00:00'::time, 30, 'confirmed');
     `);
@@ -611,10 +642,13 @@ async function run() {
     // Existing 10:00 - 10:30. With tenant default 20m, occupied until 10:50.
     // Request at 10:45 => DENIED
     await mainClient.query(`
-      DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}' AND service_id = '${serviceA}';
+      DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
+      DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}';
       INSERT INTO public.booking_buffer_rules (tenant_id, service_id, buffer_before, buffer_after)
       VALUES ('${tenantA}', NULL, 0, 20)
       ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_before = 0, buffer_after = 20;
+      INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
+      VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Prior Client', '+905551111111', '${schedDate}'::date, '10:00:00'::time, 30, 'confirmed');
     `);
     const sBuf7 = await mainClient.query(`
       SELECT public.evaluate_booking_slot(
