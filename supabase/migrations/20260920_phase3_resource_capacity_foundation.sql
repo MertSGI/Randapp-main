@@ -520,17 +520,36 @@ BEGIN
         RETURN jsonb_build_object('allowed', false, 'reason_code', 'slot_in_past', 'duration_minutes', v_svc_duration);
     END IF;
 
-    -- 8. Validate Overlapping Active Appointments
+    -- 8. Validate Overlapping Active Appointments with Asymmetric Buffer Consideration (EV055-R3 & EV070-R4)
+    -- For each existing active appointment:
+    --   occupied_start = a.start - existing_buf_before
+    --   occupied_end   = a.end   + existing_buf_after
+    -- Collision condition: (requested_start - req_buf_before) < occupied_end
+    --                  AND (requested_end   + req_buf_after)  > occupied_start
     SELECT EXISTS (
         SELECT 1
         FROM public.appointments a
+        LEFT JOIN public.booking_buffer_rules bbr_exist_svc
+            ON bbr_exist_svc.tenant_id = a.tenant_id
+           AND bbr_exist_svc.service_id = a.service_id
+           AND bbr_exist_svc.is_active = true
+        LEFT JOIN public.booking_buffer_rules bbr_exist_def
+            ON bbr_exist_def.tenant_id = a.tenant_id
+           AND bbr_exist_def.service_id IS NULL
+           AND bbr_exist_def.is_active = true
         WHERE a.staff_id = p_staff_id
           AND a.tenant_id = p_tenant_id
           AND a.appointment_date = p_date
           AND (p_exclude_appointment_id IS NULL OR a.id <> p_exclude_appointment_id)
           AND a.status NOT IN ('cancelled', 'cancelled_by_customer', 'cancelled_by_salon', 'cancelled_by_system', 'completed', 'no_show')
-          AND (a.appointment_date + a.appointment_time) < (v_req_end + (v_req_buf_after || ' minutes')::INTERVAL)
-          AND ((a.appointment_date + a.appointment_time) + (COALESCE(a.duration_minutes, 30) || ' minutes')::INTERVAL) > (v_req_start - (v_req_buf_before || ' minutes')::INTERVAL)
+          AND (v_req_start - (v_req_buf_before || ' minutes')::INTERVAL) < (
+              (a.appointment_date + a.appointment_time) + (COALESCE(a.duration_minutes, 30) || ' minutes')::INTERVAL
+              + (COALESCE(bbr_exist_svc.buffer_after, bbr_exist_def.buffer_after, 0) || ' minutes')::INTERVAL
+          )
+          AND (v_req_end + (v_req_buf_after || ' minutes')::INTERVAL) > (
+              (a.appointment_date + a.appointment_time)
+              - (COALESCE(bbr_exist_svc.buffer_before, bbr_exist_def.buffer_before, 0) || ' minutes')::INTERVAL
+          )
     ) INTO v_slot_conflict;
 
     IF v_slot_conflict THEN
