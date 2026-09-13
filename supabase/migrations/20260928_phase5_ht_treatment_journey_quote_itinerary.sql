@@ -1,16 +1,33 @@
-﻿-- =========================================================================
--- MIGRATION: 20260928_phase5_ht_treatment_journey_quote_itinerary.sql (R1 SECURITY HARDENED)
+-- =========================================================================
+-- MIGRATION: 20260928_phase5_ht_treatment_journey_quote_itinerary.sql (R2 MIGRATION INTEGRITY & HELPER HARDENED)
 -- Description: Phase 5 Node 3 Health Tourism Treatment Journey, Quote & Itinerary Domain
 -- Authority: LARI-AOS-PROGRAM-V2-BOOTSTRAP-20260908-01 (DECISION-020)
 -- Program: LARI-PROGRAM-V2-REAL-PRODUCT-20260908-01
--- Security Hardening Corrections:
---   1. Strict server-authoritative caller tenant derivation & HT coordinator capability verification.
---   2. Explicit cross-tenant entity validation for lead_id, customer_id, coordinator_staff_id, appointment_id, assigned_coordinator_staff_id.
---   3. Quote concurrency row/advisory locking on journey ID to eliminate race conditions on MAX(version)+1.
---   4. Currency code validation, amount bounds, and authoritative item total sum checks.
---   5. Quota concurrency transactional row locking on tenant vertical quota evaluation.
---   6. Fail-closed RLS; revoke from PUBLIC, anon; grant authenticated, service_role.
+-- Security & Migration Integrity Corrections (R2):
+--   1. Established composite uniqueness uq_ht_leads_id_tenant on public.ht_leads(id, tenant_id)
+--      before composite FK fk_ht_treatment_journeys_lead_tenant is declared.
+--   2. Strict server-authoritative caller tenant derivation & HT coordinator capability verification.
+--   3. Hardened internal authority helper ht_assert_caller_ht_authority by revoking execution
+--      from authenticated (only service_role/internal SECURITY DEFINER invocation permitted).
+--   4. Explicit cross-tenant entity validation for lead_id, customer_id, coordinator_staff_id, appointment_id, assigned_coordinator_staff_id.
+--   5. Quote concurrency row/advisory locking on journey ID to eliminate race conditions on MAX(version)+1.
+--   6. Currency code validation, amount bounds, and authoritative item total sum checks.
+--   7. Quota concurrency transactional row locking on tenant vertical quota evaluation.
+--   8. Fail-closed RLS; revoke from PUBLIC, anon; grant authenticated, service_role.
 -- =========================================================================
+
+-- 0. PREREQUISITE COMPOSITE UNIQUE KEY ON HT_LEADS FOR TENANT INTEGRITY
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'uq_ht_leads_id_tenant'
+          AND conrelid = 'public.ht_leads'::regclass
+    ) THEN
+        ALTER TABLE public.ht_leads
+            ADD CONSTRAINT uq_ht_leads_id_tenant UNIQUE (id, tenant_id);
+    END IF;
+END $$;
 
 -- 1. TABLE: public.ht_treatment_journeys
 CREATE TABLE IF NOT EXISTS public.ht_treatment_journeys (
@@ -191,8 +208,8 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.ht_assert_caller_ht_authority FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.ht_assert_caller_ht_authority TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.ht_assert_caller_ht_authority FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ht_assert_caller_ht_authority TO service_role;
 
 
 -- 6. SERVER-AUTHORITATIVE RPCS
