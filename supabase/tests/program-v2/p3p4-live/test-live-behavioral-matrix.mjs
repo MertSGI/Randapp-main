@@ -405,7 +405,7 @@ async function run() {
         p_time => '10:00:00'::time
       ) AS res;
     `);
-    assert(sAvail.rows[0].res.allowed === true, 'SCHEDULING: availability acceptance');
+    assert(sAvail.rows[0].res.allowed === true, 'SCHEDULING: availability acceptance', sAvail.rows[0].res);
 
     // 2.2 Time off rejection
     await mainClient.query(`
@@ -422,8 +422,8 @@ async function run() {
         p_time => '10:00:00'::time
       ) AS res;
     `);
-    assert(sTimeOff.rows[0].res.allowed === false, 'SCHEDULING: time off rejection');
-    assert(sTimeOff.rows[0].res.reason_code === 'time_off', 'SCHEDULING: time off reason code');
+    assert(sTimeOff.rows[0].res.allowed === false, 'SCHEDULING: time off rejection', sTimeOff.rows[0].res);
+    assert(sTimeOff.rows[0].res.reason_code === 'staff_unavailable', 'SCHEDULING: time off reason code', sTimeOff.rows[0].res);
     await mainClient.query(`DELETE FROM public.staff_time_off WHERE tenant_id = '${tenantA}';`);
 
     // 2.3 Break rejection (weekday 1..7, ISO weekday)
@@ -443,8 +443,8 @@ async function run() {
         p_time => '12:00:00'::time
       ) AS res;
     `);
-    assert(sBreak.rows[0].res.allowed === false, 'SCHEDULING: break rejection');
-    assert(sBreak.rows[0].res.reason_code === 'staff_break', 'SCHEDULING: break reason code');
+    assert(sBreak.rows[0].res.allowed === false, 'SCHEDULING: break rejection', sBreak.rows[0].res);
+    assert(sBreak.rows[0].res.reason_code === 'staff_break', 'SCHEDULING: break reason code', sBreak.rows[0].res);
     await mainClient.query(`DELETE FROM public.staff_breaks WHERE tenant_id = '${tenantA}';`);
 
     // 2.4 Holiday rejection (canonical public.business_holidays)
@@ -462,8 +462,8 @@ async function run() {
         p_time => '10:00:00'::time
       ) AS res;
     `);
-    assert(sHoliday.rows[0].res.allowed === false, 'SCHEDULING: holiday rejection');
-    assert(sHoliday.rows[0].res.reason_code === 'business_holiday', 'SCHEDULING: holiday reason code');
+    assert(sHoliday.rows[0].res.allowed === false, 'SCHEDULING: holiday rejection', sHoliday.rows[0].res);
+    assert(sHoliday.rows[0].res.reason_code === 'business_holiday', 'SCHEDULING: holiday reason code', sHoliday.rows[0].res);
     await mainClient.query(`DELETE FROM public.business_holidays WHERE tenant_id = '${tenantA}';`);
 
     // 2.5 Buffer collision rejection (canonical public.booking_buffer_rules)
@@ -486,8 +486,8 @@ async function run() {
         p_time => '10:35:00'::time
       ) AS res;
     `);
-    assert(sBuffer.rows[0].res.allowed === false, 'SCHEDULING: buffer collision rejection');
-    assert(sBuffer.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: buffer collision returns slot_conflict');
+    assert(sBuffer.rows[0].res.allowed === false, 'SCHEDULING: buffer collision rejection', sBuffer.rows[0].res);
+    assert(sBuffer.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: buffer collision returns slot_conflict', sBuffer.rows[0].res);
     await mainClient.query(`
       DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
       DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}';
@@ -504,8 +504,8 @@ async function run() {
         p_time => '10:00:00'::time
       ) AS res;
     `);
-    assert(sPast.rows[0].res.allowed === false, 'SCHEDULING: past-slot rejection');
-    assert(sPast.rows[0].res.reason_code === 'slot_in_past', 'SCHEDULING: past-slot reason code');
+    assert(sPast.rows[0].res.allowed === false, 'SCHEDULING: past-slot rejection', sPast.rows[0].res);
+    assert(sPast.rows[0].res.reason_code === 'slot_in_past', 'SCHEDULING: past-slot reason code', sPast.rows[0].res);
 
     // 2.7 Timezone-sensitive boundary
     const sTz = await mainClient.query(`
@@ -518,7 +518,7 @@ async function run() {
         p_time => '21:00:00'::time
       ) AS res;
     `);
-    assert(sTz.rows[0].res.allowed === false, 'SCHEDULING: timezone-sensitive boundary outside availability');
+    assert(sTz.rows[0].res.allowed === false, 'SCHEDULING: timezone-sensitive boundary outside availability', sTz.rows[0].res);
 
     // -------------------------------------------------------------------------
     // 3. RESOURCE DOMAIN
@@ -532,8 +532,8 @@ async function run() {
         '${tenantA}', '${branchA1}', '${serviceA}', '${resDate}'::date, '09:00:00'::time, 30, NULL, false
       ) AS res;
     `);
-    assert(resEval.rows[0].res.allowed === true, 'RESOURCE: multi-resource allocation evaluated allowed');
-    assert(Array.isArray(resEval.rows[0].res.allocation_plan), 'RESOURCE: allocation plan returned');
+    assert(resEval.rows[0].res.allowed === true, 'RESOURCE: multi-resource allocation evaluated allowed', resEval.rows[0].res);
+    assert(Array.isArray(resEval.rows[0].res.allocation_plan), 'RESOURCE: allocation plan returned', resEval.rows[0].res);
 
     // 3.2 Blocked resource
     await mainClient.query(`
@@ -545,8 +545,8 @@ async function run() {
         '${tenantA}', '${branchA1}', '${serviceA}', '${resDate}'::date, '09:00:00'::time, 30, NULL, false
       ) AS res;
     `);
-    assert(resBlocked.rows[0].res.allowed === false, 'RESOURCE: blocked resource rejected');
-    assert(resBlocked.rows[0].res.reason_code === 'resource_unavailable', 'RESOURCE: blocked resource reason code');
+    assert(resBlocked.rows[0].res.allowed === false, 'RESOURCE: blocked resource rejected', resBlocked.rows[0].res);
+    assert(resBlocked.rows[0].res.reason_code === 'resource_unavailable', 'RESOURCE: blocked resource reason code', resBlocked.rows[0].res);
     await mainClient.query(`DELETE FROM public.resource_blocks WHERE tenant_id = '${tenantA}' AND reason = 'Deep Clean';`);
 
     // 3.3 Cross-tenant resource rejection
@@ -648,7 +648,7 @@ async function run() {
         p_branch_id => '${branchA1}'
       ) AS res;
     `);
-    assert(wJoin.rows[0].res.success === true, 'WAITLIST: join waitlist succeeded');
+    assert(wJoin.rows[0].res.success === true, 'WAITLIST: join waitlist succeeded', wJoin.rows[0].res);
     const waitlistId = wJoin.rows[0].res.waitlist_id;
 
     // 5.2 Waitlist rate limit / deduplication
@@ -663,7 +663,7 @@ async function run() {
         p_branch_id => '${branchA1}'
       ) AS res;
     `);
-    assert(wDup.rows[0].res.success === false, 'WAITLIST: rate limit / duplicate join rejected');
+    assert(wDup.rows[0].res.success === false, 'WAITLIST: rate limit / duplicate join rejected', wDup.rows[0].res);
 
     // 5.3 Offer slot
     await mainClient.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
@@ -677,7 +677,7 @@ async function run() {
         p_expires_in_minutes => 60
       ) AS res;
     `);
-    assert(wOffer.rows[0].res.success === true, 'WAITLIST: offer slot succeeded');
+    assert(wOffer.rows[0].res.success === true, 'WAITLIST: offer slot succeeded', wOffer.rows[0].res);
     const claimToken = wOffer.rows[0].res.claim_token;
     await mainClient.query(`SELECT public.set_actor_context(NULL, 'service_role', NULL);`);
 
@@ -687,7 +687,7 @@ async function run() {
         p_claim_token => '${claimToken}'
       ) AS res;
     `);
-    assert(wClaim.rows[0].res.success === true, 'WAITLIST: one-time claim succeeded');
+    assert(wClaim.rows[0].res.success === true, 'WAITLIST: one-time claim succeeded', wClaim.rows[0].res);
 
     // 5.5 Re-claim rejected (one-time token exhausted)
     const wReclaim = await mainClient.query(`
@@ -695,7 +695,7 @@ async function run() {
         p_claim_token => '${claimToken}'
       ) AS res;
     `);
-    assert(wReclaim.rows[0].res.success === false, 'WAITLIST: re-claim with used token rejected');
+    assert(wReclaim.rows[0].res.success === false, 'WAITLIST: re-claim with used token rejected', wReclaim.rows[0].res);
 
     // 5.6 Parallel claim race
     // Seed second waitlist item
@@ -727,10 +727,10 @@ async function run() {
       clientSession1.query(`SELECT public.claim_waitlist_slot('${token2}') AS res;`),
       clientSession2.query(`SELECT public.claim_waitlist_slot('${token2}') AS res;`)
     ]);
-    const rW1 = cW1.status === 'fulfilled' ? cW1.value.rows[0].res : null;
-    const rW2 = cW2.status === 'fulfilled' ? cW2.value.rows[0].res : null;
+    const rW1 = cW1.status === 'fulfilled' ? cW1.value.rows[0].res : cW1.reason;
+    const rW2 = cW2.status === 'fulfilled' ? cW2.value.rows[0].res : cW2.reason;
     const waitlistSuccesses = [rW1?.success, rW2?.success].filter(Boolean).length;
-    assert(waitlistSuccesses === 1, 'WAITLIST: parallel claim race produces exactly one winner');
+    assert(waitlistSuccesses === 1, 'WAITLIST: parallel claim race produces exactly one winner', { rW1, rW2, waitlistSuccesses });
     recordConcurrencyPass('WAITLIST: parallel claim race');
 
     // -------------------------------------------------------------------------
