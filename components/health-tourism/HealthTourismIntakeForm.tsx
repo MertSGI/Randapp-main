@@ -14,6 +14,7 @@ export interface HealthTourismIntakeFormProps {
   referringAgencyId: string | null;
   hasInvalidAgencyWarning?: boolean;
   isRtl?: boolean;
+  primaryColor?: string;
 }
 
 /**
@@ -47,6 +48,7 @@ export const HealthTourismIntakeForm: React.FC<HealthTourismIntakeFormProps> = (
   referringAgencyId,
   hasInvalidAgencyWarning = false,
   isRtl = false,
+  primaryColor = '#4f46e5',
 }) => {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [fullName, setFullName] = useState<string>('');

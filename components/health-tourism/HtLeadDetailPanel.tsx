@@ -4,7 +4,7 @@ import { HealthTourismService } from '../../utils/healthTourismService';
 import {
   User, Mail, Phone, Globe, MapPin, Building2, Tag, Award,
   MessageSquare, ArrowRightLeft, CheckCircle2, Clock, AlertTriangle,
-  BotMessageSquare, ChevronDown, ChevronUp
+  BotMessageSquare, ChevronDown, ChevronUp, Plane
 } from 'lucide-react';
 
 interface Props {
@@ -78,6 +78,27 @@ export const HtLeadDetailPanel: React.FC<Props> = ({ lead, canManage, service, o
     const result = await service.enqueueWhatsAppHandoff({ lead_id: lead.id });
     if (!result.success) {
       setActionError(result.message || 'WhatsApp handoff başarısız.');
+    }
+    setActionLoading(false);
+    onRefresh();
+  };
+
+  const [journeySuccess, setJourneySuccess] = useState<string | null>(null);
+
+  const handleCreateJourney = async () => {
+    setActionLoading(true);
+    setActionError(null);
+    setJourneySuccess(null);
+    const result = await service.createTreatmentJourney({
+      title: `${lead.full_name} - Tedavi Yolculuğu`,
+      lead_id: lead.id,
+      coordinator_staff_id: lead.assigned_coordinator_staff_id,
+      notes: `Lead ${lead.id} üzerinden başlatıldı.`
+    });
+    if (!result.success || !result.journey_id) {
+      setActionError(result.message || 'Tedavi yolculuğu oluşturulamadı.');
+    } else {
+      setJourneySuccess(`Tedavi yolculuğu oluşturuldu: ${result.journey_id}`);
     }
     setActionLoading(false);
     onRefresh();
@@ -306,7 +327,21 @@ export const HtLeadDetailPanel: React.FC<Props> = ({ lead, canManage, service, o
                   <MessageSquare className="h-3 w-3 inline mr-1" />WhatsApp Handoff
                 </button>
               )}
+
+              <button
+                onClick={handleCreateJourney}
+                disabled={actionLoading}
+                className="text-[10px] px-2.5 py-1 rounded-lg font-medium bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-950/50 transition-colors disabled:opacity-50"
+              >
+                <Plane className="h-3 w-3 inline mr-1" />Yolculuk Başlat
+              </button>
             </div>
+
+            {journeySuccess && (
+              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                ✓ {journeySuccess}
+              </p>
+            )}
           </div>
         )}
 
