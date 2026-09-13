@@ -1,8 +1,9 @@
-name: LARI Program V2 P3+P4 Disposable Postgres Live Behavioral Acceptance
+name: LARI Program V2 Phase 5 Disposable Postgres Acceptance & Live Security Matrix
 
 on:
   push:
     branches:
+      - ci/phase5-disposable-postgres-acceptance-r2
       - ci/phase5-disposable-postgres-acceptance
       - ci/program-v2-p3p4-live-behavioral-acceptance-r1-20260911-01
       - ci/program-v2-p3p4-live-behavioral-acceptance-20260911-01
