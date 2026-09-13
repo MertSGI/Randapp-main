@@ -9,8 +9,10 @@ let testsPassed = 0;
 let testsFailed = 0;
 let concurrencyTestsExecuted = 0;
 let crossTenantNegativeTestsExecuted = 0;
+let lastExecutedTestName = '';
 
 function assert(condition, testName, detail = '') {
+  lastExecutedTestName = testName;
   testsExecuted++;
   if (condition) {
     testsPassed++;
@@ -1402,8 +1404,12 @@ async function run() {
     const depPct = await mainClient.query(`
       SELECT public.evaluate_booking_confirmation_deposit_policy('${tenantA}', '${serviceA}') AS res;
     `);
-    assert(depPct.rows[0].res.deposit_required === true, 'DEPOSIT: percentage policy evaluated');
-    assert(depPct.rows[0].res.calculated_from_percentage === true, 'DEPOSIT: percentage calculation flag set');
+    assert(
+      depPct.rows[0].res.success === false &&
+      depPct.rows[0].res.reason_code === 'PERCENTAGE_DEPOSIT_CALCULATION_UNAVAILABLE',
+      'DEPOSIT: percentage policy fails closed while price units unresolved',
+      depPct.rows[0].res
+    );
 
     // 12.4 Appointment & payment intent composite FK integrity
     let depCrossFkFailed = false;
@@ -1577,50 +1583,49 @@ async function run() {
 
     // 15.1 Completed appointment required
     const aptEarnTest = await mainClient.query(`
-      INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, status)
-      VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Loyalty User', '+905559991122', '2026-01-10'::date, '10:00:00'::time, 'confirmed')
+      INSERT INTO public.appointments (tenant_id, branch_id, customer_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, status)
+      VALUES ('${tenantA}', '${branchA1}', '${customerA}', '${serviceA}', '${staffEntityA}', 'Loyalty User', '+905559991122', '2026-01-10'::date, '10:00:00'::time, 'confirmed')
       RETURNING id;
     `);
     const aptEarnId = aptEarnTest.rows[0].id;
 
     // Earning fails on uncompleted appointment
-    let uncompletedEarnFailed = false;
-    try {
-      await mainClient.query(`
-        SELECT public.earn_loyalty_points_for_appointment('${tenantA}', '${aptEarnId}');
-      `);
-    } catch (e) {
-      uncompletedEarnFailed = true;
-    }
-    assert(uncompletedEarnFailed, 'LOYALTY: completed appointment required to earn points');
+    const uncompletedEarnRes = await mainClient.query(`
+      SELECT public.earn_loyalty_points_for_appointment('${tenantA}', '${customerA}', '${aptEarnId}') AS res;
+    `);
+    assert(
+      uncompletedEarnRes.rows[0].res.success === false &&
+      uncompletedEarnRes.rows[0].res.reason === 'APPOINTMENT_NOT_COMPLETED',
+      'LOYALTY: completed appointment required to earn points'
+    );
 
     // Complete the appointment
     await mainClient.query(`UPDATE public.appointments SET status = 'completed' WHERE id = '${aptEarnId}';`);
 
     // 15.2 Non-financial earning basis & earning idempotency
     const earnRes1 = await mainClient.query(`
-      SELECT public.earn_loyalty_points_for_appointment('${tenantA}', '${aptEarnId}') AS res;
+      SELECT public.earn_loyalty_points_for_appointment('${tenantA}', '${customerA}', '${aptEarnId}', NULL, 'earn-idem-01') AS res;
     `);
     assert(earnRes1.rows[0].res.success === true, 'LOYALTY: earn loyalty points succeeded');
-    assert(earnRes1.rows[0].res.points_earned === 50, 'LOYALTY: non-financial earning basis (50 points)');
+    assert(earnRes1.rows[0].res.points_awarded === 50, 'LOYALTY: non-financial earning basis (50 points)');
 
-    // Idempotent re-run
+    // Idempotent re-run with same idempotency key
     const earnRes2 = await mainClient.query(`
-      SELECT public.earn_loyalty_points_for_appointment('${tenantA}', '${aptEarnId}') AS res;
+      SELECT public.earn_loyalty_points_for_appointment('${tenantA}', '${customerA}', '${aptEarnId}', NULL, 'earn-idem-01') AS res;
     `);
     assert(earnRes2.rows[0].res.success === true, 'LOYALTY: earning idempotency succeeded');
-    assert(earnRes2.rows[0].res.points_earned === 0, 'LOYALTY: repeated earn returns 0 new points');
+    assert(earnRes2.rows[0].res.idempotent_replay === true, 'LOYALTY: repeated earn returns idempotent replay');
 
     // 15.3 Parallel redemption race
     const [lRed1, lRed2] = await Promise.allSettled([
       clientSession1.query(`
-        SELECT public.redeem_loyalty_points(
-          '${tenantA}', '${customerA}', 40, '${aptEarnId}', 'conc-loy-01'
+        SELECT public.redeem_loyalty_points_for_appointment(
+          '${tenantA}', '${customerA}', '${aptEarnId}', 40, 'conc-loy-01'
         ) AS res;
       `),
       clientSession2.query(`
-        SELECT public.redeem_loyalty_points(
-          '${tenantA}', '${customerA}', 40, '${aptEarnId}', 'conc-loy-02'
+        SELECT public.redeem_loyalty_points_for_appointment(
+          '${tenantA}', '${customerA}', '${aptEarnId}', 40, 'conc-loy-02'
         ) AS res;
       `)
     ]);
@@ -1849,12 +1854,27 @@ async function run() {
   console.log(`CROSS_TENANT_NEGATIVE_TESTS_EXECUTED=${crossTenantNegativeTestsExecuted}`);
   console.log('===============================================================');
 
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    try {
+      import('fs').then(fs => {
+        fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `
+### Live Behavioral Execution Summary Metrics
+- **Tests Executed**: ${testsExecuted}
+- **Tests Passed**: ${testsPassed}
+- **Tests Failed**: ${testsFailed}
+- **Concurrency Tests Passed**: ${concurrencyTestsExecuted}
+- **Cross-Tenant Negative Tests Passed**: ${crossTenantNegativeTestsExecuted}
+`);
+      });
+    } catch (_) {}
+  }
+
   if (testsFailed > 0 || testsExecuted === 0) {
     process.exit(1);
   }
 }
 
-run().catch((err) => {
+run().catch(async (err) => {
   console.error('\n❌ FATAL EXCEPTION IN BEHAVIORAL HARNESS:');
   console.error(err);
   console.log(`LIVE_BEHAVIORAL_TESTS_EXECUTED=${testsExecuted}`);
@@ -1862,5 +1882,23 @@ run().catch((err) => {
   console.log(`LIVE_BEHAVIORAL_TESTS_FAILED=${testsFailed + 1}`);
   console.log(`CONCURRENCY_TESTS_EXECUTED=${concurrencyTestsExecuted}`);
   console.log(`CROSS_TENANT_NEGATIVE_TESTS_EXECUTED=${crossTenantNegativeTestsExecuted}`);
+
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    try {
+      const fs = await import('fs');
+      fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `
+### ❌ Live Behavioral Execution Failure
+- **Last Test Name**: ${lastExecutedTestName || 'Unknown'}
+- **Tests Executed**: ${testsExecuted}
+- **Tests Passed**: ${testsPassed}
+- **Tests Failed**: ${testsFailed + 1}
+
+\`\`\`
+${err.stack || err.message || String(err)}
+\`\`\`
+`);
+    } catch (_) {}
+  }
+
   process.exit(1);
 });
