@@ -158,9 +158,9 @@ async function run() {
       ('${leadB}', '${tenantB}', 'Lead B Foreign', 'lead_b@p5.test', '+905554440002', 'new');
 
     -- Appointments
-    INSERT INTO public.appointments (id, tenant_id, branch_id, customer_id, start_time, end_time, status) VALUES
-      ('${apptA}', '${tenantA}', '${branchA1}', '${customerA}', now() + interval '1 day', now() + interval '1 day 30 minutes', 'confirmed'),
-      ('${apptB}', '${tenantB}', '${branchB1}', '${customerB}', now() + interval '1 day', now() + interval '1 day 30 minutes', 'confirmed');
+    INSERT INTO public.appointments (id, tenant_id, customer_id, appointment_date, appointment_time, status) VALUES
+      ('${apptA}', '${tenantA}', '${customerA}', (now() + interval '1 day')::date, '10:00:00'::time, 'confirmed'),
+      ('${apptB}', '${tenantB}', '${customerB}', (now() + interval '1 day')::date, '10:00:00'::time, 'confirmed');
   `);
   console.log('Fixtures seeded.\n');
 
