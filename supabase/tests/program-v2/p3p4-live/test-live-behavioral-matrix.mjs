@@ -65,6 +65,7 @@ async function run() {
   const userOwnerB = '22222222-dddd-4222-8222-222222222222';
   const staffEntityA = '11111111-ffff-4111-8111-111111111111';
   const serviceA = '11111111-9999-4111-8111-111111111111';
+  const serviceA2 = '11111111-9999-4111-8111-222222222222';
   const resourceA = '11111111-8888-4111-8111-111111111111';
   const resourceB = '22222222-8888-4222-8222-222222222222';
   const customerA = '11111111-7777-4111-8111-111111111111';
@@ -152,15 +153,21 @@ async function run() {
 
       -- 6. Create Quota-Controlled Services
       INSERT INTO public.services (id, tenant_id, name, duration, price, active)
-      VALUES ('${serviceA}', '${tenantA}', 'Deep Facial Treatment', 30, 500, true);
+      VALUES 
+        ('${serviceA}', '${tenantA}', 'Deep Facial Treatment', 30, 500, true),
+        ('${serviceA2}', '${tenantA}', 'Express Facial Treatment', 30, 300, true);
 
       INSERT INTO public.service_branches (tenant_id, service_id, branch_id)
       VALUES 
         ('${tenantA}', '${serviceA}', '${branchA1}'),
-        ('${tenantA}', '${serviceA}', '${branchA2}');
+        ('${tenantA}', '${serviceA}', '${branchA2}'),
+        ('${tenantA}', '${serviceA2}', '${branchA1}'),
+        ('${tenantA}', '${serviceA2}', '${branchA2}');
 
       INSERT INTO public.staff_services (staff_id, service_id)
-      VALUES ('${staffEntityA}', '${serviceA}');
+      VALUES 
+        ('${staffEntityA}', '${serviceA}'),
+        ('${staffEntityA}', '${serviceA2}');
 
       -- 7. Staff schedule availability (Monday to Sunday 08:00 - 20:00, ISO weekday 1..7)
       INSERT INTO public.availability_rules (tenant_id, staff_id, weekday, start_time, end_time, is_active)
@@ -466,17 +473,18 @@ async function run() {
     assert(sHoliday.rows[0].res.reason_code === 'business_holiday', 'SCHEDULING: holiday reason code', sHoliday.rows[0].res);
     await mainClient.query(`DELETE FROM public.business_holidays WHERE tenant_id = '${tenantA}';`);
 
-    // 2.5 Buffer collision rejection (canonical public.booking_buffer_rules)
-    // Buffer: 15 min buffer after appointment for serviceA
+    // 2.5 Asymmetric buffer collision matrix (EV055-R3 & EV070-R4)
+    // 2.5.1 Existing appointment buffer_after collision:
+    // Existing: 10:00 - 10:30, buffer_after = 15m (occupied until 10:45)
+    // Request: 10:35 - 11:05 => DENIED (slot_conflict)
     await mainClient.query(`
       INSERT INTO public.booking_buffer_rules (tenant_id, service_id, buffer_before, buffer_after)
       VALUES ('${tenantA}', '${serviceA}', 0, 15)
-      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_after = 15;
+      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_before = 0, buffer_after = 15;
       INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
       VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Prior Client', '+905551111111', '${schedDate}'::date, '10:00:00'::time, 30, 'confirmed');
     `);
-    // Attempt appointment at 10:35:00 (inside 10:00 + 30m + 15m buffer = 10:45)
-    const sBuffer = await mainClient.query(`
+    const sBuf1 = await mainClient.query(`
       SELECT public.evaluate_booking_slot(
         p_tenant_id => '${tenantA}',
         p_branch_id => '${branchA1}',
@@ -486,8 +494,142 @@ async function run() {
         p_time => '10:35:00'::time
       ) AS res;
     `);
-    assert(sBuffer.rows[0].res.allowed === false, 'SCHEDULING: buffer collision rejection', sBuffer.rows[0].res);
-    assert(sBuffer.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: buffer collision returns slot_conflict', sBuffer.rows[0].res);
+    assert(sBuf1.rows[0].res.allowed === false, 'SCHEDULING: existing appointment buffer_after collision rejected', sBuf1.rows[0].res);
+    assert(sBuf1.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: buffer_after returns slot_conflict', sBuf1.rows[0].res);
+
+    // 2.5.2 Existing appointment buffer_before collision:
+    // Existing starts 11:00 (duration 30m), buffer_before = 15m (occupied from 10:45)
+    // Request ending at 10:50 (e.g. 10:20 - 10:50) => DENIED (slot_conflict)
+    await mainClient.query(`
+      DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
+      UPDATE public.booking_buffer_rules SET buffer_before = 15, buffer_after = 0 WHERE tenant_id = '${tenantA}' AND service_id = '${serviceA}';
+      INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
+      VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Prior Client', '+905551111111', '${schedDate}'::date, '11:00:00'::time, 30, 'confirmed');
+    `);
+    const sBuf2 = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:20:00'::time
+      ) AS res;
+    `);
+    assert(sBuf2.rows[0].res.allowed === false, 'SCHEDULING: existing appointment buffer_before collision rejected', sBuf2.rows[0].res);
+    assert(sBuf2.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: buffer_before returns slot_conflict', sBuf2.rows[0].res);
+
+    // 2.5.3 Requested appointment buffer_before collision:
+    // Existing: 10:00 - 10:30 (buffer_before = 0, buffer_after = 0)
+    // Request: serviceA2 has buffer_before = 15m. Requested start: 10:40 (starts at 10:40, occupied from 10:25) => overlaps existing ending at 10:30 => DENIED
+    await mainClient.query(`
+      DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
+      UPDATE public.booking_buffer_rules SET buffer_before = 0, buffer_after = 0 WHERE tenant_id = '${tenantA}' AND service_id = '${serviceA}';
+      INSERT INTO public.booking_buffer_rules (tenant_id, service_id, buffer_before, buffer_after)
+      VALUES ('${tenantA}', '${serviceA2}', 15, 0)
+      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_before = 15, buffer_after = 0;
+      INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
+      VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Prior Client', '+905551111111', '${schedDate}'::date, '10:00:00'::time, 30, 'confirmed');
+    `);
+    const sBuf3 = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA2}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:40:00'::time
+      ) AS res;
+    `);
+    assert(sBuf3.rows[0].res.allowed === false, 'SCHEDULING: requested appointment buffer_before collision rejected', sBuf3.rows[0].res);
+    assert(sBuf3.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: requested buffer_before returns slot_conflict', sBuf3.rows[0].res);
+
+    // 2.5.4 Requested appointment buffer_after collision:
+    // Existing following appointment at 11:10 - 11:40 (buffer_before = 0, buffer_after = 0)
+    // Request: serviceA2 has buffer_after = 15m. Requested start: 10:30 (ends 11:00, buffer_after extends to 11:15) => overlaps 11:10 => DENIED
+    await mainClient.query(`
+      DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
+      UPDATE public.booking_buffer_rules SET buffer_before = 0, buffer_after = 15 WHERE tenant_id = '${tenantA}' AND service_id = '${serviceA2}';
+      INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
+      VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Following Client', '+905551111111', '${schedDate}'::date, '11:10:00'::time, 30, 'confirmed');
+    `);
+    const sBuf4 = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA2}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:30:00'::time
+      ) AS res;
+    `);
+    assert(sBuf4.rows[0].res.allowed === false, 'SCHEDULING: requested appointment buffer_after collision rejected', sBuf4.rows[0].res);
+    assert(sBuf4.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: requested buffer_after returns slot_conflict', sBuf4.rows[0].res);
+
+    // 2.5.5 Exact boundary condition:
+    // Existing 10:00 - 10:30 with buffer_after = 15m (occupied until 10:45)
+    // Request starting exactly at 10:45:00 (with buffer_before = 0) => ALLOWED
+    const sBuf5 = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:45:00'::time
+      ) AS res;
+    `);
+    assert(sBuf5.rows[0].res.allowed === true, 'SCHEDULING: exact boundary adjacent slot allowed', sBuf5.rows[0].res);
+
+    // 2.5.6 Different services asymmetric buffer evaluation:
+    // Existing appointment uses serviceA (buffer_after = 10m).
+    // Requested appointment uses serviceA2 (buffer_before = 5m).
+    // Existing 10:00-10:30 + 10m = occupied until 10:40.
+    // Request 10:42 with 5m buffer_before = occupied from 10:37 (< 10:40) => DENIED
+    await mainClient.query(`
+      DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
+      UPDATE public.booking_buffer_rules SET buffer_before = 0, buffer_after = 10 WHERE tenant_id = '${tenantA}' AND service_id = '${serviceA}';
+      UPDATE public.booking_buffer_rules SET buffer_before = 5, buffer_after = 0 WHERE tenant_id = '${tenantA}' AND service_id = '${serviceA2}';
+      INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
+      VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'ServiceA Client', '+905551111111', '${schedDate}'::date, '10:00:00'::time, 30, 'confirmed');
+    `);
+    const sBuf6 = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA2}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:42:00'::time
+      ) AS res;
+    `);
+    assert(sBuf6.rows[0].res.allowed === false, 'SCHEDULING: different services asymmetric buffer collision rejected', sBuf6.rows[0].res);
+    assert(sBuf6.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: different services returns slot_conflict', sBuf6.rows[0].res);
+
+    // 2.5.7 Tenant default fallback:
+    // Delete service-specific rule for serviceA. Create tenant default (service_id IS NULL) with buffer_after = 20m.
+    // Existing 10:00 - 10:30. With tenant default 20m, occupied until 10:50.
+    // Request at 10:45 => DENIED
+    await mainClient.query(`
+      DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}' AND service_id = '${serviceA}';
+      INSERT INTO public.booking_buffer_rules (tenant_id, service_id, buffer_before, buffer_after)
+      VALUES ('${tenantA}', NULL, 0, 20)
+      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_before = 0, buffer_after = 20;
+    `);
+    const sBuf7 = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:45:00'::time
+      ) AS res;
+    `);
+    assert(sBuf7.rows[0].res.allowed === false, 'SCHEDULING: tenant default buffer fallback collision rejected', sBuf7.rows[0].res);
+    assert(sBuf7.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: tenant default buffer returns slot_conflict', sBuf7.rows[0].res);
+
+    // Clean up all appointment and buffer rule test fixtures
     await mainClient.query(`
       DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
       DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}';
