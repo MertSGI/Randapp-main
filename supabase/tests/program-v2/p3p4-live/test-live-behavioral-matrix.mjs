@@ -17,8 +17,9 @@ function assert(condition, testName, detail = '') {
     console.log(`  [PASS] ${testName}`);
   } else {
     testsFailed++;
-    console.error(`  [FAIL] ${testName}${detail ? ' - ' + detail : ''}`);
-    throw new Error(`Assertion failed: ${testName} - ${detail}`);
+    const detailMsg = typeof detail === 'object' ? JSON.stringify(detail) : String(detail);
+    console.error(`  [FAIL] ${testName}${detailMsg ? ' - ' + detailMsg : ''}`);
+    throw new Error(`Assertion failed: ${testName} - ${detailMsg}`);
   }
 }
 
@@ -299,15 +300,15 @@ async function run() {
         p_branch_id => '${branchA1}'
       ) AS res;
     `);
-    assert(bResBlock.rows[0].res.success === false, 'BOOKING: blocked resource allocation rejected');
-    assert(bResBlock.rows[0].res.reason_code === 'resource_unavailable', 'BOOKING: reason_code is resource_unavailable');
+    assert(bResBlock.rows[0].res.success === false, 'BOOKING: blocked resource allocation rejected', bResBlock.rows[0].res);
+    assert(bResBlock.rows[0].res.reason_code === 'resource_unavailable', 'BOOKING: reason_code is resource_unavailable', bResBlock.rows[0].res);
 
     const qAfterResBlock = await mainClient.query(`
       SELECT usage_count FROM public.usage_counters 
       WHERE tenant_id = '${tenantA}' AND feature_key = 'max_monthly_appointments' 
         AND period_key = public.resolve_quota_period_key('${tenantA}', 'max_monthly_appointments');
     `);
-    assert(parseInt(qAfterResBlock.rows[0].usage_count, 10) === quotaAfterB1, 'BOOKING: failed resource allocation does not consume quota');
+    assert(parseInt(qAfterResBlock.rows[0].usage_count, 10) === quotaAfterB1, 'BOOKING: failed resource allocation does not consume quota', { actual: qAfterResBlock.rows[0].usage_count, expected: quotaAfterB1 });
 
     // Remove temporary resource block
     await mainClient.query(`DELETE FROM public.resource_blocks WHERE tenant_id = '${tenantA}' AND reason = 'Maintenance';`);
@@ -347,10 +348,10 @@ async function run() {
       `)
     ]);
 
-    const resConc1 = concP1.status === 'fulfilled' ? concP1.value.rows[0].res : null;
-    const resConc2 = concP2.status === 'fulfilled' ? concP2.value.rows[0].res : null;
+    const resConc1 = concP1.status === 'fulfilled' ? concP1.value.rows[0].res : concP1.reason;
+    const resConc2 = concP2.status === 'fulfilled' ? concP2.value.rows[0].res : concP2.reason;
     const successes = [resConc1?.success, resConc2?.success].filter(Boolean).length;
-    assert(successes === 1, 'BOOKING: two concurrent same-slot attempts create at most one appointment');
+    assert(successes === 1, 'BOOKING: two concurrent same-slot attempts create at most one appointment', { resConc1, resConc2, successes });
     recordConcurrencyPass('BOOKING: concurrent same-slot single winner');
 
     // 1.6 Quota limit failure & post-quota mutation failure rollback
@@ -379,8 +380,8 @@ async function run() {
         p_branch_id => '${branchA1}'
       ) AS res;
     `);
-    assert(bQuotaExceeded.rows[0].res.success === false, 'BOOKING: quota limit failure rejected');
-    assert(bQuotaExceeded.rows[0].res.reason_code === 'booking_unavailable', 'BOOKING: quota exceeded returns booking_unavailable');
+    assert(bQuotaExceeded.rows[0].res.success === false, 'BOOKING: quota limit failure rejected', bQuotaExceeded.rows[0].res);
+    assert(bQuotaExceeded.rows[0].res.reason_code === 'booking_unavailable', 'BOOKING: quota exceeded returns booking_unavailable', bQuotaExceeded.rows[0].res);
 
     // Clean up bounded test tenant entitlement override
     await mainClient.query(`
@@ -708,8 +709,8 @@ async function run() {
         p_branch_id => '${branchA1}'
       ) AS res;
     `);
+    await mainClient.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
     const wOffer2 = await mainClient.query(`
-      SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');
       SELECT public.offer_waitlist_slot(
         p_waitlist_id => '${wJoin2.rows[0].res.waitlist_id}',
         p_offered_date => '${futureDate}'::date,
