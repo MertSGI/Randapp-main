@@ -310,6 +310,7 @@ export const HealthTourismLandingPage: React.FC = () => {
             referringAgencyId={referringAgencyId}
             hasInvalidAgencyWarning={hasInvalidAgency}
             isRtl={isRtl}
+            primaryColor={primaryColor}
           />
         )}
       </section>
