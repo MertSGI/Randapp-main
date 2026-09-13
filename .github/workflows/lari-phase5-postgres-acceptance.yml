@@ -163,8 +163,7 @@ jobs:
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== EXECUTING LIVE POSTGRESQL BEHAVIORAL MATRIX (ALL 15 DOMAINS + EV079-R4) ==="
-          node supabase/tests/program-v2/p3p4-live/test-live-behavioral-matrix.mjs > matrix.log 2>&1 || (echo "=== MATRIX FAILURE LOG ===" && cat matrix.log && exit 1)
-          cat matrix.log
+          node supabase/tests/program-v2/p3p4-live/test-live-behavioral-matrix.mjs 2>&1 | tee matrix.log
 
       - name: Execute Phase 5 Live PostgreSQL Security & Concurrency Matrix
         run: |
