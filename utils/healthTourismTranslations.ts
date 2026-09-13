@@ -499,7 +499,7 @@ export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
     reviewNotice: 'يرجى التحقق من صحة بياناتك قبل الإرسال.',
     fullNameSummary: 'الاسم الكامل',
     contactSummary: 'حالة الاتصال',
-    emailSummary: 'الهاتف',
+    emailSummary: 'البريد الإلكتروني',
     phoneSummary: 'الهاتف',
     countrySummary: 'الدولة',
     languageSummary: 'اللغة المفضلة',
