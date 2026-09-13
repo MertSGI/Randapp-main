@@ -88,35 +88,43 @@ async function run() {
       VALUES 
         ('${tenantA}', 'Tenant A Live Behavioral', 'tenant-a-live', 'active', 'completed', 'published'),
         ('${tenantB}', 'Tenant B Live Cross Tenant', 'tenant-b-live', 'active', 'completed', 'published');
-
-      -- 2. Establish Deterministic Valid Commercial Subscriptions (Unlimited quotas)
-      -- Find published plan version with all core features and unlimited quotas (kurumsal plan)
-      INSERT INTO public.subscriptions (
-        tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_start, current_period_end
-      )
-      SELECT 
-        '${tenantA}', p.code, pv.id, 'active', 'manual', now() - interval '1 day', now() + interval '1 year'
-      FROM public.plan_versions pv
-      JOIN public.plans p ON p.id = pv.plan_id
-      WHERE p.code = 'kurumsal' AND pv.lifecycle_status = 'published'
-      ORDER BY pv.created_at DESC
-      LIMIT 1;
-
-      INSERT INTO public.subscriptions (
-        tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_start, current_period_end
-      )
-      SELECT 
-        '${tenantB}', p.code, pv.id, 'active', 'manual', now() - interval '1 day', now() + interval '1 year'
-      FROM public.plan_versions pv
-      JOIN public.plans p ON p.id = pv.plan_id
-      WHERE p.code = 'kurumsal' AND pv.lifecycle_status = 'published'
-      ORDER BY pv.created_at DESC
-      LIMIT 1;
     `);
 
-    // Verify subscriptions exist
-    const subCheck = await mainClient.query(`SELECT count(*) FROM public.subscriptions WHERE tenant_id IN ('${tenantA}', '${tenantB}');`);
-    assert(parseInt(subCheck.rows[0].count, 10) === 2, 'GLOBAL_SETUP: 2 subscriptions active for test tenants');
+    // 2. Establish Deterministic Valid Commercial Subscriptions (Unlimited quotas)
+    // Select published plan version (preferring ht_enterprise or kurumsal with unlimited quotas)
+    const planRes = await mainClient.query(`
+      SELECT p.code, pv.id
+        FROM public.plan_versions pv
+        JOIN public.plans p ON p.id = pv.plan_id
+        WHERE pv.lifecycle_status = 'published'
+          AND p.code IN ('ht_enterprise', 'kurumsal', 'premium')
+        ORDER BY 
+          CASE 
+            WHEN p.code = 'ht_enterprise' THEN 1
+            WHEN p.code = 'kurumsal' THEN 2
+            ELSE 3
+          END,
+          pv.version_number DESC
+        LIMIT 1;
+      `);
+      console.log('Selected Plan for Behavioral Test Subscriptions:', planRes.rows[0]);
+      assert(planRes.rows.length > 0 && planRes.rows[0].id, 'GLOBAL_SETUP: Found published plan version for test subscriptions');
+
+      const selectedPlanCode = planRes.rows[0].code;
+      const selectedPlanVersionId = planRes.rows[0].id;
+
+      await mainClient.query(`
+        INSERT INTO public.subscriptions (
+          tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_start, current_period_end
+        )
+        VALUES 
+          ('${tenantA}', '${selectedPlanCode}', '${selectedPlanVersionId}', 'active', 'manual', now() - interval '1 day', now() + interval '1 year'),
+          ('${tenantB}', '${selectedPlanCode}', '${selectedPlanVersionId}', 'active', 'manual', now() - interval '1 day', now() + interval '1 year');
+      `);
+
+      // Verify subscriptions exist
+      const subCheck = await mainClient.query(`SELECT count(*) FROM public.subscriptions WHERE tenant_id IN ('${tenantA}', '${tenantB}');`);
+      assert(parseInt(subCheck.rows[0].count, 10) === 2, 'GLOBAL_SETUP: 2 subscriptions active for test tenants');
 
     await mainClient.query(`
       -- 3. Create Auth Users & User Profiles
