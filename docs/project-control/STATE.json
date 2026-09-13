@@ -1114,5 +1114,30 @@
     "phase5_downstream_dispatch": {
         "node5_ht_funnel_multilingual": "COMPLETED_AND_ACCEPTED",
         "node6_ht_lead_ops_workspace": "COMPLETED_AND_ACCEPTED"
+    },
+    "phase5_unified_integration": {
+        "candidate_branch": "aos/phase5-disposable-unified-integration",
+        "product_composition_sha": "ee420580d2827c80ee9eef50fed6d6c0fbb16d33",
+        "bound_component_nodes": {
+            "node1": "0368c9d17eba52049fe3e78a203282656b27af14",
+            "node2": "0e6d4a2597517ec81e63e63312e21a7318e21318",
+            "node3_r2": "58cc2363c958ea52d335793945de16c36b210eed",
+            "node4": "4130ef3220aadd07fb47594589303f65241cc0e8",
+            "node5": "e097136b534147cc86b3f66716905442105567b5",
+            "node6": "3b472e43473b0d37a3a4e21e21bf2cb47a513012"
+        },
+        "all_node_contracts_result": "PASS",
+        "typecheck_result": "PASS",
+        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+        "evidence_id": "EV-088"
+    },
+    "phase5_disposable_acceptance_r3": {
+        "harness_branch": "ci/phase5-disposable-postgres-acceptance-r3",
+        "harness_sha": "c8aeceb8d22ae8b11b6fc601b82aa161d1635785",
+        "harness_delta_type": "TEST_ONLY_HARNESS_AND_WORKFLOW_DELTA",
+        "resource_blocks_end_date_fixture": "ALIGNED_TO_CANONICAL_SCHEMA",
+        "shell_exit_contract": "SET_EUO_PIPEFAIL_HARDENED",
+        "contract_suites_covered": 20,
+        "evidence_reconciliation_status": "RECONCILED_UNDER_AUDIT_R1"
     }
 }
