@@ -1129,15 +1129,27 @@
         "all_node_contracts_result": "PASS",
         "typecheck_result": "PASS",
         "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
-        "evidence_id": "EV-088"
+        "evidence_id": "EV-089"
     },
-    "phase5_disposable_acceptance_r3": {
-        "harness_branch": "ci/phase5-disposable-postgres-acceptance-r3",
-        "harness_sha": "c8aeceb8d22ae8b11b6fc601b82aa161d1635785",
+    "phase5_disposable_acceptance_r4": {
+        "harness_branch": "ci/phase5-disposable-postgres-acceptance-r4",
+        "harness_sha": "69d0fdf50a5656597c437654daffd032bb04bf8a",
+        "product_base_sha": "2cee618fd43b3acda5a464eaf4e918e832199f34",
         "harness_delta_type": "TEST_ONLY_HARNESS_AND_WORKFLOW_DELTA",
-        "resource_blocks_end_date_fixture": "ALIGNED_TO_CANONICAL_SCHEMA",
-        "shell_exit_contract": "SET_EUO_PIPEFAIL_HARDENED",
-        "contract_suites_covered": 20,
-        "evidence_reconciliation_status": "RECONCILED_UNDER_AUDIT_R1"
+        "remote_run_id": "34785166206",
+        "remote_job_id": "103799196855",
+        "workflow_steps_total": 18,
+        "workflow_steps_passed": 18,
+        "migrations_total": 87,
+        "migrations_applied_cleanly": 87,
+        "domain_contract_suites_tested": 20,
+        "domain_contract_suites_passed": 20,
+        "behavioral_matrix_status": "PASS",
+        "security_concurrency_matrix_status": "PASS",
+        "application_build_status": "PASS",
+        "typecheck_lint_status": "PASS",
+        "evidence_id": "EV-089",
+        "superseded_evidence_id": "EV-088",
+        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED"
     }
 }
