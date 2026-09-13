@@ -163,7 +163,8 @@ jobs:
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== EXECUTING LIVE POSTGRESQL BEHAVIORAL MATRIX (ALL 15 DOMAINS + EV079-R4) ==="
-          node supabase/tests/program-v2/p3p4-live/test-live-behavioral-matrix.mjs
+          node supabase/tests/program-v2/p3p4-live/test-live-behavioral-matrix.mjs > matrix.log 2>&1 || (echo "=== MATRIX FAILURE LOG ===" && cat matrix.log && exit 1)
+          cat matrix.log
 
       - name: Execute Phase 5 Live PostgreSQL Security & Concurrency Matrix
         run: |
@@ -205,6 +206,14 @@ jobs:
             console.log('DEPENDENCY AUDIT CLASSIFICATION SUMMARY:');
             console.log(JSON.stringify(summary, null, 2));
           "
+
+      - name: Upload Failure Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-diagnostics
+          path: matrix.log
+          if-no-files-found: ignore
 
       - name: Destroy Container
         if: always()
