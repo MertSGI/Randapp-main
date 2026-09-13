@@ -90,7 +90,7 @@ async function run() {
         ('${tenantB}', 'Tenant B Live Cross Tenant', 'tenant-b-live', 'active', 'completed', 'published');
 
       -- 2. Establish Deterministic Valid Commercial Subscriptions (Unlimited quotas)
-      -- Find published plan version with all core features and unlimited quotas (max_branches, max_staff, max_services, max_monthly_appointments)
+      -- Find published plan version with all core features and unlimited quotas (kurumsal plan)
       INSERT INTO public.subscriptions (
         tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_start, current_period_end
       )
@@ -98,12 +98,7 @@ async function run() {
         '${tenantA}', p.code, pv.id, 'active', 'manual', now() - interval '1 day', now() + interval '1 year'
       FROM public.plan_versions pv
       JOIN public.plans p ON p.id = pv.plan_id
-      JOIN public.plan_entitlements pe_core ON pe_core.plan_version_id = pv.id AND pe_core.feature_key = 'core_booking' AND pe_core.boolean_value = true
-      JOIN public.plan_entitlements pe_branch ON pe_branch.plan_version_id = pv.id AND pe_branch.feature_key = 'max_branches' AND pe_branch.is_unlimited = true
-      JOIN public.plan_entitlements pe_staff ON pe_staff.plan_version_id = pv.id AND pe_staff.feature_key = 'max_staff' AND pe_staff.is_unlimited = true
-      JOIN public.plan_entitlements pe_service ON pe_service.plan_version_id = pv.id AND pe_service.feature_key = 'max_services' AND pe_service.is_unlimited = true
-      JOIN public.plan_entitlements pe_appt ON pe_appt.plan_version_id = pv.id AND pe_appt.feature_key = 'max_monthly_appointments' AND pe_appt.is_unlimited = true
-      WHERE pv.lifecycle_status = 'published'
+      WHERE p.code = 'kurumsal' AND pv.lifecycle_status = 'published'
       ORDER BY pv.created_at DESC
       LIMIT 1;
 
@@ -114,15 +109,16 @@ async function run() {
         '${tenantB}', p.code, pv.id, 'active', 'manual', now() - interval '1 day', now() + interval '1 year'
       FROM public.plan_versions pv
       JOIN public.plans p ON p.id = pv.plan_id
-      JOIN public.plan_entitlements pe_core ON pe_core.plan_version_id = pv.id AND pe_core.feature_key = 'core_booking' AND pe_core.boolean_value = true
-      JOIN public.plan_entitlements pe_branch ON pe_branch.plan_version_id = pv.id AND pe_branch.feature_key = 'max_branches' AND pe_branch.is_unlimited = true
-      JOIN public.plan_entitlements pe_staff ON pe_staff.plan_version_id = pv.id AND pe_staff.feature_key = 'max_staff' AND pe_staff.is_unlimited = true
-      JOIN public.plan_entitlements pe_service ON pe_service.plan_version_id = pv.id AND pe_service.feature_key = 'max_services' AND pe_service.is_unlimited = true
-      JOIN public.plan_entitlements pe_appt ON pe_appt.plan_version_id = pv.id AND pe_appt.feature_key = 'max_monthly_appointments' AND pe_appt.is_unlimited = true
-      WHERE pv.lifecycle_status = 'published'
+      WHERE p.code = 'kurumsal' AND pv.lifecycle_status = 'published'
       ORDER BY pv.created_at DESC
       LIMIT 1;
+    `);
 
+    // Verify subscriptions exist
+    const subCheck = await mainClient.query(`SELECT count(*) FROM public.subscriptions WHERE tenant_id IN ('${tenantA}', '${tenantB}');`);
+    assert(parseInt(subCheck.rows[0].count, 10) === 2, 'GLOBAL_SETUP: 2 subscriptions active for test tenants');
+
+    await mainClient.query(`
       -- 3. Create Auth Users & User Profiles
       INSERT INTO auth.users (id, email) VALUES
         ('${userOwnerA}', 'ownera@lari.test'),
