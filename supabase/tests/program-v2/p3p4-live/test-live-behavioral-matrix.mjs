@@ -160,10 +160,10 @@ async function run() {
       INSERT INTO public.staff_services (staff_id, service_id)
       VALUES ('${staffEntityA}', '${serviceA}');
 
-      -- 7. Staff schedule availability (Monday to Sunday 08:00 - 20:00)
-      INSERT INTO public.staff_availability_rules (tenant_id, staff_id, day_of_week, start_time, end_time, is_active)
+      -- 7. Staff schedule availability (Monday to Sunday 08:00 - 20:00, ISO weekday 1..7)
+      INSERT INTO public.availability_rules (tenant_id, staff_id, weekday, start_time, end_time, is_active)
       SELECT '${tenantA}', '${staffEntityA}', d, '08:00:00'::time, '20:00:00'::time, true
-      FROM generate_series(0, 6) AS d;
+      FROM generate_series(1, 7) AS d;
 
       -- 8. Remaining Resources & Customers
       INSERT INTO public.resources (id, tenant_id, branch_id, name, capacity, is_active)
@@ -188,8 +188,8 @@ async function run() {
 
     // Check initial quota usage
     const qBefore = await mainClient.query(`
-      SELECT COALESCE((SELECT current_usage FROM public.commercial_usage_records 
-        WHERE tenant_id = '${tenantA}' AND metric_key = 'max_monthly_appointments' 
+      SELECT COALESCE((SELECT usage_count FROM public.usage_counters 
+        WHERE tenant_id = '${tenantA}' AND feature_key = 'max_monthly_appointments' 
         AND period_key = public.resolve_quota_period_key('${tenantA}', 'max_monthly_appointments')), 0) AS usage;
     `);
     const initialQuotaUsage = parseInt(qBefore.rows[0].usage, 10);
@@ -218,11 +218,11 @@ async function run() {
     const apptId1 = res1.appointment_id;
 
     const qAfter = await mainClient.query(`
-      SELECT current_usage FROM public.commercial_usage_records 
-      WHERE tenant_id = '${tenantA}' AND metric_key = 'max_monthly_appointments' 
+      SELECT usage_count FROM public.usage_counters 
+      WHERE tenant_id = '${tenantA}' AND feature_key = 'max_monthly_appointments' 
         AND period_key = public.resolve_quota_period_key('${tenantA}', 'max_monthly_appointments');
     `);
-    const quotaAfterB1 = parseInt(qAfter.rows[0].current_usage, 10);
+    const quotaAfterB1 = parseInt(qAfter.rows[0].usage_count, 10);
     assert(quotaAfterB1 === initialQuotaUsage + 1, 'BOOKING: successful booking consumes exactly one quota unit');
 
     // 1.2 Slot conflict (same slot attempted without idempotency key)
@@ -245,11 +245,11 @@ async function run() {
 
     // Quota did not increase on slot conflict
     const qAfterConflict = await mainClient.query(`
-      SELECT current_usage FROM public.commercial_usage_records 
-      WHERE tenant_id = '${tenantA}' AND metric_key = 'max_monthly_appointments' 
+      SELECT usage_count FROM public.usage_counters 
+      WHERE tenant_id = '${tenantA}' AND feature_key = 'max_monthly_appointments' 
         AND period_key = public.resolve_quota_period_key('${tenantA}', 'max_monthly_appointments');
     `);
-    assert(parseInt(qAfterConflict.rows[0].current_usage, 10) === quotaAfterB1, 'BOOKING: failed slot does not consume quota');
+    assert(parseInt(qAfterConflict.rows[0].usage_count, 10) === quotaAfterB1, 'BOOKING: failed slot does not consume quota');
 
     // 1.3 Idempotent replay
     const bReplay = await mainClient.query(`
@@ -294,11 +294,11 @@ async function run() {
     assert(bResBlock.rows[0].res.reason_code === 'resource_unavailable', 'BOOKING: reason_code is resource_unavailable');
 
     const qAfterResBlock = await mainClient.query(`
-      SELECT current_usage FROM public.commercial_usage_records 
-      WHERE tenant_id = '${tenantA}' AND metric_key = 'max_monthly_appointments' 
+      SELECT usage_count FROM public.usage_counters 
+      WHERE tenant_id = '${tenantA}' AND feature_key = 'max_monthly_appointments' 
         AND period_key = public.resolve_quota_period_key('${tenantA}', 'max_monthly_appointments');
     `);
-    assert(parseInt(qAfterResBlock.rows[0].current_usage, 10) === quotaAfterB1, 'BOOKING: failed resource allocation does not consume quota');
+    assert(parseInt(qAfterResBlock.rows[0].usage_count, 10) === quotaAfterB1, 'BOOKING: failed resource allocation does not consume quota');
 
     // Remove temporary resource block
     await mainClient.query(`DELETE FROM public.resource_blocks WHERE tenant_id = '${tenantA}' AND reason = 'Maintenance';`);
@@ -345,33 +345,17 @@ async function run() {
     recordConcurrencyPass('BOOKING: concurrent same-slot single winner');
 
     // 1.6 Quota limit failure & post-quota mutation failure rollback
-    // Test hard quota limit enforcement
+    // Insert bounded tenant entitlement override: max_monthly_appointments = 1
+    const ovrId = crypto.randomUUID();
     await mainClient.query(`
-      UPDATE public.commercial_usage_records 
-      SET current_usage = 999999
-      WHERE tenant_id = '${tenantA}' AND metric_key = 'max_monthly_appointments';
+      INSERT INTO public.tenant_entitlement_overrides (
+        id, tenant_id, feature_key, value_type, integer_value, is_unlimited, starts_at, reason
+      ) VALUES (
+        '${ovrId}', '${tenantA}', 'max_monthly_appointments', 'integer', 1, false, now() - interval '1 hour', 'Test tight quota limit'
+      );
     `);
-    // Create a plan with a tight quota limit (limit=1)
-    const tightPlanRes = await mainClient.query(`
-      DO $$
-      DECLARE
-        v_pv uuid;
-      BEGIN
-        INSERT INTO public.plan_versions (plan_id, version_number, lifecycle_status)
-        SELECT p.id, 999, 'published'
-        FROM public.plans p LIMIT 1
-        RETURNING id INTO v_pv;
 
-        INSERT INTO public.plan_entitlements (plan_version_id, feature_key, value_type, is_unlimited, integer_value, boolean_value)
-        VALUES 
-          (v_pv, 'core_booking', 'boolean', false, NULL, true),
-          (v_pv, 'max_monthly_appointments', 'integer', false, 1, NULL);
-
-        UPDATE public.subscriptions
-        SET plan_version_id = v_pv
-        WHERE tenant_id = '${tenantA}';
-      END $$;
-    `);
+    // We already consumed 1 appointment earlier (quotaAfterB1 >= 1). Attempting another booking must be rejected with booking_unavailable
     const bQuotaExceeded = await mainClient.query(`
       SELECT public.create_public_booking(
         p_slug => 'tenant-a-live',
@@ -389,18 +373,9 @@ async function run() {
     assert(bQuotaExceeded.rows[0].res.success === false, 'BOOKING: quota limit failure rejected');
     assert(bQuotaExceeded.rows[0].res.reason_code === 'booking_unavailable', 'BOOKING: quota exceeded returns booking_unavailable');
 
-    // Restore unlimited plan
+    // Clean up bounded test tenant entitlement override
     await mainClient.query(`
-      UPDATE public.subscriptions
-      SET plan_version_id = (
-        SELECT pv.id FROM public.plan_versions pv
-        JOIN public.plan_entitlements pe ON pe.plan_version_id = pv.id AND pe.feature_key = 'max_monthly_appointments' AND pe.is_unlimited = true
-        LIMIT 1
-      )
-      WHERE tenant_id = '${tenantA}';
-      UPDATE public.commercial_usage_records 
-      SET current_usage = ${quotaAfterB1 + 1}
-      WHERE tenant_id = '${tenantA}' AND metric_key = 'max_monthly_appointments';
+      DELETE FROM public.tenant_entitlement_overrides WHERE id = '${ovrId}';
     `);
 
     // -------------------------------------------------------------------------
