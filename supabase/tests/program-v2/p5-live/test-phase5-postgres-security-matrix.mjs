@@ -164,9 +164,21 @@ async function run() {
   `);
   console.log('Fixtures seeded.\n');
 
+  async function setAuth(c, userId, role = 'authenticated') {
+    if (!userId) {
+      await c.query(`RESET ROLE; SELECT set_config('request.jwt.claim.sub', '', false), set_config('request.jwt.claims', '', false);`);
+      return;
+    }
+    await c.query(`
+      SET ROLE ${role};
+      SELECT set_config('request.jwt.claim.sub', '${userId}', false);
+      SELECT set_config('request.jwt.claims', '{"sub": "${userId}", "role": "${role}"}', false);
+    `);
+  }
+
   // TEST 1: Node 2 Branch Scope Security Audit
   console.log('--- TEST 1: Node 2 clinic_get_my_context permitted_branch_ids Scoping ---');
-  await client.query(`SET LOCAL ROLE authenticated; SET LOCAL "request.jwt.claims" = '{"sub": "${userStaffA}"}';`);
+  await setAuth(client, userStaffA);
   const ctxRes = await client.query(`SELECT public.clinic_get_my_context() AS ctx;`);
   const ctxData = ctxRes.rows[0].ctx;
   console.log('clinic_get_my_context result:', JSON.stringify(ctxData));
@@ -190,7 +202,7 @@ async function run() {
 
   // TEST 3: Ordinary Staff Without HT Permission = DENY
   console.log('\n--- TEST 3: Ordinary Non-HT Staff Journey Creation = DENY ---');
-  await client.query(`SET LOCAL ROLE authenticated; SET LOCAL "request.jwt.claims" = '{"sub": "${userOrdinaryStaffA}"}';`);
+  await setAuth(client, userOrdinaryStaffA);
   let deniedOrdinary = false;
   try {
     await client.query(`
@@ -207,7 +219,7 @@ async function run() {
 
   // TEST 4: Cross-Tenant Lead Association = DENY
   console.log('\n--- TEST 4: Cross-Tenant Lead Association = DENY ---');
-  await client.query(`SET LOCAL ROLE authenticated; SET LOCAL "request.jwt.claims" = '{"sub": "${userStaffA}"}';`);
+  await setAuth(client, userStaffA);
   let deniedLead = false;
   try {
     await client.query(`
@@ -256,7 +268,7 @@ async function run() {
 
   // TEST 7: Tenant B User Mutating Tenant A Quote By Known Journey UUID = DENY
   console.log('\n--- TEST 7: Tenant B Mutating Tenant A Quote = DENY ---');
-  await client.query(`SET LOCAL ROLE authenticated; SET LOCAL "request.jwt.claims" = '{"sub": "${userStaffB}"}';`);
+  await setAuth(client, userStaffB);
   let deniedQuoteB = false;
   try {
     await client.query(`
@@ -293,7 +305,7 @@ async function run() {
 
   // TEST 9: Cross-Tenant Appointment Linkage = DENY
   console.log('\n--- TEST 9: Cross-Tenant Appointment Linkage = DENY ---');
-  await client.query(`SET LOCAL ROLE authenticated; SET LOCAL "request.jwt.claims" = '{"sub": "${userStaffA}"}';`);
+  await setAuth(client, userStaffA);
   let deniedAppt = false;
   try {
     await client.query(`
@@ -361,6 +373,8 @@ async function run() {
 
   // TEST 13: Quote Concurrency Version Allocation Under FOR UPDATE
   console.log('\n--- TEST 13: Deterministic Quote Version Concurrency Under FOR UPDATE ---');
+  await setAuth(concurrentClient1, userStaffA);
+
   const session1Quote = client.query(`
     SELECT public.ht_create_or_update_journey_quote(
       p_journey_id := '${journeyAId}',
@@ -371,7 +385,6 @@ async function run() {
   `);
 
   const session2Quote = concurrentClient1.query(`
-    SET LOCAL ROLE authenticated; SET LOCAL "request.jwt.claims" = '{"sub": "${userStaffA}"}';
     SELECT public.ht_create_or_update_journey_quote(
       p_journey_id := '${journeyAId}',
       p_currency := 'EUR',
@@ -382,8 +395,7 @@ async function run() {
 
   const [res1, res2] = await Promise.all([session1Quote, session2Quote]);
   const v1 = res1.rows[0].res.version;
-  const res2Rows = Array.isArray(res2) ? res2[res2.length - 1].rows : res2.rows;
-  const v2 = res2Rows[0].res.version;
+  const v2 = res2.rows[0].res.version;
 
   assert(v1 !== v2, `Deterministic distinct versions allocated concurrently: v1=${v1}, v2=${v2}`);
   assert((v1 === 2 && v2 === 3) || (v1 === 3 && v2 === 2), 'Concurrent versions serialized monotonically');

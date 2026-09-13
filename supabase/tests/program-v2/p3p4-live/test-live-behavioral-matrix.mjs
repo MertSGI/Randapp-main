@@ -169,7 +169,7 @@ async function run() {
       INSERT INTO public.resources (id, tenant_id, branch_id, name, resource_type, capacity, is_active)
       VALUES ('${resourceA}', '${tenantA}', '${branchA1}', 'Treatment Bed 1', 'room', 1, true);
 
-      INSERT INTO public.service_resource_requirements (tenant_id, service_id, resource_id, quantity)
+      INSERT INTO public.service_resource_requirements (tenant_id, service_id, resource_id, required_quantity)
       VALUES ('${tenantA}', '${serviceA}', '${resourceA}', 1);
 
       INSERT INTO public.customers (id, tenant_id, name, email, phone)
