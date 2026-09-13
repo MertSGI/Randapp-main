@@ -1091,8 +1091,28 @@
         "push_branch": "origin/aos/phase5-clinic-ai-soap-integration",
         "evidence_id": "EV-084"
     },
+    "phase5_node5_ht_funnel_state": {
+        "candidate_branch": "aos/phase5-ht-funnel-multilingual",
+        "candidate_sha": "e097136b534147cc86b3f66716905442105567b5",
+        "upstream_base_sha": "58cc2363c958ea52d335793945de16c36b210eed",
+        "contracts_tested": 34,
+        "contracts_result": "PASS",
+        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+        "push_branch": "origin/aos/phase5-ht-funnel-multilingual",
+        "evidence_id": "EV-086"
+    },
+    "phase5_node6_ht_lead_ops_state": {
+        "candidate_branch": "aos/phase5-ht-lead-ops-workspace",
+        "candidate_sha": "3b472e43473b0d37a3a4e21e21bf2cb47a513012",
+        "upstream_base_sha": "58cc2363c958ea52d335793945de16c36b210eed",
+        "contracts_tested": 16,
+        "contracts_result": "PASS",
+        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+        "push_branch": "origin/aos/phase5-ht-lead-ops-workspace",
+        "evidence_id": "EV-087"
+    },
     "phase5_downstream_dispatch": {
-        "node5_ht_funnel_multilingual": "DISPATCHED",
-        "node6_ht_lead_ops_workspace": "DISPATCHED"
+        "node5_ht_funnel_multilingual": "COMPLETED_AND_ACCEPTED",
+        "node6_ht_lead_ops_workspace": "COMPLETED_AND_ACCEPTED"
     }
 }
