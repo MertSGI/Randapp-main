@@ -177,6 +177,12 @@ async function run() {
         ('${customerA}', '${tenantA}', 'Ayse Customer A', 'ayse@example.com', '+905551112233'),
         ('${customerB}', '${tenantB}', 'Fatma Customer B', 'fatma@example.com', '+905554445566');
     `);
+
+    // Verify subscriptions exist
+    const subCheck = await mainClient.query(`
+      SELECT tenant_id, plan_id, status FROM public.subscriptions WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    `);
+    assert(subCheck.rows.length === 2, 'FIXTURES: test tenant subscriptions active', `Found ${subCheck.rows.length} subscriptions`);
     console.log('Global deterministic test fixtures seeded successfully.\n');
 
     // -------------------------------------------------------------------------
@@ -213,8 +219,8 @@ async function run() {
       ) AS res;
     `);
     const res1 = b1.rows[0].res;
-    assert(res1.success === true, 'BOOKING: successful booking');
-    assert(res1.reason_code === 'ok', 'BOOKING: reason_code is ok');
+    assert(res1.success === true, 'BOOKING: successful booking', JSON.stringify(res1));
+    assert(res1.reason_code === 'ok', 'BOOKING: reason_code is ok', JSON.stringify(res1));
     const apptId1 = res1.appointment_id;
 
     const qAfter = await mainClient.query(`
@@ -577,15 +583,13 @@ async function run() {
     console.log('\n--- 4. MULTI_BRANCH DOMAIN ---');
 
     // 4.1 Owner authorized across branches
-    const ownBranches = await mainClient.query(`
-      SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');
-      SELECT * FROM public.branches WHERE tenant_id = '${tenantA}';
-    `);
+    await mainClient.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
+    const ownBranches = await mainClient.query(`SELECT * FROM public.branches WHERE tenant_id = '${tenantA}';`);
     assert(ownBranches.rows.length >= 2, 'MULTI_BRANCH: owner authorized for all tenant branches');
 
     // 4.2 Staff assigned branch authorized vs unassigned branch denied
+    await mainClient.query(`SELECT public.set_actor_context('${userStaffA}', 'staff', '${tenantA}');`);
     const staffBranches = await mainClient.query(`
-      SELECT public.set_actor_context('${userStaffA}', 'staff', '${tenantA}');
       SELECT * FROM public.get_tenant_branch_calendar(
         '${tenantA}', '${branchA1}', '${futureDate}'::date, '${futureDate}'::date
       ) AS res;
@@ -594,8 +598,8 @@ async function run() {
 
     let staffUnassignedDenied = false;
     try {
+      await mainClient.query(`SELECT public.set_actor_context('${userStaffA}', 'staff', '${tenantA}');`);
       await mainClient.query(`
-        SELECT public.set_actor_context('${userStaffA}', 'staff', '${tenantA}');
         SELECT * FROM public.get_tenant_branch_calendar(
           '${tenantA}', '${branchA2}', '${futureDate}'::date, '${futureDate}'::date
         );
@@ -608,8 +612,8 @@ async function run() {
     // 4.3 Cross-tenant branch denied
     let crossTenantBranchDenied = false;
     try {
+      await mainClient.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
       await mainClient.query(`
-        SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');
         SELECT * FROM public.get_tenant_branch_calendar(
           '${tenantB}', '${branchB1}', '${futureDate}'::date, '${futureDate}'::date
         );
@@ -1235,22 +1239,22 @@ async function run() {
     assert(red1.rows[0].res.remaining_credits === 9, 'PACKAGES: remaining credits decremented');
 
     // 13.2 Parallel redemption race
+    await clientSession1.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
+    await clientSession2.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
     const [cRed1, cRed2] = await Promise.allSettled([
       clientSession1.query(`
-        SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');
         SELECT public.redeem_customer_package_credits(
           '${tenantA}', '${custPkgId}', '${serviceA}', 1, '${apptId1}', 'conc-pkg-01'
         ) AS res;
       `),
       clientSession2.query(`
-        SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');
         SELECT public.redeem_customer_package_credits(
           '${tenantA}', '${custPkgId}', '${serviceA}', 1, '${apptId1}', 'conc-pkg-02'
         ) AS res;
       `)
     ]);
-    const okRed1 = cRed1.status === 'fulfilled' && cRed1.value.rows[1]?.res?.success;
-    const okRed2 = cRed2.status === 'fulfilled' && cRed2.value.rows[1]?.res?.success;
+    const okRed1 = cRed1.status === 'fulfilled' && cRed1.value.rows[0]?.res?.success;
+    const okRed2 = cRed2.status === 'fulfilled' && cRed2.value.rows[0]?.res?.success;
     assert(okRed1 && okRed2, 'PACKAGES: parallel redemptions processed without race or corruption');
     recordConcurrencyPass('PACKAGES: parallel redemption race');
 
@@ -1309,22 +1313,22 @@ async function run() {
 
     // 14.2 Parallel double-spend prevention
     // Wallet has 8000. Launch two concurrent debits of 5000 each. Only one should succeed!
+    await clientSession1.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
+    await clientSession2.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
     const [wSpend1, wSpend2] = await Promise.allSettled([
       clientSession1.query(`
-        SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');
         SELECT public.debit_client_wallet(
           '${tenantA}', '${customerA}', 5000, 'TRY', '${apptId1}', 'conc-w-01'
         ) AS res;
       `),
       clientSession2.query(`
-        SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');
         SELECT public.debit_client_wallet(
           '${tenantA}', '${customerA}', 5000, 'TRY', '${apptId1}', 'conc-w-02'
         ) AS res;
       `)
     ]);
-    const okSpend1 = wSpend1.status === 'fulfilled' && wSpend1.value.rows[1]?.res?.success;
-    const okSpend2 = wSpend2.status === 'fulfilled' && wSpend2.value.rows[1]?.res?.success;
+    const okSpend1 = wSpend1.status === 'fulfilled' && wSpend1.value.rows[0]?.res?.success;
+    const okSpend2 = wSpend2.status === 'fulfilled' && wSpend2.value.rows[0]?.res?.success;
     const spendSuccesses = [okSpend1, okSpend2].filter(Boolean).length;
     assert(spendSuccesses === 1, 'WALLET_AND_GIFT_CARD: parallel double-spend prevention (exactly one 5000 debit succeeded)');
     recordConcurrencyPass('WALLET_AND_GIFT_CARD: parallel double-spend prevention');
