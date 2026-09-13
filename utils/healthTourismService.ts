@@ -283,4 +283,97 @@ export class HealthTourismService {
 
     return data as { success: boolean; deleted_messages?: number; deleted_conversations?: number };
   }
+
+  // =========================================================================
+  // Node 3 & Node 6: Treatment Journey, Quote & Itinerary Domain Methods
+  // =========================================================================
+
+  /**
+   * Create a new treatment journey server-authoritatively.
+   */
+  async createTreatmentJourney(params: {
+    title: string;
+    lead_id?: string | null;
+    customer_id?: string | null;
+    coordinator_staff_id?: string | null;
+    target_treatment_category?: string | null;
+    arrival_date?: string | null;
+    departure_date?: string | null;
+    notes?: string | null;
+  }): Promise<{ success: boolean; journey_id?: string; message?: string }> {
+    const { data, error } = await this.client.rpc('ht_create_treatment_journey', {
+      p_title: params.title,
+      p_lead_id: params.lead_id ?? null,
+      p_customer_id: params.customer_id ?? null,
+      p_coordinator_staff_id: params.coordinator_staff_id ?? null,
+      p_target_treatment_category: params.target_treatment_category ?? null,
+      p_arrival_date: params.arrival_date ?? null,
+      p_departure_date: params.departure_date ?? null,
+      p_notes: params.notes ?? null
+    });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    return data as { success: boolean; journey_id?: string };
+  }
+
+  /**
+   * Create or update a journey quote with deterministic concurrency.
+   */
+  async createOrUpdateJourneyQuote(params: {
+    journey_id: string;
+    currency: string;
+    total_amount_minor_units: number;
+    items: Array<{ description: string; category: string; amount_minor_units: number }>;
+    valid_until?: string | null;
+  }): Promise<{ success: boolean; quote_id?: string; version?: number; message?: string }> {
+    const { data, error } = await this.client.rpc('ht_create_or_update_journey_quote', {
+      p_journey_id: params.journey_id,
+      p_currency: params.currency,
+      p_total_amount_minor_units: params.total_amount_minor_units,
+      p_items: params.items,
+      p_valid_until: params.valid_until ?? null
+    });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    return data as { success: boolean; quote_id?: string; version?: number };
+  }
+
+  /**
+   * Add an itinerary event to a journey.
+   */
+  async addJourneyItineraryEvent(params: {
+    journey_id: string;
+    event_type: string;
+    title: string;
+    scheduled_start: string;
+    scheduled_end?: string | null;
+    location?: string | null;
+    appointment_id?: string | null;
+    assigned_coordinator_staff_id?: string | null;
+    notes?: string | null;
+  }): Promise<{ success: boolean; event_id?: string; message?: string }> {
+    const { data, error } = await this.client.rpc('ht_add_journey_itinerary_event', {
+      p_journey_id: params.journey_id,
+      p_event_type: params.event_type,
+      p_title: params.title,
+      p_scheduled_start: params.scheduled_start,
+      p_scheduled_end: params.scheduled_end ?? null,
+      p_location: params.location ?? null,
+      p_appointment_id: params.appointment_id ?? null,
+      p_assigned_coordinator_staff_id: params.assigned_coordinator_staff_id ?? null,
+      p_notes: params.notes ?? null
+    });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    return data as { success: boolean; event_id?: string };
+  }
 }
