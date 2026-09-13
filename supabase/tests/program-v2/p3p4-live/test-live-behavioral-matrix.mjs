@@ -194,6 +194,43 @@ async function run() {
       SELECT tenant_id, plan_id, status FROM public.subscriptions WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     `);
     assert(subCheck.rows.length === 2, 'FIXTURES: test tenant subscriptions active', `Found ${subCheck.rows.length} subscriptions`);
+
+    // Define canonical test actor context helper for RLS and auth simulation
+    await mainClient.query(`
+      CREATE OR REPLACE FUNCTION public.set_actor_context(
+        p_user_id UUID,
+        p_role TEXT,
+        p_tenant_id UUID
+      )
+      RETURNS VOID
+      LANGUAGE plpgsql
+      SECURITY DEFINER
+      SET search_path = pg_catalog, public
+      AS $$
+      BEGIN
+        IF p_user_id IS NULL THEN
+          PERFORM set_config('request.jwt.claim.sub', '', false);
+          PERFORM set_config('request.jwt.claim.role', COALESCE(p_role, 'service_role'), false);
+          PERFORM set_config('request.jwt.claim.tenant_id', '', false);
+          PERFORM set_config('request.jwt.claims', jsonb_build_object(
+            'role', COALESCE(p_role, 'service_role')
+          )::text, false);
+        ELSE
+          PERFORM set_config('request.jwt.claim.sub', p_user_id::text, false);
+          PERFORM set_config('request.jwt.claim.role', COALESCE(p_role, 'authenticated'), false);
+          PERFORM set_config('request.jwt.claim.tenant_id', COALESCE(p_tenant_id::text, ''), false);
+          PERFORM set_config('request.jwt.claims', jsonb_build_object(
+            'sub', p_user_id::text,
+            'role', COALESCE(p_role, 'authenticated'),
+            'tenant_id', COALESCE(p_tenant_id::text, '')
+          )::text, false);
+        END IF;
+      END;
+      $$;
+
+      GRANT EXECUTE ON FUNCTION public.set_actor_context(UUID, TEXT, UUID) TO authenticated, service_role, anon;
+    `);
+
     console.log('Global deterministic test fixtures seeded successfully.\n');
 
     // -------------------------------------------------------------------------
@@ -770,7 +807,7 @@ async function run() {
     // 4.2 Staff assigned branch authorized vs unassigned branch denied
     await mainClient.query(`SELECT public.set_actor_context('${userStaffA}', 'staff', '${tenantA}');`);
     const staffBranches = await mainClient.query(`
-      SELECT * FROM public.get_tenant_branch_calendar(
+      SELECT * FROM public.get_branch_calendar_appointments(
         '${tenantA}', '${branchA1}', '${futureDate}'::date, '${futureDate}'::date
       ) AS res;
     `);
@@ -780,7 +817,7 @@ async function run() {
     try {
       await mainClient.query(`SELECT public.set_actor_context('${userStaffA}', 'staff', '${tenantA}');`);
       await mainClient.query(`
-        SELECT * FROM public.get_tenant_branch_calendar(
+        SELECT * FROM public.get_branch_calendar_appointments(
           '${tenantA}', '${branchA2}', '${futureDate}'::date, '${futureDate}'::date
         );
       `);
@@ -794,7 +831,7 @@ async function run() {
     try {
       await mainClient.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
       await mainClient.query(`
-        SELECT * FROM public.get_tenant_branch_calendar(
+        SELECT * FROM public.get_branch_calendar_appointments(
           '${tenantB}', '${branchB1}', '${futureDate}'::date, '${futureDate}'::date
         );
       `);
@@ -1221,15 +1258,15 @@ async function run() {
     // 9.1 Tenant isolation & role authorization
     await mainClient.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
     const c360Own = await mainClient.query(`
-      SELECT public.get_tenant_customer_360('${tenantA}', '${customerA}') AS res;
+      SELECT public.get_customer_360_view('${tenantA}', '${customerA}') AS res;
     `);
-    assert(c360Own.rows[0].res.success === true, 'CUSTOMER360: owner authorized to read customer');
+    assert(c360Own.rows[0].res && c360Own.rows[0].res.customer_id === customerA, 'CUSTOMER360: owner authorized to read customer');
 
     // Cross-tenant access denied
     let c360CrossDenied = false;
     try {
       await mainClient.query(`
-        SELECT public.get_tenant_customer_360('${tenantB}', '${customerB}');
+        SELECT public.get_customer_360_view('${tenantB}', '${customerB}');
       `);
     } catch (e) {
       c360CrossDenied = true;
@@ -1264,7 +1301,7 @@ async function run() {
     const repOwn = await mainClient.query(`
       SELECT public.get_tenant_booking_analytics('${tenantA}') AS res;
     `);
-    assert(repOwn.rows[0].res.total_bookings >= 1, 'REPORTING: owner visibility confirmed');
+    assert(repOwn.rows[0].res?.metrics?.total_bookings >= 1, 'REPORTING: owner visibility confirmed');
 
     // 10.2 Staff assigned branch visibility
     await mainClient.query(`SELECT public.set_actor_context('${userStaffA}', 'staff', '${tenantA}');`);
@@ -1479,10 +1516,11 @@ async function run() {
     // 14.1 Wallet debit success
     await mainClient.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
     const wDebit = await mainClient.query(`
-      SELECT public.debit_client_wallet(
+      SELECT public.transact_wallet_balance(
         p_tenant_id => '${tenantA}',
         p_customer_id => '${customerA}',
-        p_amount_minor_units => 2000,
+        p_amount_minor => 2000,
+        p_operation => 'debit',
         p_currency => 'TRY',
         p_appointment_id => '${apptId1}',
         p_idempotency_key => 'idem-w-deb-01'
@@ -1497,13 +1535,13 @@ async function run() {
     await clientSession2.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
     const [wSpend1, wSpend2] = await Promise.allSettled([
       clientSession1.query(`
-        SELECT public.debit_client_wallet(
-          '${tenantA}', '${customerA}', 5000, 'TRY', '${apptId1}', 'conc-w-01'
+        SELECT public.transact_wallet_balance(
+          '${tenantA}', '${customerA}', 5000, 'debit', 'TRY', '${apptId1}', 'conc-w-01'
         ) AS res;
       `),
       clientSession2.query(`
-        SELECT public.debit_client_wallet(
-          '${tenantA}', '${customerA}', 5000, 'TRY', '${apptId1}', 'conc-w-02'
+        SELECT public.transact_wallet_balance(
+          '${tenantA}', '${customerA}', 5000, 'debit', 'TRY', '${apptId1}', 'conc-w-02'
         ) AS res;
       `)
     ]);
@@ -1596,11 +1634,14 @@ async function run() {
     // 15.4 Cross-tenant denial & ledger immutability
     let loyCrossFailed = false;
     try {
+      await mainClient.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
       await mainClient.query(`
         SELECT public.get_customer_loyalty_profile('${tenantB}', '${customerA}');
       `);
     } catch (e) {
       loyCrossFailed = true;
+    } finally {
+      await mainClient.query(`SELECT public.set_actor_context(NULL, 'service_role', NULL);`);
     }
     assert(loyCrossFailed, 'LOYALTY: cross-tenant profile read denied');
     recordCrossTenantPass('LOYALTY: cross-tenant denial');
