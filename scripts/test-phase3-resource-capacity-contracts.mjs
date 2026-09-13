@@ -120,6 +120,22 @@ const tests = [
   {
     name: '19. ATOMIC_ROLLBACK: Raises exception on post-quota mutation failure to force total rollback and zero leakage',
     test: () => /RAISE\s+EXCEPTION\s+'BOOKING_MUTATION_FAILED/i.test(sql)
+  },
+  {
+    name: '20. ASYMMETRIC_BUFFER_SEMANTICS: evaluate_booking_slot preserves EV055 asymmetric buffer joins and collision model',
+    test: () => {
+      const hasExistSvcJoin = /LEFT\s+JOIN\s+public\.booking_buffer_rules\s+bbr_exist_svc/i.test(sql) &&
+                             /bbr_exist_svc\.service_id\s*=\s*a\.service_id/i.test(sql) &&
+                             /bbr_exist_svc\.is_active\s*=\s*true/i.test(sql);
+      const hasExistDefJoin = /LEFT\s+JOIN\s+public\.booking_buffer_rules\s+bbr_exist_def/i.test(sql) &&
+                             /bbr_exist_def\.service_id\s+IS\s+NULL/i.test(sql) &&
+                             /bbr_exist_def\.is_active\s*=\s*true/i.test(sql);
+      const hasBufferBeforeApplied = /COALESCE\s*\(\s*bbr_exist_svc\.buffer_before\s*,\s*bbr_exist_def\.buffer_before\s*,\s*0\s*\)/i.test(sql) &&
+                                     /v_req_buf_before/i.test(sql);
+      const hasBufferAfterApplied = /COALESCE\s*\(\s*bbr_exist_svc\.buffer_after\s*,\s*bbr_exist_def\.buffer_after\s*,\s*0\s*\)/i.test(sql) &&
+                                    /v_req_buf_after/i.test(sql);
+      return hasExistSvcJoin && hasExistDefJoin && hasBufferBeforeApplied && hasBufferAfterApplied;
+    }
   }
 ];
 
