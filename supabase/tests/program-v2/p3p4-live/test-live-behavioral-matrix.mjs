@@ -488,8 +488,8 @@ async function run() {
       VALUES ('${tenantA}', '${serviceA}', 10, 15)
       ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_before = 10, buffer_after = 15;
       
-      INSERT INTO public.appointments (id, tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
-      VALUES ('55555555-aaaa-4555-8555-555555555551', '${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Prior Client', '+905551111111', '${schedDate}'::date, '10:00:00'::time, 30, 'confirmed');
+      INSERT INTO public.appointments (id, tenant_id, customer_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
+      VALUES ('55555555-aaaa-4555-8555-555555555551', '${tenantA}', '${customerA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Prior Client', '+905551111111', '${schedDate}'::date, '10:00:00'::time, 30, 'confirmed');
     `);
 
     // 2.5.1 Existing buffer_after collision: request 10:35:00 (inside 10:00 + 30m + 15m buffer = 10:45) => DENY
