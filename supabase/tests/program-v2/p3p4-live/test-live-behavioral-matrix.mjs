@@ -1763,6 +1763,14 @@ async function run() {
     // -------------------------------------------------------------------------
     console.log('\n--- EV079-R3 REACTIVATION SUITE ---');
 
+    // Clean any prior consent records, reactivation events, and old appointments for tenantA
+    // to ensure test isolation from previous domain activity
+    await mainClient.query(`
+      DELETE FROM public.consent_ledger WHERE tenant_id = '${tenantA}';
+      DELETE FROM public.customer_reactivation_events WHERE tenant_id = '${tenantA}';
+      UPDATE public.appointments SET status = 'cancelled' WHERE customer_id = '${customerA}' AND appointment_date < CURRENT_DATE - 30;
+    `);
+
     // Create a customer with last appointment 65 days ago
     const cust60 = '77777777-6060-4660-8660-777777777777';
     await mainClient.query(`
