@@ -1384,17 +1384,26 @@ async function run() {
     // -------------------------------------------------------------------------
     console.log('\n--- 10. REPORTING DOMAIN ---');
 
+    // Seed a completed appointment today for Tenant A at branchA1 so default 30-day window metrics are guaranteed >= 1
+    await mainClient.query(`
+      INSERT INTO public.appointments (
+        id, tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status
+      ) VALUES
+        (gen_random_uuid(), '${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Reporting Test Client', '+905559990001', CURRENT_DATE, '12:00:00'::time, 30, 'confirmed')
+      ON CONFLICT DO NOTHING;
+    `);
+
     // 10.1 Owner visibility
     await mainClient.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
     const repOwn = await mainClient.query(`
-      SELECT public.get_tenant_booking_analytics('${tenantA}') AS res;
+      SELECT public.get_tenant_booking_analytics('${tenantA}', NULL, CURRENT_DATE - 30, CURRENT_DATE + 365) AS res;
     `);
     assert(repOwn.rows[0].res?.metrics?.total_bookings >= 1, 'REPORTING: owner visibility confirmed');
 
     // 10.2 Staff assigned branch visibility
     await mainClient.query(`SELECT public.set_actor_context('${userStaffA}', 'staff', '${tenantA}');`);
     const repStaff = await mainClient.query(`
-      SELECT public.get_tenant_booking_analytics('${tenantA}', '${branchA1}') AS res;
+      SELECT public.get_tenant_booking_analytics('${tenantA}', '${branchA1}', CURRENT_DATE - 30, CURRENT_DATE + 365) AS res;
     `);
     assert(repStaff.rows[0].res !== null, 'REPORTING: staff assigned-branch visibility confirmed');
 
