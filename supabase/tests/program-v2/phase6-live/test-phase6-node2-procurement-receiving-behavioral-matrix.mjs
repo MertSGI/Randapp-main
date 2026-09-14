@@ -101,11 +101,11 @@ async function run() {
     // Create a second supplier in Tenant A and mark inactive for inactive-supplier checks
     const rSuppA2 = await mainClient.query(`
       SELECT public.pos_create_supplier(
-        p_name := 'Discontinued Lab Supplies'
+        p_name := 'Discontinued Lab Supplies',
+        p_is_active := false
       ) AS res;
     `);
     const suppA2 = rSuppA2.rows[0].res;
-    await mainClient.query(`UPDATE public.suppliers SET is_active = false WHERE id = '${suppA2.supplier_id}';`);
 
     // Create a supplier in Tenant B
     await setAuth(mainClient, userStaffB);

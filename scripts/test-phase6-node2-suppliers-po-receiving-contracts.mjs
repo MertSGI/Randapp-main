@@ -42,7 +42,7 @@ const tests = [
     name: '4. Purchase order receiving events table defined with idempotency constraint and link to canonical inventory movements',
     check: () => sql.includes('CREATE TABLE IF NOT EXISTS public.purchase_order_receiving_events') &&
                  sql.includes('inventory_movement_id UUID NOT NULL') &&
-                 sql.includes('CONSTRAINT uq_pore_tenant_idempotency UNIQUE (tenant_id, idempotency_key)')
+                 sql.includes('CONSTRAINT uq_pore_tenant_item_idempotency UNIQUE (tenant_id, idempotency_key, po_item_id)')
   },
   {
     name: '5. Direct table mutations strictly revoked from PUBLIC, anon, and authenticated on all 4 tables',

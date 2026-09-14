@@ -185,7 +185,7 @@ jobs:
               'uq_suppliers_tenant_name',
               'uq_purchase_orders_tenant_po_number',
               'chk_po_items_received_bound',
-              'uq_pore_tenant_idempotency'
+              'uq_pore_tenant_item_idempotency'
             )
             ORDER BY conname;
           "

@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS public.purchase_order_receiving_events (
         REFERENCES public.purchase_order_items(id, tenant_id) ON DELETE CASCADE,
     CONSTRAINT fk_pore_product_tenant FOREIGN KEY (product_id, tenant_id)
         REFERENCES public.products(id, tenant_id) ON DELETE RESTRICT,
-    CONSTRAINT uq_pore_tenant_idempotency UNIQUE (tenant_id, idempotency_key)
+    CONSTRAINT uq_pore_tenant_item_idempotency UNIQUE (tenant_id, idempotency_key, po_item_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_pore_po ON public.purchase_order_receiving_events(tenant_id, purchase_order_id);
@@ -264,7 +264,8 @@ CREATE OR REPLACE FUNCTION public.pos_create_supplier(
     p_email TEXT DEFAULT NULL,
     p_phone TEXT DEFAULT NULL,
     p_tax_identifier TEXT DEFAULT NULL,
-    p_address TEXT DEFAULT NULL
+    p_address TEXT DEFAULT NULL,
+    p_is_active BOOLEAN DEFAULT TRUE
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -328,7 +329,7 @@ BEGIN
         nullif(trim(p_phone), ''),
         nullif(trim(p_tax_identifier), ''),
         nullif(trim(p_address), ''),
-        true,
+        COALESCE(p_is_active, true),
         now(),
         now()
     )
