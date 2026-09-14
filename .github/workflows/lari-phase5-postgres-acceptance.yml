@@ -3,6 +3,7 @@ name: LARI Program V2 Phase 5 Disposable Postgres Acceptance & Live Security Mat
 on:
   push:
     branches:
+      - ci/phase5-disposable-postgres-acceptance-r5
       - ci/phase5-disposable-postgres-acceptance-r4
       - ci/phase5-disposable-postgres-acceptance-r3
       - ci/phase5-disposable-postgres-acceptance-r2
