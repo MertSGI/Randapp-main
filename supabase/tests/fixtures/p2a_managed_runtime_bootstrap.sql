@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS auth.users (
 CREATE OR REPLACE FUNCTION auth.jwt()
 RETURNS jsonb
 LANGUAGE plpgsql STABLE
+SET search_path = auth, pg_catalog
 AS $$
 DECLARE
   claims_str text;
@@ -78,6 +79,7 @@ $$;
 CREATE OR REPLACE FUNCTION auth.uid()
 RETURNS uuid
 LANGUAGE sql STABLE
+SET search_path = auth, pg_catalog
 AS $$
   SELECT COALESCE(
     NULLIF(auth.jwt()->>'sub', '')::uuid,
@@ -89,6 +91,7 @@ $$;
 CREATE OR REPLACE FUNCTION auth.role()
 RETURNS text
 LANGUAGE sql STABLE
+SET search_path = auth, pg_catalog
 AS $$
   SELECT COALESCE(
     auth.jwt()->>'role',
@@ -100,6 +103,7 @@ $$;
 CREATE OR REPLACE FUNCTION auth.email()
 RETURNS text
 LANGUAGE sql STABLE
+SET search_path = auth, pg_catalog
 AS $$
   SELECT COALESCE(
     auth.jwt()->>'email',
@@ -107,12 +111,12 @@ AS $$
   );
 $$;
 
-GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
-GRANT ALL ON TABLE auth.users TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION auth.jwt() TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION auth.role() TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION auth.email() TO anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role, public;
+GRANT ALL ON TABLE auth.users TO anon, authenticated, service_role, public;
+GRANT EXECUTE ON FUNCTION auth.jwt() TO anon, authenticated, service_role, public;
+GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated, service_role, public;
+GRANT EXECUTE ON FUNCTION auth.role() TO anon, authenticated, service_role, public;
+GRANT EXECUTE ON FUNCTION auth.email() TO anon, authenticated, service_role, public;
 
 -- BOOTSTRAP SELF-TEST
 DO $$

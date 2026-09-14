@@ -75,12 +75,30 @@ async function run() {
     console.log('--- 0. SETUP DETERMINISTIC TENANTS & SEED DATA ---');
 
     await mainClient.query(`
-      -- Clean previous test rows if any
+      -- Clean previous test rows if any (topological cascade order)
+      DELETE FROM public.appointment_resources WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.resource_blocks WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.service_resource_requirements WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.resources WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.availability_rules WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.staff_services WHERE staff_id = '${staffEntityA}' OR service_id = '${serviceA}';
+      DELETE FROM public.service_branches WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.services WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.staff_branches WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.staff WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.customer_reactivation_events WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.customer_loyalty_ledger WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.customer_loyalty_balances WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.tenant_loyalty_configs WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.consent_ledger WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.communication_outbox WHERE tenant_id IN ('${tenantA}', '${tenantB}');
       DELETE FROM public.appointments WHERE tenant_id IN ('${tenantA}', '${tenantB}');
       DELETE FROM public.customers WHERE tenant_id IN ('${tenantA}', '${tenantB}');
       DELETE FROM public.users_profile WHERE id IN ('${userOwnerA}', '${userStaffA}', '${userOwnerB}');
       DELETE FROM auth.users WHERE id IN ('${userOwnerA}', '${userStaffA}', '${userOwnerB}');
       DELETE FROM public.branches WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.subscriptions WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+      DELETE FROM public.usage_counters WHERE tenant_id IN ('${tenantA}', '${tenantB}');
       DELETE FROM public.tenants WHERE id IN ('${tenantA}', '${tenantB}');
 
       -- 1. Create Deterministic Test Tenants
@@ -88,41 +106,45 @@ async function run() {
       VALUES 
         ('${tenantA}', 'Tenant A Live Behavioral', 'tenant-a-live', 'active', 'completed', 'published'),
         ('${tenantB}', 'Tenant B Live Cross Tenant', 'tenant-b-live', 'active', 'completed', 'published');
+    `);
 
-      -- 2. Establish Deterministic Valid Commercial Subscriptions (Unlimited quotas)
-      -- Find published plan version with all core features and unlimited quotas (max_branches, max_staff, max_services, max_monthly_appointments)
-      INSERT INTO public.subscriptions (
-        tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_start, current_period_end
-      )
-      SELECT 
-        '${tenantA}', p.code, pv.id, 'active', 'manual', now() - interval '1 day', now() + interval '1 year'
-      FROM public.plan_versions pv
-      JOIN public.plans p ON p.id = pv.plan_id
-      JOIN public.plan_entitlements pe_core ON pe_core.plan_version_id = pv.id AND pe_core.feature_key = 'core_booking' AND pe_core.boolean_value = true
-      JOIN public.plan_entitlements pe_branch ON pe_branch.plan_version_id = pv.id AND pe_branch.feature_key = 'max_branches' AND pe_branch.is_unlimited = true
-      JOIN public.plan_entitlements pe_staff ON pe_staff.plan_version_id = pv.id AND pe_staff.feature_key = 'max_staff' AND pe_staff.is_unlimited = true
-      JOIN public.plan_entitlements pe_service ON pe_service.plan_version_id = pv.id AND pe_service.feature_key = 'max_services' AND pe_service.is_unlimited = true
-      JOIN public.plan_entitlements pe_appt ON pe_appt.plan_version_id = pv.id AND pe_appt.feature_key = 'max_monthly_appointments' AND pe_appt.is_unlimited = true
-      WHERE pv.lifecycle_status = 'published'
-      ORDER BY pv.created_at DESC
-      LIMIT 1;
+    // 2. Establish Deterministic Valid Commercial Subscriptions (Unlimited quotas)
+    // Select published plan version (preferring ht_enterprise or kurumsal with unlimited quotas)
+    const planRes = await mainClient.query(`
+      SELECT p.code, pv.id
+        FROM public.plan_versions pv
+        JOIN public.plans p ON p.id = pv.plan_id
+        WHERE pv.lifecycle_status = 'published'
+          AND p.code IN ('ht_enterprise', 'kurumsal', 'premium')
+        ORDER BY 
+          CASE 
+            WHEN p.code = 'ht_enterprise' THEN 1
+            WHEN p.code = 'kurumsal' THEN 2
+            ELSE 3
+          END,
+          pv.version_number DESC
+        LIMIT 1;
+      `);
+      console.log('Selected Plan for Behavioral Test Subscriptions:', planRes.rows[0]);
+      assert(planRes.rows.length > 0 && planRes.rows[0].id, 'GLOBAL_SETUP: Found published plan version for test subscriptions');
 
-      INSERT INTO public.subscriptions (
-        tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_start, current_period_end
-      )
-      SELECT 
-        '${tenantB}', p.code, pv.id, 'active', 'manual', now() - interval '1 day', now() + interval '1 year'
-      FROM public.plan_versions pv
-      JOIN public.plans p ON p.id = pv.plan_id
-      JOIN public.plan_entitlements pe_core ON pe_core.plan_version_id = pv.id AND pe_core.feature_key = 'core_booking' AND pe_core.boolean_value = true
-      JOIN public.plan_entitlements pe_branch ON pe_branch.plan_version_id = pv.id AND pe_branch.feature_key = 'max_branches' AND pe_branch.is_unlimited = true
-      JOIN public.plan_entitlements pe_staff ON pe_staff.plan_version_id = pv.id AND pe_staff.feature_key = 'max_staff' AND pe_staff.is_unlimited = true
-      JOIN public.plan_entitlements pe_service ON pe_service.plan_version_id = pv.id AND pe_service.feature_key = 'max_services' AND pe_service.is_unlimited = true
-      JOIN public.plan_entitlements pe_appt ON pe_appt.plan_version_id = pv.id AND pe_appt.feature_key = 'max_monthly_appointments' AND pe_appt.is_unlimited = true
-      WHERE pv.lifecycle_status = 'published'
-      ORDER BY pv.created_at DESC
-      LIMIT 1;
+      const selectedPlanCode = planRes.rows[0].code;
+      const selectedPlanVersionId = planRes.rows[0].id;
 
+      await mainClient.query(`
+        INSERT INTO public.subscriptions (
+          tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_start, current_period_end
+        )
+        VALUES 
+          ('${tenantA}', '${selectedPlanCode}', '${selectedPlanVersionId}', 'active', 'manual', now() - interval '1 day', now() + interval '1 year'),
+          ('${tenantB}', '${selectedPlanCode}', '${selectedPlanVersionId}', 'active', 'manual', now() - interval '1 day', now() + interval '1 year');
+      `);
+
+      // Verify subscriptions exist
+      const subCheck = await mainClient.query(`SELECT count(*) FROM public.subscriptions WHERE tenant_id IN ('${tenantA}', '${tenantB}');`);
+      assert(parseInt(subCheck.rows[0].count, 10) === 2, 'GLOBAL_SETUP: 2 subscriptions active for test tenants');
+
+    await mainClient.query(`
       -- 3. Create Auth Users & User Profiles
       INSERT INTO auth.users (id, email) VALUES
         ('${userOwnerA}', 'ownera@lari.test'),
@@ -273,8 +295,8 @@ async function run() {
     // 1.4 Resource allocation failure zero quota leakage
     // Block resourceA for 11:00:00
     await mainClient.query(`
-      INSERT INTO public.resource_blocks (tenant_id, resource_id, start_date, start_time, end_time, reason)
-      VALUES ('${tenantA}', '${resourceA}', '${futureDate}'::date, '11:00:00'::time, '11:30:00'::time, 'Maintenance');
+      INSERT INTO public.resource_blocks (tenant_id, resource_id, start_date, end_date, start_time, end_time, reason)
+      VALUES ('${tenantA}', '${resourceA}', '${futureDate}'::date, '${futureDate}'::date, '11:00:00'::time, '11:30:00'::time, 'Maintenance');
     `);
     const bResBlock = await mainClient.query(`
       SELECT public.create_public_booking(
@@ -456,17 +478,22 @@ async function run() {
     assert(sHoliday.rows[0].res.reason_code === 'business_holiday', 'SCHEDULING: holiday reason code', JSON.stringify(sHoliday.rows[0].res));
     await mainClient.query(`DELETE FROM public.business_holidays WHERE tenant_id = '${tenantA}';`);
 
-    // 2.5 Buffer collision rejection (canonical public.booking_buffer_rules)
-    // Buffer: 15 min buffer after appointment for serviceA
+    // 2.5 Scheduling Adversarial Test Matrix (Section 6 & EV055-R3 Parity)
+    // Scenario Setup:
+    // Existing appointment: 10:00:00 (duration=30 min).
+    // Buffer rule for serviceA: buffer_before = 10 min, buffer_after = 15 min.
+    // Occupied interval for existing appointment: 09:50:00 through 10:45:00.
     await mainClient.query(`
       INSERT INTO public.booking_buffer_rules (tenant_id, service_id, buffer_before, buffer_after)
-      VALUES ('${tenantA}', '${serviceA}', 0, 15)
-      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_after = 15;
-      INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
-      VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Prior Client', '+905551111111', '${schedDate}'::date, '10:00:00'::time, 30, 'confirmed');
+      VALUES ('${tenantA}', '${serviceA}', 10, 15)
+      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_before = 10, buffer_after = 15;
+      
+      INSERT INTO public.appointments (id, tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
+      VALUES ('55555555-aaaa-4555-8555-555555555551', '${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Prior Client', '+905551111111', '${schedDate}'::date, '10:00:00'::time, 30, 'confirmed');
     `);
-    // Attempt appointment at 10:35:00 (inside 10:00 + 30m + 15m buffer = 10:45)
-    const sBuffer = await mainClient.query(`
+
+    // 2.5.1 Existing buffer_after collision: request 10:35:00 (inside 10:00 + 30m + 15m buffer = 10:45) => DENY
+    const sBufAfterCol = await mainClient.query(`
       SELECT public.evaluate_booking_slot(
         p_tenant_id => '${tenantA}',
         p_branch_id => '${branchA1}',
@@ -476,10 +503,108 @@ async function run() {
         p_time => '10:35:00'::time
       ) AS res;
     `);
-    assert(sBuffer.rows[0].res.allowed === false, 'SCHEDULING: buffer collision rejection', JSON.stringify(sBuffer.rows[0].res));
-    assert(sBuffer.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: buffer collision returns slot_conflict', JSON.stringify(sBuffer.rows[0].res));
+    assert(sBufAfterCol.rows[0].res.allowed === false, 'SCHEDULING: existing buffer_after collision (10:35) rejected', JSON.stringify(sBufAfterCol.rows[0].res));
+    assert(sBufAfterCol.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: reason_code is slot_conflict');
+
+    // 2.5.2 Existing buffer_before collision: request 09:30:00 with 30m duration => ends 10:00:00, collides with existing buffer_before (starts 09:50:00) => DENY
+    const sBufBeforeCol = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '09:30:00'::time
+      ) AS res;
+    `);
+    assert(sBufBeforeCol.rows[0].res.allowed === false, 'SCHEDULING: existing buffer_before collision (09:30..10:00 vs 09:50) rejected', JSON.stringify(sBufBeforeCol.rows[0].res));
+    assert(sBufBeforeCol.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: reason_code is slot_conflict');
+
+    // 2.5.3 Exact boundary check: request 10:45:00 (existing buffer ends at 10:45:00, but request has buffer_before=10m => requested interval starts at 10:35:00) => collides with occupied 10:45:00 => DENY
+    const sBoundaryCol = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:45:00'::time
+      ) AS res;
+    `);
+    assert(sBoundaryCol.rows[0].res.allowed === false, 'SCHEDULING: 10:45 request with 10m buffer_before collides with existing occupied end (10:45)', JSON.stringify(sBoundaryCol.rows[0].res));
+
+    // Clear service buffer rule to isolate pure boundary test without requested buffers
+    await mainClient.query(`DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}';`);
+    // Now existing appointment has NO buffer (occupied 10:00:00..10:30:00). Request exactly at boundary 10:30:00 => ALLOW
+    const sBoundaryClean = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:30:00'::time
+      ) AS res;
+    `);
+    assert(sBoundaryClean.rows[0].res.allowed === true, 'SCHEDULING: exact boundary (10:30) without buffers allowed');
+
+    // 2.5.4 Exclude appointment behavior: excluding the existing appointment allows booking at 10:00:00
+    const sExcluded = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:00:00'::time,
+        p_exclude_appointment_id => '55555555-aaaa-4555-8555-555555555551'::uuid
+      ) AS res;
+    `);
+    assert(sExcluded.rows[0].res.allowed === true, 'SCHEDULING: p_exclude_appointment_id permits rebooking exact target slot');
+
+    // 2.5.5 Cancelled/completed appointment non-collision: cancelled appointment does not block slot
     await mainClient.query(`
-      DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
+      UPDATE public.appointments 
+      SET status = 'cancelled' 
+      WHERE id = '55555555-aaaa-4555-8555-555555555551';
+    `);
+    const sCancelledNoCol = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:00:00'::time
+      ) AS res;
+    `);
+    assert(sCancelledNoCol.rows[0].res.allowed === true, 'SCHEDULING: cancelled appointment produces no false collision');
+
+    // Restore confirmed status for cross-tenant / isolation checks
+    await mainClient.query(`
+      UPDATE public.appointments 
+      SET status = 'confirmed' 
+      WHERE id = '55555555-aaaa-4555-8555-555555555551';
+    `);
+
+    // 2.5.6 Cross-tenant isolation: Tenant B appointment query cannot collide with Tenant A appointment
+    // First, verify Tenant B evaluation on staffEntityA fails fail-closed with invalid_staff
+    const sCrossTenant = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantB}',
+        p_branch_id => '${branchB1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:00:00'::time
+      ) AS res;
+    `);
+    assert(sCrossTenant.rows[0].res.allowed === false, 'SCHEDULING: cross-tenant evaluation fail-closed (invalid_staff)');
+    recordCrossTenantPass('SCHEDULING: cross-tenant staff isolation');
+
+    // Clean up test appointment
+    await mainClient.query(`
+      DELETE FROM public.appointments WHERE id = '55555555-aaaa-4555-8555-555555555551';
       DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}';
     `);
 
@@ -527,8 +652,8 @@ async function run() {
 
     // 3.2 Blocked resource
     await mainClient.query(`
-      INSERT INTO public.resource_blocks (tenant_id, resource_id, start_date, start_time, end_time, reason)
-      VALUES ('${tenantA}', '${resourceA}', '${resDate}'::date, '09:00:00'::time, '10:00:00'::time, 'Deep Clean');
+      INSERT INTO public.resource_blocks (tenant_id, resource_id, start_date, end_date, start_time, end_time, reason)
+      VALUES ('${tenantA}', '${resourceA}', '${resDate}'::date, '${resDate}'::date, '09:00:00'::time, '10:00:00'::time, 'Deep Clean');
     `);
     const resBlocked = await mainClient.query(`
       SELECT public.evaluate_and_lock_resource_plan(
