@@ -3,6 +3,7 @@ name: LARI Program V2 Phase 5 Disposable Postgres Acceptance & Live Security Mat
 on:
   push:
     branches:
+      - ci/phase5-disposable-postgres-acceptance-r5
       - ci/phase5-disposable-postgres-acceptance-r4
       - ci/phase5-disposable-postgres-acceptance-r3
       - ci/phase5-disposable-postgres-acceptance-r2
@@ -167,23 +168,29 @@ jobs:
 
       - name: Execute Live PostgreSQL Behavioral Acceptance Matrix
         run: |
+          set -o pipefail
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== EXECUTING LIVE POSTGRESQL BEHAVIORAL MATRIX (ALL 15 DOMAINS + EV079-R4) ==="
-          if ! node supabase/tests/program-v2/p3p4-live/test-live-behavioral-matrix.mjs 2>&1 | tee matrix.log; then
-            echo "=== STEP 12 BEHAVIORAL MATRIX FAILED - DUMPING MATRIX.LOG ==="
+          node supabase/tests/program-v2/p3p4-live/test-live-behavioral-matrix.mjs 2>&1 | tee matrix.log
+          STATUS="${PIPESTATUS[0]}"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "=== STEP 12 BEHAVIORAL MATRIX FAILED (EXIT CODE: $STATUS) - DUMPING MATRIX.LOG ==="
             cat matrix.log || true
-            exit 1
+            exit "$STATUS"
           fi
           echo "=== BEHAVIORAL MATRIX COMPLETED CLEANLY ==="
 
       - name: Execute Phase 5 Live PostgreSQL Security & Concurrency Matrix
         run: |
+          set -o pipefail
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           echo "=== EXECUTING PHASE 5 NODE 2 & NODE 3 LIVE POSTGRESQL SECURITY MATRIX ==="
-          if ! node supabase/tests/program-v2/p5-live/test-phase5-postgres-security-matrix.mjs 2>&1 | tee -a matrix.log; then
-            echo "=== STEP 13 SECURITY MATRIX FAILED - DUMPING MATRIX.LOG ==="
+          node supabase/tests/program-v2/p5-live/test-phase5-postgres-security-matrix.mjs 2>&1 | tee -a matrix.log
+          STATUS="${PIPESTATUS[0]}"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "=== STEP 13 SECURITY MATRIX FAILED (EXIT CODE: $STATUS) - DUMPING MATRIX.LOG ==="
             cat matrix.log || true
-            exit 1
+            exit "$STATUS"
           fi
           echo "=== PHASE 5 SECURITY & CONCURRENCY MATRIX COMPLETED CLEANLY ==="
 

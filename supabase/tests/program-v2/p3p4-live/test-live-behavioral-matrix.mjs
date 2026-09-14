@@ -478,17 +478,22 @@ async function run() {
     assert(sHoliday.rows[0].res.reason_code === 'business_holiday', 'SCHEDULING: holiday reason code', JSON.stringify(sHoliday.rows[0].res));
     await mainClient.query(`DELETE FROM public.business_holidays WHERE tenant_id = '${tenantA}';`);
 
-    // 2.5 Buffer collision rejection (canonical public.booking_buffer_rules)
-    // Buffer: 15 min buffer after appointment for serviceA
+    // 2.5 Scheduling Adversarial Test Matrix (Section 6 & EV055-R3 Parity)
+    // Scenario Setup:
+    // Existing appointment: 10:00:00 (duration=30 min).
+    // Buffer rule for serviceA: buffer_before = 10 min, buffer_after = 15 min.
+    // Occupied interval for existing appointment: 09:50:00 through 10:45:00.
     await mainClient.query(`
       INSERT INTO public.booking_buffer_rules (tenant_id, service_id, buffer_before, buffer_after)
-      VALUES ('${tenantA}', '${serviceA}', 0, 15)
-      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_after = 15;
-      INSERT INTO public.appointments (tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
-      VALUES ('${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Prior Client', '+905551111111', '${schedDate}'::date, '10:00:00'::time, 30, 'confirmed');
+      VALUES ('${tenantA}', '${serviceA}', 10, 15)
+      ON CONFLICT (tenant_id, service_id) DO UPDATE SET buffer_before = 10, buffer_after = 15;
+      
+      INSERT INTO public.appointments (id, tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status)
+      VALUES ('55555555-aaaa-4555-8555-555555555551', '${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'Prior Client', '+905551111111', '${schedDate}'::date, '10:00:00'::time, 30, 'confirmed');
     `);
-    // Attempt appointment at 10:35:00 (inside 10:00 + 30m + 15m buffer = 10:45)
-    const sBuffer = await mainClient.query(`
+
+    // 2.5.1 Existing buffer_after collision: request 10:35:00 (inside 10:00 + 30m + 15m buffer = 10:45) => DENY
+    const sBufAfterCol = await mainClient.query(`
       SELECT public.evaluate_booking_slot(
         p_tenant_id => '${tenantA}',
         p_branch_id => '${branchA1}',
@@ -498,10 +503,108 @@ async function run() {
         p_time => '10:35:00'::time
       ) AS res;
     `);
-    assert(sBuffer.rows[0].res.allowed === false, 'SCHEDULING: buffer collision rejection', JSON.stringify(sBuffer.rows[0].res));
-    assert(sBuffer.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: buffer collision returns slot_conflict', JSON.stringify(sBuffer.rows[0].res));
+    assert(sBufAfterCol.rows[0].res.allowed === false, 'SCHEDULING: existing buffer_after collision (10:35) rejected', JSON.stringify(sBufAfterCol.rows[0].res));
+    assert(sBufAfterCol.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: reason_code is slot_conflict');
+
+    // 2.5.2 Existing buffer_before collision: request 09:30:00 with 30m duration => ends 10:00:00, collides with existing buffer_before (starts 09:50:00) => DENY
+    const sBufBeforeCol = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '09:30:00'::time
+      ) AS res;
+    `);
+    assert(sBufBeforeCol.rows[0].res.allowed === false, 'SCHEDULING: existing buffer_before collision (09:30..10:00 vs 09:50) rejected', JSON.stringify(sBufBeforeCol.rows[0].res));
+    assert(sBufBeforeCol.rows[0].res.reason_code === 'slot_conflict', 'SCHEDULING: reason_code is slot_conflict');
+
+    // 2.5.3 Exact boundary check: request 10:45:00 (existing buffer ends at 10:45:00, but request has buffer_before=10m => requested interval starts at 10:35:00) => collides with occupied 10:45:00 => DENY
+    const sBoundaryCol = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:45:00'::time
+      ) AS res;
+    `);
+    assert(sBoundaryCol.rows[0].res.allowed === false, 'SCHEDULING: 10:45 request with 10m buffer_before collides with existing occupied end (10:45)', JSON.stringify(sBoundaryCol.rows[0].res));
+
+    // Clear service buffer rule to isolate pure boundary test without requested buffers
+    await mainClient.query(`DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}';`);
+    // Now existing appointment has NO buffer (occupied 10:00:00..10:30:00). Request exactly at boundary 10:30:00 => ALLOW
+    const sBoundaryClean = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:30:00'::time
+      ) AS res;
+    `);
+    assert(sBoundaryClean.rows[0].res.allowed === true, 'SCHEDULING: exact boundary (10:30) without buffers allowed');
+
+    // 2.5.4 Exclude appointment behavior: excluding the existing appointment allows booking at 10:00:00
+    const sExcluded = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:00:00'::time,
+        p_exclude_appointment_id => '55555555-aaaa-4555-8555-555555555551'::uuid
+      ) AS res;
+    `);
+    assert(sExcluded.rows[0].res.allowed === true, 'SCHEDULING: p_exclude_appointment_id permits rebooking exact target slot');
+
+    // 2.5.5 Cancelled/completed appointment non-collision: cancelled appointment does not block slot
     await mainClient.query(`
-      DELETE FROM public.appointments WHERE tenant_id = '${tenantA}' AND appointment_date = '${schedDate}'::date;
+      UPDATE public.appointments 
+      SET status = 'cancelled' 
+      WHERE id = '55555555-aaaa-4555-8555-555555555551';
+    `);
+    const sCancelledNoCol = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantA}',
+        p_branch_id => '${branchA1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:00:00'::time
+      ) AS res;
+    `);
+    assert(sCancelledNoCol.rows[0].res.allowed === true, 'SCHEDULING: cancelled appointment produces no false collision');
+
+    // Restore confirmed status for cross-tenant / isolation checks
+    await mainClient.query(`
+      UPDATE public.appointments 
+      SET status = 'confirmed' 
+      WHERE id = '55555555-aaaa-4555-8555-555555555551';
+    `);
+
+    // 2.5.6 Cross-tenant isolation: Tenant B appointment query cannot collide with Tenant A appointment
+    // First, verify Tenant B evaluation on staffEntityA fails fail-closed with invalid_staff
+    const sCrossTenant = await mainClient.query(`
+      SELECT public.evaluate_booking_slot(
+        p_tenant_id => '${tenantB}',
+        p_branch_id => '${branchB1}',
+        p_service_id => '${serviceA}',
+        p_staff_id => '${staffEntityA}',
+        p_date => '${schedDate}'::date,
+        p_time => '10:00:00'::time
+      ) AS res;
+    `);
+    assert(sCrossTenant.rows[0].res.allowed === false, 'SCHEDULING: cross-tenant evaluation fail-closed (invalid_staff)');
+    recordCrossTenantPass('SCHEDULING: cross-tenant staff isolation');
+
+    // Clean up test appointment
+    await mainClient.query(`
+      DELETE FROM public.appointments WHERE id = '55555555-aaaa-4555-8555-555555555551';
       DELETE FROM public.booking_buffer_rules WHERE tenant_id = '${tenantA}';
     `);
 
