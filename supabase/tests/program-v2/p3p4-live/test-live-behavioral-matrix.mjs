@@ -1396,14 +1396,14 @@ async function run() {
     // 10.1 Owner visibility
     await mainClient.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
     const repOwn = await mainClient.query(`
-      SELECT public.get_tenant_booking_analytics('${tenantA}', NULL, CURRENT_DATE - 30, CURRENT_DATE + 365) AS res;
+      SELECT public.get_tenant_booking_analytics('${tenantA}', NULL, CURRENT_DATE - 30, CURRENT_DATE + 30) AS res;
     `);
     assert(repOwn.rows[0].res?.metrics?.total_bookings >= 1, 'REPORTING: owner visibility confirmed');
 
     // 10.2 Staff assigned branch visibility
     await mainClient.query(`SELECT public.set_actor_context('${userStaffA}', 'staff', '${tenantA}');`);
     const repStaff = await mainClient.query(`
-      SELECT public.get_tenant_booking_analytics('${tenantA}', '${branchA1}', CURRENT_DATE - 30, CURRENT_DATE + 365) AS res;
+      SELECT public.get_tenant_booking_analytics('${tenantA}', '${branchA1}', CURRENT_DATE - 30, CURRENT_DATE + 30) AS res;
     `);
     assert(repStaff.rows[0].res !== null, 'REPORTING: staff assigned-branch visibility confirmed');
 
