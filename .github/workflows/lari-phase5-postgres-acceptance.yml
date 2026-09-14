@@ -3,6 +3,7 @@ name: LARI Program V2 Phase 5 Disposable Postgres Acceptance & Live Security Mat
 on:
   push:
     branches:
+      - ci/phase6-node1-product-inventory-acceptance-r1
       - ci/phase5-disposable-postgres-acceptance-r5
       - ci/phase5-disposable-postgres-acceptance-r4
       - ci/phase5-disposable-postgres-acceptance-r3
@@ -89,7 +90,7 @@ jobs:
         run: |
           npm ci
 
-      - name: Execute 20 Domain Contract Suites (Phase 2, 3, 4 + Phase 5 Nodes 1-6)
+      - name: Execute 21 Domain Contract Suites (Phase 2, 3, 4, Phase 5 Nodes 1-6 + Phase 6 Node 1)
         run: |
           set -euo pipefail
           npx tsx scripts/test-phase2-staff-scheduling-contracts.mjs
@@ -112,7 +113,8 @@ jobs:
           npx tsx scripts/test-phase5-node4-clinic-ai-contracts.mjs
           npx tsx scripts/test-phase5-node5-funnel-contracts.mjs
           npx tsx scripts/test-phase5-node6-lead-ops-contracts.mjs
-          echo "ALL 20 DOMAIN CONTRACT SUITES PASSED!"
+          npx tsx scripts/test-phase6-node1-product-inventory-contracts.mjs
+          echo "ALL 21 DOMAIN CONTRACT SUITES PASSED!"
 
       - name: Execute Live Database Introspection & Integrity Verification
         run: |
@@ -141,7 +143,13 @@ jobs:
                 'clinic_set_staff_profile',
                 'ht_create_treatment_journey',
                 'ht_create_or_update_journey_quote',
-                'ht_add_journey_itinerary_event'
+                'ht_add_journey_itinerary_event',
+                'pos_create_product',
+                'pos_record_stock_receipt',
+                'pos_decrement_stock_for_sale',
+                'pos_adjust_stock',
+                'pos_return_restock',
+                'pos_get_branch_inventory'
               )
             ORDER BY routine_name;
           "
@@ -161,7 +169,10 @@ jobs:
               'uq_loyalty_tenant_idempotency',
               'uq_ht_treatment_journeys_id_tenant',
               'uq_ht_journey_quotes_id_tenant',
-              'uq_ht_journey_itinerary_events_id_tenant'
+              'uq_ht_journey_itinerary_events_id_tenant',
+              'uq_products_tenant_sku',
+              'uq_inventory_balances_branch_product',
+              'uq_inventory_movements_idempotency'
             )
             ORDER BY conname;
           "
@@ -193,6 +204,20 @@ jobs:
             exit "$STATUS"
           fi
           echo "=== PHASE 5 SECURITY & CONCURRENCY MATRIX COMPLETED CLEANLY ==="
+
+      - name: Execute Phase 6 Node 1 Live PostgreSQL Inventory Behavioral Matrix
+        run: |
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== EXECUTING PHASE 6 NODE 1 LIVE POSTGRESQL INVENTORY BEHAVIORAL MATRIX ==="
+          node supabase/tests/program-v2/phase6-live/test-phase6-node1-inventory-behavioral-matrix.mjs 2>&1 | tee -a matrix.log
+          STATUS="${PIPESTATUS[0]}"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "=== STEP 14 PHASE 6 INVENTORY MATRIX FAILED (EXIT CODE: $STATUS) - DUMPING MATRIX.LOG ==="
+            cat matrix.log || true
+            exit "$STATUS"
+          fi
+          echo "=== PHASE 6 NODE 1 INVENTORY BEHAVIORAL MATRIX COMPLETED CLEANLY ==="
 
       - name: Application Build
         run: |
