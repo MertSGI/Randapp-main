@@ -801,23 +801,67 @@ async function run() {
     // -------------------------------------------------------------------------
     console.log('\n--- 4. MULTI_BRANCH DOMAIN ---');
 
-    // 4.1 Owner authorized across branches
+    // 4.1 Seed test appointments across branches for calendar verification
+    await mainClient.query(`
+      INSERT INTO public.appointments (
+        id, tenant_id, branch_id, service_id, staff_id, user_name, phone, appointment_date, appointment_time, duration_minutes, status
+      ) VALUES
+        (gen_random_uuid(), '${tenantA}', '${branchA1}', '${serviceA}', '${staffEntityA}', 'TenantA Branch1 Client', '+905551110001', '${futureDate}'::date, '09:00:00'::time, 30, 'confirmed'),
+        (gen_random_uuid(), '${tenantA}', '${branchA2}', '${serviceA}', '${staffEntityA}', 'TenantA Branch2 Client', '+905551110002', '${futureDate}'::date, '11:00:00'::time, 30, 'confirmed'),
+        (gen_random_uuid(), '${tenantB}', '${branchB1}', '${serviceA}', '${staffEntityA}', 'TenantB Foreign Client', '+905552220001', '${futureDate}'::date, '09:00:00'::time, 30, 'confirmed')
+      ON CONFLICT DO NOTHING;
+    `);
+
+    // 4.1 Owner authorized across branches & tenant-wide calendar query materializes rows successfully
     await mainClient.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
     const ownBranches = await mainClient.query(`SELECT * FROM public.branches WHERE tenant_id = '${tenantA}';`);
     assert(ownBranches.rows.length >= 2, 'MULTI_BRANCH: owner authorized for all tenant branches');
 
-    // 4.2 Staff assigned branch authorized vs unassigned branch denied
+    const ownerAllCalendar = await mainClient.query(`
+      SELECT * FROM public.get_branch_calendar_appointments(
+        '${tenantA}', NULL, '${futureDate}'::date, '${futureDate}'::date
+      );
+    `);
+    assert(ownerAllCalendar.rows.length >= 2, 'MULTI_BRANCH: tenant_owner tenant-wide calendar query materializes rows successfully');
+
+    // 4.2 Owner explicit branch query succeeds
+    const ownerBranch1 = await mainClient.query(`
+      SELECT * FROM public.get_branch_calendar_appointments(
+        '${tenantA}', '${branchA1}', '${futureDate}'::date, '${futureDate}'::date
+      );
+    `);
+    assert(ownerBranch1.rows.length >= 1 && ownerBranch1.rows.every(r => r.branch_id === branchA1), 'MULTI_BRANCH: tenant_owner explicit branch query succeeds');
+
+    // 4.3 Staff mapped-branch query succeeds & returned row fields materialize with no 42804/result-type mismatch
     await mainClient.query(`SELECT public.set_actor_context('${userStaffA}', 'staff', '${tenantA}');`);
     const staffBranches = await mainClient.query(`
       SELECT * FROM public.get_branch_calendar_appointments(
         '${tenantA}', '${branchA1}', '${futureDate}'::date, '${futureDate}'::date
-      ) AS res;
+      );
     `);
-    assert(staffBranches.rows.length >= 0, 'MULTI_BRANCH: staff assigned branch authorized');
+    assert(staffBranches.rows.length >= 1, 'MULTI_BRANCH: staff mapped-branch query succeeds');
+    
+    // Verify exact row field materialization without SQLSTATE 42804
+    const firstRow = staffBranches.rows[0];
+    const fieldsValid = Boolean(
+      firstRow.appointment_id &&
+      firstRow.branch_id === branchA1 &&
+      typeof firstRow.branch_name === 'string' &&
+      firstRow.service_id &&
+      typeof firstRow.service_name === 'string' &&
+      firstRow.staff_id &&
+      typeof firstRow.staff_name === 'string' &&
+      firstRow.appointment_date &&
+      firstRow.appointment_time &&
+      typeof firstRow.duration_minutes === 'number' &&
+      typeof firstRow.status === 'string' &&
+      typeof firstRow.user_name === 'string'
+    );
+    assert(fieldsValid, 'MULTI_BRANCH: returned row fields materialize with no 42804/result-type mismatch', firstRow);
 
+    // 4.4 Staff explicit unmapped branch fails closed
     let staffUnassignedDenied = false;
     try {
-      await mainClient.query(`SELECT public.set_actor_context('${userStaffA}', 'staff', '${tenantA}');`);
       await mainClient.query(`
         SELECT * FROM public.get_branch_calendar_appointments(
           '${tenantA}', '${branchA2}', '${futureDate}'::date, '${futureDate}'::date
@@ -826,22 +870,45 @@ async function run() {
     } catch (e) {
       staffUnassignedDenied = true;
     }
-    assert(staffUnassignedDenied, 'MULTI_BRANCH: staff unassigned branch denied');
+    assert(staffUnassignedDenied, 'MULTI_BRANCH: staff explicit unmapped branch fails closed');
 
-    // 4.3 Cross-tenant branch denied
-    let crossTenantBranchDenied = false;
+    // 4.5 Staff p_branch_id=NULL returns ONLY mapped branches
+    const staffNullBranchRes = await mainClient.query(`
+      SELECT * FROM public.get_branch_calendar_appointments(
+        '${tenantA}', NULL, '${futureDate}'::date, '${futureDate}'::date
+      );
+    `);
+    const onlyMappedBranches = staffNullBranchRes.rows.length >= 1 && staffNullBranchRes.rows.every(r => r.branch_id === branchA1);
+    assert(onlyMappedBranches, 'MULTI_BRANCH: staff p_branch_id=NULL returns ONLY mapped branches');
+
+    // 4.6 Tenant mismatch fails closed
+    let tenantMismatchFailed = false;
     try {
-      await mainClient.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
       await mainClient.query(`
         SELECT * FROM public.get_branch_calendar_appointments(
           '${tenantB}', '${branchB1}', '${futureDate}'::date, '${futureDate}'::date
         );
       `);
     } catch (e) {
-      crossTenantBranchDenied = true;
+      tenantMismatchFailed = true;
     }
-    assert(crossTenantBranchDenied, 'MULTI_BRANCH: cross-tenant branch denied');
-    recordCrossTenantPass('MULTI_BRANCH: cross-tenant branch denied');
+    assert(tenantMismatchFailed, 'MULTI_BRANCH: tenant mismatch fails closed');
+    recordCrossTenantPass('MULTI_BRANCH: tenant mismatch fails closed');
+
+    // 4.7 Cross-tenant appointment visibility remains zero
+    await mainClient.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
+    let crossTenantVisibilityZero = false;
+    try {
+      await mainClient.query(`
+        SELECT * FROM public.get_branch_calendar_appointments(
+          '${tenantB}', NULL, '${futureDate}'::date, '${futureDate}'::date
+        );
+      `);
+    } catch (e) {
+      crossTenantVisibilityZero = true;
+    }
+    assert(crossTenantVisibilityZero, 'MULTI_BRANCH: cross-tenant appointment visibility remains zero');
+    recordCrossTenantPass('MULTI_BRANCH: cross-tenant appointment visibility remains zero');
 
     // Reset actor context to service_role
     await mainClient.query(`SELECT public.set_actor_context(NULL, 'service_role', NULL);`);
