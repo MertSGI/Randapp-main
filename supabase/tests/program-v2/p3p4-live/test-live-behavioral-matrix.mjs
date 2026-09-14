@@ -1160,13 +1160,19 @@ async function run() {
     assert(finalCommStatus.rows[0].status === 'delivered', 'COMMUNICATIONS: terminal-state preservation prevents regression');
 
     // 6.4 Cross-tenant sanitized read denial
-    await mainClient.query(`SELECT public.set_actor_context('${userOwnerB}', 'tenant_owner', '${tenantB}');`);
-    const crossCommRead = await mainClient.query(`
-      SELECT public.get_tenant_communication_outbox('${tenantA}') AS res;
-    `);
-    assert(crossCommRead.rows[0].res.length === 0, 'COMMUNICATIONS: cross-tenant sanitized read returns zero items');
+    let crossCommDenied = false;
+    try {
+      await mainClient.query(`SELECT public.set_actor_context('${userOwnerB}', 'tenant_owner', '${tenantB}');`);
+      await mainClient.query(`
+        SELECT public.get_tenant_communication_outbox('${tenantA}') AS res;
+      `);
+    } catch (e) {
+      crossCommDenied = true;
+    } finally {
+      await mainClient.query(`SELECT public.set_actor_context(NULL, 'service_role', NULL);`);
+    }
+    assert(crossCommDenied, 'COMMUNICATIONS: cross-tenant sanitized read denied');
     recordCrossTenantPass('COMMUNICATIONS: cross-tenant sanitized read denial');
-    await mainClient.query(`SELECT public.set_actor_context(NULL, 'service_role', NULL);`);
 
     // -------------------------------------------------------------------------
     // 7. PAYMENT DOMAIN
