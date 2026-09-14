@@ -145,6 +145,13 @@ REVOKE ALL ON TABLE public.products FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON TABLE public.inventory_balances FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON TABLE public.inventory_movements FROM PUBLIC, anon, authenticated;
 
+-- Allow SELECT to authenticated so that RLS policies govern row-level read access.
+-- Direct mutations (INSERT, UPDATE, DELETE) remain completely revoked; all writes
+-- must proceed through server-authoritative SECURITY DEFINER RPCs.
+GRANT SELECT ON TABLE public.products TO authenticated;
+GRANT SELECT ON TABLE public.inventory_balances TO authenticated;
+GRANT SELECT ON TABLE public.inventory_movements TO authenticated;
+
 
 -- =========================================================================
 -- 5. RLS POLICIES FOR DEFENSE IN DEPTH
