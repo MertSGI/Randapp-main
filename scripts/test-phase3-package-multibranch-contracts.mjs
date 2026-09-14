@@ -122,6 +122,31 @@ const tests = [
                 sql.includes('s_map.user_profile_id = v_user.id') &&
                 !/s\.id = v_user\.id/i.test(sql) &&
                 !/s_map\.id = v_user\.id/i.test(sql)
+  },
+  {
+    name: '20. Branch calendar user_name return type compatibility (explicit TEXT cast)',
+    test: () => /user_name\s+TEXT/i.test(sql) &&
+                /a\.user_name::TEXT\s+AS\s+user_name/i.test(sql)
+  },
+  {
+    name: '21. Branch calendar branch_name return type compatibility',
+    test: () => /branch_name\s+VARCHAR\(120\)/i.test(sql) &&
+                /::VARCHAR\(120\)\s+AS\s+branch_name/i.test(sql)
+  },
+  {
+    name: '22. Branch calendar service_name return type compatibility',
+    test: () => /service_name\s+TEXT/i.test(sql) &&
+                /::TEXT\s+AS\s+service_name/i.test(sql)
+  },
+  {
+    name: '23. Branch calendar staff_name return type compatibility',
+    test: () => /staff_name\s+TEXT/i.test(sql) &&
+                /::TEXT\s+AS\s+staff_name/i.test(sql)
+  },
+  {
+    name: '24. Branch calendar status return type compatibility',
+    test: () => /status\s+VARCHAR\(50\)/i.test(sql) &&
+                /(?:a\.status::VARCHAR\(50\)|a\.status)\s+AS\s+status/i.test(sql)
   }
 ];
 
