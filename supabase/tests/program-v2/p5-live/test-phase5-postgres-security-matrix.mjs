@@ -70,10 +70,24 @@ async function run() {
     ALTER TABLE public.gift_card_redemptions DISABLE TRIGGER trg_prevent_gift_card_redemptions_mutation;
 
     -- Cleanup existing test entities (order: leaf tables first to avoid FK violations)
+    DELETE FROM public.booking_waitlist WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.gift_card_redemptions WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.client_wallet_ledger WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.client_wallets WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.customer_package_redemption_ledger WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.customer_packages WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.service_package_eligibility WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.service_package_definitions WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.customer_loyalty_ledger WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.customer_loyalty_balances WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.customer_reactivation_events WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.tenant_loyalty_configs WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.customer_segment_members WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.customer_segments WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.deposit_policies WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.appointment_deposits WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.payments WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.payment_intents WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.ht_journey_itinerary_events WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.ht_journey_quotes WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.ht_treatment_journeys WHERE tenant_id IN ('${tenantA}', '${tenantB}');
@@ -81,7 +95,10 @@ async function run() {
     DELETE FROM public.ht_leads WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.clinic_staff_profiles WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.staff_branches WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.staff_services WHERE service_id IN (SELECT id FROM public.services WHERE tenant_id IN ('${tenantA}', '${tenantB}'));
+    DELETE FROM public.service_branches WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.appointments WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.services WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.staff WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.customers WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.users_profile WHERE id IN ('${userOwnerA}', '${userStaffA}', '${userOrdinaryStaffA}', '${userOwnerB}', '${userStaffB}');
