@@ -314,8 +314,8 @@ BEGIN
         a.appointment_date,
         a.appointment_time,
         a.duration_minutes,
-        a.status,
-        a.user_name
+        a.status::VARCHAR(50) AS status,
+        a.user_name::TEXT AS user_name
     FROM public.appointments a
     JOIN public.branches b ON b.id = a.branch_id AND b.tenant_id = a.tenant_id
     JOIN public.services s ON s.id = a.service_id AND s.tenant_id = a.tenant_id
