@@ -918,6 +918,11 @@ async function run() {
     // -------------------------------------------------------------------------
     console.log('\n--- 5. WAITLIST DOMAIN ---');
 
+    // Waitlist enforces p_preferred_date <= CURRENT_DATE + 90 days.
+    // Use a dynamic date within 90 days (e.g., CURRENT_DATE + 14 days)
+    const waitlistDateRes = await mainClient.query(`SELECT (CURRENT_DATE + INTERVAL '14 days')::date::text AS d;`);
+    const waitlistDate = waitlistDateRes.rows[0].d;
+
     // 5.1 Join waitlist
     const wJoin = await mainClient.query(`
       SELECT public.join_booking_waitlist(
@@ -925,7 +930,7 @@ async function run() {
         p_service_id => '${serviceA}',
         p_customer_name => 'Waitlist Customer',
         p_customer_phone => '+905553334455',
-        p_preferred_date => '${futureDate}'::date,
+        p_preferred_date => '${waitlistDate}'::date,
         p_customer_email => 'waitlist@example.com',
         p_branch_id => '${branchA1}'
       ) AS res;
@@ -933,26 +938,34 @@ async function run() {
     assert(wJoin.rows[0].res.success === true, 'WAITLIST: join waitlist succeeded', wJoin.rows[0].res);
     const waitlistId = wJoin.rows[0].res.waitlist_id;
 
-    // 5.2 Waitlist rate limit / deduplication
-    const wDup = await mainClient.query(`
-      SELECT public.join_booking_waitlist(
-        p_tenant_id => '${tenantA}',
-        p_service_id => '${serviceA}',
-        p_customer_name => 'Waitlist Customer',
-        p_customer_phone => '+905553334455',
-        p_preferred_date => '${futureDate}'::date,
-        p_customer_email => 'waitlist@example.com',
-        p_branch_id => '${branchA1}'
-      ) AS res;
-    `);
-    assert(wDup.rows[0].res.success === false, 'WAITLIST: rate limit / duplicate join rejected', wDup.rows[0].res);
+    // 5.2 Waitlist rate limit (max 5 requests per phone/tenant per hour)
+    // Send repeated requests until rate limit is exceeded
+    let rateLimitExceeded = false;
+    for (let i = 0; i < 6; i++) {
+      const wRate = await mainClient.query(`
+        SELECT public.join_booking_waitlist(
+          p_tenant_id => '${tenantA}',
+          p_service_id => '${serviceA}',
+          p_customer_name => 'Waitlist Customer',
+          p_customer_phone => '+905553334455',
+          p_preferred_date => '${waitlistDate}'::date,
+          p_customer_email => 'waitlist@example.com',
+          p_branch_id => '${branchA1}'
+        ) AS res;
+      `);
+      if (wRate.rows[0].res.success === false && wRate.rows[0].res.error === 'RATE_LIMIT_EXCEEDED') {
+        rateLimitExceeded = true;
+        break;
+      }
+    }
+    assert(rateLimitExceeded, 'WAITLIST: rate limit / duplicate join rejected with RATE_LIMIT_EXCEEDED');
 
     // 5.3 Offer slot
     await mainClient.query(`SELECT public.set_actor_context('${userOwnerA}', 'tenant_owner', '${tenantA}');`);
     const wOffer = await mainClient.query(`
       SELECT public.offer_waitlist_slot(
         p_waitlist_id => '${waitlistId}',
-        p_offered_date => '${futureDate}'::date,
+        p_offered_date => '${waitlistDate}'::date,
         p_offered_time => '16:00:00'::time,
         p_offered_staff_id => '${staffEntityA}',
         p_offered_branch_id => '${branchA1}',
@@ -987,7 +1000,7 @@ async function run() {
         p_service_id => '${serviceA}',
         p_customer_name => 'Waitlist Client 2',
         p_customer_phone => '+905553334499',
-        p_preferred_date => '${futureDate}'::date,
+        p_preferred_date => '${waitlistDate}'::date,
         p_branch_id => '${branchA1}'
       ) AS res;
     `);
@@ -995,7 +1008,7 @@ async function run() {
     const wOffer2 = await mainClient.query(`
       SELECT public.offer_waitlist_slot(
         p_waitlist_id => '${wJoin2.rows[0].res.waitlist_id}',
-        p_offered_date => '${futureDate}'::date,
+        p_offered_date => '${waitlistDate}'::date,
         p_offered_time => '17:00:00'::time,
         p_offered_staff_id => '${staffEntityA}',
         p_offered_branch_id => '${branchA1}',
