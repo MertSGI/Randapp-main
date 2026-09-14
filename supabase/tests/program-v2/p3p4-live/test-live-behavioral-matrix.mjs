@@ -1669,11 +1669,11 @@ async function run() {
     // -------------------------------------------------------------------------
     console.log('\n--- 15. LOYALTY & EV079-R3 DOMAIN ---');
 
-    // Seed loyalty configuration for tenantA
+    // Seed loyalty configuration for tenantA (minimum_points_redemption = 10 so 40-pt redemptions succeed threshold check)
     await mainClient.query(`
-      INSERT INTO public.tenant_loyalty_configs (tenant_id, is_active, points_per_completed_appointment)
-      VALUES ('${tenantA}', true, 50)
-      ON CONFLICT (tenant_id) DO UPDATE SET points_per_completed_appointment = 50;
+      INSERT INTO public.tenant_loyalty_configs (tenant_id, is_active, points_per_completed_appointment, minimum_points_redemption)
+      VALUES ('${tenantA}', true, 50, 10)
+      ON CONFLICT (tenant_id) DO UPDATE SET points_per_completed_appointment = 50, minimum_points_redemption = 10;
     `);
 
     // 15.1 Completed appointment required
@@ -1724,11 +1724,13 @@ async function run() {
         ) AS res;
       `)
     ]);
-    const okL1 = lRed1.status === 'fulfilled' && lRed1.value.rows[0]?.res?.success;
-    const okL2 = lRed2.status === 'fulfilled' && lRed2.value.rows[0]?.res?.success;
+    const rL1 = lRed1.status === 'fulfilled' ? lRed1.value.rows[0]?.res : lRed1.reason;
+    const rL2 = lRed2.status === 'fulfilled' ? lRed2.value.rows[0]?.res : lRed2.reason;
+    const okL1 = rL1?.success === true;
+    const okL2 = rL2?.success === true;
     const loySuccesses = [okL1, okL2].filter(Boolean).length;
     // Current balance was 50. Two concurrent redemptions of 40: exactly one can succeed!
-    assert(loySuccesses === 1, 'LOYALTY: parallel redemption race (prevented overdraw)');
+    assert(loySuccesses === 1, 'LOYALTY: parallel redemption race (prevented overdraw)', { rL1, rL2, loySuccesses });
     recordConcurrencyPass('LOYALTY: parallel redemption race');
 
     // 15.4 Cross-tenant denial & ledger immutability
