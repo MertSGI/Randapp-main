@@ -24,9 +24,20 @@ function assert(condition, testName, detail = '') {
   }
 }
 
-async function setAuth(client, userId) {
-  await client.query(`SELECT set_config('request.jwt.claim.sub', '${userId}', true);`);
-  await client.query(`SELECT set_config('request.jwt.claims', '{"sub":"${userId}","role":"authenticated"}', true);`);
+async function setAuth(c, userId, role = 'authenticated') {
+  if (!userId) {
+    await c.query(`RESET ROLE;`);
+    await c.query(`SELECT set_config('request.jwt.claim.sub', '', false);`);
+    await c.query(`SELECT set_config('request.jwt.claims', '', false);`);
+    return;
+  }
+  await c.query(`SET ROLE ${role};`);
+  await c.query(`SELECT set_config('request.jwt.claim.sub', $1, false);`, [userId]);
+  await c.query(`SELECT set_config('request.jwt.claims', $1, false);`, [JSON.stringify({ sub: userId, role })]);
+  const checkAuth = await c.query(`SELECT auth.uid() AS uid;`);
+  if (!checkAuth.rows[0] || checkAuth.rows[0].uid !== userId) {
+    throw new Error(`setAuth failed: expected ${userId} but got ${checkAuth.rows[0]?.uid}`);
+  }
 }
 
 async function run() {
