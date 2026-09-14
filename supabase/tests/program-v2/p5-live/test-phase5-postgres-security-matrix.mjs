@@ -61,7 +61,19 @@ async function run() {
 
   console.log('--- Seeding Fixtures for Tenant A and Tenant B ---');
   await client.query(`
-    -- Cleanup existing test entities
+    -- Temporarily disable immutable ledger triggers to allow cascading cleanup
+    -- The P3/P4 behavioral matrix (Step 12) may leave data in append-only ledger tables
+    -- that block cascading DELETEs from tenants/customers/appointments.
+    ALTER TABLE public.customer_package_redemption_ledger DISABLE TRIGGER trg_prevent_redemption_ledger_mutation;
+    ALTER TABLE public.customer_loyalty_ledger DISABLE TRIGGER trg_prevent_loyalty_ledger_mutation;
+    ALTER TABLE public.client_wallet_ledger DISABLE TRIGGER trg_prevent_wallet_ledger_mutation;
+    ALTER TABLE public.gift_card_redemptions DISABLE TRIGGER trg_prevent_gift_card_redemptions_mutation;
+
+    -- Cleanup existing test entities (order: leaf tables first to avoid FK violations)
+    DELETE FROM public.gift_card_redemptions WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.client_wallet_ledger WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.customer_package_redemption_ledger WHERE tenant_id IN ('${tenantA}', '${tenantB}');
+    DELETE FROM public.customer_loyalty_ledger WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.ht_journey_itinerary_events WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.ht_journey_quotes WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.ht_treatment_journeys WHERE tenant_id IN ('${tenantA}', '${tenantB}');
@@ -77,6 +89,12 @@ async function run() {
     DELETE FROM public.branches WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.subscriptions WHERE tenant_id IN ('${tenantA}', '${tenantB}');
     DELETE FROM public.tenants WHERE id IN ('${tenantA}', '${tenantB}');
+
+    -- Re-enable immutable ledger triggers
+    ALTER TABLE public.customer_package_redemption_ledger ENABLE TRIGGER trg_prevent_redemption_ledger_mutation;
+    ALTER TABLE public.customer_loyalty_ledger ENABLE TRIGGER trg_prevent_loyalty_ledger_mutation;
+    ALTER TABLE public.client_wallet_ledger ENABLE TRIGGER trg_prevent_wallet_ledger_mutation;
+    ALTER TABLE public.gift_card_redemptions ENABLE TRIGGER trg_prevent_gift_card_redemptions_mutation;
 
     -- Insert Tenants
     INSERT INTO public.tenants (id, name, slug, status, onboarding_status, public_site_status)
