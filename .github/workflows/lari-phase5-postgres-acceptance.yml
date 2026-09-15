@@ -92,7 +92,7 @@ jobs:
         run: |
           npm ci
 
-      - name: Execute 22 Domain Contract Suites (Phase 2, 3, 4, Phase 5 Nodes 1-6 + Phase 6 Nodes 1-2)
+      - name: Execute 23 Domain Contract Suites (Phase 2, 3, 4, Phase 5 Nodes 1-6 + Phase 6 Nodes 1-3)
         run: |
           set -euo pipefail
           npx tsx scripts/test-phase2-staff-scheduling-contracts.mjs
@@ -117,7 +117,8 @@ jobs:
           npx tsx scripts/test-phase5-node6-lead-ops-contracts.mjs
           npx tsx scripts/test-phase6-node1-product-inventory-contracts.mjs
           npx tsx scripts/test-phase6-node2-suppliers-po-receiving-contracts.mjs
-          echo "ALL 22 DOMAIN CONTRACT SUITES PASSED!"
+          npx tsx scripts/test-phase6-node3-pos-mixed-cart-checkout-contracts.mjs
+          echo "ALL 23 DOMAIN CONTRACT SUITES PASSED!"
 
       - name: Execute Live Database Introspection & Integrity Verification
         run: |
@@ -158,7 +159,11 @@ jobs:
                 'pos_approve_purchase_order',
                 'pos_cancel_purchase_order',
                 'pos_receive_purchase_order_items',
-                'pos_get_purchase_order'
+                'pos_get_purchase_order',
+                'pos_create_order',
+                'pos_add_cart_item',
+                'pos_checkout_order',
+                'pos_get_order'
               )
             ORDER BY routine_name;
           "
@@ -185,7 +190,10 @@ jobs:
               'uq_suppliers_tenant_name',
               'uq_purchase_orders_tenant_po_number',
               'chk_po_items_received_bound',
-              'uq_pore_tenant_item_idempotency'
+              'uq_pore_tenant_item_idempotency',
+              'uq_pos_orders_tenant_order_number',
+              'uq_pos_orders_tenant_idempotency',
+              'chk_pos_items_product_ref'
             )
             ORDER BY conname;
           "
@@ -245,6 +253,20 @@ jobs:
             exit "$STATUS"
           fi
           echo "=== PHASE 6 NODE 2 PROCUREMENT & RECEIVING BEHAVIORAL MATRIX COMPLETED CLEANLY ==="
+
+      - name: Execute Phase 6 Node 3 Live PostgreSQL POS Cart & Checkout Behavioral Matrix
+        run: |
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== EXECUTING PHASE 6 NODE 3 LIVE POSTGRESQL POS CART & CHECKOUT BEHAVIORAL MATRIX ==="
+          node supabase/tests/program-v2/phase6-live/test-phase6-node3-pos-cart-checkout-behavioral-matrix.mjs 2>&1 | tee -a matrix.log
+          STATUS="${PIPESTATUS[0]}"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "=== STEP 16 PHASE 6 POS CART & CHECKOUT MATRIX FAILED (EXIT CODE: $STATUS) - DUMPING MATRIX.LOG ==="
+            cat matrix.log || true
+            exit "$STATUS"
+          fi
+          echo "=== PHASE 6 NODE 3 POS CART & CHECKOUT BEHAVIORAL MATRIX COMPLETED CLEANLY ==="
 
       - name: Application Build
         run: |
