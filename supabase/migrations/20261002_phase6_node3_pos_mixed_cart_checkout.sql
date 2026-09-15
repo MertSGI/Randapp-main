@@ -9,7 +9,7 @@
 -- Directives & Domain Architecture:
 -- 1. NO DUPLICATE DOMAIN MODELS:
 --    Reuses canonical public.tenants, public.branches, public.staff, public.customers,
---    public.appointments, public.services, public.packages, public.products,
+--    public.appointments, public.services, public.service_package_definitions, public.products,
 --    public.inventory_balances, public.inventory_movements, public.payment_intents.
 -- 2. MIXED CART MODEL:
 --    A single transaction can compose services, products/retail items, and packages.
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS public.pos_order_items (
     ),
     service_id              UUID NULL REFERENCES public.services(id) ON DELETE SET NULL,
     product_id              UUID NULL,
-    package_id              UUID NULL REFERENCES public.packages(id) ON DELETE SET NULL,
+    package_id              UUID NULL REFERENCES public.service_package_definitions(id) ON DELETE SET NULL,
     appointment_id          UUID NULL REFERENCES public.appointments(id) ON DELETE SET NULL,
     item_name               TEXT NOT NULL CHECK (length(trim(item_name)) > 0),
     sku                     TEXT NULL,
@@ -428,7 +428,7 @@ BEGIN
         END IF;
 
         SELECT * INTO v_pkg
-        FROM public.packages
+        FROM public.service_package_definitions
         WHERE id = p_package_id;
 
         IF v_pkg.id IS NULL OR v_pkg.tenant_id <> v_staff.tenant_id THEN
