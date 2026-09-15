@@ -3,6 +3,8 @@ name: LARI Program V2 Phase 5 Disposable Postgres Acceptance & Live Security Mat
 on:
   push:
     branches:
+      - ci/phase6-node3-pos-cart-checkout-acceptance-r1
+      - aos/phase6-node3-pos-cart-checkout
       - ci/phase6-node2-procurement-receiving-acceptance-r1
       - aos/phase6-node2-suppliers-po-receiving
       - ci/phase6-node1-product-inventory-acceptance-r1
