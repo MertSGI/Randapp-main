@@ -1,1155 +1,1156 @@
 {
-    "schema_version": "1.0.0",
-    "updated_at": "2026-09-10T15:13:00.621Z",
-    "product": "LARİ SaaS Platform",
-    "repository": "MertSGI/Randapp-main",
-    "delivery_commitment": {
-        "duration_weeks": 12,
-        "day_0": null,
-        "day_0_state": "NEEDS_RECOVERY",
-        "reset_from_today_allowed": false
+  "schema_version": "1.0.0",
+  "updated_at": "2026-09-16T05:27:48.557396+00:00",
+  "product": "LARİ SaaS Platform",
+  "repository": "MertSGI/Randapp-main",
+  "delivery_commitment": {
+    "duration_weeks": 12,
+    "day_0": null,
+    "day_0_state": "NEEDS_RECOVERY",
+    "reset_from_today_allowed": false
+  },
+  "master_delivery_train": [
+    "LARİ Core",
+    "Package/Customer Customization",
+    "LARİ Clinic",
+    "LARİ Health Tourism",
+    "Final Delivery"
+  ],
+  "current_milestone": "Program V2 Multi-Lane: EV055-R3, EV056-R3, EV057-R2, EV058-R1 Hardened & CR2-Lite Relay Operationalized",
+  "current_status": "MULTILANE_ACTIVE_EV055_R3_EV056_R3_EV057_R2_EV058_R1_AND_RELAY_OPERATIONALIZED",
+  "production_status": "NO_GO",
+  "candidate_release": {
+    "branch": "staging/supabase-staging-consistency",
+    "sha": "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a",
+    "candidate_execution_authority": false,
+    "e2_status": "CONTROLLER_ACCEPTED",
+    "e2_evidence": {
+      "product_sha": "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a",
+      "evidence_sha": "1ab0dc43753983b5fb0851e0b4a05b2da1cc2d5b",
+      "run_id": "33418579450",
+      "job_id": "99577902401",
+      "artifact_id": "9766904123",
+      "artifact_digest": "sha256:6fdb485c9552c057f84b23393beb890e5410abf1f961b3ce9c8bbfbe2ffa1b37"
     },
-    "master_delivery_train": [
-        "LARİ Core",
-        "Package/Customer Customization",
-        "LARİ Clinic",
-        "LARİ Health Tourism",
-        "Final Delivery"
-    ],
-    "current_milestone": "Program V2 Multi-Lane: EV055-R3, EV056-R3, EV057-R2, EV058-R1 Hardened & CR2-Lite Relay Operationalized",
-    "current_status": "MULTILANE_ACTIVE_EV055_R3_EV056_R3_EV057_R2_EV058_R1_AND_RELAY_OPERATIONALIZED",
-    "production_status": "NO_GO",
-    "candidate_release": {
-        "branch": "staging/supabase-staging-consistency",
-        "sha": "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a",
-        "candidate_execution_authority": false,
-        "e2_status": "CONTROLLER_ACCEPTED",
-        "e2_evidence": {
-            "product_sha": "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a",
-            "evidence_sha": "1ab0dc43753983b5fb0851e0b4a05b2da1cc2d5b",
-            "run_id": "33418579450",
-            "job_id": "99577902401",
-            "artifact_id": "9766904123",
-            "artifact_digest": "sha256:6fdb485c9552c057f84b23393beb890e5410abf1f961b3ce9c8bbfbe2ffa1b37"
+    "e3_state": {
+      "e3_status": "CONTROLLER_COMPOSITE_ACCEPTED",
+      "e3_run_id": "R31V12E3-20260901-B",
+      "acceptance_policy_version": "R31-V12-E3-P2",
+      "manifest_version": "R31-V12-E3-54",
+      "manifest_sha256": "8a8ff19ee507cbf847d8f2eb28d8b2d52ed66fa7f87601199086fb9631eefc81",
+      "workflow_run_id": "33505689808",
+      "workflow_job_id": "99849061434",
+      "artifact_id": "9799589930",
+      "artifact_digest": "sha256:e90ee0badaf3d14aa5118102e7240767fa4175d177b803b975a143a450c99374",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "ht_ai_chat_version": "12"
+    }
+  },
+  "aos6_authority": {
+    "read_only_shadow_reconciliation_authorized": true,
+    "controlled_pilot_authorized": false,
+    "stage12c_authorized": false,
+    "candidate_execution_authority": false,
+    "allowed_exact_source_sha_for_read_only": "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a",
+    "canonical_reconciliation_sufficient_for_pilot": false,
+    "next_authority_event": "SEPARATE_CONTROLLER_PILOT_AUTHORIZATION"
+  },
+  "scope_matrix": "docs/project-control/HEALTH_TOURISM_SCOPE_MATRIX.md",
+  "canonical_refs": {
+    "main_pilot": {
+      "branch": "staging/supabase-staging-consistency",
+      "sha": "134c8716c2511c909cd400aee0496ebd70f63bf6",
+      "status": "CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE"
+    },
+    "commercial_core_baseline": {
+      "branch": "feature/p2a-commercial-core-foundation",
+      "sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "status": "CLOSED_PROVEN"
+    },
+    "core_rc4": {
+      "branch": "release/core-rc4",
+      "sha": "e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a",
+      "status": "CLOSED_PROVEN"
+    },
+    "ci_evidence_trigger": {
+      "branch": "ci/core-rc4-exact-sha-evidence-r2-20260818",
+      "sha": "61b39627692df4e0784edcfb5b2d2ed695726ec2",
+      "status": "CI_RUN_32134598853_SUCCESS"
+    },
+    "package_branch_authority": {
+      "branch": "feature/package-customer-customization-foundation",
+      "sha": "83089a0695e0a5f0cf0fda25c7006df5e6ad4c07",
+      "status": "CLOSED_PROVEN"
+    },
+    "package_branch_authority_ci_evidence": {
+      "branch": "ci/package-branch-authority-exact-sha-r2-20260820",
+      "sha": "584f276ec5185bbb4080559f7cde08334e5767cd",
+      "status": "CI_RUN_32340331307_SUCCESS"
+    },
+    "commercial_source_of_truth": {
+      "branch": "feature/package-customer-customization-foundation",
+      "sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
+      "status": "CLOSED_PROVEN"
+    },
+    "commercial_source_of_truth_ci_evidence": {
+      "branch": "ci/package-commercial-source-of-truth-exact-sha-r1-20260820",
+      "sha": "a337d85276728beffbec4a129aefc703328624d2",
+      "status": "CI_RUN_32363490123_SUCCESS"
+    },
+    "package_customization_baseline": {
+      "branch": "feature/package-customer-customization-foundation",
+      "sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
+      "status": "CLOSED_PROVEN"
+    },
+    "clinic_block1_authority": {
+      "branch": "feature/lari-clinic-foundation",
+      "sha": "2bb2b32d95387e09da06c7442a8617ccd38e4feb",
+      "status": "CLOSED_PROVEN"
+    },
+    "clinic_block1_ci_evidence": {
+      "branch": "ci/clinic-block1-exact-sha-r2-20260820",
+      "sha": "78c3e49a1883aafb74ff2e8f18acd9876e74a01b",
+      "status": "CI_RUN_32395034938_SUCCESS"
+    },
+    "clinic_block2_operational_integration": {
+      "branch": "feature/lari-clinic-foundation",
+      "sha": "5e935ed049ffe08a6797643ec9cc2b7d4e6ae637",
+      "status": "CLOSED_PROVEN"
+    },
+    "clinic_block2_ci_evidence": {
+      "branch": "ci/clinic-block2-exact-sha-r3-20260821",
+      "sha": "4432d95b7335689242db61ba5562f0560b2d1585",
+      "status": "CI_RUN_32457917961_SUCCESS"
+    },
+    "clinic_block3_workspace_ui": {
+      "branch": "feature/lari-clinic-foundation",
+      "sha": "008ebac4496d592d271d612713c437d316c416f0",
+      "status": "CLOSED_PROVEN"
+    },
+    "clinic_block3_ci_evidence": {
+      "branch": "ci/clinic-block3-exact-sha-r9-20260823",
+      "sha": "c5ecd0c507621bb6d22126691e12deb4d5826dee",
+      "status": "CI_RUN_32624729632_SUCCESS"
+    },
+    "clinic_block3_e3_isolated_runtime": {
+      "branch": "feature/lari-clinic-foundation",
+      "sha": "008ebac4496d592d271d612713c437d316c416f0",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "status": "CLOSED_PROVEN"
+    },
+    "clinic_ai_assist_v1_product": {
+      "branch": "feature/clinic-ai-assist-v1-provider-resilience",
+      "sha": "451081f2619f0342df2a8c64ae401dffb7697363",
+      "status": "CLOSED_PROVEN"
+    },
+    "clinic_ai_assist_v1_ci_evidence": {
+      "branch": "ci/clinic-ai-assist-v1-groq-exact-sha-r2-20260825",
+      "sha": "332c276b69f5d46524d57302a0ee62336380d8e8",
+      "status": "CI_RUN_32840780417_SUCCESS"
+    },
+    "clinic_ai_assist_v1_e3_isolated_runtime": {
+      "branch": "feature/clinic-ai-assist-v1-provider-resilience",
+      "sha": "451081f2619f0342df2a8c64ae401dffb7697363",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "status": "CLOSED_PROVEN"
+    },
+    "ht_foundation_slice1": {
+      "branch": "feature/lari-health-tourism-foundation",
+      "sha": "401dbf9a10ffccef594a19c7c1070a256ae279bf",
+      "status": "CLOSED_PROVEN"
+    },
+    "ht_foundation_slice1_ci_evidence": {
+      "branch": "ci/health-tourism-foundation-slice1-exact-sha-r7-20260826",
+      "sha": "93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7",
+      "status": "CI_RUN_32996883374_SUCCESS"
+    },
+    "ht_multilingual_public_intake_slice2": {
+      "branch": "feature/lari-health-tourism-slice2-public-intake",
+      "sha": "6e8d423083d44510c8446c7a858c26d1555cac0c",
+      "status": "CLOSED_PROVEN"
+    },
+    "ht_multilingual_public_intake_slice2_ci_evidence": {
+      "branch": "ci/health-tourism-slice2-public-intake-exact-sha-r7-20260828",
+      "sha": "c89dab28e9784d400c8643ac9d57a132701a4d82",
+      "status": "CI_RUN_33145277911_SUCCESS"
+    },
+    "ht_multilingual_public_intake_slice2_e3_isolated_runtime": {
+      "branch": "feature/lari-health-tourism-slice2-public-intake",
+      "sha": "6e8d423083d44510c8446c7a858c26d1555cac0c",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "status": "CLOSED_PROVEN"
+    },
+    "ht_lead_ops_multilingual_ai_assist_slice3": {
+      "branch": "staging/supabase-staging-consistency",
+      "sha": "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "status": "CLOSED_PROVEN"
+    },
+    "program_v2_canonical_base": {
+      "status": "CANONICAL_PROGRAM_V2_DEVELOPMENT_BASE",
+      "established_at": "2026-09-08T21:40:00+03:00",
+      "sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11"
+    }
+  },
+  "accepted_gates": [
+    {
+      "gate": "P1D.1A",
+      "status": "CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE",
+      "evidence_level": "E4_SHARED_STAGING_LIVE",
+      "tested_sha": "134c8716c2511c909cd400aee0496ebd70f63bf6",
+      "closed_at": "2026-08-14T16:55:15+03:00",
+      "reopen_condition": "Contradictory staging mutation or canary corruption evidence"
+    },
+    {
+      "gate": "P2A.0",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "run_ids": [
+        "31797365055"
+      ],
+      "closed_at": "2026-08-14T11:44:38Z",
+      "reopen_condition": "Failed atomic provisioning regression"
+    },
+    {
+      "gate": "P2A.1",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "run_ids": [
+        "31797365055"
+      ],
+      "closed_at": "2026-08-14T11:44:38Z",
+      "reopen_condition": "Failed commercial boundary security scan"
+    },
+    {
+      "gate": "P2A.2",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "run_ids": [
+        "31797365055"
+      ],
+      "closed_at": "2026-08-14T11:44:38Z",
+      "reopen_condition": "Failed onboarding contract or readiness test"
+    },
+    {
+      "gate": "P2A.3",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "run_ids": [
+        "31797365055"
+      ],
+      "closed_at": "2026-08-14T16:13:12+03:00",
+      "reopen_condition": "Failed onboarding handoff transaction"
+    },
+    {
+      "gate": "CORE-RC.1",
+      "status": "INTEGRATION_ALREADY_SATISFIED",
+      "evidence_level": "E1_SOURCE_PROVEN",
+      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "closed_at": "2026-08-14T16:36:05+03:00",
+      "reopen_condition": "Core contract syntax defect"
+    },
+    {
+      "gate": "CORE-RC.2A",
+      "status": "PRESENT_ON_CORE_BASELINE",
+      "evidence_level": "E1_SOURCE_PROVEN",
+      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "scope": "Communication Outbox / Provider Abstraction",
+      "reopen_condition": "Provider abstraction contract regression"
+    },
+    {
+      "gate": "CORE-RC.2B",
+      "status": "PRESENT_ON_CORE_BASELINE",
+      "evidence_level": "E1_SOURCE_PROVEN",
+      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "scope": "Public Booking Anti-Abuse",
+      "reopen_condition": "Anti-abuse RPC contract regression"
+    },
+    {
+      "gate": "CORE-RC.2C",
+      "status": "PRESENT_ON_CORE_BASELINE",
+      "evidence_level": "E1_SOURCE_PROVEN",
+      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "scope": "Demo Isolation + Tenant Subdomain Readiness",
+      "reopen_condition": "Demo tenant isolation regression"
+    },
+    {
+      "gate": "CORE-RC.3-CORE_RUNTIME",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "closed_at": "2026-08-18T11:24:15+03:00",
+      "reopen_condition": "Contradictory isolated runtime evidence or failed regression"
+    },
+    {
+      "gate": "CORE-RC.3",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+      "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "closed_at": "2026-08-18T13:12:00+03:00",
+      "reopen_condition": "Contradictory isolated runtime evidence or failed regression"
+    },
+    {
+      "gate": "CORE-RC.4",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a",
+      "run_ids": [
+        "32134598853"
+      ],
+      "closed_at": "2026-08-18T15:02:15+03:00",
+      "reopen_condition": "Contradictory Core type-contract or regression evidence"
+    },
+    {
+      "gate": "Package Branch Server Authority",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "83089a0695e0a5f0cf0fda25c7006df5e6ad4c07",
+      "run_ids": [
+        "32340331307"
+      ],
+      "closed_at": "2026-08-20T06:38:00Z",
+      "reopen_condition": "Contradictory branch authorization, RLS, commercial quota, primary-branch invariant, or concurrency regression evidence"
+    },
+    {
+      "gate": "Commercial Source-of-Truth Alignment",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
+      "run_ids": [
+        "32363490123"
+      ],
+      "closed_at": "2026-08-20T11:23:37Z",
+      "reopen_condition": "Contradictory commercial source-of-truth, entitlement projection, Supabase authority, unlimited quota, registration authority, or exact-SHA regression evidence"
+    },
+    {
+      "gate": "Package / Customer Customization Baseline",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
+      "run_ids": [
+        "32363490123"
+      ],
+      "closed_at": "2026-08-20T15:58:00+03:00",
+      "reopen_condition": "Contradictory Package branch authority, commercial source-of-truth, entitlement, registration authority, branch booking, RLS/concurrency, or exact-SHA regression evidence"
+    },
+    {
+      "gate": "LARİ Clinic Block 1 Clinical Domain Server Authority",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "2bb2b32d95387e09da06c7442a8617ccd38e4feb",
+      "run_ids": [
+        "32395034938"
+      ],
+      "closed_at": "2026-08-20T19:00:00Z",
+      "reopen_condition": "Contradictory clinical RLS, append-only note immutability, server-authoritative RPC, audit privacy, cross-tenant isolation, or exact-SHA regression evidence"
+    },
+    {
+      "gate": "LARİ Clinic Block 2 Operational Integration & Application Service Layer",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "5e935ed049ffe08a6797643ec9cc2b7d4e6ae637",
+      "run_ids": [
+        "32457917961"
+      ],
+      "closed_at": "2026-08-21T10:18:23+03:00",
+      "reopen_condition": "Contradictory operational encounter status guard, atomic completion side-effects, idempotency, patient history projection, cross-tenant boundary, or exact-SHA concurrency regression evidence"
+    },
+    {
+      "gate": "LARİ Clinic Block 3 Workspace UI & Isolated Real-Browser Acceptance",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+      "tested_sha": "008ebac4496d592d271d612713c437d316c416f0",
+      "e2_evidence_sha": "c5ecd0c507621bb6d22126691e12deb4d5826dee",
+      "e2_run_id": "32624729632",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "closed_at": "2026-08-24T13:45:00+03:00",
+      "reopen_condition": "Contradictory isolated runtime evidence or failed regression"
+    },
+    {
+      "gate": "LARİ Clinic Core Milestone",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+      "tested_sha": "008ebac4496d592d271d612713c437d316c416f0",
+      "closed_at": "2026-08-24T13:45:00+03:00",
+      "reopen_condition": "Contradictory clinical RLS, note immutability, RPC authority, cross-tenant boundary, or isolated runtime evidence"
+    },
+    {
+      "gate": "LARİ Clinic AI Assist V1 Baseline & Real Groq Runtime",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+      "tested_sha": "451081f2619f0342df2a8c64ae401dffb7697363",
+      "e2_evidence_sha": "332c276b69f5d46524d57302a0ee62336380d8e8",
+      "e2_run_id": "32840780417",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "closed_at": "2026-08-25T19:30:00Z",
+      "reopen_condition": "Contradictory real Groq runtime provider result, quota accounting regression, or clinical boundary violation"
+    },
+    {
+      "gate": "LARİ Health Tourism Scope Reconciliation Gate",
+      "status": "ACCEPTED",
+      "evidence_level": "E1_SOURCE_PROVEN",
+      "tested_sha": "25c41a7a026bb7e5e7e312c8fbee77f204e4add1",
+      "closed_at": "2026-08-26T11:20:00+03:00",
+      "reopen_condition": "Contradictory scope reconciliation or unauthorized boundary mutation"
+    },
+    {
+      "gate": "LARİ Health Tourism Foundation Slice 1 Server Authority & Lead Domain Core",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "401dbf9a10ffccef594a19c7c1070a256ae279bf",
+      "evidence_sha": "93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7",
+      "run_ids": [
+        "32996883374"
+      ],
+      "job_id": "98268377731",
+      "closed_at": "2026-08-26T20:57:48+03:00",
+      "reopen_condition": "Contradictory HT schema, server-authority RPC, capability denial, passport privacy, pagination, audit, core/clinic isolation, or exact-SHA regression evidence"
+    },
+    {
+      "gate": "LARİ Health Tourism Slice 2 Multilingual Public Intake & Surface",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+      "tested_sha": "6e8d423083d44510c8446c7a858c26d1555cac0c",
+      "e2_evidence_sha": "c89dab28e9784d400c8643ac9d57a132701a4d82",
+      "e2_run_id": "33145277911",
+      "e2_job_id": "98764791271",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "closed_at": "2026-08-28T11:30:00+03:00",
+      "reopen_condition": "Contradictory isolated runtime evidence or failed regression"
+    },
+    {
+      "gate": "LARİ Health Tourism Lead Ops + Multilingual AI Assist Slice 3",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+      "tested_sha": "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a",
+      "e3_run_id": "R31V12E3-20260901-B",
+      "workflow_run_id": "33505689808",
+      "workflow_job_id": "99849061434",
+      "artifact_id": "9799589930",
+      "artifact_digest": "sha256:e90ee0badaf3d14aa5118102e7240767fa4175d177b803b975a143a450c99374",
+      "isolated_project": "miuecvkkmyvaciticwtm",
+      "closed_at": "2026-09-01T15:53:13+03:00",
+      "reopen_condition": "Contradictory isolated runtime evidence or failed regression"
+    }
+  ],
+  "active_workstreams": {
+    "core_rc3": {
+      "status": "CLOSED_PROVEN",
+      "lanes": {
+        "core_runtime": {
+          "status": "CLOSED_PROVEN",
+          "objective": "Execute real browser /register flow, synthetic owner onboarding, ready_for_review transition, Super Admin publish, public storefront, customer booking/manage/owner visibility in isolated non-production runtime",
+          "evidence_level": "E3_ISOLATED_RUNTIME_E2E"
         },
-        "e3_state": {
-            "e3_status": "CONTROLLER_COMPOSITE_ACCEPTED",
-            "e3_run_id": "R31V12E3-20260901-B",
-            "acceptance_policy_version": "R31-V12-E3-P2",
-            "manifest_version": "R31-V12-E3-54",
-            "manifest_sha256": "8a8ff19ee507cbf847d8f2eb28d8b2d52ed66fa7f87601199086fb9631eefc81",
-            "workflow_run_id": "33505689808",
-            "workflow_job_id": "99849061434",
-            "artifact_id": "9799589930",
-            "artifact_digest": "sha256:e90ee0badaf3d14aa5118102e7240767fa4175d177b803b975a143a450c99374",
-            "isolated_project": "miuecvkkmyvaciticwtm",
-            "ht_ai_chat_version": "12"
+        "ui_v2": {
+          "status": "DEFERRED_PARALLEL_NON_BLOCKING",
+          "objective": "Materialize and integrate the parallel UI redesign later against the proven shared LARI Core"
         }
+      }
     },
-    "aos6_authority": {
-        "read_only_shadow_reconciliation_authorized": true,
-        "controlled_pilot_authorized": false,
-        "stage12c_authorized": false,
-        "candidate_execution_authority": false,
-        "allowed_exact_source_sha_for_read_only": "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a",
-        "canonical_reconciliation_sufficient_for_pilot": false,
-        "next_authority_event": "SEPARATE_CONTROLLER_PILOT_AUTHORIZATION"
+    "core_rc4": {
+      "status": "CLOSED_PROVEN",
+      "candidate_branch": "release/core-rc4",
+      "candidate_sha": "e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "closed_at": "2026-08-18T15:02:15+03:00"
     },
-    "scope_matrix": "docs/project-control/HEALTH_TOURISM_SCOPE_MATRIX.md",
-    "canonical_refs": {
-        "main_pilot": {
-            "branch": "staging/supabase-staging-consistency",
-            "sha": "134c8716c2511c909cd400aee0496ebd70f63bf6",
-            "status": "CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE"
-        },
-        "commercial_core_baseline": {
-            "branch": "feature/p2a-commercial-core-foundation",
-            "sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-            "status": "CLOSED_PROVEN"
-        },
-        "core_rc4": {
-            "branch": "release/core-rc4",
-            "sha": "e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a",
-            "status": "CLOSED_PROVEN"
-        },
-        "ci_evidence_trigger": {
-            "branch": "ci/core-rc4-exact-sha-evidence-r2-20260818",
-            "sha": "61b39627692df4e0784edcfb5b2d2ed695726ec2",
-            "status": "CI_RUN_32134598853_SUCCESS"
-        },
-        "package_branch_authority": {
-            "branch": "feature/package-customer-customization-foundation",
-            "sha": "83089a0695e0a5f0cf0fda25c7006df5e6ad4c07",
-            "status": "CLOSED_PROVEN"
-        },
-        "package_branch_authority_ci_evidence": {
-            "branch": "ci/package-branch-authority-exact-sha-r2-20260820",
-            "sha": "584f276ec5185bbb4080559f7cde08334e5767cd",
-            "status": "CI_RUN_32340331307_SUCCESS"
+    "package_customization": {
+      "status": "CLOSED_PROVEN",
+      "branch": "feature/package-customer-customization-foundation",
+      "sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "run_id": "32363490123",
+      "slices": {
+        "branch_server_authority": {
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+          "run_id": "32340331307"
         },
         "commercial_source_of_truth": {
-            "branch": "feature/package-customer-customization-foundation",
-            "sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
-            "status": "CLOSED_PROVEN"
-        },
-        "commercial_source_of_truth_ci_evidence": {
-            "branch": "ci/package-commercial-source-of-truth-exact-sha-r1-20260820",
-            "sha": "a337d85276728beffbec4a129aefc703328624d2",
-            "status": "CI_RUN_32363490123_SUCCESS"
-        },
-        "package_customization_baseline": {
-            "branch": "feature/package-customer-customization-foundation",
-            "sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
-            "status": "CLOSED_PROVEN"
-        },
-        "clinic_block1_authority": {
-            "branch": "feature/lari-clinic-foundation",
-            "sha": "2bb2b32d95387e09da06c7442a8617ccd38e4feb",
-            "status": "CLOSED_PROVEN"
-        },
-        "clinic_block1_ci_evidence": {
-            "branch": "ci/clinic-block1-exact-sha-r2-20260820",
-            "sha": "78c3e49a1883aafb74ff2e8f18acd9876e74a01b",
-            "status": "CI_RUN_32395034938_SUCCESS"
-        },
-        "clinic_block2_operational_integration": {
-            "branch": "feature/lari-clinic-foundation",
-            "sha": "5e935ed049ffe08a6797643ec9cc2b7d4e6ae637",
-            "status": "CLOSED_PROVEN"
-        },
-        "clinic_block2_ci_evidence": {
-            "branch": "ci/clinic-block2-exact-sha-r3-20260821",
-            "sha": "4432d95b7335689242db61ba5562f0560b2d1585",
-            "status": "CI_RUN_32457917961_SUCCESS"
-        },
-        "clinic_block3_workspace_ui": {
-            "branch": "feature/lari-clinic-foundation",
-            "sha": "008ebac4496d592d271d612713c437d316c416f0",
-            "status": "CLOSED_PROVEN"
-        },
-        "clinic_block3_ci_evidence": {
-            "branch": "ci/clinic-block3-exact-sha-r9-20260823",
-            "sha": "c5ecd0c507621bb6d22126691e12deb4d5826dee",
-            "status": "CI_RUN_32624729632_SUCCESS"
-        },
-        "clinic_block3_e3_isolated_runtime": {
-            "branch": "feature/lari-clinic-foundation",
-            "sha": "008ebac4496d592d271d612713c437d316c416f0",
-            "isolated_project": "miuecvkkmyvaciticwtm",
-            "status": "CLOSED_PROVEN"
-        },
-        "clinic_ai_assist_v1_product": {
-            "branch": "feature/clinic-ai-assist-v1-provider-resilience",
-            "sha": "451081f2619f0342df2a8c64ae401dffb7697363",
-            "status": "CLOSED_PROVEN"
-        },
-        "clinic_ai_assist_v1_ci_evidence": {
-            "branch": "ci/clinic-ai-assist-v1-groq-exact-sha-r2-20260825",
-            "sha": "332c276b69f5d46524d57302a0ee62336380d8e8",
-            "status": "CI_RUN_32840780417_SUCCESS"
-        },
-        "clinic_ai_assist_v1_e3_isolated_runtime": {
-            "branch": "feature/clinic-ai-assist-v1-provider-resilience",
-            "sha": "451081f2619f0342df2a8c64ae401dffb7697363",
-            "isolated_project": "miuecvkkmyvaciticwtm",
-            "status": "CLOSED_PROVEN"
-        },
-        "ht_foundation_slice1": {
-            "branch": "feature/lari-health-tourism-foundation",
-            "sha": "401dbf9a10ffccef594a19c7c1070a256ae279bf",
-            "status": "CLOSED_PROVEN"
-        },
-        "ht_foundation_slice1_ci_evidence": {
-            "branch": "ci/health-tourism-foundation-slice1-exact-sha-r7-20260826",
-            "sha": "93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7",
-            "status": "CI_RUN_32996883374_SUCCESS"
-        },
-        "ht_multilingual_public_intake_slice2": {
-            "branch": "feature/lari-health-tourism-slice2-public-intake",
-            "sha": "6e8d423083d44510c8446c7a858c26d1555cac0c",
-            "status": "CLOSED_PROVEN"
-        },
-        "ht_multilingual_public_intake_slice2_ci_evidence": {
-            "branch": "ci/health-tourism-slice2-public-intake-exact-sha-r7-20260828",
-            "sha": "c89dab28e9784d400c8643ac9d57a132701a4d82",
-            "status": "CI_RUN_33145277911_SUCCESS"
-        },
-        "ht_multilingual_public_intake_slice2_e3_isolated_runtime": {
-            "branch": "feature/lari-health-tourism-slice2-public-intake",
-            "sha": "6e8d423083d44510c8446c7a858c26d1555cac0c",
-            "isolated_project": "miuecvkkmyvaciticwtm",
-            "status": "CLOSED_PROVEN"
-        },
-        "ht_lead_ops_multilingual_ai_assist_slice3": {
-            "branch": "staging/supabase-staging-consistency",
-            "sha": "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a",
-            "isolated_project": "miuecvkkmyvaciticwtm",
-            "status": "CLOSED_PROVEN"
-        },
-        "program_v2_canonical_base": {
-            "status": "CANONICAL_PROGRAM_V2_DEVELOPMENT_BASE",
-            "established_at": "2026-09-08T21:40:00+03:00",
-            "sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11"
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+          "run_id": "32363490123",
+          "product_sha": "65a53427f52c21e60aa8f92e02a17d693a201601"
         }
+      }
     },
-    "accepted_gates": [
-        {
-            "gate": "P1D.1A",
-            "status": "CLOSED_PROVEN_TECHNICAL_ACCEPTANCE_COMPLETE",
-            "evidence_level": "E4_SHARED_STAGING_LIVE",
-            "tested_sha": "134c8716c2511c909cd400aee0496ebd70f63bf6",
-            "closed_at": "2026-08-14T16:55:15+03:00",
-            "reopen_condition": "Contradictory staging mutation or canary corruption evidence"
+    "lari_clinic": {
+      "status": "CLOSED_PROVEN",
+      "branch": "feature/lari-clinic-foundation",
+      "sha": "008ebac4496d592d271d612713c437d316c416f0",
+      "blocks": {
+        "block1_clinical_domain_server_authority": {
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+          "product_sha": "2bb2b32d95387e09da06c7442a8617ccd38e4feb",
+          "evidence_sha": "78c3e49a1883aafb74ff2e8f18acd9876e74a01b",
+          "run_id": "32395034938"
         },
-        {
-            "gate": "P2A.0",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-            "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-            "run_ids": [
-                "31797365055"
-            ],
-            "closed_at": "2026-08-14T11:44:38Z",
-            "reopen_condition": "Failed atomic provisioning regression"
+        "block2_operational_integration": {
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+          "product_sha": "5e935ed049ffe08a6797643ec9cc2b7d4e6ae637",
+          "evidence_sha": "4432d95b7335689242db61ba5562f0560b2d1585",
+          "run_id": "32457917961"
         },
-        {
-            "gate": "P2A.1",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-            "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-            "run_ids": [
-                "31797365055"
-            ],
-            "closed_at": "2026-08-14T11:44:38Z",
-            "reopen_condition": "Failed commercial boundary security scan"
-        },
-        {
-            "gate": "P2A.2",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-            "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-            "run_ids": [
-                "31797365055"
-            ],
-            "closed_at": "2026-08-14T11:44:38Z",
-            "reopen_condition": "Failed onboarding contract or readiness test"
-        },
-        {
-            "gate": "P2A.3",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-            "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-            "run_ids": [
-                "31797365055"
-            ],
-            "closed_at": "2026-08-14T16:13:12+03:00",
-            "reopen_condition": "Failed onboarding handoff transaction"
-        },
-        {
-            "gate": "CORE-RC.1",
-            "status": "INTEGRATION_ALREADY_SATISFIED",
-            "evidence_level": "E1_SOURCE_PROVEN",
-            "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-            "closed_at": "2026-08-14T16:36:05+03:00",
-            "reopen_condition": "Core contract syntax defect"
-        },
-        {
-            "gate": "CORE-RC.2A",
-            "status": "PRESENT_ON_CORE_BASELINE",
-            "evidence_level": "E1_SOURCE_PROVEN",
-            "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-            "scope": "Communication Outbox / Provider Abstraction",
-            "reopen_condition": "Provider abstraction contract regression"
-        },
-        {
-            "gate": "CORE-RC.2B",
-            "status": "PRESENT_ON_CORE_BASELINE",
-            "evidence_level": "E1_SOURCE_PROVEN",
-            "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-            "scope": "Public Booking Anti-Abuse",
-            "reopen_condition": "Anti-abuse RPC contract regression"
-        },
-        {
-            "gate": "CORE-RC.2C",
-            "status": "PRESENT_ON_CORE_BASELINE",
-            "evidence_level": "E1_SOURCE_PROVEN",
-            "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-            "scope": "Demo Isolation + Tenant Subdomain Readiness",
-            "reopen_condition": "Demo tenant isolation regression"
-        },
-        {
-            "gate": "CORE-RC.3-CORE_RUNTIME",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
-            "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-            "isolated_project": "miuecvkkmyvaciticwtm",
-            "closed_at": "2026-08-18T11:24:15+03:00",
-            "reopen_condition": "Contradictory isolated runtime evidence or failed regression"
-        },
-        {
-            "gate": "CORE-RC.3",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
-            "tested_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
-            "isolated_project": "miuecvkkmyvaciticwtm",
-            "closed_at": "2026-08-18T13:12:00+03:00",
-            "reopen_condition": "Contradictory isolated runtime evidence or failed regression"
-        },
-        {
-            "gate": "CORE-RC.4",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-            "tested_sha": "e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a",
-            "run_ids": [
-                "32134598853"
-            ],
-            "closed_at": "2026-08-18T15:02:15+03:00",
-            "reopen_condition": "Contradictory Core type-contract or regression evidence"
-        },
-        {
-            "gate": "Package Branch Server Authority",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-            "tested_sha": "83089a0695e0a5f0cf0fda25c7006df5e6ad4c07",
-            "run_ids": [
-                "32340331307"
-            ],
-            "closed_at": "2026-08-20T06:38:00Z",
-            "reopen_condition": "Contradictory branch authorization, RLS, commercial quota, primary-branch invariant, or concurrency regression evidence"
-        },
-        {
-            "gate": "Commercial Source-of-Truth Alignment",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-            "tested_sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
-            "run_ids": [
-                "32363490123"
-            ],
-            "closed_at": "2026-08-20T11:23:37Z",
-            "reopen_condition": "Contradictory commercial source-of-truth, entitlement projection, Supabase authority, unlimited quota, registration authority, or exact-SHA regression evidence"
-        },
-        {
-            "gate": "Package / Customer Customization Baseline",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-            "tested_sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
-            "run_ids": [
-                "32363490123"
-            ],
-            "closed_at": "2026-08-20T15:58:00+03:00",
-            "reopen_condition": "Contradictory Package branch authority, commercial source-of-truth, entitlement, registration authority, branch booking, RLS/concurrency, or exact-SHA regression evidence"
-        },
-        {
-            "gate": "LARİ Clinic Block 1 Clinical Domain Server Authority",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-            "tested_sha": "2bb2b32d95387e09da06c7442a8617ccd38e4feb",
-            "run_ids": [
-                "32395034938"
-            ],
-            "closed_at": "2026-08-20T19:00:00Z",
-            "reopen_condition": "Contradictory clinical RLS, append-only note immutability, server-authoritative RPC, audit privacy, cross-tenant isolation, or exact-SHA regression evidence"
-        },
-        {
-            "gate": "LARİ Clinic Block 2 Operational Integration & Application Service Layer",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-            "tested_sha": "5e935ed049ffe08a6797643ec9cc2b7d4e6ae637",
-            "run_ids": [
-                "32457917961"
-            ],
-            "closed_at": "2026-08-21T10:18:23+03:00",
-            "reopen_condition": "Contradictory operational encounter status guard, atomic completion side-effects, idempotency, patient history projection, cross-tenant boundary, or exact-SHA concurrency regression evidence"
-        },
-        {
-            "gate": "LARİ Clinic Block 3 Workspace UI & Isolated Real-Browser Acceptance",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
-            "tested_sha": "008ebac4496d592d271d612713c437d316c416f0",
-            "e2_evidence_sha": "c5ecd0c507621bb6d22126691e12deb4d5826dee",
-            "e2_run_id": "32624729632",
-            "isolated_project": "miuecvkkmyvaciticwtm",
-            "closed_at": "2026-08-24T13:45:00+03:00",
-            "reopen_condition": "Contradictory isolated runtime evidence or failed regression"
-        },
-        {
-            "gate": "LARİ Clinic Core Milestone",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
-            "tested_sha": "008ebac4496d592d271d612713c437d316c416f0",
-            "closed_at": "2026-08-24T13:45:00+03:00",
-            "reopen_condition": "Contradictory clinical RLS, note immutability, RPC authority, cross-tenant boundary, or isolated runtime evidence"
-        },
-        {
-            "gate": "LARİ Clinic AI Assist V1 Baseline & Real Groq Runtime",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
-            "tested_sha": "451081f2619f0342df2a8c64ae401dffb7697363",
-            "e2_evidence_sha": "332c276b69f5d46524d57302a0ee62336380d8e8",
-            "e2_run_id": "32840780417",
-            "isolated_project": "miuecvkkmyvaciticwtm",
-            "closed_at": "2026-08-25T19:30:00Z",
-            "reopen_condition": "Contradictory real Groq runtime provider result, quota accounting regression, or clinical boundary violation"
-        },
-        {
-            "gate": "LARİ Health Tourism Scope Reconciliation Gate",
-            "status": "ACCEPTED",
-            "evidence_level": "E1_SOURCE_PROVEN",
-            "tested_sha": "25c41a7a026bb7e5e7e312c8fbee77f204e4add1",
-            "closed_at": "2026-08-26T11:20:00+03:00",
-            "reopen_condition": "Contradictory scope reconciliation or unauthorized boundary mutation"
-        },
-        {
-            "gate": "LARİ Health Tourism Foundation Slice 1 Server Authority & Lead Domain Core",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-            "tested_sha": "401dbf9a10ffccef594a19c7c1070a256ae279bf",
-            "evidence_sha": "93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7",
-            "run_ids": [
-                "32996883374"
-            ],
-            "job_id": "98268377731",
-            "closed_at": "2026-08-26T20:57:48+03:00",
-            "reopen_condition": "Contradictory HT schema, server-authority RPC, capability denial, passport privacy, pagination, audit, core/clinic isolation, or exact-SHA regression evidence"
-        },
-        {
-            "gate": "LARİ Health Tourism Slice 2 Multilingual Public Intake & Surface",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
-            "tested_sha": "6e8d423083d44510c8446c7a858c26d1555cac0c",
-            "e2_evidence_sha": "c89dab28e9784d400c8643ac9d57a132701a4d82",
-            "e2_run_id": "33145277911",
-            "e2_job_id": "98764791271",
-            "isolated_project": "miuecvkkmyvaciticwtm",
-            "closed_at": "2026-08-28T11:30:00+03:00",
-            "reopen_condition": "Contradictory isolated runtime evidence or failed regression"
-        },
-        {
-            "gate": "LARİ Health Tourism Lead Ops + Multilingual AI Assist Slice 3",
-            "status": "CLOSED_PROVEN",
-            "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
-            "tested_sha": "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a",
-            "e3_run_id": "R31V12E3-20260901-B",
-            "workflow_run_id": "33505689808",
-            "workflow_job_id": "99849061434",
-            "artifact_id": "9799589930",
-            "artifact_digest": "sha256:e90ee0badaf3d14aa5118102e7240767fa4175d177b803b975a143a450c99374",
-            "isolated_project": "miuecvkkmyvaciticwtm",
-            "closed_at": "2026-09-01T15:53:13+03:00",
-            "reopen_condition": "Contradictory isolated runtime evidence or failed regression"
+        "block3_workspace_ui": {
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+          "product_sha": "008ebac4496d592d271d612713c437d316c416f0",
+          "e2_evidence_sha": "c5ecd0c507621bb6d22126691e12deb4d5826dee",
+          "e2_run_id": "32624729632",
+          "isolated_project": "miuecvkkmyvaciticwtm"
         }
-    ],
-    "active_workstreams": {
-        "core_rc3": {
-            "status": "CLOSED_PROVEN",
-            "lanes": {
-                "core_runtime": {
-                    "status": "CLOSED_PROVEN",
-                    "objective": "Execute real browser /register flow, synthetic owner onboarding, ready_for_review transition, Super Admin publish, public storefront, customer booking/manage/owner visibility in isolated non-production runtime",
-                    "evidence_level": "E3_ISOLATED_RUNTIME_E2E"
-                },
-                "ui_v2": {
-                    "status": "DEFERRED_PARALLEL_NON_BLOCKING",
-                    "objective": "Materialize and integrate the parallel UI redesign later against the proven shared LARI Core"
-                }
-            }
-        },
-        "core_rc4": {
-            "status": "CLOSED_PROVEN",
-            "candidate_branch": "release/core-rc4",
-            "candidate_sha": "e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a",
-            "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-            "closed_at": "2026-08-18T15:02:15+03:00"
-        },
-        "package_customization": {
-            "status": "CLOSED_PROVEN",
-            "branch": "feature/package-customer-customization-foundation",
-            "sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
-            "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-            "run_id": "32363490123",
-            "slices": {
-                "branch_server_authority": {
-                    "status": "CLOSED_PROVEN",
-                    "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-                    "run_id": "32340331307"
-                },
-                "commercial_source_of_truth": {
-                    "status": "CLOSED_PROVEN",
-                    "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-                    "run_id": "32363490123",
-                    "product_sha": "65a53427f52c21e60aa8f92e02a17d693a201601"
-                }
-            }
-        },
-        "lari_clinic": {
-            "status": "CLOSED_PROVEN",
-            "branch": "feature/lari-clinic-foundation",
-            "sha": "008ebac4496d592d271d612713c437d316c416f0",
-            "blocks": {
-                "block1_clinical_domain_server_authority": {
-                    "status": "CLOSED_PROVEN",
-                    "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-                    "product_sha": "2bb2b32d95387e09da06c7442a8617ccd38e4feb",
-                    "evidence_sha": "78c3e49a1883aafb74ff2e8f18acd9876e74a01b",
-                    "run_id": "32395034938"
-                },
-                "block2_operational_integration": {
-                    "status": "CLOSED_PROVEN",
-                    "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-                    "product_sha": "5e935ed049ffe08a6797643ec9cc2b7d4e6ae637",
-                    "evidence_sha": "4432d95b7335689242db61ba5562f0560b2d1585",
-                    "run_id": "32457917961"
-                },
-                "block3_workspace_ui": {
-                    "status": "CLOSED_PROVEN",
-                    "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
-                    "product_sha": "008ebac4496d592d271d612713c437d316c416f0",
-                    "e2_evidence_sha": "c5ecd0c507621bb6d22126691e12deb4d5826dee",
-                    "e2_run_id": "32624729632",
-                    "isolated_project": "miuecvkkmyvaciticwtm"
-                }
-            },
-            "extensions": {
-                "clinic_ai_assist_v1": {
-                    "status": "CLOSED_PROVEN",
-                    "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
-                    "product_sha": "451081f2619f0342df2a8c64ae401dffb7697363",
-                    "e2_evidence_sha": "332c276b69f5d46524d57302a0ee62336380d8e8",
-                    "e2_run_id": "32840780417",
-                    "isolated_project": "miuecvkkmyvaciticwtm",
-                    "closed_at": "2026-08-25T19:30:00Z"
-                }
-            }
-        },
-        "lari_health_tourism": {
-            "status": "CLOSED_PROVEN",
-            "reconciliation_status": "ACCEPTED_RECONCILED",
-            "objective": "Multilingual public/intake experience, Web AI Lead Agent, source attribution, lead capture & scoring, coordinator workflow, and Clinic integration",
-            "slices": {
-                "foundation_slice1": {
-                    "status": "CLOSED_PROVEN",
-                    "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
-                    "product_sha": "401dbf9a10ffccef594a19c7c1070a256ae279bf",
-                    "evidence_sha": "93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7",
-                    "run_id": "32996883374",
-                    "job_id": "98268377731"
-                },
-                "multilingual_public_intake_slice2": {
-                    "status": "CLOSED_PROVEN",
-                    "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
-                    "product_sha": "6e8d423083d44510c8446c7a858c26d1555cac0c",
-                    "e2_evidence_sha": "c89dab28e9784d400c8643ac9d57a132701a4d82",
-                    "e2_run_id": "33145277911",
-                    "e2_job_id": "98764791271",
-                    "isolated_project": "miuecvkkmyvaciticwtm"
-                },
-                "lead_ops_multilingual_ai_assist_slice3": {
-                    "status": "CLOSED_PROVEN",
-                    "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
-                    "product_sha": "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a",
-                    "e3_run_id": "R31V12E3-20260901-B",
-                    "acceptance_policy_version": "R31-V12-E3-P2",
-                    "workflow_run_id": "33505689808",
-                    "workflow_job_id": "99849061434",
-                    "artifact_id": "9799589930",
-                    "artifact_digest": "sha256:e90ee0badaf3d14aa5118102e7240767fa4175d177b803b975a143a450c99374",
-                    "isolated_project": "miuecvkkmyvaciticwtm"
-                }
-            }
+      },
+      "extensions": {
+        "clinic_ai_assist_v1": {
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+          "product_sha": "451081f2619f0342df2a8c64ae401dffb7697363",
+          "e2_evidence_sha": "332c276b69f5d46524d57302a0ee62336380d8e8",
+          "e2_run_id": "32840780417",
+          "isolated_project": "miuecvkkmyvaciticwtm",
+          "closed_at": "2026-08-25T19:30:00Z"
         }
+      }
     },
-    "external_dependencies": {
-        "iyzico_payment": "DISABLED_COMMERCIAL_MODE",
-        "external_dns": "PENDING_WILDCARD_SETUP",
-        "sms_provider": "OUTBOX_SIMULATION",
-        "whatsapp_provider": "OUTBOX_SIMULATION"
-    },
-    "non_blocking_validation": {
-        "human_participant_uat": "DEFERRED_FIELD_VALIDATION",
-        "dependency_audit_risk": "OBSERVED_DEPENDENCY_AUDIT_RISK / REVIEW_REQUIRED_BEFORE_PRODUCTION (6 vulnerabilities: 1 low, 5 high reported by npm ci during R7 CI gate)",
-        "arabic_copy_polish": "OPEN_NON_BLOCKING_COPY_POLISH (Arabic back-button copy polish deferred to pre-release polish)"
-    },
-    "current_blockers": [
-        {
-            "blocker_class": "LOCAL_RUNTIME_INFRASTRUCTURE_UNAVAILABLE",
-            "blocker_scope": "SECURITY_RUNTIME_VALIDATION_ONLY",
-            "description": "Docker, Supabase CLI, and psql are not available on this workstation. Cannot apply security migration to a disposable Postgres instance for runtime verification.",
-            "affects": "Phase 1.1 Security Runtime Validation",
-            "does_not_affect": "Design Intelligence, Design Remediation, Phase 2-7 development"
+    "lari_health_tourism": {
+      "status": "CLOSED_PROVEN",
+      "reconciliation_status": "ACCEPTED_RECONCILED",
+      "objective": "Multilingual public/intake experience, Web AI Lead Agent, source attribution, lead capture & scoring, coordinator workflow, and Clinic integration",
+      "slices": {
+        "foundation_slice1": {
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+          "product_sha": "401dbf9a10ffccef594a19c7c1070a256ae279bf",
+          "evidence_sha": "93d852f9c0ddcbddf3d25f476cee17e8d00aa3f7",
+          "run_id": "32996883374",
+          "job_id": "98268377731"
+        },
+        "multilingual_public_intake_slice2": {
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+          "product_sha": "6e8d423083d44510c8446c7a858c26d1555cac0c",
+          "e2_evidence_sha": "c89dab28e9784d400c8643ac9d57a132701a4d82",
+          "e2_run_id": "33145277911",
+          "e2_job_id": "98764791271",
+          "isolated_project": "miuecvkkmyvaciticwtm"
+        },
+        "lead_ops_multilingual_ai_assist_slice3": {
+          "status": "CLOSED_PROVEN",
+          "evidence_level": "E3_ISOLATED_RUNTIME_E2E",
+          "product_sha": "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a",
+          "e3_run_id": "R31V12E3-20260901-B",
+          "acceptance_policy_version": "R31-V12-E3-P2",
+          "workflow_run_id": "33505689808",
+          "workflow_job_id": "99849061434",
+          "artifact_id": "9799589930",
+          "artifact_digest": "sha256:e90ee0badaf3d14aa5118102e7240767fa4175d177b803b975a143a450c99374",
+          "isolated_project": "miuecvkkmyvaciticwtm"
         }
-    ],
-    "next_action": "Continue Phase 2-7 dependency-safe autonomous development. Security runtime validation awaits local database infrastructure. Design remediation awaits Controller review.",
-    "evidence_policy": {
-        "strict_levels": true,
-        "require_literal_runs": true
-    },
-    "reopen_policy": {
-        "require_empirical_proof": true
-    },
-    "program_id": "LARI-PROGRAM-V2-REAL-PRODUCT-20260908-01",
-    "current_phase": "Multi-Lane: Phase 1.1 Security HOLD + Phase 2-7 Active Development",
-    "current_execution_gate": "MULTILANE_CONTINUOUS_EXECUTION",
-    "autonomous_program_operator": "AOS",
-    "operator_standing_authority": "LARI-AOS-PROGRAM-V2-AUTONOMOUS-CONTINUATION-EVIDENCE-RECOVERY-20260910-01",
-    "superseded_milestone_state": {
-        "superseded_status": "HEALTH_TOURISM_SLICE3_CLOSED_PROVEN",
-        "superseded_milestone": "LARI Health Tourism Slice 3 - Lead Ops + Multilingual AI Assist + Handoff",
-        "reason": "Superseded by Program V2 canonical activation under DECISION-020 and authority LARI-AOS-PROGRAM-V2-BOOTSTRAP-20260908-01. Historical evidence preserved in accepted_gates."
-    },
-    "phase_0_1_result": {
-        "classification": {
-            "class_c_count": 20,
-            "class_a_count": 14,
-            "class_d_count": 0,
-            "class_e_count": 0,
-            "class_b_count": 0
-        },
-        "migration_delta_count": 0,
-        "original_review_candidate_disposition": "NOT_ACCEPTED_DO_NOT_PUSH_SUPERSEDED_DIAGNOSTIC_ONLY",
-        "authority": "LARI-AOS-PROGRAM-V2-P0-1-RECONCILIATION-SIDE-EFFECT-CORRECTION-20260908-01",
-        "product_source_delta_count": 0,
-        "merge_base": "134c8716c2511c909cd400aee0496ebd70f63bf6",
-        "canonical_product_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "disposition_reason": "Historical R31 workflows are operational/evidence workflows containing remote deploy / service-role E3 capabilities and must not be resurrected into Program V2 canonical product base.",
-        "application_delta_count": 0,
-        "original_review_candidate": "86897ab7cd077359809e282e7b467e07dadba273",
-        "status": "INDEPENDENTLY_CORRECTED_NO_PRODUCT_DELTA_REQUIRED",
-        "required_path_deltas": []
-    },
-    "phase_1_state": {
-        "candidate_branch": "aos/program-v2-phase1-security-hardening",
-        "candidate_sha": "c2a204ab9c5e3c2641be27d480d223f7148ec174",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "remedies_implemented": [
-            "S-01",
-            "S-02",
-            "S-03",
-            "S-04"
-        ],
-        "contracts_tested": 18,
-        "contracts_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/program-v2-phase1-security-hardening",
-        "disposition": "HOLD_PENDING_RUNTIME_VALIDATION",
-        "runtime_validation_status": "BLOCKED_LOCAL_DB_INFRASTRUCTURE_MISSING",
-        "static_contract_assertions": 18,
-        "static_contract_result": "ALL_PASS"
-    },
-    "uiv2_materialization": {
-        "base_sha": "27956c23704117a6ef478d95eb4c5b7060d39e3c",
-        "materialized_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
-        "materialization_state": "CONTROLLER_VERIFIED",
-        "lint_attribution": "PRE_EXISTING_IDENTICAL",
-        "lint_base_errors": 10,
-        "lint_candidate_errors": 10,
-        "lint_error_file": "services/uiV2PilotPreviewFixture.ts",
-        "candidate_changed_files": [
-            "components/layouts/SalonBookingLayout.tsx",
-            "index.html"
-        ]
-    },
-    "design_remediation": {
-        "branch": "aos/design-remediation-768px-overflow-20260909",
-        "sha": "c0b3a95d17f97714794eefd6e3ba2da2a7c59316",
-        "parent_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
-        "merge_base": "e74d097b2ba1160bc852e84503aa6368b23d43eb",
-        "changed_files": [
-            "components/layouts/MarketingLayout.tsx",
-            "pages/MarketingHomePage.tsx"
-        ],
-        "remote_state": "PUBLISHED",
-        "target_materialization_allowed": false,
-        "disposition": "AWAITING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "design_intelligence_state": {
-        "active_epic": "CORRECTED_SHA_RECAPTURE_COMPLETE",
-        "authoritative_product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
-        "baseline_classification": "SUPERSEDED_PRE_CORRECTION_BASELINE",
-        "baseline_evidence": [
-            "EV-042",
-            "EV-043",
-            "EV-044",
-            "EV-045",
-            "EV-046",
-            "EV-047"
-        ],
-        "corrected_sha_evidence": [
-            "EV-049",
-            "EV-050",
-            "EV-051",
-            "EV-052"
-        ],
-        "completed_epics": [
-            {
-                "epic": 1,
-                "name": "Brand & Marketing Surface",
-                "report": "AOS_DESIGN_EPIC1_REPORT.md",
-                "gate": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW",
-                "product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
-                "regression_delta": "POSITIVE"
-            },
-            {
-                "epic": 2,
-                "name": "Public Mini-Site & Booking",
-                "report": "AOS_DESIGN_EPIC2_REPORT.md",
-                "gate": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW",
-                "product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
-                "regression_delta": "NEUTRAL"
-            },
-            {
-                "epic": 3,
-                "name": "Customer Self-Service & Appointment Management",
-                "report": "AOS_DESIGN_EPIC3_REPORT.md",
-                "gate": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW",
-                "product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
-                "regression_delta": "POSITIVE"
-            },
-            {
-                "epic": 4,
-                "name": "Provider Admin & Staff Scheduling Surface",
-                "report": "AOS_DESIGN_EPIC4_REPORT.md",
-                "gate": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW",
-                "product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
-                "regression_delta": "NEUTRAL"
-            },
-            {
-                "epic": 5,
-                "name": "Clinic & Health Tourism Multilingual Surface",
-                "report": "AOS_DESIGN_EPIC5_REPORT.md",
-                "gate": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW",
-                "product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
-                "regression_delta": "NEUTRAL"
-            },
-            {
-                "epic": 6,
-                "name": "Super Admin Governance & Multi-Tenant Observability",
-                "report": "AOS_DESIGN_EPIC6_REPORT.md",
-                "gate": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW",
-                "product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
-                "regression_delta": "POSITIVE"
-            }
-        ],
-        "lane_status": "CORRECTED_SHA_COMPLETE_PENDING_CONTROLLER_REVIEW",
-        "release_gate_effect": "NONE"
-    },
-    "phase2_state": {
-        "candidate_branch": "aos/phase2-staff-scheduling-foundation",
-        "candidate_sha": "a29c7e7db10484e413f239f5885d99fb07bed9f4",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "capabilities_implemented": [
-            "staff_time_off",
-            "staff_breaks",
-            "booking_buffer_rules",
-            "business_holidays",
-            "check_staff_slot_availability_rpc"
-        ],
-        "contracts_tested": 20,
-        "contracts_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/phase2-staff-scheduling-foundation",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "phase3_state": {
-        "candidate_branch": "aos/phase3-waitlist-foundation",
-        "candidate_sha": "c507ca9edfce09c533a439283707c68bbdd29f25",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "capabilities_implemented": [
-            "booking_waitlist_table",
-            "join_booking_waitlist_rpc",
-            "offer_waitlist_slot_rpc",
-            "claim_waitlist_slot_rpc"
-        ],
-        "contracts_tested": 20,
-        "contracts_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/phase3-waitlist-foundation",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "phase2_state_r1": {
-        "candidate_branch": "aos/phase2-staff-scheduling-foundation-r1",
-        "candidate_sha": "59bc9a32c253d7f7faea4b6ae79d671be37f374a",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "stacked_on": "a29c7e7db10484e413f239f5885d99fb07bed9f4",
-        "corrections_applied": [
-            "removed_broad_public_read_policies",
-            "service_bound_buffer_selection",
-            "default_buffer_unique_partial_index",
-            "branch_holiday_filtering",
-            "security_definer_revoke_execute_from_public_first"
-        ],
-        "contracts_tested": 20,
-        "contracts_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/phase2-staff-scheduling-foundation-r1",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "phase3_waitlist_state_r1": {
-        "candidate_branch": "aos/phase3-waitlist-foundation-r1",
-        "candidate_sha": "40ea5b6d510ff8fa9c90b07541604a44b1c2b534",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "stacked_on": "c507ca9edfce09c533a439283707c68bbdd29f25",
-        "corrections_applied": [
-            "no_public_pii_table_surface",
-            "cryptographic_one_time_claim_capability_sha256",
-            "explicit_caller_tenant_authorization_in_offer_rpc",
-            "canonical_booking_engine_invariants_at_claim",
-            "no_anon_direct_table_insert",
-            "state_machine_transition_trigger"
-        ],
-        "contracts_tested": 20,
-        "contracts_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/phase3-waitlist-foundation-r1",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "phase3_comms_state": {
-        "candidate_branch": "aos/phase3-communications-foundation",
-        "candidate_sha": "fcfca154e0a9e57cd8f6ab007cd6d88771f8b16a",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "capabilities_implemented": [
-            "communication_outbox_table",
-            "communication_delivery_callbacks_table",
-            "deterministic_test_communication_provider",
-            "enqueue_communication_outbox_rpc",
-            "claim_outbox_batch_rpc",
-            "record_delivery_callback_rpc"
-        ],
-        "contracts_tested": 20,
-        "contracts_result": "PASS",
-        "tsc_no_emit_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/phase3-communications-foundation",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "phase2_state_r2": {
-        "candidate_branch": "aos/phase2-staff-scheduling-foundation-r2",
-        "candidate_sha": "1e865bcdba85ae30a48fe159b03dda9c1f2b0181",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "stacked_on": "59bc9a31ca8f14de33f08f1934d38a485c53af21",
-        "corrections_applied": [
-            "canonical_branch_model_branches_staff_branches_service_branches",
-            "composite_tenant_safe_foreign_keys",
-            "branch_holiday_predicate_safe_resolution",
-            "iso_weekday_semantics_alignment",
-            "public_service_duration_canonical_source",
-            "frozen_appointment_duration_occupancy",
-            "asymmetric_requested_vs_existing_buffer_intervals",
-            "unified_evaluate_booking_slot_invariant_engine"
-        ],
-        "contracts_tested": 20,
-        "contracts_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/phase2-staff-scheduling-foundation-r2",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "phase3_waitlist_state_r2": {
-        "candidate_branch": "aos/phase3-waitlist-foundation-r2",
-        "candidate_sha": "e68eb4a2091abf89cba99fd4731f308c518e0dcd",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "stacked_on": "40ea5b6d4854f58e89ed618979f8681303193aa2",
-        "corrections_applied": [
-            "canonical_branch_model_junction_integration",
-            "composite_tenant_safe_foreign_keys",
-            "explicit_role_allowlist_offer_waitlist_slot",
-            "cryptographic_256bit_unguessable_token_sha256_digest_only",
-            "bounded_expiration_domain_5_to_1440_min",
-            "canonical_evaluate_booking_slot_at_offer_and_claim",
-            "canonical_pg_advisory_xact_lock_order",
-            "canonical_appointment_insertion_contract",
-            "authorized_cancel_waitlist_slot_rpc",
-            "no_browser_direct_table_mutation"
-        ],
-        "contracts_tested": 20,
-        "contracts_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/phase3-waitlist-foundation-r2",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "phase3_comms_state_r1": {
-        "candidate_branch": "aos/phase3-communications-foundation-r1",
-        "candidate_sha": "b38309c815ebdc3b63bc69a74646063db220a252",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "stacked_on": "fcfca154e0a9e57cd8f6ab007cd6d88771f8b16a",
-        "corrections_applied": [
-            "zero_customer_pii_browser_leakage_raw_outbox_revoked",
-            "enqueue_restricted_to_service_role_with_immutable_fingerprint_idempotency",
-            "worker_claim_restricted_to_service_role_with_bounded_params",
-            "callback_restricted_to_adapter_boundary_with_compound_provider_ref",
-            "atomic_insert_on_conflict_replay_and_event_id_payload_mismatch_detection",
-            "monotonic_provider_event_timestamp_enforcement_against_regressions",
-            "deterministic_test_provider_with_injected_clock_and_sequence"
-        ],
-        "contracts_tested": 20,
-        "contracts_result": "PASS",
-        "tsc_no_emit_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/phase3-communications-foundation-r1",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "phase3_payment_state": {
-        "candidate_branch": "aos/phase3-provider-neutral-payment-foundation",
-        "candidate_sha": "4a65e74f4d538bfd87156f7ba917595e1d296062",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "capabilities_implemented": [
-            "reconciled_existing_payments_and_payment_events_no_duplicate_ledger",
-            "payment_intents_table_with_integer_minor_units_and_iso_currency",
-            "tenant_idempotency_with_immutable_request_fingerprinting",
-            "provider_scoped_atomic_replay_protection_on_payment_events",
-            "event_id_payload_mismatch_detection",
-            "monotonic_state_progression_terminal_success_preserved",
-            "all_financial_tables_access_revoked_from_browser_roles",
-            "paymentless_release_control_invariants_preserved",
-            "deterministic_test_payment_provider_no_network_send"
-        ],
-        "contracts_tested": 20,
-        "contracts_result": "PASS",
-        "tsc_no_emit_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/phase3-provider-neutral-payment-foundation",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "phase2_state_r3": {
-        "candidate_branch": "aos/phase2-staff-scheduling-foundation-r3",
-        "candidate_sha": "ab6e6924b17e452655060ee693358356c9a30ebc",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "stacked_on": "1e865bcdba85ae30a48fe159b03dda9c1f2b0181",
-        "corrections_applied": [
-            "authenticated_only_check_staff_slot_availability_revoke_public_anon",
-            "get_public_available_slots_preserved_as_sole_anonymous_surface",
-            "complete_eligibility_boundary_tenant_release_commercial_preserved",
-            "zero_divergent_eligibility_semantics",
-            "canonical_branches_and_buffer_rules_preserved"
-        ],
-        "contracts_tested": 20,
-        "contracts_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/phase2-staff-scheduling-foundation-r3",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "phase3_waitlist_state_r3": {
-        "candidate_branch": "aos/phase3-waitlist-foundation-r3",
-        "candidate_sha": "5149a86bce5c088ef7e5da864e43e7458fe8fe48",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "stacked_on": "e68eb4a2091abf89cba99fd4731f308c518e0dcd",
-        "corrections_applied": [
-            "revoked_direct_raw_mutation_authority_from_browser_roles",
-            "claim_waitlist_slot_reused_canonical_booking_transaction_primitive",
-            "shared_advisory_lock_hashtextextended_order_preserved",
-            "full_tenant_onboarding_public_site_commercial_quota_checks",
-            "bounded_inputs_customer_email_notes_preferred_date_horizon",
-            "reusable_anti_abuse_rate_limit_boundary_integrated",
-            "canonical_consent_ledger_insertion_contract",
-            "single_use_raw_token_sha256_digest_only_storage"
-        ],
-        "contracts_tested": 20,
-        "contracts_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/phase3-waitlist-foundation-r3",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "phase3_comms_state_r2": {
-        "candidate_branch": "aos/phase3-communications-foundation-r2",
-        "candidate_sha": "a328414ae5b8744129b01511c5836a941f176662",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "stacked_on": "b38309c815ebdc3b63bc69a74646063db220a252",
-        "corrections_applied": [
-            "outbox_existing_consumer_manifest_produced",
-            "reconciled_existing_canonical_communication_outbox_table",
-            "preserved_legacy_columns_with_backward_compatible_dual_write",
-            "atomic_insert_on_conflict_returning_id_pattern",
-            "digest_comparison_detecting_duplicate_exact_vs_event_id_payload_mismatch",
-            "proven_trusted_execution_acls_zero_browser_execution_service_role_strictly"
-        ],
-        "contracts_tested": 20,
-        "contracts_result": "PASS",
-        "tsc_no_emit_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/phase3-communications-foundation-r2",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "phase3_payment_state_r1": {
-        "candidate_branch": "aos/phase3-provider-neutral-payment-foundation-r1",
-        "candidate_sha": "9b5080a996dc80f305c48b0665b169527ecb8f41",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "stacked_on": "4a65e74f4d538bfd87156f7ba917595e1d296062",
-        "corrections_applied": [
-            "removed_unproven_migration_assumption_amount_times_100",
-            "explicit_legacy_unproven_unit_classification",
-            "safely_reconciled_existing_payment_events_uniqueness_to_provider_scoped",
-            "atomic_idempotency_via_insert_on_conflict_with_deterministic_reread",
-            "canonical_binding_between_provider_reference_tenant_and_intent",
-            "monotonic_provider_event_timestamp_and_state_progression_ordering",
-            "amount_minor_bigint_preserved_as_sole_financial_truth"
-        ],
-        "contracts_tested": 20,
-        "contracts_result": "PASS",
-        "tsc_no_emit_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/phase3-provider-neutral-payment-foundation-r1",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "cr2_lite_relay_operationalization": {
-        "candidate_branch": "aos/controller-relay-cr2-lite-operationalization",
-        "candidate_sha": "8bf3f9ea2d7611138129f7d632cdd4fc9d6de4f1",
-        "repository": "MertSGI/AOS",
-        "capabilities_implemented": [
-            "controller_relay_service_operationalized_with_git_data_cas_transport",
-            "lari_controller_chatgpt_mcp_ingress_surface_implemented",
-            "immutable_lari_controller_principal_binding_enforced",
-            "narrow_tool_allowlist_6_relay_ops_plus_authority_fetch_verify_and_publish",
-            "bounded_authority_store_to_docs_project_control_controller_authorities",
-            "zero_generic_git_operations_zero_product_branch_writes",
-            "relay_message_not_equal_authority_invariant_preserved"
-        ],
-        "tests_tested": 133,
-        "tests_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/controller-relay-cr2-lite-operationalization",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "phase4_loyalty_reactivation_state": {
-        "candidate_branch": "aos/phase4-loyalty-reactivation-foundation",
-        "candidate_sha": "b95b1827efc200cd5d701a2de50793bc0d72ada2",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "contracts_tested": 13,
-        "contracts_result": "PASS",
-        "push_preflight_verified": true,
-        "push_branch": "origin/aos/phase4-loyalty-reactivation-foundation",
-        "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
-    },
-    "calendar_foundation_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
-    "customer360_foundation_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
-    "phase4_node1_deposit_noshow_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
-    "phase4_node2_packages_memberships_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
-    "phase4_node3_giftcards_wallet_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
-    "phase4_node4_loyalty_reactivation_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
-    "p3p4_postgres_acceptance": {
-        "status": "ACCEPTED_WITH_EVIDENCE_METADATA_CORRECTIONS",
-        "runtime_gate": "ACCEPTED_QUALIFIED_E2_EXECUTABLE_CI",
-        "github_actions_run": "34620971501",
-        "github_actions_job": "103334549721",
-        "total_migrations": 84,
-        "final_migration": "20260926_phase4_giftcards_wallet_foundation.sql",
-        "product_test_node_runtime": "v20.20.2",
-        "disposable_postgres_image": "supabase/postgres:15.1.0.147",
-        "classification": "REAL_POSTGRES_RUNTIME_PROOF_WITH_MANAGED_RUNTIME_AND_HISTORICAL_REPLAY_FIXTURES"
-    },
-    "phase5_node1_vertical_skus_state": {
-        "candidate_branch": "aos/phase5-vertical-skus-commercial-packaging",
-        "candidate_sha": "0368c9d17eba52049fe3e78a203282656b27af14",
-        "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
-        "contracts_tested": 13,
-        "contracts_result": "PASS",
-        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
-        "push_branch": "origin/aos/phase5-vertical-skus-commercial-packaging",
-        "evidence_id": "EV-081"
-    },
-    "phase5_node2_clinic_state": {
-        "candidate_branch": "aos/phase5-clinic-practitioners-workspace-r1",
-        "candidate_sha": "0e6d4a2597517ec81e63e63312e21a7318e21318",
-        "superseded_sha": "278737303be10da0ce9d89efe54d948a7fb46671",
-        "upstream_base_sha": "0368c9d17eba52049fe3e78a203282656b27af14",
-        "contracts_tested": 10,
-        "contracts_result": "PASS",
-        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
-        "push_branch": "origin/aos/phase5-clinic-practitioners-workspace-r1",
-        "evidence_id": "EV-083"
-    },
-    "phase5_node3_ht_state": {
-        "candidate_branch": "aos/phase5-ht-journey-domain-r2",
-        "candidate_sha": "58cc2363c958ea52d335793945de16c36b210eed",
-        "superseded_sha": "44c9be621c97a8cadecc23081f1b09d6a1c04e97",
-        "reopened_sha": "920fdd05cf3073d675b34f878a2c5df3211bf9b7",
-        "upstream_base_sha": "0368c9d17eba52049fe3e78a203282656b27af14",
-        "contracts_tested": 16,
-        "contracts_result": "PASS",
-        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
-        "push_branch": "origin/aos/phase5-ht-journey-domain-r2",
-        "evidence_id": "EV-085"
-    },
-    "phase5_disposable_acceptance": {
-        "harness_branch": "ci/phase5-disposable-postgres-acceptance-r2",
-        "harness_sha": "a0a3b74ca9eb4cc7d2a27bd2cc68f12679ee56bf",
-        "github_actions_run": "34740974168",
-        "github_actions_job": "103680508425",
-        "total_migrations": 87,
-        "contract_suites_tested": 17,
-        "behavioral_matrix_status": "PASS",
-        "security_matrix_passed": 13,
-        "security_matrix_total": 13,
-        "status": "ACCEPTED_E2_EXECUTABLE_CI"
-    },
-    "phase5_node4_clinic_ai_state": {
-        "candidate_branch": "aos/phase5-clinic-ai-soap-integration",
-        "candidate_sha": "4130ef3220aadd07fb47594589303f65241cc0e8",
-        "upstream_base_sha": "0e6d4a2597517ec81e63e63312e21a7318e21318",
-        "contracts_tested": 8,
-        "contracts_result": "PASS",
-        "behavioral_tested": 25,
-        "behavioral_result": "PASS",
-        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
-        "push_branch": "origin/aos/phase5-clinic-ai-soap-integration",
-        "evidence_id": "EV-084"
-    },
-    "phase5_node5_ht_funnel_state": {
-        "candidate_branch": "aos/phase5-ht-funnel-multilingual",
-        "candidate_sha": "e097136b534147cc86b3f66716905442105567b5",
-        "upstream_base_sha": "58cc2363c958ea52d335793945de16c36b210eed",
-        "contracts_tested": 34,
-        "contracts_result": "PASS",
-        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
-        "push_branch": "origin/aos/phase5-ht-funnel-multilingual",
-        "evidence_id": "EV-086"
-    },
-    "phase5_node6_ht_lead_ops_state": {
-        "candidate_branch": "aos/phase5-ht-lead-ops-workspace",
-        "candidate_sha": "3b472e43473b0d37a3a4e21e21bf2cb47a513012",
-        "upstream_base_sha": "58cc2363c958ea52d335793945de16c36b210eed",
-        "contracts_tested": 16,
-        "contracts_result": "PASS",
-        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
-        "push_branch": "origin/aos/phase5-ht-lead-ops-workspace",
-        "evidence_id": "EV-087"
-    },
-    "phase5_downstream_dispatch": {
-        "node5_ht_funnel_multilingual": "COMPLETED_AND_ACCEPTED",
-        "node6_ht_lead_ops_workspace": "COMPLETED_AND_ACCEPTED"
-    },
-    "phase5_unified_integration": {
-        "candidate_branch": "aos/phase5-disposable-unified-integration",
-        "product_composition_sha": "ee420580d2827c80ee9eef50fed6d6c0fbb16d33",
-        "bound_component_nodes": {
-            "node1": "0368c9d17eba52049fe3e78a203282656b27af14",
-            "node2": "0e6d4a2597517ec81e63e63312e21a7318e21318",
-            "node3_r2": "58cc2363c958ea52d335793945de16c36b210eed",
-            "node4": "4130ef3220aadd07fb47594589303f65241cc0e8",
-            "node5": "e097136b534147cc86b3f66716905442105567b5",
-            "node6": "3b472e43473b0d37a3a4e21e21bf2cb47a513012"
-        },
-        "all_node_contracts_result": "PASS",
-        "typecheck_result": "PASS",
-        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
-        "evidence_id": "EV-089"
-    },
-    "phase5_disposable_acceptance_r4": {
-        "harness_branch": "ci/phase5-disposable-postgres-acceptance-r4",
-        "harness_sha": "69d0fdf50a5656597c437654daffd032bb04bf8a",
-        "product_base_sha": "2cee618fd43b3acda5a464eaf4e918e832199f34",
-        "harness_delta_type": "TEST_ONLY_HARNESS_AND_WORKFLOW_DELTA",
-        "remote_run_id": "34785166206",
-        "remote_job_id": "103799196855",
-        "workflow_steps_total": 18,
-        "workflow_steps_passed": 18,
-        "migrations_total": 87,
-        "migrations_applied_cleanly": 87,
-        "domain_contract_suites_tested": 20,
-        "domain_contract_suites_passed": 20,
-        "behavioral_matrix_status": "PASS",
-        "security_concurrency_matrix_status": "PASS",
-        "application_build_status": "PASS",
-        "typecheck_lint_status": "PASS",
-        "evidence_id": "EV-089",
-        "superseded_evidence_id": "EV-088",
-        "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED"
+      }
     }
+  },
+  "external_dependencies": {
+    "iyzico_payment": "DISABLED_COMMERCIAL_MODE",
+    "external_dns": "PENDING_WILDCARD_SETUP",
+    "sms_provider": "OUTBOX_SIMULATION",
+    "whatsapp_provider": "OUTBOX_SIMULATION"
+  },
+  "non_blocking_validation": {
+    "human_participant_uat": "DEFERRED_FIELD_VALIDATION",
+    "dependency_audit_risk": "OBSERVED_DEPENDENCY_AUDIT_RISK / REVIEW_REQUIRED_BEFORE_PRODUCTION (6 vulnerabilities: 1 low, 5 high reported by npm ci during R7 CI gate)",
+    "arabic_copy_polish": "OPEN_NON_BLOCKING_COPY_POLISH (Arabic back-button copy polish deferred to pre-release polish)"
+  },
+  "current_blockers": [
+    {
+      "blocker_class": "LOCAL_RUNTIME_INFRASTRUCTURE_UNAVAILABLE",
+      "blocker_scope": "SECURITY_RUNTIME_VALIDATION_ONLY",
+      "description": "Docker, Supabase CLI, and psql are not available on this workstation. Cannot apply security migration to a disposable Postgres instance for runtime verification.",
+      "affects": "Phase 1.1 Security Runtime Validation",
+      "does_not_affect": "Design Intelligence, Design Remediation, Phase 2-7 development"
+    }
+  ],
+  "next_action": "Continue Phase 2-7 dependency-safe autonomous development. Security runtime validation awaits local database infrastructure. Design remediation awaits Controller review.",
+  "evidence_policy": {
+    "strict_levels": true,
+    "require_literal_runs": true
+  },
+  "reopen_policy": {
+    "require_empirical_proof": true
+  },
+  "program_id": "LARI-PROGRAM-V2-REAL-PRODUCT-20260908-01",
+  "current_phase": "Multi-Lane: Phase 1.1 Security HOLD + Phase 2-7 Active Development",
+  "current_execution_gate": "MULTILANE_CONTINUOUS_EXECUTION",
+  "autonomous_program_operator": "AOS",
+  "operator_standing_authority": "LARI-AOS-PROGRAM-V2-AUTONOMOUS-CONTINUATION-EVIDENCE-RECOVERY-20260910-01",
+  "superseded_milestone_state": {
+    "superseded_status": "HEALTH_TOURISM_SLICE3_CLOSED_PROVEN",
+    "superseded_milestone": "LARI Health Tourism Slice 3 - Lead Ops + Multilingual AI Assist + Handoff",
+    "reason": "Superseded by Program V2 canonical activation under DECISION-020 and authority LARI-AOS-PROGRAM-V2-BOOTSTRAP-20260908-01. Historical evidence preserved in accepted_gates."
+  },
+  "phase_0_1_result": {
+    "classification": {
+      "class_c_count": 20,
+      "class_a_count": 14,
+      "class_d_count": 0,
+      "class_e_count": 0,
+      "class_b_count": 0
+    },
+    "migration_delta_count": 0,
+    "original_review_candidate_disposition": "NOT_ACCEPTED_DO_NOT_PUSH_SUPERSEDED_DIAGNOSTIC_ONLY",
+    "authority": "LARI-AOS-PROGRAM-V2-P0-1-RECONCILIATION-SIDE-EFFECT-CORRECTION-20260908-01",
+    "product_source_delta_count": 0,
+    "merge_base": "134c8716c2511c909cd400aee0496ebd70f63bf6",
+    "canonical_product_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "disposition_reason": "Historical R31 workflows are operational/evidence workflows containing remote deploy / service-role E3 capabilities and must not be resurrected into Program V2 canonical product base.",
+    "application_delta_count": 0,
+    "original_review_candidate": "86897ab7cd077359809e282e7b467e07dadba273",
+    "status": "INDEPENDENTLY_CORRECTED_NO_PRODUCT_DELTA_REQUIRED",
+    "required_path_deltas": []
+  },
+  "phase_1_state": {
+    "candidate_branch": "aos/program-v2-phase1-security-hardening",
+    "candidate_sha": "c2a204ab9c5e3c2641be27d480d223f7148ec174",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "remedies_implemented": [
+      "S-01",
+      "S-02",
+      "S-03",
+      "S-04"
+    ],
+    "contracts_tested": 18,
+    "contracts_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/program-v2-phase1-security-hardening",
+    "disposition": "HOLD_PENDING_RUNTIME_VALIDATION",
+    "runtime_validation_status": "BLOCKED_LOCAL_DB_INFRASTRUCTURE_MISSING",
+    "static_contract_assertions": 18,
+    "static_contract_result": "ALL_PASS"
+  },
+  "uiv2_materialization": {
+    "base_sha": "27956c23704117a6ef478d95eb4c5b7060d39e3c",
+    "materialized_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
+    "materialization_state": "CONTROLLER_VERIFIED",
+    "lint_attribution": "PRE_EXISTING_IDENTICAL",
+    "lint_base_errors": 10,
+    "lint_candidate_errors": 10,
+    "lint_error_file": "services/uiV2PilotPreviewFixture.ts",
+    "candidate_changed_files": [
+      "components/layouts/SalonBookingLayout.tsx",
+      "index.html"
+    ]
+  },
+  "design_remediation": {
+    "branch": "aos/design-remediation-768px-overflow-20260909",
+    "sha": "c0b3a95d17f97714794eefd6e3ba2da2a7c59316",
+    "parent_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
+    "merge_base": "e74d097b2ba1160bc852e84503aa6368b23d43eb",
+    "changed_files": [
+      "components/layouts/MarketingLayout.tsx",
+      "pages/MarketingHomePage.tsx"
+    ],
+    "remote_state": "PUBLISHED",
+    "target_materialization_allowed": false,
+    "disposition": "AWAITING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "design_intelligence_state": {
+    "active_epic": "CORRECTED_SHA_RECAPTURE_COMPLETE",
+    "authoritative_product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
+    "baseline_classification": "SUPERSEDED_PRE_CORRECTION_BASELINE",
+    "baseline_evidence": [
+      "EV-042",
+      "EV-043",
+      "EV-044",
+      "EV-045",
+      "EV-046",
+      "EV-047"
+    ],
+    "corrected_sha_evidence": [
+      "EV-049",
+      "EV-050",
+      "EV-051",
+      "EV-052"
+    ],
+    "completed_epics": [
+      {
+        "epic": 1,
+        "name": "Brand & Marketing Surface",
+        "report": "AOS_DESIGN_EPIC1_REPORT.md",
+        "gate": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW",
+        "product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
+        "regression_delta": "POSITIVE"
+      },
+      {
+        "epic": 2,
+        "name": "Public Mini-Site & Booking",
+        "report": "AOS_DESIGN_EPIC2_REPORT.md",
+        "gate": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW",
+        "product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
+        "regression_delta": "NEUTRAL"
+      },
+      {
+        "epic": 3,
+        "name": "Customer Self-Service & Appointment Management",
+        "report": "AOS_DESIGN_EPIC3_REPORT.md",
+        "gate": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW",
+        "product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
+        "regression_delta": "POSITIVE"
+      },
+      {
+        "epic": 4,
+        "name": "Provider Admin & Staff Scheduling Surface",
+        "report": "AOS_DESIGN_EPIC4_REPORT.md",
+        "gate": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW",
+        "product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
+        "regression_delta": "NEUTRAL"
+      },
+      {
+        "epic": 5,
+        "name": "Clinic & Health Tourism Multilingual Surface",
+        "report": "AOS_DESIGN_EPIC5_REPORT.md",
+        "gate": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW",
+        "product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
+        "regression_delta": "NEUTRAL"
+      },
+      {
+        "epic": 6,
+        "name": "Super Admin Governance & Multi-Tenant Observability",
+        "report": "AOS_DESIGN_EPIC6_REPORT.md",
+        "gate": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW",
+        "product_sha": "a3619be1cf74112fb578d2aee07875bb638600a6",
+        "regression_delta": "POSITIVE"
+      }
+    ],
+    "lane_status": "CORRECTED_SHA_COMPLETE_PENDING_CONTROLLER_REVIEW",
+    "release_gate_effect": "NONE"
+  },
+  "phase2_state": {
+    "candidate_branch": "aos/phase2-staff-scheduling-foundation",
+    "candidate_sha": "a29c7e7db10484e413f239f5885d99fb07bed9f4",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "capabilities_implemented": [
+      "staff_time_off",
+      "staff_breaks",
+      "booking_buffer_rules",
+      "business_holidays",
+      "check_staff_slot_availability_rpc"
+    ],
+    "contracts_tested": 20,
+    "contracts_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/phase2-staff-scheduling-foundation",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "phase3_state": {
+    "candidate_branch": "aos/phase3-waitlist-foundation",
+    "candidate_sha": "c507ca9edfce09c533a439283707c68bbdd29f25",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "capabilities_implemented": [
+      "booking_waitlist_table",
+      "join_booking_waitlist_rpc",
+      "offer_waitlist_slot_rpc",
+      "claim_waitlist_slot_rpc"
+    ],
+    "contracts_tested": 20,
+    "contracts_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/phase3-waitlist-foundation",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "phase2_state_r1": {
+    "candidate_branch": "aos/phase2-staff-scheduling-foundation-r1",
+    "candidate_sha": "59bc9a32c253d7f7faea4b6ae79d671be37f374a",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "stacked_on": "a29c7e7db10484e413f239f5885d99fb07bed9f4",
+    "corrections_applied": [
+      "removed_broad_public_read_policies",
+      "service_bound_buffer_selection",
+      "default_buffer_unique_partial_index",
+      "branch_holiday_filtering",
+      "security_definer_revoke_execute_from_public_first"
+    ],
+    "contracts_tested": 20,
+    "contracts_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/phase2-staff-scheduling-foundation-r1",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "phase3_waitlist_state_r1": {
+    "candidate_branch": "aos/phase3-waitlist-foundation-r1",
+    "candidate_sha": "40ea5b6d510ff8fa9c90b07541604a44b1c2b534",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "stacked_on": "c507ca9edfce09c533a439283707c68bbdd29f25",
+    "corrections_applied": [
+      "no_public_pii_table_surface",
+      "cryptographic_one_time_claim_capability_sha256",
+      "explicit_caller_tenant_authorization_in_offer_rpc",
+      "canonical_booking_engine_invariants_at_claim",
+      "no_anon_direct_table_insert",
+      "state_machine_transition_trigger"
+    ],
+    "contracts_tested": 20,
+    "contracts_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/phase3-waitlist-foundation-r1",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "phase3_comms_state": {
+    "candidate_branch": "aos/phase3-communications-foundation",
+    "candidate_sha": "fcfca154e0a9e57cd8f6ab007cd6d88771f8b16a",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "capabilities_implemented": [
+      "communication_outbox_table",
+      "communication_delivery_callbacks_table",
+      "deterministic_test_communication_provider",
+      "enqueue_communication_outbox_rpc",
+      "claim_outbox_batch_rpc",
+      "record_delivery_callback_rpc"
+    ],
+    "contracts_tested": 20,
+    "contracts_result": "PASS",
+    "tsc_no_emit_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/phase3-communications-foundation",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "phase2_state_r2": {
+    "candidate_branch": "aos/phase2-staff-scheduling-foundation-r2",
+    "candidate_sha": "1e865bcdba85ae30a48fe159b03dda9c1f2b0181",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "stacked_on": "59bc9a31ca8f14de33f08f1934d38a485c53af21",
+    "corrections_applied": [
+      "canonical_branch_model_branches_staff_branches_service_branches",
+      "composite_tenant_safe_foreign_keys",
+      "branch_holiday_predicate_safe_resolution",
+      "iso_weekday_semantics_alignment",
+      "public_service_duration_canonical_source",
+      "frozen_appointment_duration_occupancy",
+      "asymmetric_requested_vs_existing_buffer_intervals",
+      "unified_evaluate_booking_slot_invariant_engine"
+    ],
+    "contracts_tested": 20,
+    "contracts_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/phase2-staff-scheduling-foundation-r2",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "phase3_waitlist_state_r2": {
+    "candidate_branch": "aos/phase3-waitlist-foundation-r2",
+    "candidate_sha": "e68eb4a2091abf89cba99fd4731f308c518e0dcd",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "stacked_on": "40ea5b6d4854f58e89ed618979f8681303193aa2",
+    "corrections_applied": [
+      "canonical_branch_model_junction_integration",
+      "composite_tenant_safe_foreign_keys",
+      "explicit_role_allowlist_offer_waitlist_slot",
+      "cryptographic_256bit_unguessable_token_sha256_digest_only",
+      "bounded_expiration_domain_5_to_1440_min",
+      "canonical_evaluate_booking_slot_at_offer_and_claim",
+      "canonical_pg_advisory_xact_lock_order",
+      "canonical_appointment_insertion_contract",
+      "authorized_cancel_waitlist_slot_rpc",
+      "no_browser_direct_table_mutation"
+    ],
+    "contracts_tested": 20,
+    "contracts_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/phase3-waitlist-foundation-r2",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "phase3_comms_state_r1": {
+    "candidate_branch": "aos/phase3-communications-foundation-r1",
+    "candidate_sha": "b38309c815ebdc3b63bc69a74646063db220a252",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "stacked_on": "fcfca154e0a9e57cd8f6ab007cd6d88771f8b16a",
+    "corrections_applied": [
+      "zero_customer_pii_browser_leakage_raw_outbox_revoked",
+      "enqueue_restricted_to_service_role_with_immutable_fingerprint_idempotency",
+      "worker_claim_restricted_to_service_role_with_bounded_params",
+      "callback_restricted_to_adapter_boundary_with_compound_provider_ref",
+      "atomic_insert_on_conflict_replay_and_event_id_payload_mismatch_detection",
+      "monotonic_provider_event_timestamp_enforcement_against_regressions",
+      "deterministic_test_provider_with_injected_clock_and_sequence"
+    ],
+    "contracts_tested": 20,
+    "contracts_result": "PASS",
+    "tsc_no_emit_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/phase3-communications-foundation-r1",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "phase3_payment_state": {
+    "candidate_branch": "aos/phase3-provider-neutral-payment-foundation",
+    "candidate_sha": "4a65e74f4d538bfd87156f7ba917595e1d296062",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "capabilities_implemented": [
+      "reconciled_existing_payments_and_payment_events_no_duplicate_ledger",
+      "payment_intents_table_with_integer_minor_units_and_iso_currency",
+      "tenant_idempotency_with_immutable_request_fingerprinting",
+      "provider_scoped_atomic_replay_protection_on_payment_events",
+      "event_id_payload_mismatch_detection",
+      "monotonic_state_progression_terminal_success_preserved",
+      "all_financial_tables_access_revoked_from_browser_roles",
+      "paymentless_release_control_invariants_preserved",
+      "deterministic_test_payment_provider_no_network_send"
+    ],
+    "contracts_tested": 20,
+    "contracts_result": "PASS",
+    "tsc_no_emit_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/phase3-provider-neutral-payment-foundation",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "phase2_state_r3": {
+    "candidate_branch": "aos/phase2-staff-scheduling-foundation-r3",
+    "candidate_sha": "ab6e6924b17e452655060ee693358356c9a30ebc",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "stacked_on": "1e865bcdba85ae30a48fe159b03dda9c1f2b0181",
+    "corrections_applied": [
+      "authenticated_only_check_staff_slot_availability_revoke_public_anon",
+      "get_public_available_slots_preserved_as_sole_anonymous_surface",
+      "complete_eligibility_boundary_tenant_release_commercial_preserved",
+      "zero_divergent_eligibility_semantics",
+      "canonical_branches_and_buffer_rules_preserved"
+    ],
+    "contracts_tested": 20,
+    "contracts_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/phase2-staff-scheduling-foundation-r3",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "phase3_waitlist_state_r3": {
+    "candidate_branch": "aos/phase3-waitlist-foundation-r3",
+    "candidate_sha": "5149a86bce5c088ef7e5da864e43e7458fe8fe48",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "stacked_on": "e68eb4a2091abf89cba99fd4731f308c518e0dcd",
+    "corrections_applied": [
+      "revoked_direct_raw_mutation_authority_from_browser_roles",
+      "claim_waitlist_slot_reused_canonical_booking_transaction_primitive",
+      "shared_advisory_lock_hashtextextended_order_preserved",
+      "full_tenant_onboarding_public_site_commercial_quota_checks",
+      "bounded_inputs_customer_email_notes_preferred_date_horizon",
+      "reusable_anti_abuse_rate_limit_boundary_integrated",
+      "canonical_consent_ledger_insertion_contract",
+      "single_use_raw_token_sha256_digest_only_storage"
+    ],
+    "contracts_tested": 20,
+    "contracts_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/phase3-waitlist-foundation-r3",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "phase3_comms_state_r2": {
+    "candidate_branch": "aos/phase3-communications-foundation-r2",
+    "candidate_sha": "a328414ae5b8744129b01511c5836a941f176662",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "stacked_on": "b38309c815ebdc3b63bc69a74646063db220a252",
+    "corrections_applied": [
+      "outbox_existing_consumer_manifest_produced",
+      "reconciled_existing_canonical_communication_outbox_table",
+      "preserved_legacy_columns_with_backward_compatible_dual_write",
+      "atomic_insert_on_conflict_returning_id_pattern",
+      "digest_comparison_detecting_duplicate_exact_vs_event_id_payload_mismatch",
+      "proven_trusted_execution_acls_zero_browser_execution_service_role_strictly"
+    ],
+    "contracts_tested": 20,
+    "contracts_result": "PASS",
+    "tsc_no_emit_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/phase3-communications-foundation-r2",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "phase3_payment_state_r1": {
+    "candidate_branch": "aos/phase3-provider-neutral-payment-foundation-r1",
+    "candidate_sha": "9b5080a996dc80f305c48b0665b169527ecb8f41",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "stacked_on": "4a65e74f4d538bfd87156f7ba917595e1d296062",
+    "corrections_applied": [
+      "removed_unproven_migration_assumption_amount_times_100",
+      "explicit_legacy_unproven_unit_classification",
+      "safely_reconciled_existing_payment_events_uniqueness_to_provider_scoped",
+      "atomic_idempotency_via_insert_on_conflict_with_deterministic_reread",
+      "canonical_binding_between_provider_reference_tenant_and_intent",
+      "monotonic_provider_event_timestamp_and_state_progression_ordering",
+      "amount_minor_bigint_preserved_as_sole_financial_truth"
+    ],
+    "contracts_tested": 20,
+    "contracts_result": "PASS",
+    "tsc_no_emit_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/phase3-provider-neutral-payment-foundation-r1",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "cr2_lite_relay_operationalization": {
+    "candidate_branch": "aos/controller-relay-cr2-lite-operationalization",
+    "candidate_sha": "8bf3f9ea2d7611138129f7d632cdd4fc9d6de4f1",
+    "repository": "MertSGI/AOS",
+    "capabilities_implemented": [
+      "controller_relay_service_operationalized_with_git_data_cas_transport",
+      "lari_controller_chatgpt_mcp_ingress_surface_implemented",
+      "immutable_lari_controller_principal_binding_enforced",
+      "narrow_tool_allowlist_6_relay_ops_plus_authority_fetch_verify_and_publish",
+      "bounded_authority_store_to_docs_project_control_controller_authorities",
+      "zero_generic_git_operations_zero_product_branch_writes",
+      "relay_message_not_equal_authority_invariant_preserved"
+    ],
+    "tests_tested": 133,
+    "tests_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/controller-relay-cr2-lite-operationalization",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "phase4_loyalty_reactivation_state": {
+    "candidate_branch": "aos/phase4-loyalty-reactivation-foundation",
+    "candidate_sha": "b95b1827efc200cd5d701a2de50793bc0d72ada2",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "contracts_tested": 13,
+    "contracts_result": "PASS",
+    "push_preflight_verified": true,
+    "push_branch": "origin/aos/phase4-loyalty-reactivation-foundation",
+    "disposition": "CLAIM_ONLY_PENDING_INDEPENDENT_CONTROLLER_REVIEW"
+  },
+  "calendar_foundation_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
+  "customer360_foundation_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
+  "phase4_node1_deposit_noshow_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
+  "phase4_node2_packages_memberships_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
+  "phase4_node3_giftcards_wallet_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
+  "phase4_node4_loyalty_reactivation_gate": "AOS_STANDING_AUTHORITY_ACCEPTED",
+  "p3p4_postgres_acceptance": {
+    "status": "ACCEPTED_WITH_EVIDENCE_METADATA_CORRECTIONS",
+    "runtime_gate": "ACCEPTED_QUALIFIED_E2_EXECUTABLE_CI",
+    "github_actions_run": "34620971501",
+    "github_actions_job": "103334549721",
+    "total_migrations": 84,
+    "final_migration": "20260926_phase4_giftcards_wallet_foundation.sql",
+    "product_test_node_runtime": "v20.20.2",
+    "disposable_postgres_image": "supabase/postgres:15.1.0.147",
+    "classification": "REAL_POSTGRES_RUNTIME_PROOF_WITH_MANAGED_RUNTIME_AND_HISTORICAL_REPLAY_FIXTURES"
+  },
+  "phase5_node1_vertical_skus_state": {
+    "candidate_branch": "aos/phase5-vertical-skus-commercial-packaging",
+    "candidate_sha": "0368c9d17eba52049fe3e78a203282656b27af14",
+    "canonical_base_sha": "09bb1f8d8ce070c33d09099a6d0ae20c93787d11",
+    "contracts_tested": 13,
+    "contracts_result": "PASS",
+    "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "push_branch": "origin/aos/phase5-vertical-skus-commercial-packaging",
+    "evidence_id": "EV-081"
+  },
+  "phase5_node2_clinic_state": {
+    "candidate_branch": "aos/phase5-clinic-practitioners-workspace-r1",
+    "candidate_sha": "0e6d4a2597517ec81e63e63312e21a7318e21318",
+    "superseded_sha": "278737303be10da0ce9d89efe54d948a7fb46671",
+    "upstream_base_sha": "0368c9d17eba52049fe3e78a203282656b27af14",
+    "contracts_tested": 10,
+    "contracts_result": "PASS",
+    "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "push_branch": "origin/aos/phase5-clinic-practitioners-workspace-r1",
+    "evidence_id": "EV-083"
+  },
+  "phase5_node3_ht_state": {
+    "candidate_branch": "aos/phase5-ht-journey-domain-r2",
+    "candidate_sha": "58cc2363c958ea52d335793945de16c36b210eed",
+    "superseded_sha": "44c9be621c97a8cadecc23081f1b09d6a1c04e97",
+    "reopened_sha": "920fdd05cf3073d675b34f878a2c5df3211bf9b7",
+    "upstream_base_sha": "0368c9d17eba52049fe3e78a203282656b27af14",
+    "contracts_tested": 16,
+    "contracts_result": "PASS",
+    "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "push_branch": "origin/aos/phase5-ht-journey-domain-r2",
+    "evidence_id": "EV-085"
+  },
+  "phase5_disposable_acceptance": {
+    "harness_branch": "ci/phase5-disposable-postgres-acceptance-r2",
+    "harness_sha": "a0a3b74ca9eb4cc7d2a27bd2cc68f12679ee56bf",
+    "github_actions_run": "34740974168",
+    "github_actions_job": "103680508425",
+    "total_migrations": 87,
+    "contract_suites_tested": 17,
+    "behavioral_matrix_status": "PASS",
+    "security_matrix_passed": 13,
+    "security_matrix_total": 13,
+    "status": "ACCEPTED_E2_EXECUTABLE_CI"
+  },
+  "phase5_node4_clinic_ai_state": {
+    "candidate_branch": "aos/phase5-clinic-ai-soap-integration",
+    "candidate_sha": "4130ef3220aadd07fb47594589303f65241cc0e8",
+    "upstream_base_sha": "0e6d4a2597517ec81e63e63312e21a7318e21318",
+    "contracts_tested": 8,
+    "contracts_result": "PASS",
+    "behavioral_tested": 25,
+    "behavioral_result": "PASS",
+    "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "push_branch": "origin/aos/phase5-clinic-ai-soap-integration",
+    "evidence_id": "EV-084"
+  },
+  "phase5_node5_ht_funnel_state": {
+    "candidate_branch": "aos/phase5-ht-funnel-multilingual",
+    "candidate_sha": "e097136b534147cc86b3f66716905442105567b5",
+    "upstream_base_sha": "58cc2363c958ea52d335793945de16c36b210eed",
+    "contracts_tested": 34,
+    "contracts_result": "PASS",
+    "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "push_branch": "origin/aos/phase5-ht-funnel-multilingual",
+    "evidence_id": "EV-086"
+  },
+  "phase5_node6_ht_lead_ops_state": {
+    "candidate_branch": "aos/phase5-ht-lead-ops-workspace",
+    "candidate_sha": "3b472e43473b0d37a3a4e21e21bf2cb47a513012",
+    "upstream_base_sha": "58cc2363c958ea52d335793945de16c36b210eed",
+    "contracts_tested": 16,
+    "contracts_result": "PASS",
+    "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "push_branch": "origin/aos/phase5-ht-lead-ops-workspace",
+    "evidence_id": "EV-087"
+  },
+  "phase5_downstream_dispatch": {
+    "node5_ht_funnel_multilingual": "COMPLETED_AND_ACCEPTED",
+    "node6_ht_lead_ops_workspace": "COMPLETED_AND_ACCEPTED"
+  },
+  "phase5_unified_integration": {
+    "candidate_branch": "aos/phase5-disposable-unified-integration",
+    "product_composition_sha": "ee420580d2827c80ee9eef50fed6d6c0fbb16d33",
+    "bound_component_nodes": {
+      "node1": "0368c9d17eba52049fe3e78a203282656b27af14",
+      "node2": "0e6d4a2597517ec81e63e63312e21a7318e21318",
+      "node3_r2": "58cc2363c958ea52d335793945de16c36b210eed",
+      "node4": "4130ef3220aadd07fb47594589303f65241cc0e8",
+      "node5": "e097136b534147cc86b3f66716905442105567b5",
+      "node6": "3b472e43473b0d37a3a4e21e21bf2cb47a513012"
+    },
+    "all_node_contracts_result": "PASS",
+    "typecheck_result": "PASS",
+    "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "evidence_id": "EV-089"
+  },
+  "phase5_disposable_acceptance_r4": {
+    "harness_branch": "ci/phase5-disposable-postgres-acceptance-r4",
+    "harness_sha": "69d0fdf50a5656597c437654daffd032bb04bf8a",
+    "product_base_sha": "2cee618fd43b3acda5a464eaf4e918e832199f34",
+    "harness_delta_type": "TEST_ONLY_HARNESS_AND_WORKFLOW_DELTA",
+    "remote_run_id": "34785166206",
+    "remote_job_id": "103799196855",
+    "workflow_steps_total": 18,
+    "workflow_steps_passed": 18,
+    "migrations_total": 87,
+    "migrations_applied_cleanly": 87,
+    "domain_contract_suites_tested": 20,
+    "domain_contract_suites_passed": 20,
+    "behavioral_matrix_status": "PASS",
+    "security_concurrency_matrix_status": "PASS",
+    "application_build_status": "PASS",
+    "typecheck_lint_status": "PASS",
+    "evidence_id": "EV-089",
+    "superseded_evidence_id": "EV-088",
+    "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED"
+  },
+  "next_action_execution_base_sha": "80ee72dbaa93d95a742995770c7bd80f69f0aaf2"
 }
