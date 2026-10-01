@@ -320,8 +320,9 @@ async function run() {
     console.log('\n--- 8. CONCURRENCY RACE: ATOMIC STOCK OVER-SUBSCRIPTION PREVENTION ---');
     concurrencyTestsExecuted++;
 
-    // Create single-unit product
-    await setAuth(mainClient, null);
+    // Create single-unit product using authenticated Tenant A staff identity
+    // required by the server-authoritative inventory RPC contract.
+    await setAuth(mainClient, userStaffA);
     const scarceProdRes = await mainClient.query(`
       SELECT pos_create_product(
         'Limited Edition Hair Serum',
