@@ -107,7 +107,9 @@ async function run() {
     // 2. SETUP TEST CATALOG & INVENTORY AT BRANCH A1 AND BRANCH A2
     // -------------------------------------------------------------------------
     console.log('\n--- 2. SETUP PRODUCT CATALOG & MULTI-BRANCH STOCK ---');
-    await setAuth(mainClient, null); // admin/service role to seed
+    // Setup product catalog and initial stock receipts as authenticated Tenant A staff identity
+    // required by the server-authoritative inventory RPC contract.
+    await setAuth(mainClient, userStaffA);
 
     const prodRes = await mainClient.query(`
       SELECT pos_create_product(
