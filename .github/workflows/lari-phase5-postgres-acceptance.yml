@@ -3,6 +3,7 @@ name: LARI Program V2 Phase 5 Disposable Postgres Acceptance & Live Security Mat
 on:
   push:
     branches:
+      - aos/phase6-node4-staff-commissions-tips
       - ci/phase6-node3-pos-cart-checkout-acceptance-r1
       - aos/phase6-node3-pos-cart-checkout
       - ci/phase6-node2-procurement-receiving-acceptance-r1
@@ -94,7 +95,7 @@ jobs:
         run: |
           npm ci
 
-      - name: Execute 23 Domain Contract Suites (Phase 2, 3, 4, Phase 5 Nodes 1-6 + Phase 6 Nodes 1-3)
+      - name: Execute 24 Domain Contract Suites (Phase 2, 3, 4, Phase 5 Nodes 1-6 + Phase 6 Nodes 1-4)
         run: |
           set -euo pipefail
           npx tsx scripts/test-phase2-staff-scheduling-contracts.mjs
@@ -120,7 +121,8 @@ jobs:
           npx tsx scripts/test-phase6-node1-product-inventory-contracts.mjs
           npx tsx scripts/test-phase6-node2-suppliers-po-receiving-contracts.mjs
           npx tsx scripts/test-phase6-node3-pos-mixed-cart-checkout-contracts.mjs
-          echo "ALL 23 DOMAIN CONTRACT SUITES PASSED!"
+          npx tsx scripts/test-phase6-node4-commissions-tips-contracts.mjs
+          echo "ALL 24 DOMAIN CONTRACT SUITES PASSED!"
 
       - name: Execute Live Database Introspection & Integrity Verification
         run: |
@@ -165,7 +167,10 @@ jobs:
                 'pos_create_order',
                 'pos_add_cart_item',
                 'pos_checkout_order',
-                'pos_get_order'
+                'pos_get_order',
+                'pos_set_staff_commission_rule',
+                'pos_set_tip_allocation',
+                'pos_get_staff_earnings'
               )
             ORDER BY routine_name;
           "
@@ -195,7 +200,10 @@ jobs:
               'uq_pore_tenant_item_idempotency',
               'uq_pos_orders_tenant_order_number',
               'uq_pos_orders_tenant_idempotency',
-              'chk_pos_items_product_ref'
+              'chk_pos_items_product_ref',
+              'uq_staff_commission_rules_logical',
+              'uq_pos_tip_allocations_order_staff',
+              'uq_staff_earnings_tenant_idempotency'
             )
             ORDER BY conname;
           "
@@ -269,6 +277,20 @@ jobs:
             exit "$STATUS"
           fi
           echo "=== PHASE 6 NODE 3 POS CART & CHECKOUT BEHAVIORAL MATRIX COMPLETED CLEANLY ==="
+
+      - name: Execute Phase 6 Node 4 Live PostgreSQL Staff Commissions & Tips Behavioral Matrix
+        run: |
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== EXECUTING PHASE 6 NODE 4 LIVE POSTGRESQL STAFF COMMISSIONS & TIPS BEHAVIORAL MATRIX ==="
+          node supabase/tests/program-v2/phase6-live/test-phase6-node4-commissions-tips-behavioral-matrix.mjs 2>&1 | tee -a matrix.log
+          STATUS="${PIPESTATUS[0]}"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "=== STEP 17 PHASE 6 STAFF COMMISSIONS & TIPS MATRIX FAILED (EXIT CODE: $STATUS) - DUMPING MATRIX.LOG ==="
+            cat matrix.log || true
+            exit "$STATUS"
+          fi
+          echo "=== PHASE 6 NODE 4 STAFF COMMISSIONS & TIPS BEHAVIORAL MATRIX COMPLETED CLEANLY ==="
 
       - name: Application Build
         run: |
