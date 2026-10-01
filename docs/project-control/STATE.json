@@ -1152,5 +1152,17 @@
     "superseded_evidence_id": "EV-088",
     "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED"
   },
-  "next_action_execution_base_sha": "80ee72dbaa93d95a742995770c7bd80f69f0aaf2"
+  "phase6_node3_pos_cart_checkout_state": {
+    "candidate_branch": "aos/phase6-node3-pos-cart-checkout",
+    "candidate_sha": "2c7543ff81875b1b04ffafdd94f2da940362d05c",
+    "upstream_base_sha": "80ee72dbaa93d95a742995770c7bd80f69f0aaf2",
+    "domain_contract_suites_tested": 23,
+    "domain_contract_suites_passed": 23,
+    "github_actions_run": "36910447089",
+    "github_actions_job": "110531482685",
+    "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "evidence_id": "EV-092",
+    "disposition": "PROVEN / ACCEPTED E2 executable CI consistent with EV-090 and EV-091."
+  },
+  "next_action_execution_base_sha": "2c7543ff81875b1b04ffafdd94f2da940362d05c"
 }
