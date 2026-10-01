@@ -501,8 +501,8 @@
       "key": "pos",
       "label": "Point of Sale",
       "category": "retail",
-      "source_state": "PLANNED",
-      "program_maturity": "PLANNED",
+      "source_state": "LIVE_ACCEPTANCE_ONLY",
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
       "target_phase": 6,
       "external_provider_or_company_dependency": true
     },
@@ -510,8 +510,8 @@
       "key": "inventory",
       "label": "Inventory / Stock Ledger",
       "category": "retail",
-      "source_state": "PLANNED",
-      "program_maturity": "PLANNED",
+      "source_state": "LIVE_ACCEPTANCE_ONLY",
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
       "target_phase": 6,
       "external_provider_or_company_dependency": false
     },
@@ -519,8 +519,8 @@
       "key": "purchase_orders",
       "label": "Suppliers / Purchase Orders",
       "category": "retail",
-      "source_state": "PLANNED",
-      "program_maturity": "PLANNED",
+      "source_state": "LIVE_ACCEPTANCE_ONLY",
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
       "target_phase": 6,
       "external_provider_or_company_dependency": false
     },
@@ -528,8 +528,8 @@
       "key": "commissions_tips",
       "label": "Staff Commissions & Tips",
       "category": "retail",
-      "source_state": "PLANNED",
-      "program_maturity": "PLANNED",
+      "source_state": "LIVE_ACCEPTANCE_ONLY",
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
       "target_phase": 6,
       "external_provider_or_company_dependency": true
     },

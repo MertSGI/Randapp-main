@@ -1164,5 +1164,34 @@
     "evidence_id": "EV-092",
     "disposition": "PROVEN / ACCEPTED E2 executable CI consistent with EV-090 and EV-091."
   },
-  "next_action_execution_base_sha": "2c7543ff81875b1b04ffafdd94f2da940362d05c"
+  "phase6_node4_staff_commissions_tips_state": {
+    "candidate_branch": "aos/phase6-node4-staff-commissions-tips",
+    "candidate_sha": "39e61bb76e32d4b83f8fe9f60efff91de2a5b049",
+    "upstream_base_sha": "2c7543ff81875b1b04ffafdd94f2da940362d05c",
+    "domain_contract_suites_tested": 24,
+    "domain_contract_suites_passed": 24,
+    "github_actions_run": "36913749244",
+    "github_actions_job": "110542526890",
+    "gate_status": "AOS_STANDING_AUTHORITY_ACCEPTED",
+    "evidence_id": "EV-093",
+    "disposition": "PROVEN / ACCEPTED E2 executable CI"
+  },
+  "phase6_status": "CLOSED_PROVEN",
+  "phase6_accepted_execution_chain": {
+    "node1": "6ea3d04d59a5ee8a80602f2c0c4fa4772d37bf09",
+    "node2": "80ee72dbaa93d95a742995770c7bd80f69f0aaf2",
+    "node3": "2c7543ff81875b1b04ffafdd94f2da940362d05c",
+    "node4": "39e61bb76e32d4b83f8fe9f60efff91de2a5b049"
+  },
+  "next_product_action": {
+    "phase": "PHASE_7",
+    "node": "NODE_1_VERIFIED_REVIEWS",
+    "canonical_capability_order": [
+      "Node 1 — Verified Reviews",
+      "Node 2 — Discovery Marketplace",
+      "Node 3 — Favorites & Fast Rebooking"
+    ],
+    "execution_base_sha": "39e61bb76e32d4b83f8fe9f60efff91de2a5b049"
+  },
+  "next_action_execution_base_sha": "39e61bb76e32d4b83f8fe9f60efff91de2a5b049"
 }
