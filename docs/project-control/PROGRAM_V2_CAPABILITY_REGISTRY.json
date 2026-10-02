@@ -549,7 +549,14 @@
       "source_state": "PLANNED",
       "program_maturity": "PLANNED",
       "target_phase": 7,
-      "external_provider_or_company_dependency": false
+      "external_provider_or_company_dependency": false,
+      "execution_contract_id": "LARI-P7-N2-DISCOVERY-MARKETPLACE-R1",
+      "execution_authority": "DECISION-022",
+      "execution_base_sha": "2b5e08d2b8dc674dd1dd21ea93f1b967ec468201",
+      "architecture": "SERVER_AUTHORITATIVE_PUBLIC_PROJECTION",
+      "duplicate_listing_truth_allowed": false,
+      "acceptance_target": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "delivery_slice": "R1_SERVER_AUTHORITY_FIRST"
     },
     {
       "key": "favorites_rebooking",

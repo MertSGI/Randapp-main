@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-10-02T12:06:47.816034Z",
+  "updated_at": "2026-10-02T19:07:26.036250Z",
   "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
@@ -17,7 +17,7 @@
     "Final Delivery"
   ],
   "current_milestone": "Program V2 Phase 7 — Node 2 Discovery Marketplace",
-  "current_status": "PHASE_7_NODE_2_DISCOVERY_MARKETPLACE_READY",
+  "current_status": "PHASE_7_NODE_2_DISCOVERY_MARKETPLACE_R1_CONTRACT_BOUND_READY",
   "production_status": "NO_GO",
   "candidate_release": {
     "branch": "staging/supabase-staging-consistency",
@@ -578,7 +578,7 @@
       "does_not_affect": "Design Intelligence, Design Remediation, Phase 2-7 development"
     }
   ],
-  "next_action": "Implement Phase 7 Node 2 — Discovery Marketplace from accepted Phase 7 Node 1 R4 execution base 2b5e08d2b8dc674dd1dd21ea93f1b967ec468201 under standing authority. Production remains NO_GO.",
+  "next_action": "Implement Phase 7 Node 2 R1 — Discovery Marketplace server authority from accepted Phase 7 Node 1 R4 execution base 2b5e08d2b8dc674dd1dd21ea93f1b967ec468201 under DECISION-022/LARI-P7-N2-DISCOVERY-MARKETPLACE-R1. Build a server-authoritative public discovery/search projection over existing canonical tenant, business-profile, branch, service, media/portfolio, and verified-review authorities; do not create a duplicate marketplace listing truth. Reuse canonical public eligibility rules; expose only public-safe projection fields; only published verified reviews may affect public review aggregates; require bounded deterministic query/filter/pagination/ranking behavior. R1 must deliver SQL/RPC server authority plus static contracts and a disposable-Postgres live behavioral matrix covering eligibility negatives, unpublished/ineligible leakage, cross-tenant and private-field leakage, input/pagination bounds, filtering/ranking determinism, and prior-domain regression replay. R2 application adapter/service integration is blocked until R1 acceptance; R3 customer-facing discovery/portfolio UI and UI V2 integration are blocked until R2 acceptance. Production remains NO_GO.",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true
@@ -1221,5 +1221,72 @@
     ],
     "execution_base_sha": "2b5e08d2b8dc674dd1dd21ea93f1b967ec468201"
   },
-  "next_action_execution_base_sha": "2b5e08d2b8dc674dd1dd21ea93f1b967ec468201"
+  "next_action_execution_base_sha": "2b5e08d2b8dc674dd1dd21ea93f1b967ec468201",
+  "phase7_node2_contract": {
+    "contract_id": "LARI-P7-N2-DISCOVERY-MARKETPLACE-R1",
+    "authority": "DECISION-022",
+    "status": "BOUND_READY_FOR_IMPLEMENTATION",
+    "execution_base_sha": "2b5e08d2b8dc674dd1dd21ea93f1b967ec468201",
+    "architecture": {
+      "model": "SERVER_AUTHORITATIVE_PUBLIC_PROJECTION",
+      "duplicate_listing_truth_allowed": false,
+      "canonical_authorities": [
+        "tenant/business identity",
+        "tenant business profile",
+        "branches",
+        "services",
+        "canonical media/portfolio",
+        "Phase 7 Node 1 verified reviews"
+      ],
+      "eligibility_policy": "REUSE_EXISTING_CANONICAL_PUBLIC_ELIGIBILITY_FAIL_CLOSED"
+    },
+    "server_contract": {
+      "minimum_capabilities": [
+        "bounded discovery/search",
+        "public discovery profile",
+        "category/location/service filtering",
+        "bounded pagination",
+        "deterministic ordering and tie-break",
+        "verified published review aggregates",
+        "canonical portfolio/media projection"
+      ],
+      "implementation_may_use": [
+        "RPCs",
+        "views/projections",
+        "indexes",
+        "supporting SQL functions"
+      ],
+      "must_not_use": [
+        "duplicate marketplace listing truth",
+        "client-authoritative eligibility",
+        "unbounded reads",
+        "unpublished review aggregates",
+        "private tenant/customer/staff data in public responses",
+        "hidden paid ranking boost"
+      ]
+    },
+    "acceptance": {
+      "required": [
+        "static contract suite",
+        "disposable PostgreSQL live behavioral matrix",
+        "eligibility negative cases",
+        "unpublished/ineligible leakage negatives",
+        "cross-tenant and private-field leakage negatives",
+        "input and pagination bounds",
+        "filtering and deterministic ranking assertions",
+        "verified published review integrity assertions",
+        "prior-domain regression replay",
+        "exact-SHA executable CI evidence"
+      ],
+      "artifact_presence_alone_is_acceptance": false,
+      "production": "NO_GO"
+    },
+    "delivery_slices": {
+      "R1": "SERVER_AUTHORITY_SQL_RPC_AND_ACCEPTANCE",
+      "R2": "APPLICATION_SERVICE_ADAPTER_AFTER_R1_ACCEPTED",
+      "R3": "CUSTOMER_FACING_DISCOVERY_PORTFOLIO_UI_AFTER_R2_ACCEPTED"
+    },
+    "ui_v2": "HOLD_UNTIL_R1_AND_R2_ACCEPTED",
+    "node3": "NOT_IN_SCOPE"
+  }
 }
