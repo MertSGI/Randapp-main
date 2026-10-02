@@ -177,7 +177,7 @@ BEGIN
     END IF;
 
     -- Validate rating range
-    IF p_rating < 1 OR p_rating > 5 THEN
+    IF p_rating IS NULL OR p_rating < 1 OR p_rating > 5 THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: Rating must be between 1 and 5.';
     END IF;
 
@@ -235,10 +235,30 @@ BEGIN
         );
     END IF;
 
-    -- Advisory lock to serialize review creation per appointment BEFORE replay / duplicate check
-    PERFORM pg_advisory_xact_lock(hashtext('review:' || p_appointment_id::text));
+    -- MANDATORY FIXED LOCK ORDER:
+    -- 1. Tenant + normalized idempotency-key lock
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended(
+            'review:idempotency:' ||
+            v_customer.tenant_id::text ||
+            ':' ||
+            v_idempotency_clean,
+            0
+        )
+    );
 
-    -- Check idempotency key first: same tenant + same idempotency key
+    -- 2. Tenant + appointment lock
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended(
+            'review:appointment:' ||
+            v_customer.tenant_id::text ||
+            ':' ||
+            p_appointment_id::text,
+            0
+        )
+    );
+
+    -- 3. Check idempotency key first: same tenant + same idempotency key
     IF EXISTS (
         SELECT 1 FROM public.review_idempotency_keys
         WHERE tenant_id = v_customer.tenant_id
@@ -392,11 +412,11 @@ DECLARE
     v_aggregate           JSONB;
 BEGIN
     -- Validate input bounds
-    IF p_limit < 1 OR p_limit > 100 THEN
+    IF p_limit IS NULL OR p_limit < 1 OR p_limit > 100 THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: p_limit must be between 1 and 100.';
     END IF;
 
-    IF p_offset < 0 THEN
+    IF p_offset IS NULL OR p_offset < 0 THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: p_offset must be greater than or equal to 0.';
     END IF;
 
@@ -544,11 +564,11 @@ BEGIN
     END IF;
 
     -- Validate input bounds
-    IF p_limit < 1 OR p_limit > 100 THEN
+    IF p_limit IS NULL OR p_limit < 1 OR p_limit > 100 THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: p_limit must be between 1 and 100.';
     END IF;
 
-    IF p_offset < 0 THEN
+    IF p_offset IS NULL OR p_offset < 0 THEN
         RAISE EXCEPTION 'INVALID_ARGUMENT: p_offset must be greater than or equal to 0.';
     END IF;
 

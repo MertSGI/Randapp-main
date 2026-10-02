@@ -100,6 +100,12 @@ async function run() {
     const appointmentPageA3 = '4e4e4e4e-1111-2222-3333-444444444444';
     const appointmentPageA4 = '4f4f4f4f-1111-2222-3333-444444444444';
 
+    // R4 Idempotency across different appointments fixtures
+    const appointmentDiffAppSeq1 = '7a7a7a7a-1111-2222-3333-777777777771';
+    const appointmentDiffAppSeq2 = '7a7a7a7a-1111-2222-3333-777777777772';
+    const appointmentDiffAppConc1 = '7b7b7b7b-1111-2222-3333-777777777771';
+    const appointmentDiffAppConc2 = '7b7b7b7b-1111-2222-3333-777777777772';
+
     // -------------------------------------------------------------------------
     // SETUP: Seed deterministic fixtures via adminClient (postgres superuser)
     // -------------------------------------------------------------------------
@@ -193,7 +199,11 @@ async function run() {
         ('${appointmentConcurrencySame}', '${tenantA}', '${branchA1}', '${customerA1}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 1, '10:00', 30, 'completed'),
         ('${appointmentConcurrencyDiff}', '${tenantA}', '${branchA1}', '${customerA1}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 1, '11:00', 30, 'completed'),
         ('${appointmentPageA3}', '${tenantA}', '${branchA1}', '${customerA1}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 4, '12:00', 30, 'completed'),
-        ('${appointmentPageA4}', '${tenantA}', '${branchA1}', '${customerA2}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 3, '13:00', 30, 'completed')
+        ('${appointmentPageA4}', '${tenantA}', '${branchA1}', '${customerA2}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 3, '13:00', 30, 'completed'),
+        ('${appointmentDiffAppSeq1}', '${tenantA}', '${branchA1}', '${customerA1}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 2, '09:00', 30, 'completed'),
+        ('${appointmentDiffAppSeq2}', '${tenantA}', '${branchA1}', '${customerA1}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 2, '09:30', 30, 'completed'),
+        ('${appointmentDiffAppConc1}', '${tenantA}', '${branchA1}', '${customerA1}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 1, '14:00', 30, 'completed'),
+        ('${appointmentDiffAppConc2}', '${tenantA}', '${branchA1}', '${customerA1}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 1, '14:30', 30, 'completed')
       ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status;
     `);
 
@@ -382,6 +392,25 @@ async function run() {
     }
     assert(invalidRatingCaught, 'P7.2.5: Rating > 5 raises INVALID_ARGUMENT');
 
+    // R4 Defect A: p_rating := NULL must fail closed with INVALID_ARGUMENT (NOT INTERNAL_ERROR)
+    let nullRatingCaught = false;
+    let nullRatingNotInternal = false;
+    try {
+      await actorClient.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentCompletedA2}',
+          p_rating := NULL,
+          p_title := 'Null rating test',
+          p_content := 'Rating null should fail closed with INVALID_ARGUMENT',
+          p_idempotency_key := 'review-test-null-rating'
+        );
+      `);
+    } catch (err) {
+      nullRatingCaught = err.message.includes('INVALID_ARGUMENT');
+      nullRatingNotInternal = !err.message.includes('INTERNAL_ERROR');
+    }
+    assert(nullRatingCaught && nullRatingNotInternal, 'P7.2.5b: p_rating := NULL raises INVALID_ARGUMENT and NOT INTERNAL_ERROR');
+
     // Idempotency key blank / null / exceeds 200 chars
     let emptyKeyCaught = false;
     try {
@@ -557,6 +586,86 @@ async function run() {
     `);
     assert(parseInt(countDiff.rows[0].cnt, 10) === 1, 'P7.3.7: Exactly 1 review inserted under concurrent different-key');
 
+    // R4 Defect C & Semantics D: SAME TENANT + SAME IDEMPOTENCY KEY + DIFFERENT APPOINTMENT SEQUENTIAL
+    // appointmentDiffAppSeq1 creates first successfully
+    await setActorAuth(actorClient, userCustomerA);
+    let seqApp1Res = await actorClient.query(`
+      SELECT public.create_verified_review(
+        p_appointment_id := '${appointmentDiffAppSeq1}',
+        p_rating := 5,
+        p_title := 'Seq diff app 1',
+        p_content := 'First review with key',
+        p_idempotency_key := 'same-key-diff-app-seq'
+      ) AS res;
+    `);
+    assert(seqApp1Res.rows[0].res.success === true, 'P7.3.8: Sequential diff-app 1 succeeds');
+
+    // appointmentDiffAppSeq2 with same idempotency key raises IDEMPOTENCY_CONFLICT
+    let seqApp2Conflict = false;
+    try {
+      await actorClient.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentDiffAppSeq2}',
+          p_rating := 5,
+          p_title := 'Seq diff app 2',
+          p_content := 'Different appointment same key',
+          p_idempotency_key := 'same-key-diff-app-seq'
+        );
+      `);
+    } catch (err) {
+      seqApp2Conflict = err.message.includes('IDEMPOTENCY_CONFLICT');
+    }
+    assert(seqApp2Conflict, 'P7.3.9: Sequential same tenant same idempotency key different appointment raises IDEMPOTENCY_CONFLICT');
+
+    // R4 Defect C & Semantics E: SAME TENANT + SAME IDEMPOTENCY KEY + DIFFERENT APPOINTMENT CONCURRENT
+    // Both start from clean state against appointmentDiffAppConc1 and appointmentDiffAppConc2
+    let pDiffAppConcurrent = Promise.allSettled([
+      concurrentClient1.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentDiffAppConc1}',
+          p_rating := 5,
+          p_title := 'Concurrent diff app 1',
+          p_content := 'Competing appointment 1',
+          p_idempotency_key := 'same-key-diff-app-concurrent'
+        ) AS res;
+      `),
+      concurrentClient2.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentDiffAppConc2}',
+          p_rating := 5,
+          p_title := 'Concurrent diff app 2',
+          p_content := 'Competing appointment 2',
+          p_idempotency_key := 'same-key-diff-app-concurrent'
+        ) AS res;
+      `)
+    ]);
+
+    const [concRes1, concRes2] = await pDiffAppConcurrent;
+    const successes = [concRes1, concRes2].filter(r => r.status === 'fulfilled' && r.value.rows[0].res.success === true);
+    const conflicts = [concRes1, concRes2].filter(r => r.status === 'rejected' && r.reason.message.includes('IDEMPOTENCY_CONFLICT'));
+    const internalErrors = [concRes1, concRes2].filter(r => r.status === 'rejected' && r.reason.message.includes('INTERNAL_ERROR'));
+    const uniqueErrors = [concRes1, concRes2].filter(r => r.status === 'rejected' && (r.reason.message.includes('unique constraint') || r.reason.message.includes('duplicate key value')));
+
+    assert(successes.length === 1, 'P7.3.10: Exactly one concurrent diff-app call succeeds');
+    assert(conflicts.length === 1, 'P7.3.11: Competing concurrent diff-app call raises IDEMPOTENCY_CONFLICT');
+    assert(internalErrors.length === 0, 'P7.3.12: No INTERNAL_ERROR exposed during concurrent diff-app key conflict');
+    assert(uniqueErrors.length === 0, 'P7.3.13: No database unique constraint error exposed during concurrent diff-app key conflict');
+    concurrencyTestsExecuted++;
+
+    // Exactly one physical review exists across the two target appointments
+    const diffAppReviewCount = await adminClient.query(`
+      SELECT count(*) AS cnt FROM public.reviews
+      WHERE appointment_id IN ('${appointmentDiffAppConc1}', '${appointmentDiffAppConc2}');
+    `);
+    assert(parseInt(diffAppReviewCount.rows[0].cnt, 10) === 1, 'P7.3.14: Exactly one review exists across competing target appointments');
+
+    // Exactly one idempotency row exists for that tenant/key
+    const diffAppIdemCount = await adminClient.query(`
+      SELECT count(*) AS cnt FROM public.review_idempotency_keys
+      WHERE tenant_id = '${tenantA}' AND idempotency_key = 'same-key-diff-app-concurrent';
+    `);
+    assert(parseInt(diffAppIdemCount.rows[0].cnt, 10) === 1, 'P7.3.15: Exactly one idempotency row exists for concurrent key');
+
     // -------------------------------------------------------------------------
     // 4. MODERATION: STAFF & TENANT OWNER AUTHORITY (WITHOUT STAFF ROW)
     // -------------------------------------------------------------------------
@@ -726,6 +835,23 @@ async function run() {
     }
     assert(pubRatingInvalid, 'P7.5.11: p_min_rating > 5 raises INVALID_ARGUMENT');
 
+    // R4 Defect B: get_public_reviews explicit NULL limit and NULL offset guards
+    let pubNullLimitInvalid = false;
+    try {
+      await anonClient.query(`SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_limit := NULL);`);
+    } catch (err) {
+      pubNullLimitInvalid = err.message.includes('p_limit must be between 1 and 100');
+    }
+    assert(pubNullLimitInvalid, 'P7.5.11b: get_public_reviews p_limit := NULL raises INVALID_ARGUMENT');
+
+    let pubNullOffsetInvalid = false;
+    try {
+      await anonClient.query(`SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_offset := NULL);`);
+    } catch (err) {
+      pubNullOffsetInvalid = err.message.includes('p_offset must be greater than or equal to 0');
+    }
+    assert(pubNullOffsetInvalid, 'P7.5.11c: get_public_reviews p_offset := NULL raises INVALID_ARGUMENT');
+
     // Tenant Reviews read pagination
     await setActorAuth(actorClient, userStaffA);
     let tenPage = await actorClient.query(`
@@ -735,6 +861,23 @@ async function run() {
     assert(tenData.success === true, 'P7.5.12: get_tenant_reviews succeeds');
     assert(tenData.reviews.length === 2, 'P7.5.13: Tenant reviews respects limit');
     assert(tenData.aggregate.total_count >= 4, 'P7.5.14: Tenant aggregate total_count spans complete filtered set');
+
+    // R4 Defect B: get_tenant_reviews explicit NULL limit and NULL offset guards
+    let tenNullLimitInvalid = false;
+    try {
+      await actorClient.query(`SELECT public.get_tenant_reviews(p_limit := NULL);`);
+    } catch (err) {
+      tenNullLimitInvalid = err.message.includes('p_limit must be between 1 and 100');
+    }
+    assert(tenNullLimitInvalid, 'P7.5.15: get_tenant_reviews p_limit := NULL raises INVALID_ARGUMENT');
+
+    let tenNullOffsetInvalid = false;
+    try {
+      await actorClient.query(`SELECT public.get_tenant_reviews(p_offset := NULL);`);
+    } catch (err) {
+      tenNullOffsetInvalid = err.message.includes('p_offset must be greater than or equal to 0');
+    }
+    assert(tenNullOffsetInvalid, 'P7.5.16: get_tenant_reviews p_offset := NULL raises INVALID_ARGUMENT');
 
     // -------------------------------------------------------------------------
     // 6. RLS & PERMISSION TRUST BOUNDARIES
