@@ -25,19 +25,14 @@ function assert(condition, testName, detail = '') {
   }
 }
 
-async function setAuth(c, userId, role = 'authenticated') {
-  if (!userId) {
-    await c.query(`RESET ROLE;`);
-    await c.query(`SELECT set_config('request.jwt.claim.sub', '', false);`);
-    await c.query(`SELECT set_config('request.jwt.claims', '', false);`);
-    return;
-  }
-  await c.query(`SET ROLE ${role};`);
-  await c.query(`SELECT set_config('request.jwt.claim.sub', $1, false);`, [userId]);
-  await c.query(`SELECT set_config('request.jwt.claims', $1, false);`, [JSON.stringify({ sub: userId, role })]);
-  const checkAuth = await c.query(`SELECT auth.uid() AS uid;`);
-  if (!checkAuth.rows[0] || checkAuth.rows[0].uid !== userId) {
-    throw new Error(`setAuth failed: expected ${userId} but got ${checkAuth.rows[0]?.uid}`);
+async function setActorAuth(client, userId, role = 'authenticated') {
+  await client.query(`SET ROLE ${role};`);
+  if (userId) {
+    await client.query(`SELECT set_config('request.jwt.claim.sub', $1, false);`, [userId]);
+    await client.query(`SELECT set_config('request.jwt.claims', $1, false);`, [JSON.stringify({ sub: userId, role })]);
+  } else {
+    await client.query(`SELECT set_config('request.jwt.claim.sub', '', false);`);
+    await client.query(`SELECT set_config('request.jwt.claims', '', false);`);
   }
 }
 
@@ -45,43 +40,72 @@ async function run() {
   console.log('===============================================================');
   console.log('STARTING PHASE 7 NODE 1 LIVE POSTGRESQL VERIFIED REVIEWS BEHAVIORAL MATRIX');
   console.log(`Target Database: ${DB_URL}`);
-  console.log('===============================================================\\n');
+  console.log('===============================================================\n');
 
-  const mainClient = new Client({ connectionString: DB_URL });
+  // Privileged admin client: postgres role for fixtures & direct internal state assertions
+  const adminClient = new Client({ connectionString: DB_URL });
+  // Actor client: authenticated user operations
+  const actorClient = new Client({ connectionString: DB_URL });
+  // Anon client: unauthenticated visitor operations
+  const anonClient = new Client({ connectionString: DB_URL });
+  // Dedicated concurrency actor clients
   const concurrentClient1 = new Client({ connectionString: DB_URL });
   const concurrentClient2 = new Client({ connectionString: DB_URL });
 
-  await mainClient.connect();
+  await adminClient.connect();
+  await actorClient.connect();
+  await anonClient.connect();
   await concurrentClient1.connect();
   await concurrentClient2.connect();
 
   try {
-// Deterministic test fixtures
+    // Deterministic test fixtures UUIDs
     const tenantA = '11111111-aaaa-4111-8111-111111111111';
     const tenantB = '22222222-bbbb-4222-8222-222222222222';
     const branchA1 = '11111111-bbbb-4111-8111-111111111111';
     const branchA2 = '11111111-cccc-4111-8111-111111111111';
     const branchB1 = '22222222-bbbb-4222-8222-222222222222';
 
+    // Users (auth.users + public.users_profile)
+    const userOwnerA = 'aaaa0000-0000-4000-a000-000000000001';
     const userStaffA = 'aaaa1111-0000-4000-a000-000000000002';
     const userStaffB = 'bbbb2222-0000-4000-b000-000000000002';
     const userCustomerA = 'cccc3333-0000-4000-c000-000000000003';
-    const userCustomerB = 'dddd4444-0000-4000-d000-000000000003';
     const userCustomerA2 = 'eeee5555-0000-4000-e000-000000000003';
+    const userCustomerB = 'dddd4444-0000-4000-d000-000000000003';
 
+    // Staff entities
+    const staffEntityA = '11111111-2222-3333-4444-111111111111';
+    const staffEntityB = '22222222-2222-3333-4444-222222222222';
+
+    // Customers
+    const customerA1 = '55555555-1111-2222-3333-555555555555';
+    const customerA2 = '66666666-1111-2222-3333-666666666666';
+    const customerB1 = '77777777-1111-2222-3333-777777777777';
+
+    // Services
     const serviceA = '3a3a3a3a-1111-2222-3333-333333333333';
     const serviceB = '3b3b3b3b-1111-2222-3333-333333333333';
 
+    // Appointments
     const appointmentCompletedA1 = '4a4a4a4a-1111-2222-3333-444444444444';
     const appointmentCompletedA2 = '4b4b4b4b-1111-2222-3333-444444444444';
     const appointmentConfirmedA1 = '4c4c4c4c-1111-2222-3333-444444444444';
     const appointmentCompletedB1 = '4d4d4d4d-1111-2222-3333-444444444444';
+    const appointmentEdge = '6b6b6b6b-1111-2222-3333-666666666666';
+    const appointmentConcurrencySame = '5a5a5a5a-1111-2222-3333-555555555555';
+    const appointmentConcurrencyDiff = '5b5b5b5b-1111-2222-3333-555555555555';
 
-    // SETUP: Create minimal test fixtures
-    console.log('--- SETUP: Test Fixtures ---');
-    await setAuth(mainClient, userStaffA);
+    // Pagination appointments
+    const appointmentPageA3 = '4e4e4e4e-1111-2222-3333-444444444444';
+    const appointmentPageA4 = '4f4f4f4f-1111-2222-3333-444444444444';
 
-    await mainClient.query(`
+    // -------------------------------------------------------------------------
+    // SETUP: Seed deterministic fixtures via adminClient (postgres superuser)
+    // -------------------------------------------------------------------------
+    console.log('--- SETUP: Deterministic Fixtures via adminClient ---');
+
+    await adminClient.query(`
       INSERT INTO public.tenants (id, slug, name, status, public_site_status, onboarding_status)
       VALUES 
         ('${tenantA}', 'tenant-a', 'Tenant A', 'active', 'published', 'completed'),
@@ -91,7 +115,7 @@ async function run() {
         public_site_status = EXCLUDED.public_site_status, onboarding_status = EXCLUDED.onboarding_status;
     `);
 
-    await mainClient.query(`
+    await adminClient.query(`
       INSERT INTO public.branches (id, tenant_id, name, slug, is_active, is_primary)
       VALUES 
         ('${branchA1}', '${tenantA}', 'Branch A1', 'branch-a1', true, true),
@@ -100,400 +124,652 @@ async function run() {
       ON CONFLICT (id) DO UPDATE SET is_active = true;
     `);
 
-    await mainClient.query(`
-      INSERT INTO public.services (id, tenant_id, name, name_tr, duration, price, active)
+    // Seed auth.users first
+    await adminClient.query(`
+      INSERT INTO auth.users (id, email, role)
+      VALUES
+        ('${userOwnerA}', 'ownerA@test.invalid', 'authenticated'),
+        ('${userStaffA}', 'staffA@test.invalid', 'authenticated'),
+        ('${userStaffB}', 'staffB@test.invalid', 'authenticated'),
+        ('${userCustomerA}', 'custA1@test.invalid', 'authenticated'),
+        ('${userCustomerA2}', 'custA2@test.invalid', 'authenticated'),
+        ('${userCustomerB}', 'custB1@test.invalid', 'authenticated')
+      ON CONFLICT (id) DO NOTHING;
+    `);
+
+    // Seed users_profile next (Owner has NO staff row to test owner authority)
+    await adminClient.query(`
+      INSERT INTO public.users_profile (id, tenant_id, name, role, active)
+      VALUES
+        ('${userOwnerA}', '${tenantA}', 'Owner A', 'tenant_owner', true),
+        ('${userStaffA}', '${tenantA}', 'Staff A User', 'staff', true),
+        ('${userStaffB}', '${tenantB}', 'Staff B User', 'staff', true),
+        ('${userCustomerA}', '${tenantA}', 'Cust A1 User', 'customer', true),
+        ('${userCustomerA2}', '${tenantA}', 'Cust A2 User', 'customer', true),
+        ('${userCustomerB}', '${tenantB}', 'Cust B1 User', 'customer', true)
+      ON CONFLICT (id) DO UPDATE SET
+        tenant_id = EXCLUDED.tenant_id,
+        role = EXCLUDED.role,
+        active = EXCLUDED.active;
+    `);
+
+    // Seed staff records
+    await adminClient.query(`
+      INSERT INTO public.staff (id, tenant_id, user_profile_id, name, title, active)
       VALUES 
+        ('${staffEntityA}', '${tenantA}', '${userStaffA}', 'Staff A', 'Specialist', true),
+        ('${staffEntityB}', '${tenantB}', '${userStaffB}', 'Staff B', 'Specialist', true)
+      ON CONFLICT (id) DO UPDATE SET active = true;
+    `);
+
+    // Seed customers
+    await adminClient.query(`
+      INSERT INTO public.customers (id, tenant_id, user_profile_id, name, email, phone)
+      VALUES 
+        ('${customerA1}', '${tenantA}', '${userCustomerA}', 'Customer A1', 'custA1@test.invalid', '+905001112233'),
+        ('${customerA2}', '${tenantA}', '${userCustomerA2}', 'Customer A2', 'custA2@test.invalid', '+905001112244'),
+        ('${customerB1}', '${tenantB}', '${userCustomerB}', 'Customer B1', 'custB1@test.invalid', '+905002223344')
+      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
+    `);
+
+    // Seed services
+    await adminClient.query(`
+      INSERT INTO public.services (id, tenant_id, name, name_tr, duration, price, active)
+      VALUES
         ('${serviceA}', '${tenantA}', 'Service A', 'Hizmet A', 30, 10000, true),
         ('${serviceB}', '${tenantB}', 'Service B', 'Hizmet B', 45, 15000, true)
       ON CONFLICT (id) DO UPDATE SET active = true;
     `);
 
-    await mainClient.query(`
-      INSERT INTO public.staff (id, tenant_id, user_profile_id, name, title, active)
-      VALUES 
-        ('11111111-2222-3333-4444-111111111111', '${tenantA}', '${userStaffA}', 'Staff A', 'Specialist', true),
-        ('22222222-2222-3333-4444-222222222222', '${tenantB}', '${userStaffB}', 'Staff B', 'Specialist', true)
-      ON CONFLICT (id) DO UPDATE SET active = true;
-    `);
-
-    await mainClient.query(`
-      INSERT INTO public.customers (id, tenant_id, user_profile_id, name, email, phone)
-      VALUES 
-        ('55555555-1111-2222-3333-555555555555', '${tenantA}', '${userCustomerA}', 'Customer A1', 'custA1@test.invalid', '+905001112233'),
-        ('66666666-1111-2222-3333-666666666666', '${tenantA}', '${userCustomerA2}', 'Customer A2', 'custA2@test.invalid', '+905001112244'),
-        ('77777777-1111-2222-3333-777777777777', '${tenantB}', '${userCustomerB}', 'Customer B1', 'custB1@test.invalid', '+905002223344')
-      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
-    `);
-
-    await mainClient.query(`
+    // Seed appointments
+    await adminClient.query(`
       INSERT INTO public.appointments (id, tenant_id, branch_id, customer_id, service_id, staff_id, appointment_date, appointment_time, duration_minutes, status)
       VALUES 
-        ('${appointmentCompletedA1}', '${tenantA}', '${branchA1}', '55555555-1111-2222-3333-555555555555', '${serviceA}', '11111111-2222-3333-4444-111111111111', CURRENT_DATE - 7, '10:00', 30, 'completed'),
-        ('${appointmentCompletedA2}', '${tenantA}', '${branchA1}', '66666666-1111-2222-3333-666666666666', '${serviceA}', '11111111-2222-3333-4444-111111111111', CURRENT_DATE - 5, '14:00', 30, 'completed'),
-        ('${appointmentConfirmedA1}', '${tenantA}', '${branchA1}', '55555555-1111-2222-3333-555555555555', '${serviceA}', '11111111-2222-3333-4444-111111111111', CURRENT_DATE + 7, '10:00', 30, 'confirmed'),
-        ('${appointmentCompletedB1}', '${tenantB}', '${branchB1}', '77777777-1111-2222-3333-777777777777', '${serviceB}', '22222222-2222-3333-4444-222222222222', CURRENT_DATE - 3, '11:00', 45, 'completed')
+        ('${appointmentCompletedA1}', '${tenantA}', '${branchA1}', '${customerA1}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 7, '10:00', 30, 'completed'),
+        ('${appointmentCompletedA2}', '${tenantA}', '${branchA1}', '${customerA2}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 5, '14:00', 30, 'completed'),
+        ('${appointmentConfirmedA1}', '${tenantA}', '${branchA1}', '${customerA1}', '${serviceA}', '${staffEntityA}', CURRENT_DATE + 7, '10:00', 30, 'confirmed'),
+        ('${appointmentCompletedB1}', '${tenantB}', '${branchB1}', '${customerB1}', '${serviceB}', '${staffEntityB}', CURRENT_DATE - 3, '11:00', 45, 'completed'),
+        ('${appointmentEdge}', '${tenantA}', '${branchA1}', '${customerA1}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 2, '15:00', 30, 'completed'),
+        ('${appointmentConcurrencySame}', '${tenantA}', '${branchA1}', '${customerA1}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 1, '10:00', 30, 'completed'),
+        ('${appointmentConcurrencyDiff}', '${tenantA}', '${branchA1}', '${customerA1}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 1, '11:00', 30, 'completed'),
+        ('${appointmentPageA3}', '${tenantA}', '${branchA1}', '${customerA1}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 4, '12:00', 30, 'completed'),
+        ('${appointmentPageA4}', '${tenantA}', '${branchA1}', '${customerA2}', '${serviceA}', '${staffEntityA}', CURRENT_DATE - 3, '13:00', 30, 'completed')
       ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status;
     `);
 
-    console.log('Setup complete.\\n');
-// 1. CREATE VERIFIED REVIEW - BASIC ELIGIBILITY
-    console.log('--- 1. CREATE VERIFIED REVIEW: BASIC ELIGIBILITY ---');
-    await setAuth(mainClient, userCustomerA);
+    // Initialize anon client
+    await setActorAuth(anonClient, null, 'anon');
 
-    let r1 = await mainClient.query(`
+    console.log('Setup completed successfully.\n');
+
+    // -------------------------------------------------------------------------
+    // 1. CREATE VERIFIED REVIEW - ELIGIBILITY & IDEMPOTENCY
+    // -------------------------------------------------------------------------
+    console.log('--- 1. CREATE VERIFIED REVIEW: ELIGIBILITY & IDEMPOTENCY ---');
+    await setActorAuth(actorClient, userCustomerA);
+
+    let r1 = await actorClient.query(`
       SELECT public.create_verified_review(
         p_appointment_id := '${appointmentCompletedA1}',
-        p_rating := 5, p_title := 'Excellent service', p_content := 'Very professional.',
-        p_idempotency_key := 'review-test-1'
+        p_rating := 5,
+        p_title := 'Excellent service',
+        p_content := 'Very professional.',
+        p_idempotency_key := 'review-test-key-1'
       ) AS res;
     `);
     let res1 = r1.rows[0].res;
-    assert(res1.success === true, 'P7.1.1: Create review for own completed appointment succeeds');
+    assert(res1.success === true, 'P7.1.1: Create review for completed appointment succeeds');
     assert(res1.reason_code === 'ok', 'P7.1.2: Returns ok reason code');
-    assert(res1.idempotent_replay === false, 'P7.1.3: First submission not replay');
+    assert(res1.idempotent_replay === false, 'P7.1.3: First submission is not replay');
     const reviewId1 = res1.review_id;
 
-    let r1check = await mainClient.query(`SELECT is_published FROM public.reviews WHERE id = '${reviewId1}';`);
-    assert(r1check.rows[0].is_published === false, 'P7.1.4: New review is unpublished by default');
+    // Verify internal state using adminClient
+    let checkR1 = await adminClient.query(`SELECT is_published, title, content, idempotency_key FROM public.reviews WHERE id = '${reviewId1}';`);
+    assert(checkR1.rows[0].is_published === false, 'P7.1.4: Review is unpublished initially');
+    assert(checkR1.rows[0].title === 'Excellent service', 'P7.1.5: Title stored properly');
 
-    let r1dup = await mainClient.query(`
+    // Same appointment + same idempotency key -> idempotent_replay = true
+    let r1Replay = await actorClient.query(`
       SELECT public.create_verified_review(
         p_appointment_id := '${appointmentCompletedA1}',
-        p_rating := 4, p_title := 'Trying again', p_content := 'Should fail',
-        p_idempotency_key := 'review-test-1-different-key'
+        p_rating := 5,
+        p_title := 'Excellent service',
+        p_content := 'Very professional.',
+        p_idempotency_key := 'review-test-key-1'
       ) AS res;
     `);
-    let res1dup = r1dup.rows[0].res;
-    assert(res1dup.success === false, 'P7.1.5: Duplicate review rejected');
-    assert(res1dup.reason_code === 'duplicate_review', 'P7.1.6: Returns duplicate_review reason code');
+    let res1Replay = r1Replay.rows[0].res;
+    assert(res1Replay.success === true, 'P7.1.6: Exact same-key replay succeeds');
+    assert(res1Replay.idempotent_replay === true, 'P7.1.7: Replay returns idempotent_replay = true');
+    assert(res1Replay.review_id === reviewId1, 'P7.1.8: Replay returns original review_id');
 
-    let r1idem = await mainClient.query(`
+    // Same appointment + different idempotency key -> duplicate_review
+    let r1Dup = await actorClient.query(`
       SELECT public.create_verified_review(
         p_appointment_id := '${appointmentCompletedA1}',
-        p_rating := 5, p_title := 'Excellent service', p_content := 'Very professional.',
-        p_idempotency_key := 'review-test-1'
+        p_rating := 4,
+        p_title := 'Trying second review',
+        p_content := 'Should be duplicate',
+        p_idempotency_key := 'review-test-key-1-diff'
       ) AS res;
     `);
-    let res1idem = r1idem.rows[0].res;
-    assert(res1idem.success === true, 'P7.1.7: Idempotent replay succeeds');
-    assert(res1idem.idempotent_replay === true, 'P7.1.8: Returns idempotent_replay true');
-    assert(res1idem.review_id === reviewId1, 'P7.1.9: Returns same review ID');
+    let res1Dup = r1Dup.rows[0].res;
+    assert(res1Dup.success === false, 'P7.1.9: Different key for same appointment fails');
+    assert(res1Dup.reason_code === 'duplicate_review', 'P7.1.10: Duplicate returns duplicate_review reason code');
 
-    // 2. CREATE VERIFIED REVIEW - ELIGIBILITY GATES
-    console.log('\\n--- 2. CREATE VERIFIED REVIEW: ELIGIBILITY GATES ---');
+    // -------------------------------------------------------------------------
+    // 2. CREATE VERIFIED REVIEW - BOUNDED INPUTS & EXPECTED ERROR GATES
+    // -------------------------------------------------------------------------
+    console.log('\n--- 2. CREATE VERIFIED REVIEW: BOUNDED INPUTS & EXPECTED ERRORS ---');
 
-    let r2a = await mainClient.query(`
+    // Uncompleted appointment
+    let r2NonCompleted = await actorClient.query(`
       SELECT public.create_verified_review(
         p_appointment_id := '${appointmentConfirmedA1}',
-        p_rating := 5, p_title := 'Great', p_content := 'Will be great',
-        p_idempotency_key := 'review-test-2a'
+        p_rating := 5,
+        p_title := 'Too early',
+        p_content := 'Appointment not completed',
+        p_idempotency_key := 'review-test-confirmed'
       ) AS res;
     `);
-    let res2a = r2a.rows[0].res;
-    assert(res2a.success === false, 'P7.2.1: Review for confirmed appointment rejected');
-    assert(res2a.reason_code === 'appointment_not_completed', 'P7.2.2: Returns appointment_not_completed');
+    let res2NonCompleted = r2NonCompleted.rows[0].res;
+    assert(res2NonCompleted.success === false, 'P7.2.1: Non-completed appointment rejected');
+    assert(res2NonCompleted.reason_code === 'appointment_not_completed', 'P7.2.2: Returns appointment_not_completed');
 
-    await setAuth(mainClient, userCustomerA2);
-    let r2b = await mainClient.query(`
-      SELECT public.create_verified_review(
-        p_appointment_id := '${appointmentCompletedA1}',
-        p_rating := 3, p_title := 'Not my appointment', p_content := 'Should fail',
-        p_idempotency_key := 'review-test-2b'
-      ) AS res;
-    `);
-    let res2b = r2b.rows[0].res;
-    assert(res2b.success === false, 'P7.2.3: Review for another customer appointment rejected');
+    // Other customer's appointment
+    await setActorAuth(actorClient, userCustomerA2);
+    let customerMismatchCaught = false;
+    try {
+      await actorClient.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentCompletedA1}',
+          p_rating := 4,
+          p_title := 'Not mine',
+          p_content := 'Should fail',
+          p_idempotency_key := 'review-test-other-cust'
+        );
+      `);
+    } catch (err) {
+      customerMismatchCaught = err.message.includes('FORBIDDEN');
+    }
+    assert(customerMismatchCaught, 'P7.2.3: Cross-customer review raises FORBIDDEN exception');
 
-    await setAuth(mainClient, userCustomerB);
-    let r2c = await mainClient.query(`
-      SELECT public.create_verified_review(
-        p_appointment_id := '${appointmentCompletedA1}',
-        p_rating := 5, p_title := 'Cross tenant', p_content := 'Should fail',
-        p_idempotency_key := 'review-test-2c'
-      ) AS res;
-    `);
-    crossTenantNegativeTestsExecuted++;
+    // Cross-tenant review
+    await setActorAuth(actorClient, userCustomerB);
+    let crossTenantReviewCaught = false;
+    try {
+      await actorClient.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentCompletedA1}',
+          p_rating := 5,
+          p_title := 'Cross tenant attempt',
+          p_content := 'Should fail',
+          p_idempotency_key := 'review-test-cross-tenant'
+        );
+      `);
+    } catch (err) {
+      crossTenantReviewCaught = err.message.includes('FORBIDDEN') || err.message.includes('CROSS_TENANT_VIOLATION');
+      crossTenantNegativeTestsExecuted++;
+    }
+    assert(crossTenantReviewCaught, 'P7.2.4: Cross-tenant review creation is denied');
 
-    await setAuth(mainClient, userCustomerA);
-    let r2d = await mainClient.query(`
+    // Invalid rating (> 5)
+    await setActorAuth(actorClient, userCustomerA);
+    let invalidRatingCaught = false;
+    try {
+      await actorClient.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentCompletedA2}',
+          p_rating := 6,
+          p_title := 'Rating out of range',
+          p_content := 'Rating 6 is invalid',
+          p_idempotency_key := 'review-test-invalid-rating'
+        );
+      `);
+    } catch (err) {
+      invalidRatingCaught = err.message.includes('INVALID_ARGUMENT');
+    }
+    assert(invalidRatingCaught, 'P7.2.5: Rating > 5 raises INVALID_ARGUMENT');
+
+    // Idempotency key blank / null / exceeds 200 chars
+    let emptyKeyCaught = false;
+    try {
+      await actorClient.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentCompletedA2}',
+          p_rating := 5,
+          p_title := 'No key',
+          p_content := 'Empty key',
+          p_idempotency_key := '   '
+        );
+      `);
+    } catch (err) {
+      emptyKeyCaught = err.message.includes('idempotency_key is required');
+    }
+    assert(emptyKeyCaught, 'P7.2.6: Blank idempotency key raises INVALID_ARGUMENT');
+
+    let longKeyCaught = false;
+    try {
+      await actorClient.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentCompletedA2}',
+          p_rating := 5,
+          p_title := 'Long key',
+          p_content := 'Key > 200 chars',
+          p_idempotency_key := '${'k'.repeat(201)}'
+        );
+      `);
+    } catch (err) {
+      longKeyCaught = err.message.includes('exceeds maximum length of 200 characters');
+    }
+    assert(longKeyCaught, 'P7.2.7: Idempotency key > 200 chars raises INVALID_ARGUMENT');
+
+    // Title > 160 chars
+    let longTitleCaught = false;
+    try {
+      await actorClient.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentCompletedA2}',
+          p_rating := 5,
+          p_title := '${'T'.repeat(161)}',
+          p_content := 'Title too long',
+          p_idempotency_key := 'review-test-long-title'
+        );
+      `);
+    } catch (err) {
+      longTitleCaught = err.message.includes('Title exceeds maximum length of 160 characters');
+    }
+    assert(longTitleCaught, 'P7.2.8: Title > 160 chars raises INVALID_ARGUMENT');
+
+    // Content > 4000 chars
+    let longContentCaught = false;
+    try {
+      await actorClient.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentCompletedA2}',
+          p_rating := 5,
+          p_title := 'Valid title',
+          p_content := '${'C'.repeat(4001)}',
+          p_idempotency_key := 'review-test-long-content'
+        );
+      `);
+    } catch (err) {
+      longContentCaught = err.message.includes('Content exceeds maximum length of 4000 characters');
+    }
+    assert(longContentCaught, 'P7.2.9: Content > 4000 chars raises INVALID_ARGUMENT');
+
+    // Create additional valid reviews for pagination & moderation tests
+    await setActorAuth(actorClient, userCustomerA2);
+    let r3a = await actorClient.query(`
       SELECT public.create_verified_review(
         p_appointment_id := '${appointmentCompletedA2}',
-        p_rating := 6, p_title := 'Invalid rating', p_content := 'Should fail',
-        p_idempotency_key := 'review-test-2d'
+        p_rating := 4,
+        p_title := 'Good visit',
+        p_content := 'Staff was attentive.',
+        p_idempotency_key := 'review-test-cust2-key'
       ) AS res;
     `);
-    crossTenantNegativeTestsExecuted++;
+    const reviewId2 = r3a.rows[0].res.review_id;
+    assert(r3a.rows[0].res.success === true, 'P7.2.10: Customer A2 review created');
 
-    // 3. CREATE VERIFIED REVIEW - VALID REVIEWS
-    console.log('\\n--- 3. CREATE VERIFIED REVIEW: VALID REVIEWS ---');
-    await setAuth(mainClient, userCustomerA2);
-
-    let r3a = await mainClient.query(`
-      SELECT public.create_verified_review(
-        p_appointment_id := '${appointmentCompletedA2}',
-        p_rating := 4, p_title := 'Good experience', p_content := 'Staff was professional.',
-        p_idempotency_key := 'review-test-3a'
-      ) AS res;
-    `);
-    let res3a = r3a.rows[0].res;
-    assert(res3a.success === true, 'P7.3.1: Second customer review succeeds');
-    const reviewId2 = res3a.review_id;
-
-    await setAuth(mainClient, userCustomerB);
-    let r3b = await mainClient.query(`
+    await setActorAuth(actorClient, userCustomerB);
+    let r3b = await actorClient.query(`
       SELECT public.create_verified_review(
         p_appointment_id := '${appointmentCompletedB1}',
-        p_rating := 5, p_title := 'Perfect', p_content := 'Best experience ever.',
-        p_idempotency_key := 'review-test-3b'
+        p_rating := 5,
+        p_title := 'Tenant B Great',
+        p_content := 'Outstanding care in Tenant B.',
+        p_idempotency_key := 'review-test-tenant-b-key'
       ) AS res;
     `);
-    let res3b = r3b.rows[0].res;
-    assert(res3b.success === true, 'P7.3.2: Tenant B customer review succeeds');
-    const reviewId3 = res3b.review_id;
-// 4. PUBLIC READ CONTRACT (get_public_reviews)
-    console.log('\\n--- 4. PUBLIC READ CONTRACT (get_public_reviews) ---');
+    const reviewId3 = r3b.rows[0].res.review_id;
+    assert(r3b.rows[0].res.success === true, 'P7.2.11: Tenant B customer review created');
 
-    await setAuth(mainClient, null);
-    let r4a = await mainClient.query(`SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_limit := 10, p_offset := 0) AS res;`);
-    let res4a = r4a.rows[0].res;
-    assert(res4a.success === true, 'P7.4.1: Public read succeeds');
-    assert(res4a.reviews.length === 0, 'P7.4.2: No published reviews initially');
-    assert(res4a.aggregate.total_count === 0, 'P7.4.3: Aggregate count is 0');
+    // -------------------------------------------------------------------------
+    // 3. CONCURRENCY: SAME-KEY & DIFFERENT-KEY
+    // -------------------------------------------------------------------------
+    console.log('\n--- 3. CONCURRENCY: SAME-KEY & DIFFERENT-KEY ---');
 
-    await setAuth(mainClient, userStaffA);
-    await mainClient.query(`SELECT public.moderate_review(p_review_id := '${reviewId1}', p_action := 'publish') AS res;`);
+    await setActorAuth(concurrentClient1, userCustomerA);
+    await setActorAuth(concurrentClient2, userCustomerA);
 
-    let r4b = await mainClient.query(`SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_limit := 10, p_offset := 0) AS res;`);
-    let res4b = r4b.rows[0].res;
-    assert(res4b.success === true, 'P7.4.4: Public read after publish succeeds');
-    assert(res4b.reviews.length === 1, 'P7.4.5: Published review appears');
-    assert(res4b.reviews[0].id === reviewId1, 'P7.4.6: Correct review returned');
-    assert(res4b.reviews[0].rating === 5, 'P7.4.7: Rating correct');
-    assert(res4b.aggregate.total_count === 1, 'P7.4.8: Aggregate count is 1');
-    assert(res4b.aggregate.average_rating === 5, 'P7.4.9: Average rating correct');
-    assert(res4b.aggregate.rating_distribution['5'] === 1, 'P7.4.10: Rating distribution correct');
-
-    let r4c = await mainClient.query(`SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_branch_id := '${branchA1}', p_limit := 10, p_offset := 0) AS res;`);
-    let res4c = r4c.rows[0].res;
-    assert(res4c.reviews.length === 1, 'P7.4.11: Branch filter works');
-
-    let r4d = await mainClient.query(`SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_min_rating := 4, p_limit := 10, p_offset := 0) AS res;`);
-    let res4d = r4d.rows[0].res;
-    assert(res4d.reviews.length === 1, 'P7.4.12: Min rating filter works');
-
-    let r4e = await mainClient.query(`SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_min_rating := 5, p_limit := 10, p_offset := 0) AS res;`);
-    let res4e = r4e.rows[0].res;
-    assert(res4e.reviews.length === 1, 'P7.4.13: Min rating 5 works');
-
-    let r4f = await mainClient.query(`SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_limit := 1, p_offset := 0) AS res;`);
-    let res4f = r4f.rows[0].res;
-    assert(res4f.reviews.length === 1, 'P7.4.14: Pagination limit works');
-
-    await setAuth(mainClient, null);
-    let r4g = await mainClient.query(`SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_limit := 10, p_offset := 0) AS res;`);
-    let res4g = r4g.rows[0].res;
-    assert(res4g.reviews.length === 1, 'P7.4.15: Tenant A only sees tenant A reviews');
-await setAuth(mainClient, userStaffB);
-    await mainClient.query(`SELECT public.moderate_review(p_review_id := '${reviewId3}', p_action := 'publish') AS res;`);
-    await setAuth(mainClient, null);
-    let r4h = await mainClient.query(`SELECT public.get_public_reviews(p_tenant_slug := 'tenant-b', p_limit := 10, p_offset := 0) AS res;`);
-    let res4h = r4h.rows[0].res;
-    assert(res4h.success === true, 'P7.4.16: Tenant B public read succeeds');
-    assert(res4h.reviews.length === 1, 'P7.4.17: Tenant B has 1 published review');
-    assert(res4h.aggregate.total_count === 1, 'P7.4.18: Tenant B aggregate correct');
-
-    // 5. TENANT READ CONTRACT (get_tenant_reviews)
-    console.log('\\n--- 5. TENANT READ CONTRACT (get_tenant_reviews) ---');
-    await setAuth(mainClient, userStaffA);
-
-    let r5a = await mainClient.query(`SELECT public.get_tenant_reviews(p_limit := 20, p_offset := 0) AS res;`);
-    let res5a = r5a.rows[0].res;
-    assert(res5a.success === true, 'P7.5.1: Tenant read succeeds');
-    assert(res5a.reviews.length === 2, 'P7.5.2: Staff sees both reviews');
-    assert(res5a.aggregate.total_count === 2, 'P7.5.3: Total count 2');
-    assert(res5a.aggregate.published_count === 1, 'P7.5.4: Published count 1');
-    assert(res5a.aggregate.pending_count === 1, 'P7.5.5: Pending count 1');
-
-    let r5b = await mainClient.query(`SELECT public.get_tenant_reviews(p_is_published := false, p_limit := 20, p_offset := 0) AS res;`);
-    let res5b = r5b.rows[0].res;
-    assert(res5b.reviews.length === 1, 'P7.5.6: Filter unpublished works');
-    assert(res5b.reviews[0].is_published === false, 'P7.5.7: Correct unpublished review');
-
-    let r5c = await mainClient.query(`SELECT public.get_tenant_reviews(p_is_published := true, p_limit := 20, p_offset := 0) AS res;`);
-    let res5c = r5c.rows[0].res;
-    assert(res5c.reviews.length === 1, 'P7.5.8: Filter published works');
-    assert(res5c.reviews[0].is_published === true, 'P7.5.9: Correct published review');
-
-    let r5d = await mainClient.query(`SELECT public.get_tenant_reviews(p_customer_id := '55555555-1111-2222-3333-555555555555', p_limit := 20, p_offset := 0) AS res;`);
-    let res5d = r5d.rows[0].res;
-    assert(res5d.reviews.length === 1, 'P7.5.10: Filter by customer works');
-    assert(res5d.reviews[0].customer_id === '55555555-1111-2222-3333-555555555555', 'P7.5.11: Correct customer');
-
-    let r5e = await mainClient.query(`SELECT public.get_tenant_reviews(p_staff_id := '11111111-2222-3333-4444-111111111111', p_limit := 20, p_offset := 0) AS res;`);
-    let res5e = r5e.rows[0].res;
-    assert(res5e.reviews.length === 2, 'P7.5.12: Filter by staff works');
-
-    await setAuth(mainClient, userStaffA);
-    let r5f = await mainClient.query(`SELECT public.get_tenant_reviews(p_limit := 20, p_offset := 0) AS res;`);
-    let res5f = r5f.rows[0].res;
-    assert(res5f.reviews.length === 2, 'P7.5.13: Staff A only sees tenant A reviews');
-
-    await setAuth(mainClient, userStaffB);
-    let r5g = await mainClient.query(`SELECT public.get_tenant_reviews(p_limit := 20, p_offset := 0) AS res;`);
-    let res5g = r5g.rows[0].res;
-    assert(res5g.reviews.length === 1, 'P7.5.14: Staff B only sees tenant B reviews');
-// 6. MODERATE REVIEW (publish/unpublish/respond)
-    console.log('\\n--- 6. MODERATE REVIEW ---');
-    await setAuth(mainClient, userStaffA);
-
-    let r6a = await mainClient.query(`SELECT public.moderate_review(p_review_id := '${reviewId2}', p_action := 'publish') AS res;`);
-    let res6a = r6a.rows[0].res;
-    assert(res6a.success === true, 'P7.6.1: Publish succeeds');
-    assert(res6a.reason_code === 'ok', 'P7.6.2: Returns ok');
-
-    let r6aCheck = await mainClient.query(`SELECT is_published, published_at FROM public.reviews WHERE id = '${reviewId2}';`);
-    assert(r6aCheck.rows[0].is_published === true, 'P7.6.3: Review is published');
-    assert(r6aCheck.rows[0].published_at !== null, 'P7.6.4: Published_at is set');
-
-    let r6b = await mainClient.query(`SELECT public.moderate_review(p_review_id := '${reviewId2}', p_action := 'publish') AS res;`);
-    let res6b = r6b.rows[0].res;
-    assert(res6b.success === false, 'P7.6.5: Double publish rejected');
-    assert(res6b.reason_code === 'already_published', 'P7.6.6: Returns already_published');
-
-    let r6c = await mainClient.query(`SELECT public.moderate_review(p_review_id := '${reviewId2}', p_action := 'unpublish') AS res;`);
-    let res6c = r6c.rows[0].res;
-    assert(res6c.success === true, 'P7.6.7: Unpublish succeeds');
-
-    let r6cCheck = await mainClient.query(`SELECT is_published, published_at FROM public.reviews WHERE id = '${reviewId2}';`);
-    assert(r6cCheck.rows[0].is_published === false, 'P7.6.8: Review is unpublished');
-    assert(r6cCheck.rows[0].published_at === null, 'P7.6.9: Published_at is null');
-
-    let r6d = await mainClient.query(`SELECT public.moderate_review(p_review_id := '${reviewId2}', p_action := 'unpublish') AS res;`);
-    let res6d = r6d.rows[0].res;
-    assert(res6d.success === false, 'P7.6.10: Double unpublish rejected');
-    assert(res6d.reason_code === 'already_unpublished', 'P7.6.11: Returns already_unpublished');
-
-    let r6e = await mainClient.query(`SELECT public.moderate_review(p_review_id := '${reviewId1}', p_action := 'respond', p_response_text := 'Thank you!') AS res;`);
-    let res6e = r6e.rows[0].res;
-    assert(res6e.success === true, 'P7.6.12: Respond succeeds');
-
-    let r6eCheck = await mainClient.query(`SELECT response_text, responded_by, responded_at FROM public.reviews WHERE id = '${reviewId1}';`);
-    assert(r6eCheck.rows[0].response_text === 'Thank you!', 'P7.6.13: Response text saved');
-    assert(r6eCheck.rows[0].responded_by !== null, 'P7.6.14: Responded_by set');
-    assert(r6eCheck.rows[0].responded_at !== null, 'P7.6.15: Responded_at set');
-
-    let r6f = await mainClient.query(`SELECT public.moderate_review(p_review_id := '${reviewId1}', p_action := 'respond', p_response_text := 'Another') AS res;`);
-    let res6f = r6f.rows[0].res;
-    assert(res6f.success === false, 'P7.6.16: Double respond rejected');
-    assert(res6f.reason_code === 'already_responded', 'P7.6.17: Returns already_responded');
-let r6g = await mainClient.query(`SELECT public.moderate_review(p_review_id := '${reviewId2}', p_action := 'respond', p_response_text := '') AS res;`);
-    crossTenantNegativeTestsExecuted++;
-
-    await setAuth(mainClient, userStaffB);
-    let r6h = await mainClient.query(`SELECT public.moderate_review(p_review_id := '${reviewId1}', p_action := 'publish') AS res;`);
-    crossTenantNegativeTestsExecuted++;
-
-    await setAuth(mainClient, userStaffA);
-    let r6i = await mainClient.query(`SELECT public.moderate_review(p_review_id := '${reviewId1}', p_action := 'invalid_action') AS res;`);
-    crossTenantNegativeTestsExecuted++;
-
-    // 7. CONCURRENCY TESTS
-    console.log('\\n--- 7. CONCURRENCY TESTS ---');
-
-    const appointmentConcurrency = '5a5a5a5a-1111-2222-3333-555555555555';
-    await setAuth(mainClient, userStaffA);
-    await mainClient.query(`
-      INSERT INTO public.appointments (id, tenant_id, branch_id, customer_id, service_id, staff_id, appointment_date, appointment_time, duration_minutes, status)
-      VALUES ('${appointmentConcurrency}', '${tenantA}', '${branchA1}', '55555555-1111-2222-3333-555555555555', '${serviceA}', '11111111-2222-3333-4444-111111111111', CURRENT_DATE - 1, '10:00', 30, 'completed')
-      ON CONFLICT (id) DO UPDATE SET status = 'completed';
-    `);
-
-    await setAuth(mainClient, userCustomerA);
-    await setAuth(concurrentClient1, userCustomerA);
-
-    let pConcurrent = Promise.all([
-      mainClient.query(`SELECT public.create_verified_review(p_appointment_id := '${appointmentConcurrency}', p_rating := 5, p_title := 'Concurrent 1', p_content := 'Test', p_idempotency_key := 'concurrent-test-1') AS res;`),
-      concurrentClient1.query(`SELECT public.create_verified_review(p_appointment_id := '${appointmentConcurrency}', p_rating := 4, p_title := 'Concurrent 2', p_content := 'Test', p_idempotency_key := 'concurrent-test-2') AS res;`)
+    // Concurrent same-key: exactly one creates the review, both succeed with identical review ID
+    const pSameKey = Promise.all([
+      concurrentClient1.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentConcurrencySame}',
+          p_rating := 5,
+          p_title := 'Concurrent same key 1',
+          p_content := 'Test',
+          p_idempotency_key := 'concurrency-same-key-token'
+        ) AS res;
+      `),
+      concurrentClient2.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentConcurrencySame}',
+          p_rating := 5,
+          p_title := 'Concurrent same key 2',
+          p_content := 'Test',
+          p_idempotency_key := 'concurrency-same-key-token'
+        ) AS res;
+      `)
     ]);
 
-    let [c1, c2] = await pConcurrent;
-    let successCount = [c1.rows[0].res.success, c2.rows[0].res.success].filter(s => s).length;
-    assert(successCount === 1, 'P7.7.1: Only one concurrent review succeeds');
+    const [resSame1, resSame2] = await pSameKey;
+    const sameOut1 = resSame1.rows[0].res;
+    const sameOut2 = resSame2.rows[0].res;
+    assert(sameOut1.success === true && sameOut2.success === true, 'P7.3.1: Concurrent same-key calls both return success');
+    assert(sameOut1.review_id === sameOut2.review_id, 'P7.3.2: Concurrent same-key calls return identical review_id');
+    const replayFlags = [sameOut1.idempotent_replay, sameOut2.idempotent_replay];
+    assert(replayFlags.includes(false) && replayFlags.includes(true), 'P7.3.3: One creates and one replays');
     concurrencyTestsExecuted++;
 
-    // 8. RLS AND PERMISSION BOUNDARIES
-    console.log('\\n--- 8. RLS AND PERMISSION BOUNDARIES ---');
-
-    await setAuth(mainClient, userCustomerA);
-    let directInsertFailed = false;
-    try { await mainClient.query(`INSERT INTO public.reviews (tenant_id, branch_id, appointment_id, customer_id, service_id, staff_id, rating, idempotency_key) VALUES ('${tenantA}', '${branchA1}', '${appointmentCompletedA2}', '55555555-1111-2222-3333-555555555555', '${serviceA}', '11111111-2222-3333-4444-111111111111', 5, 'direct-insert-test');`); } catch (e) { directInsertFailed = true; }
-    assert(directInsertFailed, 'P7.8.1: Direct INSERT on reviews denied');
-
-    let directUpdateFailed = false;
-    try { await mainClient.query(`UPDATE public.reviews SET rating = 1 WHERE id = '${reviewId1}';`); } catch (e) { directUpdateFailed = true; }
-    assert(directUpdateFailed, 'P7.8.2: Direct UPDATE on reviews denied');
-
-    let directDeleteFailed = false;
-    try { await mainClient.query(`DELETE FROM public.reviews WHERE id = '${reviewId1}';`); } catch (e) { directDeleteFailed = true; }
-    assert(directDeleteFailed, 'P7.8.3: Direct DELETE on reviews denied');
-
-    await setAuth(mainClient, null);
-    let r8d = await mainClient.query(`SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_limit := 10, p_offset := 0) AS res;`);
-    let res8d = r8d.rows[0].res;
-    assert(res8d.success === true, 'P7.8.4: Anon can call get_public_reviews');
-
-    let anonTenantReadFailed = false;
-    try { await mainClient.query(`SELECT public.get_tenant_reviews(p_limit := 10) AS res;`); } catch (e) { anonTenantReadFailed = true; }
-    assert(anonTenantReadFailed, 'P7.8.5: Anon cannot call get_tenant_reviews');
-
-    await setAuth(mainClient, userCustomerA);
-    let customerTenantReadFailed = false;
-    try { await mainClient.query(`SELECT public.get_tenant_reviews(p_limit := 10) AS res;`); } catch (e) { customerTenantReadFailed = true; }
-    assert(customerTenantReadFailed, 'P7.8.6: Customer cannot call get_tenant_reviews');
-// 9. AUDIT EVENTS
-    console.log('\\n--- 9. AUDIT EVENTS ---');
-    await setAuth(mainClient, userStaffA);
-
-    let auditCheck = await mainClient.query(`SELECT action, resource_type, resource_id, payload FROM public.audit_events WHERE resource_type = 'reviews' ORDER BY created_at DESC LIMIT 10;`);
-    let auditRows = auditCheck.rows;
-    let hasCreateEvent = auditRows.some(r => r.action === 'review_created');
-    let hasModerateEvent = auditRows.some(r => r.action === 'review_moderated');
-    assert(hasCreateEvent, 'P7.9.1: review_created audit event recorded');
-    assert(hasModerateEvent, 'P7.9.2: review_moderated audit event recorded');
-
-    // 10. EDGE CASES
-    console.log('\\n--- 10. EDGE CASES ---');
-
-    await setAuth(mainClient, userCustomerA2);
-    let r10a = await mainClient.query(`
-      SELECT public.create_verified_review(p_appointment_id := '${appointmentCompletedA2}', p_rating := 3, p_title := NULL, p_content := NULL, p_idempotency_key := 'review-test-10a') AS res;
+    // Verify internal state: exactly 1 review exists for this appointment
+    const countSame = await adminClient.query(`
+      SELECT count(*) AS cnt FROM public.reviews WHERE appointment_id = '${appointmentConcurrencySame}';
     `);
-    let res10a = r10a.rows[0].res;
-    assert(res10a.success === false && res10a.reason_code === 'duplicate_review', 'P7.10.1: NULL title/content handled (duplicate_review as expected)');
+    assert(parseInt(countSame.rows[0].cnt, 10) === 1, 'P7.3.4: Exactly 1 review inserted under concurrent same-key');
 
-    const appointmentEdge = '6b6b6b6b-1111-2222-3333-666666666666';
-    await setAuth(mainClient, userStaffA);
-    await mainClient.query(`
-      INSERT INTO public.appointments (id, tenant_id, branch_id, customer_id, service_id, staff_id, appointment_date, appointment_time, duration_minutes, status)
-      VALUES ('${appointmentEdge}', '${tenantA}', '${branchA1}', '55555555-1111-2222-3333-555555555555', '${serviceA}', '11111111-2222-3333-4444-111111111111', CURRENT_DATE - 2, '15:00', 30, 'completed')
-      ON CONFLICT (id) DO UPDATE SET status = 'completed';
+    // Concurrent different-key for one appointment: exactly one succeeds, one returns duplicate_review
+    const pDiffKey = Promise.all([
+      concurrentClient1.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentConcurrencyDiff}',
+          p_rating := 5,
+          p_title := 'Concurrent diff key 1',
+          p_content := 'Test',
+          p_idempotency_key := 'concurrency-diff-key-1'
+        ) AS res;
+      `),
+      concurrentClient2.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentConcurrencyDiff}',
+          p_rating := 4,
+          p_title := 'Concurrent diff key 2',
+          p_content := 'Test',
+          p_idempotency_key := 'concurrency-diff-key-2'
+        ) AS res;
+      `)
+    ]);
+
+    const [resDiff1, resDiff2] = await pDiffKey;
+    const diffOut1 = resDiff1.rows[0].res;
+    const diffOut2 = resDiff2.rows[0].res;
+    const diffSuccesses = [diffOut1.success, diffOut2.success].filter(Boolean).length;
+    const diffDuplicates = [diffOut1.reason_code, diffOut2.reason_code].filter(rc => rc === 'duplicate_review').length;
+    assert(diffSuccesses === 1, 'P7.3.5: Exactly one concurrent different-key call succeeds');
+    assert(diffDuplicates === 1, 'P7.3.6: The other concurrent call returns duplicate_review');
+    concurrencyTestsExecuted++;
+
+    const countDiff = await adminClient.query(`
+      SELECT count(*) AS cnt FROM public.reviews WHERE appointment_id = '${appointmentConcurrencyDiff}';
     `);
-    await setAuth(mainClient, userCustomerA);
-    let r10b = await mainClient.query(`
-      SELECT public.create_verified_review(p_appointment_id := '${appointmentEdge}', p_rating := 3, p_title := '   ', p_content := '   ', p_idempotency_key := 'review-test-10b') AS res;
+    assert(parseInt(countDiff.rows[0].cnt, 10) === 1, 'P7.3.7: Exactly 1 review inserted under concurrent different-key');
+
+    // -------------------------------------------------------------------------
+    // 4. MODERATION: STAFF & TENANT OWNER AUTHORITY (WITHOUT STAFF ROW)
+    // -------------------------------------------------------------------------
+    console.log('\n--- 4. MODERATION: STAFF & TENANT OWNER AUTHORITY ---');
+
+    // Staff A publishes review 1
+    await setActorAuth(actorClient, userStaffA);
+    let modPub = await actorClient.query(`
+      SELECT public.moderate_review(p_review_id := '${reviewId1}', p_action := 'publish') AS res;
     `);
-    let res10b = r10b.rows[0].res;
-    assert(res10b.success === true, 'P7.10.2: Empty string title/content becomes NULL');
+    assert(modPub.rows[0].res.success === true, 'P7.4.1: Staff can publish review in own tenant');
 
-    let r10bCheck = await mainClient.query(`SELECT title, content FROM public.reviews WHERE id = '${res10b.review_id}';`);
-    assert(r10bCheck.rows[0].title === null, 'P7.10.3: Title is NULL after trim');
-    assert(r10bCheck.rows[0].content === null, 'P7.10.4: Content is NULL after trim');
+    // Double publish returns already_published
+    let modDoublePub = await actorClient.query(`
+      SELECT public.moderate_review(p_review_id := '${reviewId1}', p_action := 'publish') AS res;
+    `);
+    assert(modDoublePub.rows[0].res.success === false && modDoublePub.rows[0].res.reason_code === 'already_published', 'P7.4.2: Double publish rejected');
 
-    console.log('\\n===============================================================');
-    console.log('LIVE POSTGRESQL VERIFIED REVIEWS BEHAVIORAL MATRIX: ' + testsPassed + '/' + testsExecuted + ' TESTS PASSED | ' + testsFailed + ' FAILURES');
-    console.log('CONCURRENCY TESTS: ' + concurrencyTestsExecuted);
-    console.log('CROSS-TENANT NEGATIVE TESTS: ' + crossTenantNegativeTestsExecuted);
-    console.log('===============================================================\\n');
+    // Tenant Owner (userOwnerA - has NO staff row) publishes review 2 and responds
+    await setActorAuth(actorClient, userOwnerA);
+    let ownerPub = await actorClient.query(`
+      SELECT public.moderate_review(p_review_id := '${reviewId2}', p_action := 'publish') AS res;
+    `);
+    assert(ownerPub.rows[0].res.success === true, 'P7.4.3: Tenant owner without staff entity can moderate review');
+
+    let ownerRespond = await actorClient.query(`
+      SELECT public.moderate_review(
+        p_review_id := '${reviewId2}',
+        p_action := 'respond',
+        p_response_text := 'Thank you from the Owner!'
+      ) AS res;
+    `);
+    assert(ownerRespond.rows[0].res.success === true, 'P7.4.4: Tenant owner can submit moderation response');
+
+    // Verify internal state using adminClient
+    let checkOwnerMod = await adminClient.query(`
+      SELECT response_text, responded_by, responded_by_user_id
+      FROM public.reviews WHERE id = '${reviewId2}';
+    `);
+    assert(checkOwnerMod.rows[0].response_text === 'Thank you from the Owner!', 'P7.4.5: Response text recorded accurately');
+    assert(checkOwnerMod.rows[0].responded_by === null, 'P7.4.6: responded_by staff FK is NULL for owner without staff row');
+    assert(checkOwnerMod.rows[0].responded_by_user_id === userOwnerA, 'P7.4.7: responded_by_user_id stores owner users_profile UUID');
+
+    // Empty moderation response is rejected
+    let emptyRespCaught = false;
+    try {
+      await actorClient.query(`
+        SELECT public.moderate_review(
+          p_review_id := '${reviewId1}',
+          p_action := 'respond',
+          p_response_text := '   '
+        );
+      `);
+    } catch (err) {
+      emptyRespCaught = err.message.includes('Response text is required');
+    }
+    assert(emptyRespCaught, 'P7.4.8: Empty moderation response text raises INVALID_ARGUMENT');
+
+    // Moderation response > 4000 characters rejected
+    let longRespCaught = false;
+    try {
+      await actorClient.query(`
+        SELECT public.moderate_review(
+          p_review_id := '${reviewId1}',
+          p_action := 'respond',
+          p_response_text := '${'R'.repeat(4001)}'
+        );
+      `);
+    } catch (err) {
+      longRespCaught = err.message.includes('Response text exceeds maximum length of 4000 characters');
+    }
+    assert(longRespCaught, 'P7.4.9: Moderation response > 4000 chars raises INVALID_ARGUMENT');
+
+    // Invalid action rejected
+    let invalidActionCaught = false;
+    try {
+      await actorClient.query(`
+        SELECT public.moderate_review(p_review_id := '${reviewId1}', p_action := 'delete_review');
+      `);
+    } catch (err) {
+      invalidActionCaught = err.message.includes('INVALID_ARGUMENT');
+    }
+    assert(invalidActionCaught, 'P7.4.10: Invalid moderation action raises INVALID_ARGUMENT');
+
+    // Cross-tenant moderation rejected
+    await setActorAuth(actorClient, userStaffB);
+    let crossTenantModCaught = false;
+    try {
+      await actorClient.query(`
+        SELECT public.moderate_review(p_review_id := '${reviewId1}', p_action := 'publish');
+      `);
+    } catch (err) {
+      crossTenantModCaught = err.message.includes('CROSS_TENANT_VIOLATION');
+      crossTenantNegativeTestsExecuted++;
+    }
+    assert(crossTenantModCaught, 'P7.4.11: Cross-tenant moderation raises CROSS_TENANT_VIOLATION');
+
+    // Also publish Tenant B review for isolation testing
+    await actorClient.query(`
+      SELECT public.moderate_review(p_review_id := '${reviewId3}', p_action := 'publish');
+    `);
+
+    // -------------------------------------------------------------------------
+    // 5. PUBLIC & TENANT PAGINATION & AGGREGATE COUNTS
+    // -------------------------------------------------------------------------
+    console.log('\n--- 5. PAGINATION & GLOBAL AGGREGATES ---');
+
+    // Seed 2 more published reviews in Tenant A for multi-page verification
+    await adminClient.query(`
+      INSERT INTO public.reviews (
+        id, tenant_id, branch_id, appointment_id, customer_id, service_id, staff_id,
+        rating, title, content, is_published, published_at, idempotency_key
+      ) VALUES
+        (gen_random_uuid(), '${tenantA}', '${branchA1}', '${appointmentPageA3}', '${customerA1}', '${serviceA}', '${staffEntityA}', 5, 'Page Review 3', 'Great 3', true, now(), 'page-review-3'),
+        (gen_random_uuid(), '${tenantA}', '${branchA1}', '${appointmentPageA4}', '${customerA2}', '${serviceA}', '${staffEntityA}', 4, 'Page Review 4', 'Great 4', true, now(), 'page-review-4')
+      ON CONFLICT DO NOTHING;
+    `);
+
+    // Now Tenant A has 4 published reviews (two rating 5, two rating 4)
+    // Page 1: limit 2, offset 0
+    let pubPage1 = await anonClient.query(`
+      SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_limit := 2, p_offset := 0) AS res;
+    `);
+    let p1Data = pubPage1.rows[0].res;
+    assert(p1Data.success === true, 'P7.5.1: Public read page 1 succeeds');
+    assert(p1Data.reviews.length === 2, 'P7.5.2: Page 1 returns exactly 2 items');
+    assert(p1Data.aggregate.total_count === 4, 'P7.5.3: Global aggregate total_count is 4 on page 1');
+    assert(Number(p1Data.aggregate.average_rating) === 4.5, 'P7.5.4: Global aggregate average_rating is 4.5');
+
+    // Page 2: limit 2, offset 2
+    let pubPage2 = await anonClient.query(`
+      SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_limit := 2, p_offset := 2) AS res;
+    `);
+    let p2Data = pubPage2.rows[0].res;
+    assert(p2Data.success === true, 'P7.5.5: Public read page 2 succeeds');
+    assert(p2Data.reviews.length === 2, 'P7.5.6: Page 2 returns exactly 2 items');
+    assert(p2Data.aggregate.total_count === 4, 'P7.5.7: Global aggregate total_count remains 4 on page 2');
+
+    // Ensure items between page 1 and page 2 are distinct (deterministic paging)
+    const page1Ids = p1Data.reviews.map(r => r.id);
+    const page2Ids = p2Data.reviews.map(r => r.id);
+    const idOverlap = page1Ids.filter(id => page2Ids.includes(id));
+    assert(idOverlap.length === 0, 'P7.5.8: Page 1 and Page 2 reviews are completely disjoint');
+
+    // Bounds validation on get_public_reviews
+    let pubLimitInvalid = false;
+    try {
+      await anonClient.query(`SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_limit := 101);`);
+    } catch (err) {
+      pubLimitInvalid = err.message.includes('p_limit must be between 1 and 100');
+    }
+    assert(pubLimitInvalid, 'P7.5.9: p_limit > 100 raises INVALID_ARGUMENT');
+
+    let pubOffsetInvalid = false;
+    try {
+      await anonClient.query(`SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_offset := -1);`);
+    } catch (err) {
+      pubOffsetInvalid = err.message.includes('p_offset must be greater than or equal to 0');
+    }
+    assert(pubOffsetInvalid, 'P7.5.10: p_offset < 0 raises INVALID_ARGUMENT');
+
+    let pubRatingInvalid = false;
+    try {
+      await anonClient.query(`SELECT public.get_public_reviews(p_tenant_slug := 'tenant-a', p_min_rating := 6);`);
+    } catch (err) {
+      pubRatingInvalid = err.message.includes('p_min_rating must be between 1 and 5');
+    }
+    assert(pubRatingInvalid, 'P7.5.11: p_min_rating > 5 raises INVALID_ARGUMENT');
+
+    // Tenant Reviews read pagination
+    await setActorAuth(actorClient, userStaffA);
+    let tenPage = await actorClient.query(`
+      SELECT public.get_tenant_reviews(p_limit := 2, p_offset := 0) AS res;
+    `);
+    let tenData = tenPage.rows[0].res;
+    assert(tenData.success === true, 'P7.5.12: get_tenant_reviews succeeds');
+    assert(tenData.reviews.length === 2, 'P7.5.13: Tenant reviews respects limit');
+    assert(tenData.aggregate.total_count >= 4, 'P7.5.14: Tenant aggregate total_count spans complete filtered set');
+
+    // -------------------------------------------------------------------------
+    // 6. RLS & PERMISSION TRUST BOUNDARIES
+    // -------------------------------------------------------------------------
+    console.log('\n--- 6. TRUST BOUNDARIES & RLS RESTRICTIONS ---');
+
+    // Direct table DML is completely denied for authenticated actors
+    await setActorAuth(actorClient, userCustomerA);
+
+    let directInsertDenied = false;
+    try {
+      await actorClient.query(`
+        INSERT INTO public.reviews (tenant_id, branch_id, appointment_id, customer_id, service_id, staff_id, rating, idempotency_key)
+        VALUES ('${tenantA}', '${branchA1}', '${appointmentCompletedA1}', '${customerA1}', '${serviceA}', '${staffEntityA}', 5, 'direct-tamper');
+      `);
+    } catch (err) {
+      directInsertDenied = err.message.includes('permission denied');
+    }
+    assert(directInsertDenied, 'P7.6.1: Direct INSERT on reviews denied to authenticated');
+
+    let directUpdateDenied = false;
+    try {
+      await actorClient.query(`UPDATE public.reviews SET rating = 1 WHERE id = '${reviewId1}';`);
+    } catch (err) {
+      directUpdateDenied = err.message.includes('permission denied');
+    }
+    assert(directUpdateDenied, 'P7.6.2: Direct UPDATE on reviews denied to authenticated');
+
+    let directDeleteDenied = false;
+    try {
+      await actorClient.query(`DELETE FROM public.reviews WHERE id = '${reviewId1}';`);
+    } catch (err) {
+      directDeleteDenied = err.message.includes('permission denied');
+    }
+    assert(directDeleteDenied, 'P7.6.3: Direct DELETE on reviews denied to authenticated');
+
+    // Direct table SELECT denied for anon on reviews table directly
+    let anonDirectSelectDenied = false;
+    try {
+      await anonClient.query(`SELECT * FROM public.reviews;`);
+    } catch (err) {
+      anonDirectSelectDenied = err.message.includes('permission denied');
+    }
+    assert(anonDirectSelectDenied, 'P7.6.4: Direct SELECT on reviews denied to anon (must use RPC)');
+
+    // Anon tenant-read denial
+    let anonTenantReadDenied = false;
+    try {
+      await anonClient.query(`SELECT public.get_tenant_reviews();`);
+    } catch (err) {
+      anonTenantReadDenied = err.message.includes('permission denied') || err.message.includes('UNAUTHENTICATED');
+    }
+    assert(anonTenantReadDenied, 'P7.6.5: Anon cannot invoke get_tenant_reviews');
+
+    // Customer tenant-read denial
+    let customerTenantReadDenied = false;
+    try {
+      await actorClient.query(`SELECT public.get_tenant_reviews();`);
+    } catch (err) {
+      customerTenantReadDenied = err.message.includes('FORBIDDEN');
+    }
+    assert(customerTenantReadDenied, 'P7.6.6: Customer role cannot invoke get_tenant_reviews');
+
+    // -------------------------------------------------------------------------
+    // 7. AUDIT LOG VERIFICATION (CANONICAL COLUMNS)
+    // -------------------------------------------------------------------------
+    console.log('\n--- 7. AUDIT TRAIL VERIFICATION ---');
+
+    const auditCheck = await adminClient.query(`
+      SELECT tenant_id, actor_id, actor_role, action, resource_type, resource_id, payload
+      FROM public.audit_events
+      WHERE resource_type = 'reviews'
+      ORDER BY created_at DESC
+      LIMIT 20;
+    `);
+
+    assert(auditCheck.rows.length >= 2, 'P7.7.1: Audit events recorded for review operations');
+    const actions = auditCheck.rows.map(r => r.action);
+    assert(actions.includes('review_created'), 'P7.7.2: review_created audit event exists');
+    assert(actions.includes('review_moderated'), 'P7.7.3: review_moderated audit event exists');
+
+    console.log('\n===============================================================');
+    console.log(`LIVE POSTGRESQL VERIFIED REVIEWS BEHAVIORAL MATRIX: ${testsPassed}/${testsExecuted} TESTS PASSED | ${testsFailed} FAILURES`);
+    console.log(`CONCURRENCY TESTS: ${concurrencyTestsExecuted}`);
+    console.log(`CROSS-TENANT NEGATIVE TESTS: ${crossTenantNegativeTestsExecuted}`);
+    console.log('===============================================================\n');
 
     console.log('LIVE_BEHAVIORAL_TESTS_EXECUTED=' + testsExecuted);
     console.log('LIVE_BEHAVIORAL_TESTS_PASSED=' + testsPassed);
@@ -502,7 +778,9 @@ let r6g = await mainClient.query(`SELECT public.moderate_review(p_review_id := '
     console.log('CROSS_TENANT_NEGATIVE_TESTS_EXECUTED=' + crossTenantNegativeTestsExecuted);
 
   } finally {
-    await mainClient.end();
+    await adminClient.end();
+    await actorClient.end();
+    await anonClient.end();
     await concurrentClient1.end();
     await concurrentClient2.end();
   }
