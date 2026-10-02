@@ -490,8 +490,8 @@ async function run() {
         SELECT public.create_verified_review(
           p_appointment_id := '${appointmentConcurrencySame}',
           p_rating := 5,
-          p_title := 'Concurrent same key 1',
-          p_content := 'Test',
+          p_title := 'Concurrent same key',
+          p_content := 'Same exact concurrent request',
           p_idempotency_key := 'concurrency-same-key-token'
         ) AS res;
       `),
@@ -499,8 +499,8 @@ async function run() {
         SELECT public.create_verified_review(
           p_appointment_id := '${appointmentConcurrencySame}',
           p_rating := 5,
-          p_title := 'Concurrent same key 2',
-          p_content := 'Test',
+          p_title := 'Concurrent same key',
+          p_content := 'Same exact concurrent request',
           p_idempotency_key := 'concurrency-same-key-token'
         ) AS res;
       `)
