@@ -223,6 +223,20 @@ jobs:
             ORDER BY conname;
           "
 
+          echo "=== VERIFYING PHASE 7 NODE 1 TABLES EXISTENCE ==="
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -c "
+            DO \$\$
+            BEGIN
+              IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'reviews') THEN
+                RAISE EXCEPTION 'Table public.reviews does not exist';
+              END IF;
+              IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'review_idempotency_keys') THEN
+                RAISE EXCEPTION 'Table public.review_idempotency_keys does not exist';
+              END IF;
+            END;
+            \$\$;
+          "
+
       - name: Execute Live PostgreSQL Behavioral Acceptance Matrix
         run: |
           set -o pipefail

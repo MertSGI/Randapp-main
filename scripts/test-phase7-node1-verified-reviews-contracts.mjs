@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 
 const migrationPath = path.resolve('supabase/migrations/20261004_phase7_node1_verified_reviews_foundation.sql');
+const workflowPath = path.resolve('.github/workflows/lari-phase5-postgres-acceptance.yml');
 
 console.log('===============================================================');
 console.log('STARTING PHASE 7 NODE 1 STATIC CONTRACT VERIFICATION');
@@ -18,6 +19,7 @@ if (!fs.existsSync(migrationPath)) {
 }
 
 const sql = fs.readFileSync(migrationPath, 'utf8');
+const workflowYaml = fs.existsSync(workflowPath) ? fs.readFileSync(workflowPath, 'utf8') : '';
 
 let testsExecuted = 0;
 let testsPassed = 0;
@@ -62,7 +64,7 @@ assertContract(
 );
 
 assertContract(
-  '3. public.reviews rating column bounded between 1 and 5',
+  '3. public.reviews rating column bounded between 1 and 5 (SMALLINT internally)',
   () => sql.includes('rating              SMALLINT NOT NULL CHECK (rating >= 1 AND rating <= 5)')
 );
 
@@ -144,31 +146,43 @@ assertContract(
 // 3. create_verified_review Contracts
 // -----------------------------------------------------------------------------
 assertContract(
-  '14. create_verified_review signature has legal default for p_idempotency_key (TEXT DEFAULT NULL)',
-  () => /CREATE OR REPLACE FUNCTION public\.create_verified_review\(\s*p_appointment_id\s+UUID,\s*p_rating\s+SMALLINT,\s*p_title\s+TEXT DEFAULT NULL,\s*p_content\s+TEXT DEFAULT NULL,\s*p_idempotency_key\s+TEXT DEFAULT NULL\s*\)/.test(sql)
+  '14. create_verified_review signature uses INTEGER for p_rating and legal default for p_idempotency_key',
+  () => /CREATE OR REPLACE FUNCTION public\.create_verified_review\(\s*p_appointment_id\s+UUID,\s*p_rating\s+INTEGER,\s*p_title\s+TEXT DEFAULT NULL,\s*p_content\s+TEXT DEFAULT NULL,\s*p_idempotency_key\s+TEXT DEFAULT NULL\s*\)/.test(sql)
 );
 
 assertContract(
-  '15. create_verified_review validates non-null, non-blank, max 200 char idempotency key',
+  '15. create_verified_review exact REVOKE and GRANT use (UUID, INTEGER, TEXT, TEXT, TEXT)',
+  () => sql.includes('REVOKE ALL ON FUNCTION public.create_verified_review(UUID, INTEGER, TEXT, TEXT, TEXT) FROM PUBLIC, anon;') &&
+        sql.includes('GRANT EXECUTE ON FUNCTION public.create_verified_review(UUID, INTEGER, TEXT, TEXT, TEXT) TO authenticated;')
+);
+
+assertContract(
+  '16. create_verified_review safely casts rating::smallint for storage',
+  () => sql.includes('p_rating::smallint')
+);
+
+assertContract(
+  '17. create_verified_review validates non-null, non-blank, max 200 char idempotency key',
   () => sql.includes("p_idempotency_key IS NULL OR trim(p_idempotency_key) = ''") &&
         sql.includes('idempotency_key is required') &&
         sql.includes('length(v_idempotency_clean) > 200')
 );
 
 assertContract(
-  '16. create_verified_review bounds p_title <= 160 and p_content <= 4000',
+  '18. create_verified_review bounds p_title <= 160 and p_content <= 4000',
   () => sql.includes('length(v_title_clean) > 160') &&
         sql.includes('length(v_content_clean) > 4000')
 );
 
 assertContract(
-  '17. create_verified_review binds customer identity deterministically to appointment tenant',
-  () => sql.includes('c.user_profile_id = v_caller_uid') &&
-        sql.includes('c.tenant_id = v_appointment.tenant_id')
+  '19. create_verified_review binds customer identity using appointment customer_id, tenant_id, and caller uid',
+  () => sql.includes('c.id = v_appointment.customer_id') &&
+        sql.includes('c.tenant_id = v_appointment.tenant_id') &&
+        sql.includes('c.user_profile_id = v_caller_uid')
 );
 
 assertContract(
-  '18. create_verified_review acquires per-appointment advisory lock before replay/duplicate decisions',
+  '20. create_verified_review acquires per-appointment advisory lock before replay/duplicate decisions',
   () => {
     const lockIdx = sql.indexOf("pg_advisory_xact_lock(hashtext('review:' || p_appointment_id::text))");
     const replayIdx = sql.indexOf('SELECT 1 FROM public.review_idempotency_keys');
@@ -178,18 +192,22 @@ assertContract(
 );
 
 assertContract(
-  '19. create_verified_review handles same-key replay with idempotent_replay=true',
-  () => sql.includes("'idempotent_replay', true") &&
-        sql.includes("'review_id', v_review_id")
+  '21. create_verified_review enforces payload equality on replay and raises IDEMPOTENCY_CONFLICT on mismatch',
+  () => sql.includes('IDEMPOTENCY_CONFLICT: Idempotency key reused with different request payload') &&
+        sql.includes('v_existing_review.appointment_id = p_appointment_id') &&
+        sql.includes('v_existing_review.customer_id = v_customer.id') &&
+        sql.includes('v_existing_review.rating = p_rating') &&
+        sql.includes('(v_existing_review.title IS NOT DISTINCT FROM v_title_clean)') &&
+        sql.includes('(v_existing_review.content IS NOT DISTINCT FROM v_content_clean)')
 );
 
 assertContract(
-  '20. create_verified_review handles same-appointment/customer duplicate with duplicate_review',
+  '22. create_verified_review handles same-appointment/customer duplicate with duplicate_review',
   () => sql.includes("'reason_code', 'duplicate_review'")
 );
 
 assertContract(
-  '21. create_verified_review preserves completed-appointment eligibility gate',
+  '23. create_verified_review preserves completed-appointment eligibility gate',
   () => sql.includes("v_appointment.status <> 'completed'") &&
         sql.includes("'reason_code', 'appointment_not_completed'")
 );
@@ -198,22 +216,29 @@ assertContract(
 // 4. get_public_reviews Contracts
 // -----------------------------------------------------------------------------
 assertContract(
-  '22. get_public_reviews validates bounds for p_limit (1..100), p_offset (>=0), p_min_rating (1..5)',
+  '24. get_public_reviews signature uses INTEGER for p_min_rating',
+  () => /CREATE OR REPLACE FUNCTION public\.get_public_reviews\(\s*p_tenant_slug\s+TEXT,\s*p_branch_id\s+UUID DEFAULT NULL,\s*p_service_id\s+UUID DEFAULT NULL,\s*p_staff_id\s+UUID DEFAULT NULL,\s*p_min_rating\s+INTEGER DEFAULT NULL/.test(sql) &&
+        sql.includes('REVOKE ALL ON FUNCTION public.get_public_reviews(TEXT, UUID, UUID, UUID, INTEGER, INTEGER, INTEGER)') &&
+        sql.includes('GRANT EXECUTE ON FUNCTION public.get_public_reviews(TEXT, UUID, UUID, UUID, INTEGER, INTEGER, INTEGER)')
+);
+
+assertContract(
+  '25. get_public_reviews validates bounds for p_limit (1..100), p_offset (>=0), p_min_rating (1..5)',
   () => sql.includes('p_limit < 1 OR p_limit > 100') &&
         sql.includes('p_offset < 0') &&
         sql.includes('p_min_rating < 1 OR p_min_rating > 5')
 );
 
 assertContract(
-  '23. get_public_reviews applies ORDER BY + LIMIT/OFFSET in subquery/CTE before json aggregation',
+  '26. get_public_reviews applies ORDER BY + LIMIT/OFFSET in subquery/CTE before json aggregation and orders jsonb_agg',
   () => sql.includes('WITH paged_reviews AS (') &&
         sql.includes('ORDER BY r.created_at DESC, r.id DESC') &&
         sql.includes('LIMIT p_limit OFFSET p_offset') &&
-        sql.includes('FROM paged_reviews pr')
+        sql.includes('ORDER BY pr.created_at DESC, pr.id DESC')
 );
 
 assertContract(
-  '24. get_public_reviews aggregate statistics calculate totals over complete filtered result',
+  '27. get_public_reviews aggregate statistics calculate totals over complete filtered result',
   () => {
     const subqueryLimitIdx = sql.indexOf('LIMIT p_limit OFFSET p_offset');
     const aggIdx = sql.indexOf('-- Aggregate statistics over complete filtered set (unaffected by LIMIT / OFFSET)');
@@ -225,13 +250,20 @@ assertContract(
 // 5. get_tenant_reviews Contracts
 // -----------------------------------------------------------------------------
 assertContract(
-  '25. get_tenant_reviews validates bounds for p_limit (1..100), p_offset (>=0), p_min_rating (1..5)',
+  '28. get_tenant_reviews signature uses INTEGER for p_min_rating',
+  () => /CREATE OR REPLACE FUNCTION public\.get_tenant_reviews\(\s*p_branch_id\s+UUID DEFAULT NULL,\s*p_service_id\s+UUID DEFAULT NULL,\s*p_staff_id\s+UUID DEFAULT NULL,\s*p_customer_id\s+UUID DEFAULT NULL,\s*p_is_published\s+BOOLEAN DEFAULT NULL,\s*p_min_rating\s+INTEGER DEFAULT NULL/.test(sql) &&
+        sql.includes('REVOKE ALL ON FUNCTION public.get_tenant_reviews(UUID, UUID, UUID, UUID, BOOLEAN, INTEGER, INTEGER, INTEGER)') &&
+        sql.includes('GRANT EXECUTE ON FUNCTION public.get_tenant_reviews(UUID, UUID, UUID, UUID, BOOLEAN, INTEGER, INTEGER, INTEGER)')
+);
+
+assertContract(
+  '29. get_tenant_reviews validates bounds for p_limit (1..100), p_offset (>=0), p_min_rating (1..5)',
   () => sql.includes('p_limit < 1 OR p_limit > 100') &&
         sql.includes('p_offset < 0')
 );
 
 assertContract(
-  '26. get_tenant_reviews resolves authority deterministically from users_profile without unqualified LIMIT 1',
+  '30. get_tenant_reviews resolves authority deterministically from users_profile without unqualified LIMIT 1',
   () => sql.includes('FROM public.users_profile up') &&
         sql.includes('up.id = v_caller_uid') &&
         sql.includes('up.active = true') &&
@@ -239,14 +271,15 @@ assertContract(
 );
 
 assertContract(
-  '27. get_tenant_reviews supports tenant_owner without staff entity',
+  '31. get_tenant_reviews supports tenant_owner without staff entity',
   () => sql.includes("v_up.role = 'tenant_owner'") &&
         sql.includes('Owner has direct tenant authority without requiring a staff entity')
 );
 
 assertContract(
-  '28. get_tenant_reviews uses subquery/CTE pagination before json aggregation',
+  '32. get_tenant_reviews uses subquery/CTE pagination and orders jsonb_agg',
   () => sql.includes('WITH paged_reviews AS (') &&
+        sql.includes('ORDER BY pr.created_at DESC, pr.id DESC') &&
         sql.includes('r.responded_by_user_id')
 );
 
@@ -254,21 +287,30 @@ assertContract(
 // 6. moderate_review Contracts
 // -----------------------------------------------------------------------------
 assertContract(
-  '29. moderate_review resolves authority from users_profile and preserves tenant fail-closed semantics',
+  '33. moderate_review resolves authority from users_profile and preserves tenant fail-closed semantics',
   () => sql.includes('v_review.tenant_id <> v_tenant_id') &&
         sql.includes('CROSS_TENANT_VIOLATION')
 );
 
 assertContract(
-  '30. moderate_review supports tenant owner moderation without staff foreign key constraint violation',
+  '34. moderate_review supports tenant owner moderation without staff foreign key constraint violation',
   () => sql.includes('responded_by_user_id = v_caller_uid') &&
         sql.includes('responded_by = v_staff_id')
 );
 
 assertContract(
-  '31. moderate_review validates response_text bounds (required and max 4000 chars)',
+  '35. moderate_review validates response_text bounds (required and max 4000 chars)',
   () => sql.includes("p_response_text IS NULL OR trim(p_response_text) = ''") &&
         sql.includes('length(v_response_clean) > 4000')
+);
+
+// -----------------------------------------------------------------------------
+// 7. CI Workflow Introspection Verification
+// -----------------------------------------------------------------------------
+assertContract(
+  '36. Workflow inspects public.reviews and public.review_idempotency_keys tables',
+  () => workflowYaml.includes("table_name = 'reviews'") &&
+        workflowYaml.includes("table_name = 'review_idempotency_keys'")
 );
 
 // -----------------------------------------------------------------------------

@@ -243,6 +243,57 @@ async function run() {
     assert(res1Replay.idempotent_replay === true, 'P7.1.7: Replay returns idempotent_replay = true');
     assert(res1Replay.review_id === reviewId1, 'P7.1.8: Replay returns original review_id');
 
+    // Same idempotency key with modified rating -> IDEMPOTENCY_CONFLICT
+    let conflictRatingCaught = false;
+    try {
+      await actorClient.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentCompletedA1}',
+          p_rating := 4,
+          p_title := 'Excellent service',
+          p_content := 'Very professional.',
+          p_idempotency_key := 'review-test-key-1'
+        );
+      `);
+    } catch (err) {
+      conflictRatingCaught = err.message.includes('IDEMPOTENCY_CONFLICT');
+    }
+    assert(conflictRatingCaught, 'P7.1.9: Same key with changed rating raises IDEMPOTENCY_CONFLICT');
+
+    // Same idempotency key with modified title -> IDEMPOTENCY_CONFLICT
+    let conflictTitleCaught = false;
+    try {
+      await actorClient.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentCompletedA1}',
+          p_rating := 5,
+          p_title := 'Changed title',
+          p_content := 'Very professional.',
+          p_idempotency_key := 'review-test-key-1'
+        );
+      `);
+    } catch (err) {
+      conflictTitleCaught = err.message.includes('IDEMPOTENCY_CONFLICT');
+    }
+    assert(conflictTitleCaught, 'P7.1.10: Same key with changed title raises IDEMPOTENCY_CONFLICT');
+
+    // Same idempotency key with modified content -> IDEMPOTENCY_CONFLICT
+    let conflictContentCaught = false;
+    try {
+      await actorClient.query(`
+        SELECT public.create_verified_review(
+          p_appointment_id := '${appointmentCompletedA1}',
+          p_rating := 5,
+          p_title := 'Excellent service',
+          p_content := 'Changed content text',
+          p_idempotency_key := 'review-test-key-1'
+        );
+      `);
+    } catch (err) {
+      conflictContentCaught = err.message.includes('IDEMPOTENCY_CONFLICT');
+    }
+    assert(conflictContentCaught, 'P7.1.11: Same key with changed content raises IDEMPOTENCY_CONFLICT');
+
     // Same appointment + different idempotency key -> duplicate_review
     let r1Dup = await actorClient.query(`
       SELECT public.create_verified_review(
@@ -254,8 +305,8 @@ async function run() {
       ) AS res;
     `);
     let res1Dup = r1Dup.rows[0].res;
-    assert(res1Dup.success === false, 'P7.1.9: Different key for same appointment fails');
-    assert(res1Dup.reason_code === 'duplicate_review', 'P7.1.10: Duplicate returns duplicate_review reason code');
+    assert(res1Dup.success === false, 'P7.1.12: Different key for same appointment fails');
+    assert(res1Dup.reason_code === 'duplicate_review', 'P7.1.13: Duplicate returns duplicate_review reason code');
 
     // -------------------------------------------------------------------------
     // 2. CREATE VERIFIED REVIEW - BOUNDED INPUTS & EXPECTED ERROR GATES
@@ -720,6 +771,15 @@ async function run() {
     }
     assert(directDeleteDenied, 'P7.6.3: Direct DELETE on reviews denied to authenticated');
 
+    // Direct table SELECT denied for authenticated on reviews table directly
+    let authDirectSelectDenied = false;
+    try {
+      await actorClient.query(`SELECT * FROM public.reviews;`);
+    } catch (err) {
+      authDirectSelectDenied = err.message.includes('permission denied');
+    }
+    assert(authDirectSelectDenied, 'P7.6.4: Direct SELECT on reviews denied to authenticated (must use RPC)');
+
     // Direct table SELECT denied for anon on reviews table directly
     let anonDirectSelectDenied = false;
     try {
@@ -727,7 +787,7 @@ async function run() {
     } catch (err) {
       anonDirectSelectDenied = err.message.includes('permission denied');
     }
-    assert(anonDirectSelectDenied, 'P7.6.4: Direct SELECT on reviews denied to anon (must use RPC)');
+    assert(anonDirectSelectDenied, 'P7.6.5: Direct SELECT on reviews denied to anon (must use RPC)');
 
     // Anon tenant-read denial
     let anonTenantReadDenied = false;

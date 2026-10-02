@@ -141,7 +141,7 @@ REVOKE ALL ON public.review_idempotency_keys FROM PUBLIC, anon, authenticated;
 
 CREATE OR REPLACE FUNCTION public.create_verified_review(
     p_appointment_id      UUID,
-    p_rating              SMALLINT,
+    p_rating              INTEGER,
     p_title               TEXT DEFAULT NULL,
     p_content             TEXT DEFAULT NULL,
     p_idempotency_key     TEXT DEFAULT NULL
@@ -155,6 +155,7 @@ DECLARE
     v_caller_uid          UUID := auth.uid();
     v_customer            RECORD;
     v_appointment         RECORD;
+    v_existing_review     RECORD;
     v_review_id           UUID;
     v_idempotency_clean   TEXT;
     v_title_clean         TEXT;
@@ -203,11 +204,12 @@ BEGIN
         RAISE EXCEPTION 'NOT_FOUND: Appointment not found.';
     END IF;
 
-    -- Derive caller customer identity deterministically bound to appointment's tenant
+    -- Derive caller customer identity deterministically bound to appointment's customer, tenant, and caller uid
     SELECT c.* INTO v_customer
     FROM public.customers c
-    WHERE c.user_profile_id = v_caller_uid
-      AND c.tenant_id = v_appointment.tenant_id;
+    WHERE c.id = v_appointment.customer_id
+      AND c.tenant_id = v_appointment.tenant_id
+      AND c.user_profile_id = v_caller_uid;
 
     IF v_customer.id IS NULL THEN
         RAISE EXCEPTION 'FORBIDDEN: Caller has no customer profile in this tenant.';
@@ -236,24 +238,33 @@ BEGIN
     -- Advisory lock to serialize review creation per appointment BEFORE replay / duplicate check
     PERFORM pg_advisory_xact_lock(hashtext('review:' || p_appointment_id::text));
 
-    -- Check idempotency key first: same tenant + same idempotency key returns original review with idempotent_replay=true
+    -- Check idempotency key first: same tenant + same idempotency key
     IF EXISTS (
         SELECT 1 FROM public.review_idempotency_keys
         WHERE tenant_id = v_customer.tenant_id
           AND idempotency_key = v_idempotency_clean
     ) THEN
-        SELECT r.id INTO v_review_id
+        SELECT r.* INTO v_existing_review
         FROM public.reviews r
         JOIN public.review_idempotency_keys k ON k.review_id = r.id
         WHERE k.tenant_id = v_customer.tenant_id
           AND k.idempotency_key = v_idempotency_clean;
 
-        RETURN jsonb_build_object(
-            'success', true,
-            'idempotent_replay', true,
-            'review_id', v_review_id,
-            'reason_code', 'ok'
-        );
+        -- Verify logical payload equality
+        IF v_existing_review.appointment_id = p_appointment_id
+           AND v_existing_review.customer_id = v_customer.id
+           AND v_existing_review.rating = p_rating
+           AND (v_existing_review.title IS NOT DISTINCT FROM v_title_clean)
+           AND (v_existing_review.content IS NOT DISTINCT FROM v_content_clean) THEN
+            RETURN jsonb_build_object(
+                'success', true,
+                'idempotent_replay', true,
+                'review_id', v_existing_review.id,
+                'reason_code', 'ok'
+            );
+        ELSE
+            RAISE EXCEPTION 'IDEMPOTENCY_CONFLICT: Idempotency key reused with different request payload.';
+        END IF;
     END IF;
 
     -- Check duplicate review: same appointment/customer + different key returns duplicate_review
@@ -290,7 +301,7 @@ BEGIN
         v_customer.id,
         v_appointment.service_id,
         v_appointment.staff_id,
-        p_rating,
+        p_rating::smallint,
         v_title_clean,
         v_content_clean,
         false,  -- published after moderation
@@ -351,8 +362,8 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.create_verified_review(UUID, SMALLINT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.create_verified_review(UUID, SMALLINT, TEXT, TEXT, TEXT) TO authenticated;
+REVOKE ALL ON FUNCTION public.create_verified_review(UUID, INTEGER, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.create_verified_review(UUID, INTEGER, TEXT, TEXT, TEXT) TO authenticated;
 
 -- =========================================================================
 -- 4. RPC: public.get_public_reviews (Public read contract - published only)
@@ -363,7 +374,7 @@ CREATE OR REPLACE FUNCTION public.get_public_reviews(
     p_branch_id           UUID DEFAULT NULL,
     p_service_id          UUID DEFAULT NULL,
     p_staff_id            UUID DEFAULT NULL,
-    p_min_rating          SMALLINT DEFAULT NULL,
+    p_min_rating          INTEGER DEFAULT NULL,
     p_limit               INTEGER DEFAULT 20,
     p_offset              INTEGER DEFAULT 0
 )
@@ -464,6 +475,7 @@ BEGIN
             'content', pr.content,
             'created_at', pr.created_at
         )
+        ORDER BY pr.created_at DESC, pr.id DESC
     ), '[]'::jsonb)
     INTO v_reviews
     FROM paged_reviews pr;
@@ -497,8 +509,8 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.get_public_reviews(TEXT, UUID, UUID, UUID, SMALLINT, INTEGER, INTEGER) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.get_public_reviews(TEXT, UUID, UUID, UUID, SMALLINT, INTEGER, INTEGER) TO anon, authenticated;
+REVOKE ALL ON FUNCTION public.get_public_reviews(TEXT, UUID, UUID, UUID, INTEGER, INTEGER, INTEGER) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_public_reviews(TEXT, UUID, UUID, UUID, INTEGER, INTEGER, INTEGER) TO anon, authenticated;
 
 -- =========================================================================
 -- 5. RPC: public.get_tenant_reviews (Staff/Owner read contract - all reviews)
@@ -510,7 +522,7 @@ CREATE OR REPLACE FUNCTION public.get_tenant_reviews(
     p_staff_id            UUID DEFAULT NULL,
     p_customer_id         UUID DEFAULT NULL,
     p_is_published        BOOLEAN DEFAULT NULL,
-    p_min_rating          SMALLINT DEFAULT NULL,
+    p_min_rating          INTEGER DEFAULT NULL,
     p_limit               INTEGER DEFAULT 50,
     p_offset              INTEGER DEFAULT 0
 )
@@ -670,6 +682,7 @@ BEGIN
             'created_at', pr.created_at,
             'updated_at', pr.updated_at
         )
+        ORDER BY pr.created_at DESC, pr.id DESC
     ), '[]'::jsonb)
     INTO v_reviews
     FROM paged_reviews pr;
@@ -706,8 +719,8 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.get_tenant_reviews(UUID, UUID, UUID, UUID, BOOLEAN, SMALLINT, INTEGER, INTEGER) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.get_tenant_reviews(UUID, UUID, UUID, UUID, BOOLEAN, SMALLINT, INTEGER, INTEGER) TO authenticated;
+REVOKE ALL ON FUNCTION public.get_tenant_reviews(UUID, UUID, UUID, UUID, BOOLEAN, INTEGER, INTEGER, INTEGER) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_tenant_reviews(UUID, UUID, UUID, UUID, BOOLEAN, INTEGER, INTEGER, INTEGER) TO authenticated;
 
 -- =========================================================================
 -- 6. RPC: public.moderate_review (Staff/Owner publish/unpublish/respond)
