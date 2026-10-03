@@ -3,6 +3,7 @@ name: LARI Program V2 Phase 5 Disposable Postgres Acceptance & Live Security Mat
 on:
   push:
     branches:
+      - feature/phase7-node2-discovery-marketplace-r1-20261003
       - cline/phase7-node1-verified-reviews-20261002
       - aos/phase6-node4-staff-commissions-tips
       - ci/phase6-node3-pos-cart-checkout-acceptance-r1
@@ -132,6 +133,13 @@ jobs:
           node scripts/test-phase7-node1-verified-reviews-contracts.mjs
           echo "PHASE 7 NODE 1 VERIFIED REVIEWS STATIC CONTRACT SUITE PASSED!"
 
+      - name: Execute Phase 7 Node 2 Discovery Marketplace Static Contract Suite
+        run: |
+          set -euo pipefail
+          echo "=== EXECUTING PHASE 7 NODE 2 DISCOVERY MARKETPLACE STATIC CONTRACT SUITE ==="
+          node scripts/test-phase7-node2-discovery-marketplace-contracts.mjs
+          echo "PHASE 7 NODE 2 DISCOVERY MARKETPLACE STATIC CONTRACT SUITE PASSED!"
+
       - name: Execute Live Database Introspection & Integrity Verification
         run: |
           DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
@@ -182,7 +190,9 @@ jobs:
                 'create_verified_review',
                 'get_public_reviews',
                 'get_tenant_reviews',
-                'moderate_review'
+                'moderate_review',
+                'get_discovery_marketplace_listings',
+                'get_discovery_marketplace_detail'
               )
             ORDER BY routine_name;
           "
@@ -334,6 +344,20 @@ jobs:
             exit "$STATUS"
           fi
           echo "=== PHASE 7 NODE 1 VERIFIED REVIEWS BEHAVIORAL MATRIX COMPLETED CLEANLY ==="
+
+      - name: Execute Phase 7 Node 2 Live PostgreSQL Discovery Marketplace Behavioral Matrix
+        run: |
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== EXECUTING PHASE 7 NODE 2 LIVE POSTGRESQL DISCOVERY MARKETPLACE BEHAVIORAL MATRIX ==="
+          node supabase/tests/program-v2/phase7-live/test-phase7-node2-discovery-marketplace-behavioral-matrix.mjs 2>&1 | tee -a matrix.log
+          STATUS="${PIPESTATUS[0]}"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "=== STEP 19 PHASE 7 DISCOVERY MARKETPLACE MATRIX FAILED (EXIT CODE: $STATUS) - DUMPING MATRIX.LOG ==="
+            cat matrix.log || true
+            exit "$STATUS"
+          fi
+          echo "=== PHASE 7 NODE 2 DISCOVERY MARKETPLACE BEHAVIORAL MATRIX COMPLETED CLEANLY ==="
 
       - name: Application Build
         run: |
