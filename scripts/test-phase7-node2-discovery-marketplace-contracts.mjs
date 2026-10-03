@@ -1,7 +1,8 @@
 // scripts/test-phase7-node2-discovery-marketplace-contracts.mjs
 // Phase 7 Node 2 R1: Discovery Marketplace Server Authority Static Contracts
 // Strictly asserts no duplicate listing table, server-authoritative projections,
-// security definer functions, bounded pagination, deterministic ranking, and privacy guarantees.
+// security definer functions, canonical eligibility reuse, bounded inputs, zero-result contract,
+// deterministic ranking, and privacy guarantees.
 
 import fs from 'fs';
 import path from 'path';
@@ -91,18 +92,18 @@ assertContract(
 // 3. CANONICAL ELIGIBILITY REUSE
 // -----------------------------------------------------------------------------
 assertContract(
-  '7. Public eligibility gate strictly checked in get_discovery_marketplace_listings',
-  () => sql.includes("t.status IN ('active', 'manual_active')") &&
+  '7. Canonical eligibility evaluator reused in get_discovery_marketplace_listings',
+  () => sql.includes("evaluate_public_booking_eligibility_internal") &&
+        sql.includes("t.status IN ('active', 'manual_active')") &&
         sql.includes("t.onboarding_status = 'completed'") &&
         sql.includes("t.public_site_status = 'published'") &&
         sql.includes("bp.is_public_profile_enabled = true")
 );
 
 assertContract(
-  '8. Public eligibility gate strictly enforced in get_discovery_marketplace_detail',
-  () => sql.includes("v_tenant.status NOT IN ('active', 'manual_active')") &&
-        sql.includes("v_tenant.onboarding_status <> 'completed'") &&
-        sql.includes("v_tenant.public_site_status <> 'published'") &&
+  '8. Canonical eligibility evaluator reused in get_discovery_marketplace_detail',
+  () => sql.includes("evaluate_public_booking_eligibility_internal") &&
+        sql.includes("v_tenant.status NOT IN ('active', 'manual_active')") &&
         sql.includes("v_bp.is_public_profile_enabled IS NOT TRUE")
 );
 
@@ -123,7 +124,7 @@ assertContract(
 );
 
 // -----------------------------------------------------------------------------
-// 5. DETERMINISTIC RANKING & BOUNDED PAGINATION
+// 5. DETERMINISTIC RANKING & BOUNDED INPUTS
 // -----------------------------------------------------------------------------
 assertContract(
   '11. Deterministic tie-breaking order in listings query',
@@ -134,17 +135,28 @@ assertContract(
 );
 
 assertContract(
-  '12. Input limits enforced and bounded (default 20, max 100, min 1)',
+  '12. All public inputs bounded (search, city, district, category, slug, rating, pagination)',
   () => sql.includes("v_limit := 20;") &&
         sql.includes("v_limit := 100;") &&
-        sql.includes("v_offset := 0;")
+        sql.includes("v_offset := 0;") &&
+        sql.includes("p_search_query exceeds maximum length of 100") &&
+        sql.includes("p_city exceeds maximum length of 100") &&
+        sql.includes("p_district exceeds maximum length of 100") &&
+        sql.includes("p_category exceeds maximum length of 100") &&
+        sql.includes("p_slug exceeds maximum length of 100")
+);
+
+assertContract(
+  '13. Zero-result listing contract ensures empty array [] and zero count',
+  () => sql.includes("FILTER (WHERE p.tenant_id IS NOT NULL)") &&
+        sql.includes("v_listings := '[]'::jsonb;")
 );
 
 // -----------------------------------------------------------------------------
 // 6. PRIVACY & LEAKAGE NEGATIVE CONSTRAINTS
 // -----------------------------------------------------------------------------
 assertContract(
-  '13. No internal financial or private customer fields leaked in RPCs',
+  '14. No internal financial or private customer fields leaked in RPCs',
   () => !sql.includes('profit_margin') &&
         !sql.includes('cost_price') &&
         !sql.includes('commission_rate') &&
@@ -158,12 +170,12 @@ assertContract(
 // 7. CI WORKFLOW PARITY
 // -----------------------------------------------------------------------------
 assertContract(
-  '14. Workflow incorporates Phase 7 Node 2 static contracts execution',
+  '15. Workflow incorporates Phase 7 Node 2 static contracts execution',
   () => workflowYaml.includes('test-phase7-node2-discovery-marketplace-contracts.mjs')
 );
 
 assertContract(
-  '15. Workflow incorporates Phase 7 Node 2 behavioral matrix execution',
+  '16. Workflow incorporates Phase 7 Node 2 behavioral matrix execution',
   () => workflowYaml.includes('test-phase7-node2-discovery-marketplace-behavioral-matrix.mjs')
 );
 

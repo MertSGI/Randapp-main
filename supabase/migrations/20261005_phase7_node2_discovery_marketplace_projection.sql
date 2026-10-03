@@ -15,12 +15,17 @@
 --    public.tenants, public.tenant_business_profiles, public.branches,
 --    public.services, public.reviews.
 -- 2. REUSE CANONICAL PUBLIC ELIGIBILITY GATES:
+--    Marketplace visibility reuses canonical public eligibility/publication rules already
+--    enforced by the existing public booking/business surfaces.
 --    A business is eligible for public discovery IF AND ONLY IF:
 --      - tenants.status IN ('active', 'manual_active')
 --      - tenants.onboarding_status = 'completed'
 --      - tenants.public_site_status = 'published'
 --      - tenant_business_profiles.is_public_profile_enabled = true
---    Inactive, suspended, draft, onboarding, or profile-disabled businesses are strictly omitted.
+--      - canonical evaluate_public_booking_eligibility_internal returns bookable = true
+--    Inactive, suspended, draft, onboarding, commercial-ineligible, or profile-disabled
+--    businesses are strictly omitted.
+--    Discovery RPCs fail closed with generic NOT_ELIGIBLE without exposing internal details.
 -- 3. VERIFIED PUBLISHED REVIEW AGGREGATES ONLY:
 --    Only verified reviews with is_published = true affect review counts and rating averages.
 --    Unpublished reviews (is_published = false) are strictly excluded from aggregates and details.
@@ -29,11 +34,18 @@
 --    contact info, cover/logo/gallery, active branches, active services, verified rating aggregates).
 --    Internal notes, staff commissions, profits, costs, subscription internals, moderation logs,
 --    and customer private records are NEVER exposed.
--- 5. DETERMINISTIC RANKING & BOUNDED PAGINATION:
+-- 5. BOUNDED INPUTS & DETERMINISTIC RANKING:
+--    All text and pagination inputs are explicitly bounded:
+--      - search query, city, district, category, slug: trimmed, bounded to max 100 characters.
+--      - p_min_rating: bounded between 1.0 and 5.0.
+--      - p_limit: constrained to 1..100 (default 20).
+--      - p_offset: constrained to >= 0.
 --    Deterministic tie-breaking:
 --      ORDER BY avg_rating DESC NULLS LAST, review_count DESC, t.created_at DESC, t.id ASC
---    Bounded pagination: p_limit constrained to 1..100 (default 20), p_offset >= 0.
--- 6. SECURITY DEFINER RPCs:
+--    Deterministic nested projections (primary_branch, featured_services, recent_reviews).
+-- 6. ZERO-RESULT CONTRACT:
+--    When zero matches exist, total_count = 0 and listings = [] (empty jsonb array, no null objects).
+-- 7. SECURITY DEFINER RPCs:
 --    search_path pinned to pg_catalog, public.
 --    Execute granted to anon, authenticated, and service_role.
 -- =========================================================================
@@ -109,17 +121,36 @@ BEGIN
         RAISE EXCEPTION 'INVALID_ARGUMENT: p_min_rating must be between 1.0 and 5.0';
     END IF;
 
-    -- Sanitize filter inputs
+    -- Validate & bound all text inputs explicitly (finite bounds)
     v_clean_search := nullif(trim(p_search_query), '');
-    IF v_clean_search IS NOT NULL AND length(v_clean_search) > 100 THEN
-        v_clean_search := substring(v_clean_search from 1 for 100);
+    IF v_clean_search IS NOT NULL THEN
+        IF length(v_clean_search) > 100 THEN
+            RAISE EXCEPTION 'INVALID_ARGUMENT: p_search_query exceeds maximum length of 100 characters';
+        END IF;
     END IF;
 
     v_clean_city := nullif(trim(p_city), '');
-    v_clean_district := nullif(trim(p_district), '');
-    v_clean_category := nullif(trim(p_category), '');
+    IF v_clean_city IS NOT NULL THEN
+        IF length(v_clean_city) > 100 THEN
+            RAISE EXCEPTION 'INVALID_ARGUMENT: p_city exceeds maximum length of 100 characters';
+        END IF;
+    END IF;
 
-    -- 2. Execute bounded, deterministic query
+    v_clean_district := nullif(trim(p_district), '');
+    IF v_clean_district IS NOT NULL THEN
+        IF length(v_clean_district) > 100 THEN
+            RAISE EXCEPTION 'INVALID_ARGUMENT: p_district exceeds maximum length of 100 characters';
+        END IF;
+    END IF;
+
+    v_clean_category := nullif(trim(p_category), '');
+    IF v_clean_category IS NOT NULL THEN
+        IF length(v_clean_category) > 100 THEN
+            RAISE EXCEPTION 'INVALID_ARGUMENT: p_category exceeds maximum length of 100 characters';
+        END IF;
+    END IF;
+
+    -- 2. Execute bounded, deterministic query with canonical eligibility reuse
     WITH eligible_tenants AS (
         SELECT
             t.id AS tenant_id,
@@ -158,6 +189,8 @@ BEGIN
           AND t.onboarding_status = 'completed'
           AND t.public_site_status = 'published'
           AND bp.is_public_profile_enabled = true
+          -- Reuse canonical public eligibility evaluator
+          AND COALESCE((public.evaluate_public_booking_eligibility_internal(t.id, t.slug)->>'bookable')::boolean, false) = true
           AND (v_clean_city IS NULL OR bp.city ILIKE v_clean_city)
           AND (v_clean_district IS NULL OR bp.district ILIKE v_clean_district)
           AND (v_clean_category IS NULL OR bp.business_category ILIKE v_clean_category)
@@ -227,7 +260,7 @@ BEGIN
                         FROM public.branches b
                         WHERE b.tenant_id = p.tenant_id
                           AND b.is_active = true
-                        ORDER BY b.is_primary DESC, b.created_at ASC
+                        ORDER BY b.is_primary DESC, b.created_at ASC, b.id ASC
                         LIMIT 1
                     ),
                     'featured_services', COALESCE((
@@ -240,13 +273,14 @@ BEGIN
                                 'price', s.price,
                                 'category', s.category,
                                 'image', s.image
-                            ) ORDER BY s.price ASC, s.name ASC
+                            ) ORDER BY s.price ASC, s.name ASC, s.id ASC
                         )
                         FROM (
                             SELECT s.id, s.name, s.name_tr, s.duration, s.price, s.category, s.image
                             FROM public.services s
                             WHERE s.tenant_id = p.tenant_id
                               AND s.active = true
+                            ORDER BY s.price ASC, s.name ASC, s.id ASC
                             LIMIT 5
                         ) s
                     ), '[]'::jsonb)
@@ -256,13 +290,19 @@ BEGIN
                     p.review_count DESC,
                     p.tenant_created_at DESC,
                     p.tenant_id ASC
-            ),
+            ) FILTER (WHERE p.tenant_id IS NOT NULL),
             '[]'::jsonb
         )
     INTO v_total_count, v_listings
     FROM counted
     LEFT JOIN paged p ON true
     GROUP BY counted.total_count;
+
+    -- Zero-result safety check: ensure strictly 0 and []
+    IF v_total_count IS NULL OR v_total_count = 0 THEN
+        v_total_count := 0;
+        v_listings := '[]'::jsonb;
+    END IF;
 
     RETURN jsonb_build_object(
         'success', true,
@@ -291,6 +331,7 @@ DECLARE
     v_clean_slug          TEXT;
     v_tenant              RECORD;
     v_bp                  RECORD;
+    v_canonical_eval      JSONB;
     v_branches            JSONB;
     v_services            JSONB;
     v_reviews             JSONB;
@@ -306,7 +347,15 @@ BEGIN
 
     v_clean_slug := trim(p_slug);
 
-    -- 1. Resolve tenant and verify canonical eligibility
+    IF length(v_clean_slug) > 100 THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'reason_code', 'INVALID_ARGUMENT',
+            'message', 'p_slug exceeds maximum length of 100 characters'
+        );
+    END IF;
+
+    -- 1. Resolve tenant
     SELECT
         t.id,
         t.slug,
@@ -326,7 +375,8 @@ BEGIN
         );
     END IF;
 
-    -- Strict public eligibility check
+    -- 2. Strict public eligibility checks:
+    -- A. Status & publication check
     IF v_tenant.status NOT IN ('active', 'manual_active')
        OR v_tenant.onboarding_status <> 'completed'
        OR v_tenant.public_site_status <> 'published' THEN
@@ -337,7 +387,17 @@ BEGIN
         );
     END IF;
 
-    -- 2. Fetch business profile
+    -- B. Canonical public booking eligibility evaluator reuse
+    v_canonical_eval := public.evaluate_public_booking_eligibility_internal(v_tenant.id, v_tenant.slug);
+    IF COALESCE((v_canonical_eval->>'bookable')::boolean, false) IS NOT TRUE THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'reason_code', 'NOT_ELIGIBLE',
+            'message', 'Business is not eligible for discovery'
+        );
+    END IF;
+
+    -- 3. Fetch business profile
     SELECT * INTO v_bp
     FROM public.tenant_business_profiles
     WHERE tenant_id = v_tenant.id;
@@ -350,7 +410,7 @@ BEGIN
         );
     END IF;
 
-    -- 3. Fetch active branches only
+    -- 4. Fetch active branches only
     SELECT COALESCE(
         jsonb_agg(
             jsonb_build_object(
@@ -359,7 +419,7 @@ BEGIN
                 'slug', b.slug,
                 'is_primary', b.is_primary,
                 'timezone', b.timezone
-            ) ORDER BY b.is_primary DESC, b.name ASC
+            ) ORDER BY b.is_primary DESC, b.name ASC, b.id ASC
         ),
         '[]'::jsonb
     ) INTO v_branches
@@ -367,7 +427,7 @@ BEGIN
     WHERE b.tenant_id = v_tenant.id
       AND b.is_active = true;
 
-    -- 4. Fetch active services only
+    -- 5. Fetch active services only
     SELECT COALESCE(
         jsonb_agg(
             jsonb_build_object(
@@ -378,7 +438,7 @@ BEGIN
                 'duration', s.duration,
                 'price', s.price,
                 'image', s.image
-            ) ORDER BY s.category ASC NULLS LAST, s.price ASC, s.name ASC
+            ) ORDER BY s.category ASC NULLS LAST, s.price ASC, s.name ASC, s.id ASC
         ),
         '[]'::jsonb
     ) INTO v_services
@@ -386,7 +446,7 @@ BEGIN
     WHERE s.tenant_id = v_tenant.id
       AND s.active = true;
 
-    -- 5. Fetch verified published reviews aggregates and recent published reviews
+    -- 6. Fetch verified published reviews aggregates and recent published reviews
     SELECT
         COUNT(r.id) AS count,
         COALESCE(ROUND(AVG(r.rating)::numeric, 2), 0.0) AS avg_rating,
