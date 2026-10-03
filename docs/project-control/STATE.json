@@ -578,7 +578,7 @@
       "does_not_affect": "Design Intelligence, Design Remediation, Phase 2-7 development"
     }
   ],
-  "next_action": "Implement Phase 7 Node 2 R1 — Discovery Marketplace server authority from accepted Phase 7 Node 1 R4 execution base 2b5e08d2b8dc674dd1dd21ea93f1b967ec468201 under DECISION-022/LARI-P7-N2-DISCOVERY-MARKETPLACE-R1. Build a server-authoritative public discovery/search projection over existing canonical tenant, business-profile, branch, service, media/portfolio, and verified-review authorities; do not create a duplicate marketplace listing truth. Reuse canonical public eligibility rules; expose only public-safe projection fields; only published verified reviews may affect public review aggregates; require bounded deterministic query/filter/pagination/ranking behavior. R1 must deliver SQL/RPC server authority plus static contracts and a disposable-Postgres live behavioral matrix covering eligibility negatives, unpublished/ineligible leakage, cross-tenant and private-field leakage, input/pagination bounds, filtering/ranking determinism, and prior-domain regression replay. R2 application adapter/service integration is blocked until R1 acceptance; R3 customer-facing discovery/portfolio UI and UI V2 integration are blocked until R2 acceptance. Production remains NO_GO.",
+  "next_action": "Implement Phase 7 Node 2 R2 — Discovery Marketplace Application Service / Adapter Integration from accepted R1 execution base 814e3ca0c09c3a484e20869f1a47a3545259f6db under DECISION-022 / LARI-P7-N2-DISCOVERY-MARKETPLACE-R2. Consume the accepted R1 server-authoritative Discovery Marketplace RPCs. Implement the typed application service/adapter boundary, request/response DTO mapping, bounded parameter mapping, public-safe response mapping, deterministic error/result handling, and executable integration tests. Do not redesign or duplicate R1 SQL/server authority. Do not begin customer-facing Discovery/Portfolio UI. R3 and UI V2 remain blocked until R2 acceptance. Production remains NO_GO.",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true
@@ -1315,8 +1315,8 @@
     },
     "delivery_slices": {
       "R1": "ACCEPTED_PROVEN",
-      "R2": "APPLICATION_SERVICE_ADAPTER_IN_PROGRESS",
-      "R3": "CUSTOMER_FACING_DISCOVERY_PORTFOLIO_UI_AFTER_R2_ACCEPTED"
+      "R2": "BOUND_READY_FOR_IMPLEMENTATION",
+      "R3": "BLOCKED_UNTIL_R2_ACCEPTED"
     },
     "ui_v2": "HOLD_UNTIL_R1_AND_R2_ACCEPTED",
     "node3": "NOT_IN_SCOPE"
