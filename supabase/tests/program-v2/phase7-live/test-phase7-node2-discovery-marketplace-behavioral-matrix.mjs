@@ -75,6 +75,22 @@ async function run() {
       WHERE id = 1;
     `);
 
+    // Pre-cleanup fixture rows to ensure idempotency across test executions
+    await adminClient.query(`
+      DELETE FROM public.reviews WHERE tenant_id IN ('${tenantEligible1}', '${tenantEligible2}', '${tenantDraft}', '${tenantSuspended}', '${tenantDisabledProfile}', '${tenantCommercialIneligible}');
+      DELETE FROM public.appointments WHERE tenant_id IN ('${tenantEligible1}', '${tenantEligible2}', '${tenantDraft}', '${tenantSuspended}', '${tenantDisabledProfile}', '${tenantCommercialIneligible}');
+      DELETE FROM public.staff_services WHERE staff_id IN ('${staff1}', '${staff2}');
+      DELETE FROM public.service_branches WHERE tenant_id IN ('${tenantEligible1}', '${tenantEligible2}');
+      DELETE FROM public.staff_branches WHERE tenant_id IN ('${tenantEligible1}', '${tenantEligible2}');
+      DELETE FROM public.services WHERE tenant_id IN ('${tenantEligible1}', '${tenantEligible2}');
+      DELETE FROM public.branches WHERE tenant_id IN ('${tenantEligible1}', '${tenantEligible2}');
+      DELETE FROM public.staff WHERE tenant_id IN ('${tenantEligible1}', '${tenantEligible2}');
+      DELETE FROM public.customers WHERE tenant_id IN ('${tenantEligible1}', '${tenantEligible2}');
+      DELETE FROM public.tenant_business_profiles WHERE tenant_id IN ('${tenantEligible1}', '${tenantEligible2}', '${tenantDraft}', '${tenantSuspended}', '${tenantDisabledProfile}', '${tenantCommercialIneligible}');
+      DELETE FROM public.subscriptions WHERE tenant_id IN ('${tenantEligible1}', '${tenantEligible2}', '${tenantDraft}', '${tenantSuspended}', '${tenantDisabledProfile}', '${tenantCommercialIneligible}');
+      DELETE FROM public.tenants WHERE id IN ('${tenantEligible1}', '${tenantEligible2}', '${tenantDraft}', '${tenantSuspended}', '${tenantDisabledProfile}', '${tenantCommercialIneligible}');
+    `);
+
     // 1. Tenants
     await adminClient.query(`
       INSERT INTO public.tenants (id, slug, name, status, public_site_status, onboarding_status)
@@ -91,7 +107,7 @@ async function run() {
     `);
 
     // 2. Canonical Commercial Subscriptions (MANDATORY BEFORE OPERATIONAL ROWS)
-    // Resolve published plan version with unlimited or sufficient quota for branches, services, staff
+    // Resolve published plan version with unlimited quota for branches, services, staff
     console.log('--- Establishing Deterministic Commercial Subscriptions Before Operational Rows ---');
     await adminClient.query(`
       DELETE FROM public.subscriptions WHERE tenant_id IN ('${tenantEligible1}', '${tenantEligible2}', '${tenantCommercialIneligible}');
@@ -104,6 +120,10 @@ async function run() {
       FROM public.plan_versions pv
       JOIN public.plans p ON p.id = pv.plan_id
       JOIN public.plan_entitlements pe_core ON pe_core.plan_version_id = pv.id AND pe_core.feature_key = 'core_booking' AND pe_core.boolean_value = true
+      JOIN public.plan_entitlements pe_branch ON pe_branch.plan_version_id = pv.id AND pe_branch.feature_key = 'max_branches' AND pe_branch.is_unlimited = true
+      JOIN public.plan_entitlements pe_staff ON pe_staff.plan_version_id = pv.id AND pe_staff.feature_key = 'max_staff' AND pe_staff.is_unlimited = true
+      JOIN public.plan_entitlements pe_service ON pe_service.plan_version_id = pv.id AND pe_service.feature_key = 'max_services' AND pe_service.is_unlimited = true
+      JOIN public.plan_entitlements pe_appt ON pe_appt.plan_version_id = pv.id AND pe_appt.feature_key = 'max_monthly_appointments' AND pe_appt.is_unlimited = true
       WHERE pv.lifecycle_status = 'published'
       ORDER BY pv.created_at DESC
       LIMIT 1;
@@ -116,14 +136,25 @@ async function run() {
       FROM public.plan_versions pv
       JOIN public.plans p ON p.id = pv.plan_id
       JOIN public.plan_entitlements pe_core ON pe_core.plan_version_id = pv.id AND pe_core.feature_key = 'core_booking' AND pe_core.boolean_value = true
+      JOIN public.plan_entitlements pe_branch ON pe_branch.plan_version_id = pv.id AND pe_branch.feature_key = 'max_branches' AND pe_branch.is_unlimited = true
+      JOIN public.plan_entitlements pe_staff ON pe_staff.plan_version_id = pv.id AND pe_staff.feature_key = 'max_staff' AND pe_staff.is_unlimited = true
+      JOIN public.plan_entitlements pe_service ON pe_service.plan_version_id = pv.id AND pe_service.feature_key = 'max_services' AND pe_service.is_unlimited = true
+      JOIN public.plan_entitlements pe_appt ON pe_appt.plan_version_id = pv.id AND pe_appt.feature_key = 'max_monthly_appointments' AND pe_appt.is_unlimited = true
       WHERE pv.lifecycle_status = 'published'
       ORDER BY pv.created_at DESC
       LIMIT 1;
     `);
 
     // Verify resolve_commercial_quota for fixture tenants
-    const q1 = await adminClient.query(`SELECT public.resolve_commercial_quota('${tenantEligible1}', 'max_branches') AS q;`);
-    assert(q1.rows.length > 0, 'Commercial quota for tenantEligible1 resolved');
+    const qBranch1 = await adminClient.query(`SELECT public.resolve_commercial_quota('${tenantEligible1}', 'max_branches') AS q;`);
+    const qStaff1 = await adminClient.query(`SELECT public.resolve_commercial_quota('${tenantEligible1}', 'max_staff') AS q;`);
+    const qService1 = await adminClient.query(`SELECT public.resolve_commercial_quota('${tenantEligible1}', 'max_services') AS q;`);
+    assert(qBranch1.rows.length > 0 && (qBranch1.rows[0].q.is_unlimited === true || qBranch1.rows[0].q.limit_value >= 5), 'Commercial max_branches quota for tenantEligible1 resolved with sufficient limit');
+    assert(qStaff1.rows.length > 0 && (qStaff1.rows[0].q.is_unlimited === true || qStaff1.rows[0].q.limit_value >= 5), 'Commercial max_staff quota for tenantEligible1 resolved with sufficient limit');
+    assert(qService1.rows.length > 0 && (qService1.rows[0].q.is_unlimited === true || qService1.rows[0].q.limit_value >= 5), 'Commercial max_services quota for tenantEligible1 resolved with sufficient limit');
+
+    const qBranch2 = await adminClient.query(`SELECT public.resolve_commercial_quota('${tenantEligible2}', 'max_branches') AS q;`);
+    assert(qBranch2.rows.length > 0 && (qBranch2.rows[0].q.is_unlimited === true || qBranch2.rows[0].q.limit_value >= 5), 'Commercial max_branches quota for tenantEligible2 resolved with sufficient limit');
 
     // 3. Profiles
     await adminClient.query(`
