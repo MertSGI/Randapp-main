@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-10-02T19:07:26.036250Z",
+  "updated_at": "2026-10-03T07:20:00.000000Z",
   "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
@@ -17,7 +17,7 @@
     "Final Delivery"
   ],
   "current_milestone": "Program V2 Phase 7 — Node 2 Discovery Marketplace",
-  "current_status": "PHASE_7_NODE_2_DISCOVERY_MARKETPLACE_R1_CONTRACT_BOUND_READY",
+  "current_status": "PHASE_7_NODE_2_DISCOVERY_MARKETPLACE_R2_BOUND_READY",
   "production_status": "NO_GO",
   "candidate_release": {
     "branch": "staging/supabase-staging-consistency",
@@ -1209,24 +1209,56 @@
   },
   "phase7_status": "IN_PROGRESS",
   "phase7_accepted_execution_chain": {
-    "node1": "2b5e08d2b8dc674dd1dd21ea93f1b967ec468201"
+    "node1": "2b5e08d2b8dc674dd1dd21ea93f1b967ec468201",
+    "node2_r1": "814e3ca0c09c3a484e20869f1a47a3545259f6db"
+  },
+  "phase7_node2_discovery_marketplace_r1_state": {
+    "status": "CLOSED_PROVEN",
+    "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+    "product_sha": "814e3ca0c09c3a484e20869f1a47a3545259f6db",
+    "upstream_base_sha": "2b5e08d2b8dc674dd1dd21ea93f1b967ec468201",
+    "product_branch": "feature/phase7-node2-discovery-marketplace-r1-20261003",
+    "github_actions_run": "37103225108",
+    "github_actions_job": "111146686628",
+    "migration_replay_count": 94,
+    "domain_contract_suites_passed": 24,
+    "static_contract_assertions_passed": 16,
+    "node1_live_behavioral_tests_passed": 79,
+    "node2_live_behavioral_tests_passed": 60,
+    "canonical_public_eligibility_reused": "PASS",
+    "zero_result_empty_array": "PASS",
+    "all_public_inputs_bounded": "PASS",
+    "deterministic_ranking": "PASS",
+    "deterministic_nested_limits": "PASS",
+    "no_duplicate_listing_truth": "PASS",
+    "application_build_status": "PASS",
+    "typecheck_lint_status": "PASS",
+    "evidence_id": "EV-096",
+    "disposition": "PROVEN / ACCEPTED E2 executable CI — R1 Server Authority & Public Projection"
   },
   "next_product_action": {
     "phase": "PHASE_7",
     "node": "NODE_2_DISCOVERY_MARKETPLACE",
+    "slice": "R2_APPLICATION_SERVICE_ADAPTER",
     "canonical_capability_order": [
       "Node 1 — Verified Reviews",
       "Node 2 — Discovery Marketplace",
       "Node 3 — Favorites & Fast Rebooking"
     ],
-    "execution_base_sha": "2b5e08d2b8dc674dd1dd21ea93f1b967ec468201"
+    "execution_base_sha": "814e3ca0c09c3a484e20869f1a47a3545259f6db"
   },
-  "next_action_execution_base_sha": "2b5e08d2b8dc674dd1dd21ea93f1b967ec468201",
+  "next_action_execution_base_sha": "814e3ca0c09c3a484e20869f1a47a3545259f6db",
   "phase7_node2_contract": {
-    "contract_id": "LARI-P7-N2-DISCOVERY-MARKETPLACE-R1",
+    "contract_id": "LARI-P7-N2-DISCOVERY-MARKETPLACE-R2",
     "authority": "DECISION-022",
     "status": "BOUND_READY_FOR_IMPLEMENTATION",
-    "execution_base_sha": "2b5e08d2b8dc674dd1dd21ea93f1b967ec468201",
+    "execution_base_sha": "814e3ca0c09c3a484e20869f1a47a3545259f6db",
+    "r1_server_authority": {
+      "status": "ACCEPTED_PROVEN",
+      "product_sha": "814e3ca0c09c3a484e20869f1a47a3545259f6db",
+      "evidence_id": "EV-096",
+      "ci_run_id": "37103225108"
+    },
     "architecture": {
       "model": "SERVER_AUTHORITATIVE_PUBLIC_PROJECTION",
       "duplicate_listing_truth_allowed": false,
@@ -1282,8 +1314,8 @@
       "production": "NO_GO"
     },
     "delivery_slices": {
-      "R1": "SERVER_AUTHORITY_SQL_RPC_AND_ACCEPTANCE",
-      "R2": "APPLICATION_SERVICE_ADAPTER_AFTER_R1_ACCEPTED",
+      "R1": "ACCEPTED_PROVEN",
+      "R2": "APPLICATION_SERVICE_ADAPTER_IN_PROGRESS",
       "R3": "CUSTOMER_FACING_DISCOVERY_PORTFOLIO_UI_AFTER_R2_ACCEPTED"
     },
     "ui_v2": "HOLD_UNTIL_R1_AND_R2_ACCEPTED",
