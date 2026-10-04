@@ -3,6 +3,7 @@ name: LARI Program V2 Phase 5 Disposable Postgres Acceptance & Live Security Mat
 on:
   push:
     branches:
+      - feature/phase7-node2-discovery-marketplace-r3-review-20261004
       - feature/phase7-node2-discovery-marketplace-r1-20261003
       - cline/phase7-node1-verified-reviews-20261002
       - aos/phase6-node4-staff-commissions-tips
@@ -358,6 +359,19 @@ jobs:
             exit "$STATUS"
           fi
           echo "=== PHASE 7 NODE 2 DISCOVERY MARKETPLACE BEHAVIORAL MATRIX COMPLETED CLEANLY ==="
+
+      - name: Execute Phase 7 Node 2 R3 Discovery Marketplace UI Contract Test
+        run: |
+          set -o pipefail
+          echo "=== EXECUTING PHASE 7 NODE 2 R3 DISCOVERY MARKETPLACE UI CONTRACT TEST ==="
+          node supabase/tests/program-v2/phase7-live/test-phase7-node2-discovery-marketplace-r3-ui.mjs 2>&1 | tee -a matrix.log
+          STATUS="${PIPESTATUS[0]}"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "=== STEP 20 PHASE 7 R3 DISCOVERY UI CONTRACT TEST FAILED (EXIT CODE: $STATUS) - DUMPING MATRIX.LOG ==="
+            cat matrix.log || true
+            exit "$STATUS"
+          fi
+          echo "=== PHASE 7 NODE 2 R3 DISCOVERY MARKETPLACE UI CONTRACT TEST COMPLETED CLEANLY ==="
 
       - name: Application Build
         run: |

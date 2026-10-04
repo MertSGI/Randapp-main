@@ -5,7 +5,6 @@ import { DiscoveryPortfolio } from '../components/DiscoveryPortfolio';
 import type {
   DiscoveryListingDTO,
   DiscoveryBusinessDetailDTO,
-  DiscoveryServiceDetailDTO,
 } from '../../types/discoveryMarketplaceDTOs';
 
 export const DiscoveryMarketplace: React.FC = () => {
@@ -128,9 +127,9 @@ export const DiscoveryMarketplace: React.FC = () => {
     navigate('/discovery');
   };
 
-  const handleBookNow = (service?: DiscoveryServiceDetailDTO) => {
+  const handleBookNow = () => {
     if (selectedBusiness) {
-      navigate(`/book?tenant=${selectedBusiness.slug}${service ? `&serviceId=${service.id}` : ''}`);
+      navigate(`/booking/${encodeURIComponent(selectedBusiness.slug)}`);
     }
   };
 
@@ -320,9 +319,15 @@ export const DiscoveryMarketplace: React.FC = () => {
                     {item.businessCategory}
                   </div>
                   <div className="absolute bottom-3 right-3 bg-black/60 backdrop-blur-sm text-white px-2 py-0.5 rounded-lg text-xs font-semibold flex items-center gap-1">
-                    <span className="text-amber-400">★</span>
-                    <span>{item.averageRating ? item.averageRating.toFixed(1) : '5.0'}</span>
-                    <span className="text-[10px] text-gray-300">({item.reviewCount})</span>
+                    {item.reviewCount > 0 && item.averageRating > 0 ? (
+                      <>
+                        <span className="text-amber-400">★</span>
+                        <span>{item.averageRating.toFixed(1)}</span>
+                        <span className="text-[10px] text-gray-300">({item.reviewCount})</span>
+                      </>
+                    ) : (
+                      <span>Yeni</span>
+                    )}
                   </div>
                 </div>
 

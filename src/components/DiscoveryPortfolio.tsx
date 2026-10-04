@@ -42,6 +42,8 @@ export const DiscoveryPortfolio: React.FC<DiscoveryPortfolioProps> = ({
   } = business;
 
   const defaultCover = 'https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&w=1200&q=80';
+  const reviewCount = reviewsSummary?.totalReviews ?? 0;
+  const hasRating = reviewCount > 0 && (reviewsSummary?.averageRating ?? 0) > 0;
 
   return (
     <div className="discovery-portfolio bg-white text-gray-900 rounded-2xl shadow-xl overflow-hidden border border-gray-100 max-w-5xl mx-auto my-8">
@@ -90,11 +92,17 @@ export const DiscoveryPortfolio: React.FC<DiscoveryPortfolioProps> = ({
           <div className="flex items-center gap-3">
             <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl text-center border border-white/20">
               <div className="flex items-center justify-center gap-1 text-amber-400 font-bold text-lg">
-                <span>★</span>
-                <span>{reviewsSummary?.averageRating ? reviewsSummary.averageRating.toFixed(1) : '5.0'}</span>
+                {hasRating ? (
+                  <>
+                    <span>★</span>
+                    <span>{reviewsSummary.averageRating.toFixed(1)}</span>
+                  </>
+                ) : (
+                  <span className="text-sm text-white">Yeni</span>
+                )}
               </div>
               <div className="text-xs text-gray-300">
-                {reviewsSummary?.totalReviews ?? recentReviews.length} değerlendirme
+                {reviewCount > 0 ? `${reviewCount} değerlendirme` : 'Henüz değerlendirme yok'}
               </div>
             </div>
             {onBookNow && (
@@ -301,12 +309,12 @@ export const DiscoveryPortfolio: React.FC<DiscoveryPortfolioProps> = ({
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-2xl font-black text-amber-500">
-                  {reviewsSummary?.averageRating ? reviewsSummary.averageRating.toFixed(1) : '5.0'}
+                <span className={`font-black ${hasRating ? 'text-2xl text-amber-500' : 'text-sm text-gray-500'}`}>
+                  {hasRating ? reviewsSummary.averageRating.toFixed(1) : 'Puan yok'}
                 </span>
                 <div className="text-xs text-gray-500">
-                  <div>★★★★★</div>
-                  <div>{reviewsSummary?.totalReviews ?? recentReviews.length} değerlendirme</div>
+                  {hasRating && <div>★★★★★</div>}
+                  <div>{reviewCount > 0 ? `${reviewCount} değerlendirme` : 'Henüz değerlendirme yok'}</div>
                 </div>
               </div>
             </div>

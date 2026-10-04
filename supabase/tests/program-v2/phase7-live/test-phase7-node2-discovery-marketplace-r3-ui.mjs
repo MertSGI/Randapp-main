@@ -44,12 +44,11 @@ const appPath = path.resolve('App.tsx');
 
 assert(fs.existsSync(marketplacePath), 'src/pages/DiscoveryMarketplace.tsx exists');
 assert(fs.existsSync(portfolioPath), 'src/components/DiscoveryPortfolio.tsx exists');
-assert(fs.existsSync(routesPath), 'src/routes.tsx exists');
 assert(fs.existsSync(appPath), 'App.tsx exists');
+assert(!fs.existsSync(routesPath), 'unused duplicate src/routes.tsx is absent');
 
 const marketplaceContent = fs.readFileSync(marketplacePath, 'utf8');
 const portfolioContent = fs.readFileSync(portfolioPath, 'utf8');
-const routesContent = fs.readFileSync(routesPath, 'utf8');
 const appContent = fs.readFileSync(appPath, 'utf8');
 
 assert(
@@ -100,23 +99,23 @@ assert(
 console.log('\n--- TEST GROUP 3: Route Integration & Wiring ---');
 
 assert(
-  routesContent.includes('/discovery'),
-  'src/routes.tsx registers /discovery route'
-);
-
-assert(
-  routesContent.includes('/discovery/:slug'),
-  'src/routes.tsx registers /discovery/:slug route'
-);
-
-assert(
   appContent.includes('/discovery'),
-  'App.tsx registers /discovery route'
+  'active App.tsx router registers /discovery route'
 );
 
 assert(
   appContent.includes('/discovery/:slug'),
-  'App.tsx registers /discovery/:slug route'
+  'active App.tsx router registers /discovery/:slug route'
+);
+
+assert(
+  marketplaceContent.includes('/booking/${encodeURIComponent(selectedBusiness.slug)}'),
+  'booking handoff uses canonical /booking/:tenantSlug route'
+);
+
+assert(
+  !marketplaceContent.includes('/book?tenant=') && !marketplaceContent.includes('serviceId='),
+  'booking handoff does not emit unsupported tenant/service query parameters'
 );
 
 // -----------------------------------------------------------------------------
@@ -142,6 +141,16 @@ assert(
 assert(
   portfolioContent.includes('services'),
   'DiscoveryPortfolio displays services list'
+);
+
+assert(
+  !marketplaceContent.includes("'5.0'") && !portfolioContent.includes("'5.0'"),
+  'zero-review state does not fabricate a 5.0 rating'
+);
+
+assert(
+  marketplaceContent.includes('item.reviewCount > 0') && portfolioContent.includes('reviewCount > 0'),
+  'rating presentation is gated by authoritative review counts'
 );
 
 console.log('\n==================================================================');
