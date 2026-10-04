@@ -21,6 +21,7 @@ import SupportPage from './pages/SupportPage';
 import { ClinicWorkspacePage } from './pages/clinic/ClinicWorkspacePage';
 import { HealthTourismLandingPage } from './pages/health-tourism/HealthTourismLandingPage';
 import { HtCoordinatorWorkspacePage } from './pages/health-tourism/HtCoordinatorWorkspacePage';
+import { DiscoveryMarketplace } from './src/pages/DiscoveryMarketplace';
 
 import BookingPage from './pages/BookingPage';
 import AdminPage from './pages/AdminPage';
@@ -98,6 +99,8 @@ const AppFlowSwitcher: React.FC = () => {
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/support" element={<SupportPage />} />
+        <Route path="/discovery" element={<DiscoveryMarketplace />} />
+        <Route path="/discovery/:slug" element={<DiscoveryMarketplace />} />
       </Route>
 
       {/* 2. Self-Service Routes (Must precede dynamic /:tenantSlug) */}
