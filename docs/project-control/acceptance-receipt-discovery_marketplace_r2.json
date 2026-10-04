@@ -1,0 +1,16 @@
+{
+  "receipt_id": "receipt-lari-p7-n2-discovery-marketplace-r2",
+  "project_id": "lari",
+  "lane": "lane-b",
+  "slice_id": "discovery_marketplace_r2",
+  "execution_base_sha": "814e3ca0c09c3a484e20869f1a47a3545259f6db",
+  "candidate_sha": "1bc7cfddd4c07b448956521acc86a125bcdea80d",
+  "ci_workflow_name": "lari-phase5-postgres-acceptance.yml",
+  "ci_run_id": 37197225582,
+  "ci_conclusion": "success",
+  "acceptance_result": "ACCEPTED",
+  "controller_authority": "DECISION-022",
+  "canonical_control_transition_sha": "b8db36e00b4d6337ff4f0d4f1f5bed904db18e1b",
+  "created_at": "2026-10-04T11:15:31.701150+00:00",
+  "production": "NO_GO"
+}
