@@ -1223,7 +1223,8 @@
   "phase7_status": "IN_PROGRESS",
   "phase7_accepted_execution_chain": {
     "node1": "2b5e08d2b8dc674dd1dd21ea93f1b967ec468201",
-    "node2_r1": "814e3ca0c09c3a484e20869f1a47a3545259f6db"
+    "node2_r1": "814e3ca0c09c3a484e20869f1a47a3545259f6db",
+    "node2_r2": "1bc7cfddd4c07b448956521acc86a125bcdea80d"
   },
   "phase7_node2_discovery_marketplace_r1_state": {
     "status": "CLOSED_PROVEN",
@@ -1252,19 +1253,19 @@
   "next_product_action": {
     "phase": "PHASE_7",
     "node": "NODE_2_DISCOVERY_MARKETPLACE",
-    "slice": "R2_APPLICATION_SERVICE_ADAPTER",
+    "slice": "R3_CUSTOMER_FACING_DISCOVERY_PORTFOLIO_UI",
     "canonical_capability_order": [
       "Node 1 — Verified Reviews",
       "Node 2 — Discovery Marketplace",
       "Node 3 — Favorites & Fast Rebooking"
     ],
-    "execution_base_sha": "814e3ca0c09c3a484e20869f1a47a3545259f6db"
+    "execution_base_sha": "1bc7cfddd4c07b448956521acc86a125bcdea80d"
   },
-  "next_action_execution_base_sha": "814e3ca0c09c3a484e20869f1a47a3545259f6db",
+  "next_action_execution_base_sha": "1bc7cfddd4c07b448956521acc86a125bcdea80d",
   "phase7_node2_contract": {
     "contract_id": "LARI-P7-N2-DISCOVERY-MARKETPLACE-R2",
     "authority": "DECISION-022",
-    "status": "BOUND_READY_FOR_IMPLEMENTATION",
+    "status": "ACCEPTED_PROVEN",
     "execution_base_sha": "814e3ca0c09c3a484e20869f1a47a3545259f6db",
     "r1_server_authority": {
       "status": "ACCEPTED_PROVEN",
@@ -1328,10 +1329,10 @@
     },
     "delivery_slices": {
       "R1": "ACCEPTED_PROVEN",
-      "R2": "BOUND_READY_FOR_IMPLEMENTATION",
-      "R3": "BLOCKED_UNTIL_R2_ACCEPTED"
+      "R2": "ACCEPTED_PROVEN",
+      "R3": "BOUND_READY_FOR_IMPLEMENTATION"
     },
-    "ui_v2": "HOLD_UNTIL_R1_AND_R2_ACCEPTED",
+    "ui_v2": "RELEASED_ACTIVE",
     "node3": "NOT_IN_SCOPE"
   }
 }
