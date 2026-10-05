@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-10-04T11:15:55.554795+00:00",
+  "updated_at": "2026-10-05T07:51:18.920087+00:00",
   "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
@@ -16,8 +16,8 @@
     "LARİ Health Tourism",
     "Final Delivery"
   ],
-  "current_milestone": "Program V2 Phase 7 — Node 2 Discovery Marketplace R3",
-  "current_status": "PHASE_7_NODE_2_DISCOVERY_MARKETPLACE_R3_BOUND_READY",
+  "current_milestone": "Program V2 Phase 7 — Node 3 Favorites & Fast Rebooking Prebind",
+  "current_status": "PHASE_7_NODE_3_FAVORITES_REBOOKING_PREBIND_REQUIRED",
   "production_status": "NO_GO",
   "candidate_release": {
     "branch": "staging/supabase-staging-consistency",
@@ -45,8 +45,8 @@
       "isolated_project": "miuecvkkmyvaciticwtm",
       "ht_ai_chat_version": "12"
     },
-    "accepted_product_sha": "1bc7cfddd4c07b448956521acc86a125bcdea80d",
-    "next_action_execution_base_sha": "1bc7cfddd4c07b448956521acc86a125bcdea80d"
+    "accepted_product_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6",
+    "next_action_execution_base_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6"
   },
   "aos6_authority": {
     "read_only_shadow_reconciliation_authorized": true,
@@ -450,6 +450,17 @@
       ],
       "closed_at": "2026-10-04T11:15:55.554795+00:00",
       "reopen_condition": "Failed contract verification or CI regression"
+    },
+    {
+      "gate": "P7N2-DISCOVERY-MARKETPLACE_R3",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6",
+      "run_ids": [
+        "37231913934"
+      ],
+      "closed_at": "2026-10-05T07:51:18.920087+00:00",
+      "reopen_condition": "Failed exact-SHA R3 contract verification or CI regression"
     }
   ],
   "active_workstreams": {
@@ -591,7 +602,7 @@
       "does_not_affect": "Design Intelligence, Design Remediation, Phase 2-7 development"
     }
   ],
-  "next_action": "Implement Phase 7 Node 2 R3 — Customer-facing Discovery / Portfolio UI from accepted R2 execution base 1bc7cfddd4c07b448956521acc86a125bcdea80d under DECISION-022. Consume accepted R1 server-authoritative Discovery Marketplace RPCs and R2 application service contracts. Production remains NO_GO.",
+  "next_action": "Research and bind the Phase 7 Node 3 Favorites & Fast Rebooking execution contract from accepted Node 2 R3 base e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6 before any implementation. Node 3 implementation is NOT authorized. Production remains NO_GO.",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true
@@ -1224,7 +1235,8 @@
   "phase7_accepted_execution_chain": {
     "node1": "2b5e08d2b8dc674dd1dd21ea93f1b967ec468201",
     "node2_r1": "814e3ca0c09c3a484e20869f1a47a3545259f6db",
-    "node2_r2": "1bc7cfddd4c07b448956521acc86a125bcdea80d"
+    "node2_r2": "1bc7cfddd4c07b448956521acc86a125bcdea80d",
+    "node2_r3": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6"
   },
   "phase7_node2_discovery_marketplace_r1_state": {
     "status": "CLOSED_PROVEN",
@@ -1252,16 +1264,16 @@
   },
   "next_product_action": {
     "phase": "PHASE_7",
-    "node": "NODE_2_DISCOVERY_MARKETPLACE",
-    "slice": "R3_CUSTOMER_FACING_DISCOVERY_PORTFOLIO_UI",
+    "node": "NODE_3_FAVORITES_FAST_REBOOKING",
+    "slice": "PREBIND_REQUIRED",
     "canonical_capability_order": [
       "Node 1 — Verified Reviews",
       "Node 2 — Discovery Marketplace",
       "Node 3 — Favorites & Fast Rebooking"
     ],
-    "execution_base_sha": "1bc7cfddd4c07b448956521acc86a125bcdea80d"
+    "execution_base_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6"
   },
-  "next_action_execution_base_sha": "1bc7cfddd4c07b448956521acc86a125bcdea80d",
+  "next_action_execution_base_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6",
   "phase7_node2_contract": {
     "contract_id": "LARI-P7-N2-DISCOVERY-MARKETPLACE-R2",
     "authority": "DECISION-022",
@@ -1330,7 +1342,7 @@
     "delivery_slices": {
       "R1": "ACCEPTED_PROVEN",
       "R2": "ACCEPTED_PROVEN",
-      "R3": "BOUND_READY_FOR_IMPLEMENTATION"
+      "R3": "ACCEPTED_PROVEN"
     },
     "ui_v2": "RELEASED_ACTIVE",
     "node3": "NOT_IN_SCOPE"

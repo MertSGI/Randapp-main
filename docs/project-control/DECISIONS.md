@@ -102,3 +102,7 @@
 - **Acceptance**: R1 requires eligibility and leakage negatives, cross-tenant/private-field isolation, bounds, filtering/ranking determinism, published-review integrity, prior-domain regression replay, build/typecheck/lint as applicable, and exact-SHA executable CI evidence. Artifact presence alone is not acceptance.
 - **Production**: `NO_GO`. Node 3 Favorites & Fast Rebooking remains downstream and must not be pulled into Node 2.
 
+## DECISION-023: Phase 7 Node 2 R3 Functional Acceptance and Node 3 Prebind Boundary
+- **Status**: ACCEPTED
+- **Authority**: `LARI-P7-N2-R3-ACCEPT-N3-PREBIND-20261005-01`.
+- **Decision**: Phase 7 Node 2 R3 functional Discovery / Portfolio UI is accepted at exact product SHA `e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6` from execution base `1bc7cfddd4c07b448956521acc86a125bcdea80d`, with exact-SHA GitHub Actions Run `37231913934` completed successfully. DECISION-022 remains the Node 2 server-authoritative architecture authority. This functional acceptance does not close broader UI-V2 visual or productization work; real-browser, visual, and productization evidence remains separate. Node 3 Favorites & Fast Rebooking is downstream, its implementation is not authorized, and Controller PREBIND is required first. Production remains `NO_GO`.
