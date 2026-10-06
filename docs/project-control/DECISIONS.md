@@ -106,3 +106,13 @@
 - **Status**: ACCEPTED
 - **Authority**: `LARI-P7-N2-R3-ACCEPT-N3-PREBIND-20261005-01`.
 - **Decision**: Phase 7 Node 2 R3 functional Discovery / Portfolio UI is accepted at exact product SHA `e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6` from execution base `1bc7cfddd4c07b448956521acc86a125bcdea80d`, with exact-SHA GitHub Actions Run `37231913934` completed successfully. DECISION-022 remains the Node 2 server-authoritative architecture authority. This functional acceptance does not close broader UI-V2 visual or productization work; real-browser, visual, and productization evidence remains separate. Node 3 Favorites & Fast Rebooking is downstream, its implementation is not authorized, and Controller PREBIND is required first. Production remains `NO_GO`.
+
+## DECISION-024: Phase 7 Node 3 R1 Server Foundation Acceptance and R2 Product Integration Authorization
+- **Status**: ACCEPTED
+- **Authority**: `LARI-P7-N3-R1-ACCEPT-R2-AUTHORIZE-20261006-01`.
+- **R1 Acceptance**: Phase 7 Node 3 Favorites & Fast Rebooking R1 is accepted at exact product SHA `d52492b9de18070733c1a565fb691f68f564ba69` from execution base `e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6`, with exact-SHA GitHub Actions Run `37417054448` completed successfully.
+- **Favorites Authority**: Favorites are an `auth.uid()`-scoped relationship over canonical tenant truth. Duplicate marketplace, business, or customer truth is forbidden. Browser `lari_customer_auth`/localStorage identity and raw email or phone are not server favorites authorization.
+- **Fast Rebooking Authority**: Fast rebooking is a current-truth seed only. Existing appointment manage-token authority proves ownership of the historical appointment; current service, staff, branch, price, and duration must be re-resolved. `evaluate_booking_slot` remains availability authority and `create_public_booking` remains booking transaction authority. Node 3 code cannot directly insert a rebooking appointment.
+- **R2 Authorization**: Bounded Node 3 R2 Product Integration is authorized from exact execution base `d52492b9de18070733c1a565fb691f68f564ba69`. The fast-rebook UI must use the manage-token surface and R1 seed, require current availability selection, and finish through canonical booking. Favorites UI must use R1 RPCs and real Supabase authenticated identity; if that session is unavailable, the affected favorites-auth surface must fail or degrade safely. OTP, magic-link, or a new customer-auth architecture is not authorized by R2.
+- **Independent Lane**: UI-V2 remains an independent parallel lane and the Node 3 branch is not the UI-V2 branch.
+- **Production**: `NO_GO`.

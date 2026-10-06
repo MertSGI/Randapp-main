@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-10-05T07:51:18.920087+00:00",
+  "updated_at": "2026-10-06T06:41:33.210932+00:00",
   "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
@@ -16,8 +16,8 @@
     "LARİ Health Tourism",
     "Final Delivery"
   ],
-  "current_milestone": "Program V2 Phase 7 — Node 3 Favorites & Fast Rebooking Prebind",
-  "current_status": "PHASE_7_NODE_3_FAVORITES_REBOOKING_PREBIND_REQUIRED",
+  "current_milestone": "Program V2 Phase 7 — Node 3 Favorites & Fast Rebooking R2 Product Integration",
+  "current_status": "PHASE_7_NODE_3_FAVORITES_REBOOKING_R2_PRODUCT_INTEGRATION_AUTHORIZED",
   "production_status": "NO_GO",
   "candidate_release": {
     "branch": "staging/supabase-staging-consistency",
@@ -45,8 +45,8 @@
       "isolated_project": "miuecvkkmyvaciticwtm",
       "ht_ai_chat_version": "12"
     },
-    "accepted_product_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6",
-    "next_action_execution_base_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6"
+    "accepted_product_sha": "d52492b9de18070733c1a565fb691f68f564ba69",
+    "next_action_execution_base_sha": "d52492b9de18070733c1a565fb691f68f564ba69"
   },
   "aos6_authority": {
     "read_only_shadow_reconciliation_authorized": true,
@@ -461,6 +461,17 @@
       ],
       "closed_at": "2026-10-05T07:51:18.920087+00:00",
       "reopen_condition": "Failed exact-SHA R3 contract verification or CI regression"
+    },
+    {
+      "gate": "P7N3-FAVORITES-REBOOKING_R1",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "d52492b9de18070733c1a565fb691f68f564ba69",
+      "run_ids": [
+        "37417054448"
+      ],
+      "closed_at": "2026-10-06T06:41:33.210932+00:00",
+      "reopen_condition": "Failed exact-SHA Node 3 R1 contract verification or CI regression"
     }
   ],
   "active_workstreams": {
@@ -602,7 +613,7 @@
       "does_not_affect": "Design Intelligence, Design Remediation, Phase 2-7 development"
     }
   ],
-  "next_action": "Research and bind the Phase 7 Node 3 Favorites & Fast Rebooking execution contract from accepted Node 2 R3 base e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6 before any implementation. Node 3 implementation is NOT authorized. Production remains NO_GO.",
+  "next_action": "Implement bounded Phase 7 Node 3 Favorites & Fast Rebooking R2 Product Integration from accepted R1 execution base d52492b9de18070733c1a565fb691f68f564ba69. Fast rebooking must use the existing appointment manage-token surface and the R1 current-truth seed; the user must select current availability through evaluate_booking_slot and final creation must use create_public_booking, with no direct appointment insert or historical price/duration authority. Favorites must use the R1 RPCs and real Supabase authenticated identity; lari_customer_auth, browser localStorage, raw email, and raw phone are not authorization. If an authenticated customer session is unavailable, hold only that favorites-auth surface; OTP, magic-link, or a new customer-auth architecture is not authorized. UI-V2 remains an independent lane. Production remains NO_GO.",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true
@@ -1236,7 +1247,8 @@
     "node1": "2b5e08d2b8dc674dd1dd21ea93f1b967ec468201",
     "node2_r1": "814e3ca0c09c3a484e20869f1a47a3545259f6db",
     "node2_r2": "1bc7cfddd4c07b448956521acc86a125bcdea80d",
-    "node2_r3": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6"
+    "node2_r3": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6",
+    "node3_r1": "d52492b9de18070733c1a565fb691f68f564ba69"
   },
   "phase7_node2_discovery_marketplace_r1_state": {
     "status": "CLOSED_PROVEN",
@@ -1265,15 +1277,15 @@
   "next_product_action": {
     "phase": "PHASE_7",
     "node": "NODE_3_FAVORITES_FAST_REBOOKING",
-    "slice": "PREBIND_REQUIRED",
+    "slice": "R2_PRODUCT_INTEGRATION_AUTHORIZED",
     "canonical_capability_order": [
       "Node 1 — Verified Reviews",
       "Node 2 — Discovery Marketplace",
       "Node 3 — Favorites & Fast Rebooking"
     ],
-    "execution_base_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6"
+    "execution_base_sha": "d52492b9de18070733c1a565fb691f68f564ba69"
   },
-  "next_action_execution_base_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6",
+  "next_action_execution_base_sha": "d52492b9de18070733c1a565fb691f68f564ba69",
   "phase7_node2_contract": {
     "contract_id": "LARI-P7-N2-DISCOVERY-MARKETPLACE-R2",
     "authority": "DECISION-022",
@@ -1346,5 +1358,35 @@
     },
     "ui_v2": "RELEASED_ACTIVE",
     "node3": "NOT_IN_SCOPE"
+  },
+  "phase7_node3_contract": {
+    "contract_id": "LARI-P7-N3-FAVORITES-REBOOKING-R1",
+    "authority": "DECISION-024",
+    "status": "R1_ACCEPTED_PROVEN",
+    "execution_base_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6",
+    "r1_server_foundation": {
+      "status": "ACCEPTED_PROVEN",
+      "product_sha": "d52492b9de18070733c1a565fb691f68f564ba69",
+      "ci_run_id": 37417054448
+    },
+    "architecture": {
+      "favorites_model": "AUTH_UID_RELATION_TO_CANONICAL_TENANT",
+      "duplicate_business_truth_allowed": false,
+      "duplicate_customer_truth_allowed": false,
+      "favorites_identity_authority": "SUPABASE_AUTH_UID",
+      "localstorage_customer_auth_authority_allowed": false,
+      "raw_email_phone_authority_allowed": false,
+      "fast_rebooking_model": "MANAGE_TOKEN_AUTHORIZED_CURRENT_TRUTH_SEED",
+      "fast_rebooking_ownership_authority": "EXISTING_APPOINTMENT_MANAGE_TOKEN",
+      "historical_appointment_is_current_truth": false,
+      "canonical_availability_authority": "evaluate_booking_slot",
+      "canonical_booking_authority": "create_public_booking",
+      "direct_appointment_insert_allowed": false
+    },
+    "delivery_slices": {
+      "R1": "ACCEPTED_PROVEN",
+      "R2": "AUTHORIZED"
+    },
+    "production": "NO_GO"
   }
 }

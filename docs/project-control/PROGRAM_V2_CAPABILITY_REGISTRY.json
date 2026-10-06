@@ -564,10 +564,15 @@
       "key": "favorites_rebooking",
       "label": "Favorites & Fast Rebooking",
       "category": "marketplace",
-      "source_state": "PLANNED",
-      "program_maturity": "PLANNED",
+      "source_state": "LIVE_ACCEPTANCE_ONLY",
+      "program_maturity": "REAL_CODE_NOT_LIVE_VERIFIED",
       "target_phase": 7,
-      "external_provider_or_company_dependency": false
+      "external_provider_or_company_dependency": false,
+      "execution_contract_id": "LARI-P7-N3-FAVORITES-REBOOKING-R1",
+      "execution_base_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6",
+      "delivery_slice": "R1_ACCEPTED_R2_AUTHORIZED",
+      "accepted_r1_sha": "d52492b9de18070733c1a565fb691f68f564ba69",
+      "accepted_r1_ci_run_id": 37417054448
     },
     {
       "key": "pwa",
