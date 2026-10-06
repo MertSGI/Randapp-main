@@ -1,0 +1,17 @@
+{
+  "receipt_id": "program-v2-convergence-20261007",
+  "project_id": "lari",
+  "lane": "convergence",
+  "slice_id": "program_v2_convergence",
+  "execution_base_sha": "d52492b9de18070733c1a565fb691f68f564ba69",
+  "candidate_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a",
+  "ci_workflow_name": "lari-phase5-postgres-acceptance.yml",
+  "ci_run_id": 37492399349,
+  "ci_conclusion": "success",
+  "acceptance_result": "ACCEPTED",
+  "controller_authority": "DECISION-024",
+  "control_sha_before": "803ead3622a9660edc10d1dfe5d0f6da5dc44d22",
+  "canonical_control_transition_sha": "803ead3622a9660edc10d1dfe5d0f6da5dc44d22",
+  "created_at": "2026-10-06T16:05:46.388606+00:00",
+  "production": "NO_GO"
+}
