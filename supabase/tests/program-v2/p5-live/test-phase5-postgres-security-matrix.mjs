@@ -439,6 +439,51 @@ async function run() {
   assert(v1 !== v2, `Deterministic distinct versions allocated concurrently: v1=${v1}, v2=${v2}`);
   assert((v1 === 2 && v2 === 3) || (v1 === 3 && v2 === 2), 'Concurrent versions serialized monotonically');
 
+  // TEST 14: Effective Security Hardening on ht_rate_limit_buckets (RLS and Privileges)
+  console.log('\n--- TEST 14: Effective Security Hardening on ht_rate_limit_buckets ---');
+  const rlsCheck = await client.query(`
+    SELECT relrowsecurity 
+    FROM pg_class 
+    WHERE oid = 'public.ht_rate_limit_buckets'::regclass;
+  `);
+  assert(rlsCheck.rows[0].relrowsecurity === true, 'ht_rate_limit_buckets RLS enabled in catalog');
+
+  const privCheck = await client.query(`
+    SELECT grantee, privilege_type 
+    FROM information_schema.role_table_grants 
+    WHERE table_schema = 'public' 
+      AND table_name = 'ht_rate_limit_buckets'
+      AND grantee IN ('PUBLIC', 'anon', 'authenticated');
+  `);
+  assert(privCheck.rows.length === 0, 'No direct table privileges on ht_rate_limit_buckets for PUBLIC, anon, or authenticated');
+
+  // TEST 15: Effective Security Definer Helper Search Path and ACL Boundaries
+  console.log('\n--- TEST 15: Security Definer Helper search_path and EXECUTE ACLs ---');
+  const funcProcs = await client.query(`
+    SELECT proname, prosecdef, proconfig
+    FROM pg_proc p
+    JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public'
+      AND proname IN ('get_user_role', 'get_user_tenant_id', 'is_super_admin', 'update_updated_at_column', 'update_tenant_business_profiles_updated_at_column');
+  `);
+  for (const row of funcProcs.rows) {
+    const configs = row.proconfig || [];
+    const hasSearchPath = configs.some(c => c.includes('search_path=pg_catalog, public') || c.includes('search_path=pg_catalog,public'));
+    assert(hasSearchPath, `Function ${row.proname} sets fixed search_path = pg_catalog, public`);
+    if (['get_user_role', 'get_user_tenant_id', 'is_super_admin'].includes(row.proname)) {
+      assert(row.prosecdef === true, `Function ${row.proname} is SECURITY DEFINER`);
+    }
+  }
+
+  const funcAcls = await client.query(`
+    SELECT routine_name, grantee, privilege_type
+    FROM information_schema.routine_privileges
+    WHERE routine_schema = 'public'
+      AND routine_name IN ('get_user_role', 'get_user_tenant_id', 'is_super_admin')
+      AND grantee IN ('PUBLIC', 'anon');
+  `);
+  assert(funcAcls.rows.length === 0, 'No EXECUTE privilege granted to PUBLIC or anon on identity helper functions');
+
   console.log('\n===============================================================');
   console.log(`LIVE POSTGRESQL SECURITY MATRIX: ${testsPassed}/${testsExecuted} TESTS PASSED | ZERO FAILURES`);
   console.log('===============================================================\n');
