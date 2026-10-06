@@ -45,8 +45,8 @@
       "isolated_project": "miuecvkkmyvaciticwtm",
       "ht_ai_chat_version": "12"
     },
-    "accepted_product_sha": "d52492b9de18070733c1a565fb691f68f564ba69",
-    "next_action_execution_base_sha": "d52492b9de18070733c1a565fb691f68f564ba69"
+    "accepted_product_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a",
+    "next_action_execution_base_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a"
   },
   "aos6_authority": {
     "read_only_shadow_reconciliation_authorized": true,
@@ -472,6 +472,17 @@
       ],
       "closed_at": "2026-10-06T06:41:33.210932+00:00",
       "reopen_condition": "Failed exact-SHA Node 3 R1 contract verification or CI regression"
+    },
+    {
+      "gate": "LARI-PROGRAM-V2-CONVERGENCE",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a",
+      "run_ids": [
+        "37492399349"
+      ],
+      "closed_at": "2026-10-06T16:06:30Z",
+      "reopen_condition": "Contradictory security regression or broken accepted-work manifest"
     }
   ],
   "active_workstreams": {
@@ -1283,9 +1294,9 @@
       "Node 2 — Discovery Marketplace",
       "Node 3 — Favorites & Fast Rebooking"
     ],
-    "execution_base_sha": "d52492b9de18070733c1a565fb691f68f564ba69"
+    "execution_base_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a"
   },
-  "next_action_execution_base_sha": "d52492b9de18070733c1a565fb691f68f564ba69",
+  "next_action_execution_base_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a",
   "phase7_node2_contract": {
     "contract_id": "LARI-P7-N2-DISCOVERY-MARKETPLACE-R2",
     "authority": "DECISION-022",
@@ -1393,10 +1404,10 @@
     "lari": {
       "project_id": "lari",
       "lane_id": "product",
-      "status": "HOLD_PENDING_WP3_CONVERGENCE",
+      "status": "READY_POST_CONVERGENCE",
       "authority": "DECISION-024",
       "authority_revision": "20261007-01",
-      "execution_base_sha": "d52492b9de18070733c1a565fb691f68f564ba69",
+      "execution_base_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a",
       "objective": "Complete canonically authorized Phase 7 Node 3 R2 Favorites & Fast Rebooking Product Integration under DECISION-024 and current canonical control.",
       "gate": "P7N3-FAVORITES-FAST-REBOOKING-R2",
       "production": "NO_GO",
@@ -1406,15 +1417,15 @@
         "supabase/migrations",
         "tests/favorites"
       ],
-      "hold_reason": "HOLD_PENDING_WP3_CONVERGENCE: Security and accepted-work preservation convergence required before Phase 7 Node 3 R2 execution"
+      "hold_reason": null
     },
     "ui_v2": {
       "project_id": "lari-ui-v2",
       "lane_id": "ui_v2",
-      "status": "HOLD_PENDING_WP3_CONVERGENCE",
+      "status": "READY_POST_CONVERGENCE",
       "authority": "DECISION-024",
       "authority_revision": "20261007-01",
-      "execution_base_sha": "d52492b9de18070733c1a565fb691f68f564ba69",
+      "execution_base_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a",
       "objective": "Continue LARI UI-V2 productization from the current accepted product frontier, preserving valid historical UI productization while adapting it to current canonical server-authoritative contracts.",
       "gate": "LARI-UI-V2-PRODUCTIZATION",
       "production": "NO_GO",
@@ -1423,7 +1434,7 @@
         "src/components/v2",
         "tests/ui-v2"
       ],
-      "hold_reason": "HOLD_PENDING_WP3_CONVERGENCE: Security and accepted-work preservation convergence required before UI-V2 execution"
+      "hold_reason": null
     }
   },
   "shared_path_governance": {

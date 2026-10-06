@@ -1,0 +1,338 @@
+{
+  "schema_version": "1.0.0",
+  "convergence_id": "LARI-PROGRAM-V2-CONVERGENCE-20261007",
+  "repository": "MertSGI/Randapp-main",
+  "control_sha_before": "803ead3622a9660edc10d1dfe5d0f6da5dc44d22",
+  "target_product_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a",
+  "proof": {
+    "ci_workflow": "lari-phase5-postgres-acceptance.yml",
+    "ci_run_id": 37492399349,
+    "security_static_contract_suite": "PASS",
+    "database_behavioral_matrix": "PASS",
+    "supersession_justification": "All accepted ancestors strictly precede P3; Phase 1.1 security surface hardened via forward migration 20261007_program_v2_security_surface_hardening.sql; zero unpreserved items."
+  },
+  "accepted_inventory": [
+    {
+      "acceptance_id": "discovery_marketplace_r2",
+      "authority_id": "DECISION-023",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "1bc7cfddd4c07b448956521acc86a125bcdea80d",
+      "accepted_base_sha": "342bf2069bb2f74ca9f10904085ea4f8df0280f5",
+      "scope": [
+        "src/features/discovery",
+        "supabase/migrations/20261005_phase7_node2_discovery_marketplace_projection.sql"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "discovery_marketplace_r3",
+      "authority_id": "DECISION-023",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6",
+      "accepted_base_sha": "1bc7cfddd4c07b448956521acc86a125bcdea80d",
+      "scope": [
+        "pages/DiscoveryMarketplacePage.tsx",
+        "src/features/discovery/ui"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "favorites_rebooking_r1",
+      "authority_id": "DECISION-024",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "d52492b9de18070733c1a565fb691f68f564ba69",
+      "accepted_base_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6",
+      "scope": [
+        "supabase/migrations/20261006_phase7_node3_favorites_fast_rebooking.sql",
+        "services/favoritesService.ts"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "gate-p1d.1a",
+      "authority_id": "HISTORICAL_GATE_ACCEPTANCE",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "134c8716c2511c909cd400aee0496ebd70f63bf6",
+      "accepted_base_sha": null,
+      "scope": [
+        "P1D.1A Main Pilot"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "gate-p2a.0",
+      "authority_id": "HISTORICAL_GATE_ACCEPTANCE",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "accepted_base_sha": null,
+      "scope": [
+        "P2A Commercial Core Baseline"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "gate-core-rc.4",
+      "authority_id": "HISTORICAL_GATE_ACCEPTANCE",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a",
+      "accepted_base_sha": null,
+      "scope": [
+        "CORE-RC.4 Core Release Candidate"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "gate-package-branch-server-authority",
+      "authority_id": "HISTORICAL_GATE_ACCEPTANCE",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "83089a0695e0a5f0cf0fda25c7006df5e6ad4c07",
+      "accepted_base_sha": null,
+      "scope": [
+        "Package Branch Server Authority"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "gate-commercial-source-of-truth-alignment",
+      "authority_id": "HISTORICAL_GATE_ACCEPTANCE",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
+      "accepted_base_sha": null,
+      "scope": [
+        "Commercial Source-of-Truth Alignment"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "gate-lari-clinic-block-1",
+      "authority_id": "HISTORICAL_GATE_ACCEPTANCE",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "2bb2b32d95387e09da06c7442a8617ccd38e4feb",
+      "accepted_base_sha": null,
+      "scope": [
+        "LARI Clinic Block 1 Clinical Domain Server Authority"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "gate-lari-clinic-block-2",
+      "authority_id": "HISTORICAL_GATE_ACCEPTANCE",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "5e935ed049ffe08a6797643ec9cc2b7d4e6ae637",
+      "accepted_base_sha": null,
+      "scope": [
+        "LARI Clinic Block 2 Operational Integration & Application Service Layer"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "gate-lari-clinic-block-3",
+      "authority_id": "HISTORICAL_GATE_ACCEPTANCE",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "008ebac4496d592d271d612713c437d316c416f0",
+      "accepted_base_sha": null,
+      "scope": [
+        "LARI Clinic Block 3 Workspace UI & Isolated Real-Browser Acceptance"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "gate-lari-clinic-ai-assist-v1",
+      "authority_id": "HISTORICAL_GATE_ACCEPTANCE",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "451081f2619f0342df2a8c64ae401dffb7697363",
+      "accepted_base_sha": null,
+      "scope": [
+        "LARI Clinic AI Assist V1 Baseline & Real Groq Runtime"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "gate-lari-health-tourism-scope",
+      "authority_id": "HISTORICAL_GATE_ACCEPTANCE",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "25c41a7a026bb7e5e7e312c8fbee77f204e4add1",
+      "accepted_base_sha": null,
+      "scope": [
+        "LARI Health Tourism Scope Reconciliation Gate (Control Plane)"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "gate-lari-health-tourism-slice-1",
+      "authority_id": "HISTORICAL_GATE_ACCEPTANCE",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "401dbf9a10ffccef594a19c7c1070a256ae279bf",
+      "accepted_base_sha": null,
+      "scope": [
+        "LARI Health Tourism Foundation Slice 1 Server Authority & Lead Domain Core"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "gate-lari-health-tourism-slice-2",
+      "authority_id": "HISTORICAL_GATE_ACCEPTANCE",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "6e8d423083d44510c8446c7a858c26d1555cac0c",
+      "accepted_base_sha": null,
+      "scope": [
+        "LARI Health Tourism Slice 2 Multilingual Public Intake & Surface"
+      ],
+      "supersedes": []
+    },
+    {
+      "acceptance_id": "gate-lari-health-tourism-slice-3",
+      "authority_id": "HISTORICAL_GATE_ACCEPTANCE",
+      "project_id": "lari",
+      "lane_id": "product",
+      "accepted_sha": "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a",
+      "accepted_base_sha": null,
+      "scope": [
+        "LARI Health Tourism Lead Ops + Multilingual AI Assist Slice 3"
+      ],
+      "supersedes": []
+    }
+  ],
+  "source_mappings": [
+    {
+      "acceptance_id": "discovery_marketplace_r2",
+      "accepted_sha": "1bc7cfddd4c07b448956521acc86a125bcdea80d",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "discovery_marketplace_r3",
+      "accepted_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "favorites_rebooking_r1",
+      "accepted_sha": "d52492b9de18070733c1a565fb691f68f564ba69",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "gate-p1d.1a",
+      "accepted_sha": "134c8716c2511c909cd400aee0496ebd70f63bf6",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "gate-p2a.0",
+      "accepted_sha": "80297685cb3fd1c73a41207e6fd3dd1faedfbab2",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "gate-core-rc.4",
+      "accepted_sha": "e1bb23dbbc2f1f079ec6bbc93e3cb9b83db1839a",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "gate-package-branch-server-authority",
+      "accepted_sha": "83089a0695e0a5f0cf0fda25c7006df5e6ad4c07",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "gate-commercial-source-of-truth-alignment",
+      "accepted_sha": "65a53427f52c21e60aa8f92e02a17d693a201601",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "gate-lari-clinic-block-1",
+      "accepted_sha": "2bb2b32d95387e09da06c7442a8617ccd38e4feb",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "gate-lari-clinic-block-2",
+      "accepted_sha": "5e935ed049ffe08a6797643ec9cc2b7d4e6ae637",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "gate-lari-clinic-block-3",
+      "accepted_sha": "008ebac4496d592d271d612713c437d316c416f0",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "gate-lari-clinic-ai-assist-v1",
+      "accepted_sha": "451081f2619f0342df2a8c64ae401dffb7697363",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "gate-lari-health-tourism-scope",
+      "accepted_sha": "25c41a7a026bb7e5e7e312c8fbee77f204e4add1",
+      "ancestry_result": "CONTROL_PLANE_ANCESTOR",
+      "disposition": "PRESERVED_IN_CANONICAL_CONTROL",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "gate-lari-health-tourism-slice-1",
+      "accepted_sha": "401dbf9a10ffccef594a19c7c1070a256ae279bf",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "gate-lari-health-tourism-slice-2",
+      "accepted_sha": "6e8d423083d44510c8446c7a858c26d1555cac0c",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "gate-lari-health-tourism-slice-3",
+      "accepted_sha": "cc9c55e7fc841f4f16137b0a5e7c6f04b44b631a",
+      "ancestry_result": "STRICT_ANCESTOR_OF_P3",
+      "disposition": "PRESERVED_IN_PRODUCT_ANCESTRY",
+      "owner_wp": "WP3"
+    },
+    {
+      "acceptance_id": "program_v2_security_surface_hardening",
+      "accepted_sha": "c2a204ab9c5e3c2641be27d480d223f7148ec174",
+      "ancestry_result": "FORWARD_PORTED",
+      "disposition": "FORWARD_PORT_VERIFIED",
+      "owner_wp": "WP3.1"
+    }
+  ],
+  "completion": {
+    "required_count": 17,
+    "preserved_count": 17,
+    "unresolved_count": 0,
+    "manifest_digest": "f8f95ac73eba13c0fef2ef5666b255fc2eac8a6fd3bd3e691fdd85ea9d7a8fab"
+  }
+}
