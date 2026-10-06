@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-10-06T06:41:33.210932+00:00",
+  "updated_at": "2026-10-06T19:56:00.000000+00:00",
   "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
@@ -624,7 +624,7 @@
       "does_not_affect": "Design Intelligence, Design Remediation, Phase 2-7 development"
     }
   ],
-  "next_action": "Implement bounded Phase 7 Node 3 Favorites & Fast Rebooking R2 Product Integration from accepted R1 execution base d52492b9de18070733c1a565fb691f68f564ba69. Fast rebooking must use the existing appointment manage-token surface and the R1 current-truth seed; the user must select current availability through evaluate_booking_slot and final creation must use create_public_booking, with no direct appointment insert or historical price/duration authority. Favorites must use the R1 RPCs and real Supabase authenticated identity; lari_customer_auth, browser localStorage, raw email, and raw phone are not authorization. If an authenticated customer session is unavailable, hold only that favorites-auth surface; OTP, magic-link, or a new customer-auth architecture is not authorized. UI-V2 remains an independent lane. Production remains NO_GO.",
+  "next_action": "Implement bounded Phase 7 Node 3 Favorites & Fast Rebooking R2 Product Integration from accepted R1 execution base a8740a4a252c83060e8eaad28f49f58140c0ee5a. Fast rebooking must use the existing appointment manage-token surface and the R1 current-truth seed; the user must select current availability through evaluate_booking_slot and final creation must use create_public_booking, with no direct appointment insert or historical price/duration authority. Favorites must use the R1 RPCs and real Supabase authenticated identity; lari_customer_auth, browser localStorage, raw email, and raw phone are not authorization. If an authenticated customer session is unavailable, hold only that favorites-auth surface; OTP, magic-link, or a new customer-auth architecture is not authorized. UI-V2 remains an independent lane. Production remains NO_GO.",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true
@@ -1406,16 +1406,19 @@
       "lane_id": "product",
       "status": "READY_POST_CONVERGENCE",
       "authority": "DECISION-024",
-      "authority_revision": "20261007-01",
+      "authority_revision": "20261007-02",
       "execution_base_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a",
       "objective": "Complete canonically authorized Phase 7 Node 3 R2 Favorites & Fast Rebooking Product Integration under DECISION-024 and current canonical control.",
       "gate": "P7N3-FAVORITES-FAST-REBOOKING-R2",
       "production": "NO_GO",
       "allowed_scope": [
-        "src/features/favorites",
-        "src/features/rebooking",
-        "supabase/migrations",
-        "tests/favorites"
+        "pages/AppointmentSelfServicePage.tsx",
+        "pages/BookingPage.tsx",
+        "pages/customer/",
+        "services/appointmentSelfServiceService.ts",
+        "services/repositories/supabaseBookingRepository.ts",
+        "scripts/test-phase7-node3-favorites-rebooking-contracts.mjs",
+        "supabase/tests/program-v2/phase7-live/test-phase7-node3-favorites-fast-rebooking-behavioral-matrix.mjs"
       ],
       "hold_reason": null
     },
@@ -1424,15 +1427,19 @@
       "lane_id": "ui_v2",
       "status": "READY_POST_CONVERGENCE",
       "authority": "DECISION-024",
-      "authority_revision": "20261007-01",
+      "authority_revision": "20261007-02",
       "execution_base_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a",
       "objective": "Continue LARI UI-V2 productization from the current accepted product frontier, preserving valid historical UI productization while adapting it to current canonical server-authoritative contracts.",
       "gate": "LARI-UI-V2-PRODUCTIZATION",
       "production": "NO_GO",
       "allowed_scope": [
-        "src/ui-v2",
-        "src/components/v2",
-        "tests/ui-v2"
+        "components/SalonWebsiteViewV2.tsx",
+        "components/layouts/MarketingLayout.tsx",
+        "components/layouts/SalonBookingLayout.tsx",
+        "pages/MarketingHomePage.tsx",
+        "services/tenantService.ts",
+        "src/components/DiscoveryPortfolio.tsx",
+        "src/pages/DiscoveryMarketplace.tsx"
       ],
       "hold_reason": null
     }
@@ -1440,9 +1447,13 @@
   "shared_path_governance": {
     "contract_version": "1.0.0",
     "status": "ENFORCED",
-    "known_shared_paths": [
-      "pages/BookingPage.tsx"
-    ],
-    "rule": "Do not mutate shared paths concurrently across parallel lanes without an explicit ownership handoff contract."
+    "paths": {
+      "pages/BookingPage.tsx": {
+        "owner_lane": "lari",
+        "state": "EXCLUSIVE",
+        "handoff_required": true,
+        "handoff_condition": "PHASE7_NODE3_R2_ACCEPTED_OR_EXPLICIT_CONTROLLER_HANDOFF"
+      }
+    }
   }
 }
