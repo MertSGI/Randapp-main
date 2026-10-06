@@ -3,6 +3,7 @@ name: LARI Program V2 Phase 5 Disposable Postgres Acceptance & Live Security Mat
 on:
   push:
     branches:
+      - aos/phase7-node3-favorites-fast-rebooking-r1
       - feature/phase7-node2-discovery-marketplace-r3-review-20261004
       - feature/phase7-node2-discovery-marketplace-r1-20261003
       - cline/phase7-node1-verified-reviews-20261002
@@ -140,6 +141,13 @@ jobs:
           echo "=== EXECUTING PHASE 7 NODE 2 DISCOVERY MARKETPLACE STATIC CONTRACT SUITE ==="
           node scripts/test-phase7-node2-discovery-marketplace-contracts.mjs
           echo "PHASE 7 NODE 2 DISCOVERY MARKETPLACE STATIC CONTRACT SUITE PASSED!"
+
+      - name: Execute Phase 7 Node 3 Favorites and Fast Rebooking Static Contract Suite
+        run: |
+          set -euo pipefail
+          echo "=== EXECUTING PHASE 7 NODE 3 FAVORITES AND FAST REBOOKING STATIC CONTRACT SUITE ==="
+          node scripts/test-phase7-node3-favorites-rebooking-contracts.mjs
+          echo "PHASE 7 NODE 3 FAVORITES AND FAST REBOOKING STATIC CONTRACT SUITE PASSED!"
 
       - name: Execute Live Database Introspection & Integrity Verification
         run: |
@@ -359,6 +367,20 @@ jobs:
             exit "$STATUS"
           fi
           echo "=== PHASE 7 NODE 2 DISCOVERY MARKETPLACE BEHAVIORAL MATRIX COMPLETED CLEANLY ==="
+
+      - name: Execute Phase 7 Node 3 Live PostgreSQL Favorites and Fast Rebooking Behavioral Matrix
+        run: |
+          set -o pipefail
+          DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          echo "=== EXECUTING PHASE 7 NODE 3 FAVORITES AND FAST REBOOKING BEHAVIORAL MATRIX ==="
+          RUN_STANDALONE=true DB_URL="$DB_URL" node supabase/tests/program-v2/phase7-live/test-phase7-node3-favorites-fast-rebooking-behavioral-matrix.mjs 2>&1 | tee -a matrix.log
+          STATUS="${PIPESTATUS[0]}"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "=== PHASE 7 NODE 3 BEHAVIORAL MATRIX FAILED (EXIT CODE: $STATUS) - DUMPING MATRIX.LOG ==="
+            cat matrix.log || true
+            exit "$STATUS"
+          fi
+          echo "=== PHASE 7 NODE 3 FAVORITES AND FAST REBOOKING BEHAVIORAL MATRIX COMPLETED CLEANLY ==="
 
       - name: Execute Phase 7 Node 2 R3 Discovery Marketplace UI Contract Test
         run: |
