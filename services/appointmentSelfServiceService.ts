@@ -8,6 +8,35 @@ import { getBookingRepository, getSelfServiceRepository } from './repositories';
 import { communicationEventService } from './communicationEventService';
 import { tenantService } from './tenantService';
 import { auditLogService } from './auditLogService';
+import {
+  SupabaseBookingRepository,
+  CustomerFavoritesResult,
+  SetCustomerFavoriteResult
+} from './repositories/supabaseBookingRepository';
+
+// Fast Rebooking Types
+export interface FastRebookingSeed {
+  sourceAppointmentId: string;
+  tenantSlug: string;
+  branchId: string;
+  serviceId: string;
+  serviceName: string;
+  currentServicePrice: number;
+  currentServiceDurationMinutes: number;
+  staffId: string;
+  staffName: string;
+  requiresCurrentAvailabilitySelection: boolean;
+  availabilityAuthority: 'evaluate_booking_slot';
+  bookingAuthority: 'create_public_booking';
+  canonicalBookingRequired: boolean;
+}
+
+export interface FastRebookingSeedResult {
+  success: boolean;
+  reasonCode: string;
+  seed?: FastRebookingSeed;
+  message?: string;
+}
 
 const POLICY_STORAGE_KEY = 'lari_tenant_booking_policies';
 
@@ -966,6 +995,88 @@ export const appointmentSelfServiceService = {
     } catch (e) {
       console.error('Error reviewing change request', e);
       return false;
+    }
+  },
+
+  // ============================================================
+  // FAVORITES (Phase 7 Node 3 R2)
+  // Supabase Auth identity and the accepted SECURITY DEFINER RPCs are authoritative.
+  async getCustomerFavorites(limit: number = 50, offset: number = 0): Promise<CustomerFavoritesResult> {
+    const { getDataSourceMode } = await import('./dataSourceConfig');
+    if (getDataSourceMode() !== 'supabase') {
+      return {
+        success: false,
+        reasonCode: 'NOT_IN_SUPABASE_MODE',
+        total: 0,
+        limit,
+        offset,
+        favorites: []
+      };
+    }
+    return new SupabaseBookingRepository().getCustomerFavorites(limit, offset);
+  },
+
+  async setCustomerFavorite(
+    tenantId: string,
+    isFavorite: boolean = true
+  ): Promise<SetCustomerFavoriteResult> {
+    const { getDataSourceMode } = await import('./dataSourceConfig');
+    if (getDataSourceMode() !== 'supabase') {
+      return { success: false, reasonCode: 'NOT_IN_SUPABASE_MODE' };
+    }
+    return new SupabaseBookingRepository().setCustomerFavorite(tenantId, isFavorite);
+  },
+
+  // A manage token proves ownership of the historical appointment. This method
+  // returns current canonical selections only; BookingPage obtains fresh
+  // availability and creates the appointment through create_public_booking.
+  async getFastRebookingSeed(token: string): Promise<FastRebookingSeedResult> {
+    if (!token || typeof token !== 'string' || token.trim().length < 32) {
+      return {
+        success: false,
+        reasonCode: 'INVALID_TOKEN',
+        message: 'Geçersiz yönetim bağlantısı.'
+      };
+    }
+
+    try {
+      const { getDataSourceMode } = await import('./dataSourceConfig');
+      if (getDataSourceMode() !== 'supabase') {
+        return {
+          success: false,
+          reasonCode: 'NOT_IN_SUPABASE_MODE',
+          message: 'Bu özellik yalnızca güvenli çevrimiçi modda kullanılabilir.'
+        };
+      }
+
+      const result = await new SupabaseBookingRepository()
+        .getFastRebookingSeedByManageToken(token.trim());
+
+      if (result.success && result.seed) {
+        return { success: true, reasonCode: 'OK', seed: result.seed };
+      }
+
+      const messages: Record<string, string> = {
+        INVALID_TOKEN: 'Bu yönetim bağlantısı geçersiz veya süresi dolmuş.',
+        APPOINTMENT_NOT_REBOOKABLE: 'Yalnızca tamamlanmış randevular yeniden oluşturulabilir.',
+        TENANT_RESELECTION_REQUIRED: 'İşletme artık çevrimiçi randevu kabul etmiyor.',
+        SERVICE_RESELECTION_REQUIRED: 'Bu hizmet artık mevcut değil. Lütfen yeni bir hizmet seçin.',
+        STAFF_RESELECTION_REQUIRED: 'Bu uzman artık bu hizmeti sunmuyor. Lütfen yeni bir uzman seçin.',
+        BRANCH_RESELECTION_REQUIRED: 'Bu şube artık mevcut değil. Lütfen yeni bir şube seçin.',
+        TEMPORARY_FAILURE: 'İşlem şu anda tamamlanamadı. Lütfen kısa süre sonra tekrar deneyin.'
+      };
+      return {
+        success: false,
+        reasonCode: result.reasonCode,
+        message: messages[result.reasonCode] || messages.TEMPORARY_FAILURE
+      };
+    } catch (error) {
+      console.error('[appointmentSelfServiceService] getFastRebookingSeed failed', error);
+      return {
+        success: false,
+        reasonCode: 'TEMPORARY_FAILURE',
+        message: 'İşlem şu anda tamamlanamadı. Lütfen kısa süre sonra tekrar deneyin.'
+      };
     }
   }
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Service, BUSINESS_HOURS, Staff } from '../types';
 import * as GeminiService from '../services/geminiService';
 import * as NotificationService from '../services/notificationService';
@@ -19,6 +19,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { canPreviewTenantSite } from '../utils/previewAuth';
 import SalonWebsiteView from '../components/SalonWebsiteView';
 import { getDataSourceMode } from '../services/dataSourceConfig';
+import { appointmentSelfServiceService } from '../services/appointmentSelfServiceService';
 
 
 const generateTimeSlots = (): string[] => {
@@ -87,6 +88,10 @@ const BookingPage: React.FC = () => {
   const [timeSlots, setTimeSlots] = useState<string[]>([]);
   const [slotLoadingError, setSlotLoadingError] = useState<string | null>(null);
   const [slotRefreshKey, setSlotRefreshKey] = useState<number>(0);
+  const [fastRebookStatus, setFastRebookStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [fastRebookError, setFastRebookError] = useState<string>('');
+  const fastRebookAppliedRef = useRef<string>('');
+  const [favoriteStatus, setFavoriteStatus] = useState<'hidden' | 'loading' | 'signed_out' | 'favorite' | 'not_favorite' | 'error'>('hidden');
 
   useEffect(() => {
     if (tenant && selectedStaff && selectedService && selectedDate) {
@@ -234,6 +239,97 @@ const BookingPage: React.FC = () => {
       });
     }
   }, [tenant, staffList, selectedService]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.hash.split('?')[1]);
+    const manageToken = params.get('rebook_token')?.trim() || '';
+    if (!manageToken || !tenant || servicesList.length === 0 || staffList.length === 0 || branches.length === 0) {
+      return;
+    }
+    if (fastRebookAppliedRef.current === manageToken) return;
+    fastRebookAppliedRef.current = manageToken;
+    setFastRebookStatus('loading');
+    setFastRebookError('');
+    setStep(1);
+
+    appointmentSelfServiceService.getFastRebookingSeed(manageToken)
+      .then(result => {
+        if (!result.success || !result.seed) {
+          setFastRebookStatus('error');
+          setFastRebookError(result.message || (language === 'tr'
+            ? 'Yeniden rezervasyon bilgileri alınamadı.'
+            : 'Rebooking details could not be loaded.'));
+          return;
+        }
+
+        const seed = result.seed;
+        const service = servicesList.find(item => item.id === seed.serviceId);
+        const staff = staffList.find(item => item.id === seed.staffId);
+        const branch = branches.find(item => item.id === seed.branchId);
+        if (seed.tenantSlug !== tenant.slug || !service || !staff || !branch) {
+          setFastRebookStatus('error');
+          setFastRebookError(language === 'tr'
+            ? 'Önceki seçimler artık kullanılamıyor. Lütfen yeni bir randevu oluşturun.'
+            : 'The previous selections are no longer available. Please start a new booking.');
+          return;
+        }
+
+        setSelectedBranch(branch);
+        setSelectedService(service);
+        setSelectedStaff(staff);
+        setSelectedDate(new Date().toISOString().split('T')[0]);
+        setSelectedTime('');
+        setStep(3);
+        setFastRebookStatus('ready');
+      })
+      .catch(error => {
+        console.error('Fast rebooking seed load failed', error);
+        setFastRebookStatus('error');
+        setFastRebookError(language === 'tr'
+          ? 'Yeniden rezervasyon şu anda başlatılamıyor. Lütfen tekrar deneyin.'
+          : 'Rebooking cannot be started right now. Please try again.');
+      });
+  }, [tenant, servicesList, staffList, branches, language]);
+
+  useEffect(() => {
+    if (!tenant || getDataSourceMode() !== 'supabase') {
+      setFavoriteStatus('hidden');
+      return;
+    }
+
+    setFavoriteStatus('loading');
+    appointmentSelfServiceService.getCustomerFavorites(100, 0)
+      .then(result => {
+        if (!result.success) {
+          setFavoriteStatus(result.reasonCode === 'auth_required' ? 'signed_out' : 'error');
+          return;
+        }
+        setFavoriteStatus(result.favorites.some(item => item.tenant_id === tenant.id)
+          ? 'favorite'
+          : 'not_favorite');
+      })
+      .catch(error => {
+        console.error('Favorite status load failed', error);
+        setFavoriteStatus('error');
+      });
+  }, [tenant?.id]);
+
+  const toggleCurrentTenantFavorite = async () => {
+    if (!tenant || (favoriteStatus !== 'favorite' && favoriteStatus !== 'not_favorite')) return;
+    const shouldFavorite = favoriteStatus === 'not_favorite';
+    setFavoriteStatus('loading');
+    try {
+      const result = await appointmentSelfServiceService.setCustomerFavorite(tenant.id, shouldFavorite);
+      if (!result.success) {
+        setFavoriteStatus(result.reasonCode === 'auth_required' ? 'signed_out' : 'error');
+        return;
+      }
+      setFavoriteStatus(result.isFavorite ? 'favorite' : 'not_favorite');
+    } catch (error) {
+      console.error('Favorite update failed', error);
+      setFavoriteStatus('error');
+    }
+  };
 
 
   useEffect(() => {
@@ -803,6 +899,31 @@ const BookingPage: React.FC = () => {
          </div>
       ) : (
       <div data-testid="public-booking-ready">
+        {favoriteStatus !== 'hidden' && (
+          <div className="mx-auto flex max-w-6xl justify-end px-4 py-3">
+            {favoriteStatus === 'signed_out' ? (
+              <a href="#/customer/login" className="text-sm font-medium text-blue-600 hover:underline">
+                Favorilere eklemek için giriş yap
+              </a>
+            ) : favoriteStatus === 'error' ? (
+              <span className="text-sm text-gray-500">Favoriler şu anda kullanılamıyor.</span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void toggleCurrentTenantFavorite()}
+                disabled={favoriteStatus === 'loading'}
+                aria-pressed={favoriteStatus === 'favorite'}
+                className="rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:border-red-200 hover:text-red-600 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-200"
+              >
+                {favoriteStatus === 'loading'
+                  ? 'Favoriler kontrol ediliyor...'
+                  : favoriteStatus === 'favorite'
+                    ? '♥ Favorilerimde'
+                    : '♡ Favorilere ekle'}
+              </button>
+            )}
+          </div>
+        )}
         <SalonWebsiteView 
           tenant={tenant}
           businessProfile={businessProfile}
@@ -817,6 +938,23 @@ const BookingPage: React.FC = () => {
           bookingComponent={
             step > 0 ? (
               <div data-testid="public-booking-form" className="bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-blue-900/5 border border-gray-100 dark:border-slate-700/50 p-6 md:p-8 lg:p-10 mx-auto w-full mb-12">
+                {fastRebookStatus === 'loading' && (
+                  <div role="status" className="mb-6 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
+                    {language === 'tr' ? 'Önceki randevunuzun güncel seçenekleri hazırlanıyor...' : 'Loading current options from your previous appointment...'}
+                  </div>
+                )}
+                {fastRebookStatus === 'ready' && (
+                  <div data-testid="fast-rebook-ready" className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200">
+                    {language === 'tr'
+                      ? 'Hizmet, uzman ve şube güncel kayıtlardan seçildi. Lütfen yeni bir tarih ve müsait saat seçin.'
+                      : 'Service, staff, and branch were selected from current records. Choose a new date and available time.'}
+                  </div>
+                )}
+                {fastRebookStatus === 'error' && (
+                  <div data-testid="fast-rebook-error" role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+                    {fastRebookError}
+                  </div>
+                )}
                 {renderStepper()}
                 {/* Steps 1-4 with left/right column structure */}
                 {step < 5 && (

@@ -7,6 +7,9 @@ import { Appointment, Staff, Service } from '../../types';
 import { getAppointments } from '../../services/appointmentService';
 import { getStaffList } from '../../services/staffService';
 import { getServices } from '../../services/serviceCatalogService';
+import { supabase } from '../../services/supabaseClient';
+import { FavoritesSection } from './FavoritesSection';
+import { getDataSourceMode } from '../../services/dataSourceConfig';
 
 const CustomerPortalPage: React.FC = () => {
   const { language } = useLanguage();
@@ -17,54 +20,86 @@ const CustomerPortalPage: React.FC = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [servicesList, setServicesList] = useState<Service[]>([]);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
-    const authData = localStorage.getItem('lari_customer_auth');
-    if (!authData || !tenant) {
-      navigate('/customer/login');
-      return;
-    }
-    
-    try {
-      const auth = JSON.parse(authData);
-      if (auth.tenantId !== tenant.id) {
-        localStorage.removeItem('lari_customer_auth');
+    const checkAuthAndLoadData = async () => {
+      if (!tenant) {
         navigate('/customer/login');
         return;
       }
-      loadData(auth);
-    } catch {
-      localStorage.removeItem('lari_customer_auth');
-      navigate('/customer/login');
-    }
+
+      if (getDataSourceMode() === 'supabase') {
+        try {
+          const { data: { user }, error } = await supabase.auth.getUser();
+          setIsAuthenticated(!error && !!user);
+        } catch (error) {
+          console.error('Customer auth check failed', error);
+          setIsAuthenticated(false);
+        } finally {
+          setAuthChecked(true);
+        }
+        return;
+      }
+
+      const authData = localStorage.getItem('lari_customer_auth');
+      if (!authData) {
+        navigate('/customer/login');
+        return;
+      }
+
+      try {
+        const auth = JSON.parse(authData);
+        if (auth.tenantId !== tenant.id) {
+          localStorage.removeItem('lari_customer_auth');
+          navigate('/customer/login');
+          return;
+        }
+        setIsAuthenticated(true);
+        await loadData(auth);
+      } catch {
+        localStorage.removeItem('lari_customer_auth');
+        navigate('/customer/login');
+      } finally {
+        setAuthChecked(true);
+      }
+    };
+
+    void checkAuthAndLoadData();
   }, [tenant, navigate]);
 
-  const loadData = async (authObj: any) => {
+  const loadData = async (identity: { id?: string; email?: string; phone?: string }) => {
     if (!tenant) return;
-    const staff = await getStaffList(tenant.id);
-    const services = await getServices(tenant.id);
+    const [staff, services, apts] = await Promise.all([
+      getStaffList(tenant.id),
+      getServices(tenant.id),
+      getAppointments(tenant.id)
+    ]);
     setStaffList(staff);
     setServicesList(services);
 
-    // Filter appointments for this user
-    const apts = await getAppointments(tenant.id);
-    
-    const userApts = apts.filter(a => {
-      // Find matches using any of the available authenticated identifiers
-      const emailMatch = authObj.email && a.user_email?.toLowerCase() === authObj.email;
-      const phoneMatch = authObj.phone && a.phone?.replace(/\D/g, '') === authObj.phone;
-      const idMatch = authObj.id && (a.customerId === authObj.id || a.user_email === authObj.id);
-      
-      return idMatch || emailMatch || phoneMatch;
+    const email = identity.email?.toLowerCase();
+    const phone = identity.phone?.replace(/\D/g, '');
+    const userApts = apts.filter(appointment => {
+      const emailMatch = email && appointment.user_email?.toLowerCase() === email;
+      const phoneMatch = phone && appointment.phone?.replace(/\D/g, '') === phone;
+      const idMatch = identity.id && appointment.customerId === identity.id;
+      return !!(idMatch || emailMatch || phoneMatch);
     });
-    
-    // Sort descending by date/time
-    userApts.sort((a, b) => new Date(`${b.date}T${b.time}`).getTime() - new Date(`${a.date}T${a.time}`).getTime());
+
+    userApts.sort((a, b) =>
+      new Date(`${b.date}T${b.time}`).getTime() - new Date(`${a.date}T${a.time}`).getTime()
+    );
     setAppointments(userApts);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('lari_customer_auth');
+  const handleLogout = async () => {
+    if (getDataSourceMode() === 'supabase') {
+      await supabase.auth.signOut();
+    } else {
+      localStorage.removeItem('lari_customer_auth');
+    }
     navigate('/customer/login');
   };
 
@@ -103,17 +138,21 @@ const CustomerPortalPage: React.FC = () => {
              </h1>
              <span className="text-xs text-gray-500 uppercase tracking-widest font-semibold mt-1">{tenant?.name}</span>
           </div>
-          <button 
-            onClick={handleLogout}
-            className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 transition"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-            <span className="hidden sm:inline">{t.customer_portal.logout}</span>
-          </button>
+          {isAuthenticated && (
+            <button
+              onClick={() => void handleLogout()}
+              className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 transition"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 013-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+              <span className="hidden sm:inline">{t.customer_portal.logout}</span>
+            </button>
+          )}
         </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-8">
+        {authChecked && <FavoritesSection isAuthenticated={isAuthenticated} />}
+
         {/* Safe Explanatory Turkish Banner */}
         <div className="p-4 bg-blue-50/60 dark:bg-blue-950/20 rounded-xl border border-blue-100 dark:border-blue-900/40 text-xs text-blue-800 dark:text-blue-300 flex items-start gap-3">
           <svg className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">

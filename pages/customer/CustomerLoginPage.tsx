@@ -4,6 +4,8 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { translations } from '../../utils/translations';
 import { getAppointments } from '../../services/appointmentService';
 import { useTenant } from '../../contexts/TenantContext';
+import { supabase } from '../../services/supabaseClient';
+import { getDataSourceMode } from '../../services/dataSourceConfig';
 
 const CustomerLoginPage: React.FC = () => {
   const { language } = useLanguage();
@@ -12,10 +14,39 @@ const CustomerLoginPage: React.FC = () => {
   const navigate = useNavigate();
   const [contactInfo, setContactInfo] = useState('');
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!contactInfo.trim()) return;
+
+    if (getDataSourceMode() === 'supabase') {
+      setSubmitting(true);
+      setError('');
+      setMessage('');
+      try {
+        const value = contactInfo.trim();
+        const callbackUrl = `${window.location.origin}${window.location.pathname}#/customer/appointments`;
+        const credentials = value.includes('@')
+          ? { email: value, options: { emailRedirectTo: callbackUrl } }
+          : { phone: value };
+        const { error: authError } = await supabase.auth.signInWithOtp(credentials);
+        if (authError) {
+          setError(authError.message);
+          return;
+        }
+        setMessage(value.includes('@')
+          ? 'Güvenli giriş bağlantısı e-posta adresinize gönderildi.'
+          : 'Güvenli giriş kodu telefonunuza gönderildi.');
+      } catch (cause) {
+        console.error('Customer OTP login failed', cause);
+        setError('Giriş şu anda başlatılamıyor. Lütfen tekrar deneyin.');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
 
     if (!tenant) {
       setError('Tenant not found.');
@@ -81,6 +112,7 @@ const CustomerLoginPage: React.FC = () => {
                 onChange={(e) => {
                   setContactInfo(e.target.value);
                   setError('');
+                  setMessage('');
                 }}
               />
             </div>
@@ -91,14 +123,19 @@ const CustomerLoginPage: React.FC = () => {
               {error}
             </div>
           )}
+          {message && (
+            <div role="status" className="text-emerald-600 text-sm text-center font-medium">
+              {message}
+            </div>
+          )}
 
           <div>
             <button
               type="submit"
-              disabled={!contactInfo.trim()}
+              disabled={!contactInfo.trim() || submitting}
               className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-accent hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent disabled:opacity-50 transition"
             >
-              {t.customer_portal.login_btn}
+              {submitting ? 'Gönderiliyor...' : t.customer_portal.login_btn}
             </button>
           </div>
         </form>

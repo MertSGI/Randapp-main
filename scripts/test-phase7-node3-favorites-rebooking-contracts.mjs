@@ -15,6 +15,26 @@ if (!fs.existsSync(migrationPath)) {
 
 const sql = fs.readFileSync(migrationPath, 'utf8');
 const normalized = sql.replace(/\s+/g, ' ').toLowerCase();
+const repositorySource = fs.readFileSync(
+  path.resolve('services/repositories/supabaseBookingRepository.ts'),
+  'utf8'
+);
+const selfServiceSource = fs.readFileSync(
+  path.resolve('services/appointmentSelfServiceService.ts'),
+  'utf8'
+);
+const managePageSource = fs.readFileSync(
+  path.resolve('pages/AppointmentSelfServicePage.tsx'),
+  'utf8'
+);
+const bookingPageSource = fs.readFileSync(
+  path.resolve('pages/BookingPage.tsx'),
+  'utf8'
+);
+const customerLoginSource = fs.readFileSync(
+  path.resolve('pages/customer/CustomerLoginPage.tsx'),
+  'utf8'
+);
 
 function functionBody(name) {
   const pattern = new RegExp(
@@ -176,6 +196,63 @@ assertContract(
   (sql.match(/revoke all on function public\./gi) ?? []).length === 3 &&
     /grant execute on function public\.set_customer_favorite\(uuid, boolean\)\s+to authenticated, service_role/i.test(normalized) &&
     /grant execute on function public\.get_fast_rebooking_seed_by_manage_token\(text\)\s+to anon, authenticated, service_role/i.test(normalized)
+);
+
+assertContract(
+  '21. R2 favorites call only the accepted RPCs and validate Supabase Auth identity',
+  repositorySource.includes('/rest/v1/rpc/get_customer_favorites') &&
+    repositorySource.includes('/rest/v1/rpc/set_customer_favorite') &&
+    repositorySource.includes('supabase.auth.getUser()') &&
+    !repositorySource.includes('lari_customer_auth')
+);
+
+assertContract(
+  '22. R2 fast rebooking resolves the accepted manage-token seed RPC',
+  repositorySource.includes('/rest/v1/rpc/get_fast_rebooking_seed_by_manage_token') &&
+    selfServiceSource.includes('getFastRebookingSeedByManageToken(token.trim())')
+);
+
+assertContract(
+  '23. Manage surface exposes rebooking only for completed appointments',
+  /appointment\.status\s*===\s*'completed'[\s\S]*handleFastRebook/i.test(managePageSource) &&
+    managePageSource.includes('appointmentSelfServiceService.getFastRebookingSeed(effectiveToken)')
+);
+
+assertContract(
+  '24. Rebooking handoff carries only the ownership token to the canonical tenant route',
+  managePageSource.includes("new URLSearchParams({ rebook_token: effectiveToken })") &&
+    managePageSource.includes('encodeURIComponent(result.seed.tenantSlug)') &&
+    managePageSource.includes('navigate(') &&
+    !/new URLSearchParams\(\{[\s\S]{0,200}service:/i.test(managePageSource)
+);
+
+assertContract(
+  '25. Booking page re-resolves current seed selections and requires current tenant match',
+  bookingPageSource.includes("params.get('rebook_token')") &&
+    bookingPageSource.includes('seed.tenantSlug !== tenant.slug') &&
+    bookingPageSource.includes('item.id === seed.serviceId') &&
+    bookingPageSource.includes('item.id === seed.staffId') &&
+    bookingPageSource.includes('item.id === seed.branchId')
+);
+
+assertContract(
+  '26. Rebooking remains on canonical availability and creation paths',
+  bookingPageSource.includes('availabilityService.getAvailableSlotsForStaff') &&
+    bookingPageSource.includes('repo.createPublicBooking({') &&
+    !/insert\s+into\s+appointments/i.test(bookingPageSource)
+);
+
+assertContract(
+  '27. Customer authentication uses Supabase OTP rather than mock identity in Supabase mode',
+  customerLoginSource.includes("getDataSourceMode() === 'supabase'") &&
+    customerLoginSource.includes('supabase.auth.signInWithOtp') &&
+    customerLoginSource.includes('emailRedirectTo')
+);
+
+assertContract(
+  '28. R2 does not expand the shared BookingRepository contract',
+  !selfServiceSource.includes('repo.getCustomerFavorites(') &&
+    !selfServiceSource.includes('repo.getFastRebookingSeedByManageToken(')
 );
 
 console.log('---------------------------------------------------------------');
