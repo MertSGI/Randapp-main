@@ -1,8 +1,10 @@
 import { Tenant, TenantBranding } from '../types';
+import type { DiscoveryBusinessDetailDTO } from '../types/discoveryMarketplaceDTOs';
 import { dataProvider } from './dataProvider';
 import { supabase } from './supabaseClient';
 import { getDataSourceMode } from './dataSourceConfig';
 import { shouldUsePilotLocalBypass } from './pilotBypassPolicy';
+import { discoveryMarketplaceService } from './discoveryMarketplaceService';
 
 const DEMO_TENANT: Tenant = {
   id: 'tenant_demo',
@@ -19,6 +21,13 @@ const DEMO_TENANT: Tenant = {
     primaryColor: '#000000',
   }
 };
+
+/**
+ * Server-authoritative tenant discovery configuration.
+ * Aligns with public.get_discovery_marketplace_detail RPC contract (DECISION-022 / LARI-P7-N2-DISCOVERY-MARKETPLACE-R1).
+ * Maps directly to DiscoveryBusinessDetailDTO for zero-transform passthrough.
+ */
+export type TenantDiscoveryConfig = DiscoveryBusinessDetailDTO;
 
 export const tenantService = {
   async resolveTenantFromHost(hostname: string): Promise<Tenant | null> {
@@ -331,6 +340,21 @@ export const tenantService = {
     
     const key = `lari:${tenantId}:branding`;
     return dataProvider.get<TenantBranding>(key);
+  },
+
+  /**
+   * Fetches server-authoritative tenant discovery configuration.
+   * Aligns with public.get_discovery_marketplace_detail RPC contract (DECISION-022 / LARI-P7-N2-DISCOVERY-MARKETPLACE-R1).
+   * Returns zero-transform passthrough of DiscoveryBusinessDetailDTO for UI-V2 consumption.
+   * Fails closed with null if tenant is not eligible for public discovery (NOT_ELIGIBLE, NOT_FOUND, etc.).
+   */
+  async getTenantDiscoveryConfig(slug: string): Promise<TenantDiscoveryConfig | null> {
+    if (getDataSourceMode() !== 'supabase') {
+      return null;
+    }
+
+    const result = await discoveryMarketplaceService.getDetail({ slug });
+    return result.success ? result.data.business : null;
   },
 
   async updateTenant(tenantId: string, updates: Partial<Tenant>): Promise<void> {

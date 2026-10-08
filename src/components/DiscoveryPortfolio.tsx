@@ -2,14 +2,35 @@ import React, { useState } from 'react';
 import type {
   DiscoveryBusinessDetailDTO,
   DiscoveryServiceDetailDTO,
-  DiscoveryRecentReviewDTO,
 } from '../../types/discoveryMarketplaceDTOs';
 
+/**
+ * DiscoveryPortfolio — Server-authoritative business portfolio presentation component.
+ *
+ * Contract Alignment: LARI-P7-N2-DISCOVERY-MARKETPLACE-R2 (DECISION-022)
+ * - Consumes DiscoveryBusinessDetailDTO from canonical get_discovery_marketplace_detail RPC
+ * - Zero mock/local data — all content sourced from server-authoritative DTO
+ * - Pure presentational component (UI-V2 lane): no mutations, only local UI state
+ * - Responsive across 6 viewports via Tailwind utilities
+ * - Brand posture: indigo-600 primary, amber-500 ratings, neutral grayscale
+ * - Lane scope: presentation only; data fetching via discoveryMarketplaceService in parent
+ *
+ * Canonical RPCs (R2 Projection Contract):
+ * - public.get_discovery_marketplace_listings(search, city, district, category, minRating, limit, offset)
+ * - public.get_discovery_marketplace_detail(slug)
+ * Data flows: RPC → discoveryMarketplaceAdapter → discoveryMarketplaceService → DiscoveryMarketplace page → this component (props)
+ */
 export interface DiscoveryPortfolioProps {
+  /** Canonical business detail projection from get_discovery_marketplace_detail RPC */
   business: DiscoveryBusinessDetailDTO;
+  /** Callback when a service is selected for detail view */
   onSelectService?: (service: DiscoveryServiceDetailDTO) => void;
+  /** Callback for primary booking CTA — service optional for general booking */
   onBookNow?: (service?: DiscoveryServiceDetailDTO) => void;
 }
+
+const safeExternalUrl = (value?: string): string | undefined =>
+  value && /^https?:\/\//i.test(value) ? value : undefined;
 
 export const DiscoveryPortfolio: React.FC<DiscoveryPortfolioProps> = ({
   business,
@@ -19,6 +40,8 @@ export const DiscoveryPortfolio: React.FC<DiscoveryPortfolioProps> = ({
   const [activeTab, setActiveTab] = useState<'about' | 'services' | 'reviews' | 'gallery'>('services');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
+  // Destructure all fields from canonical DiscoveryBusinessDetailDTO projection
+  // All data is server-authoritative — DTO guarantees required arrays/objects
   const {
     name,
     businessCategory,
@@ -29,26 +52,47 @@ export const DiscoveryPortfolio: React.FC<DiscoveryPortfolioProps> = ({
     address,
     coverImageUrl,
     logoUrl,
-    galleryImages = [],
-    amenities = [],
-    services = [],
+    galleryImages,
+    amenities,
+    services,
     reviewsSummary,
-    recentReviews = [],
-    branches = [],
+    recentReviews,
+    branches,
     phone,
+    whatsappNumber,
     instagramUrl,
     websiteUrl,
     openingHoursSummary,
+    parkingInfo,
+    paymentMethods,
+    cancellationPolicy,
+    bookingPolicy,
   } = business;
 
   const defaultCover = 'https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&w=1200&q=80';
-  const reviewCount = reviewsSummary?.totalReviews ?? 0;
-  const hasRating = reviewCount > 0 && (reviewsSummary?.averageRating ?? 0) > 0;
+  const reviewCount = reviewsSummary.totalReviews;
+  const hasRating = reviewCount > 0 && reviewsSummary.averageRating > 0;
+  // DTO guarantees distribution shape: { 5: number; 4: number; 3: number; 2: number; 1: number }
+  const ratingDistribution = reviewsSummary.distribution;
+
+  // Helper to format rating distribution for display — pure UI computation
+  const getRatingDistributionBars = () => {
+    if (!hasRating) return [];
+    const stars = [5, 4, 3, 2, 1] as const;
+    return stars.map((star) => {
+      const count = ratingDistribution[star];
+      const percentage = reviewCount > 0 ? Math.round((count / reviewCount) * 100) : 0;
+      return { star, count, percentage };
+    });
+  };
+
+  const safeInstagramUrl = safeExternalUrl(instagramUrl);
+  const safeWebsiteUrl = safeExternalUrl(websiteUrl);
 
   return (
     <div className="discovery-portfolio bg-white text-gray-900 rounded-2xl shadow-xl overflow-hidden border border-gray-100 max-w-5xl mx-auto my-8">
       {/* Cover Header */}
-      <div className="relative h-64 md:h-80 w-full bg-gray-900">
+      <div className="relative h-72 sm:h-80 w-full bg-gray-900">
         <img
           src={coverImageUrl || defaultCover}
           alt={name}
@@ -56,16 +100,16 @@ export const DiscoveryPortfolio: React.FC<DiscoveryPortfolioProps> = ({
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
         
-        <div className="absolute bottom-6 left-6 right-6 flex flex-col md:flex-row md:items-end justify-between gap-4 text-white">
+        <div className="absolute bottom-4 left-4 right-4 sm:bottom-6 sm:left-6 sm:right-6 flex flex-col md:flex-row md:items-end justify-between gap-4 text-white">
           <div className="flex items-center gap-4">
             {logoUrl ? (
               <img
                 src={logoUrl}
                 alt={`${name} Logo`}
-                className="w-20 h-20 rounded-xl object-cover border-2 border-white shadow-lg bg-white"
+                className="w-14 h-14 sm:w-20 sm:h-20 rounded-xl object-cover border-2 border-white shadow-lg bg-white"
               />
             ) : (
-              <div className="w-20 h-20 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-2xl font-bold border-2 border-white shadow-lg">
+              <div className="w-14 h-14 sm:w-20 sm:h-20 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-2xl font-bold border-2 border-white shadow-lg">
                 {name.charAt(0)}
               </div>
             )}
@@ -78,7 +122,7 @@ export const DiscoveryPortfolio: React.FC<DiscoveryPortfolioProps> = ({
                   {district}, {city}
                 </span>
               </div>
-              <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight mt-1">
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight mt-1">
                 {name}
               </h1>
               {shortDescription && (
@@ -118,12 +162,12 @@ export const DiscoveryPortfolio: React.FC<DiscoveryPortfolioProps> = ({
       </div>
 
       {/* Navigation Tabs */}
-      <div className="border-b border-gray-200 bg-gray-50/50 px-6 flex gap-8">
+      <div className="border-b border-gray-200 bg-gray-50/50 px-4 sm:px-6 flex gap-6 sm:gap-8 overflow-x-auto">
         {(['services', 'about', 'gallery', 'reviews'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`py-4 font-medium text-sm border-b-2 transition-colors duration-150 capitalize ${
+            className={`py-4 font-medium text-sm border-b-2 transition-colors duration-150 capitalize whitespace-nowrap ${
               activeTab === tab
                 ? 'border-indigo-600 text-indigo-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -150,7 +194,7 @@ export const DiscoveryPortfolio: React.FC<DiscoveryPortfolioProps> = ({
                 {services.map((service) => (
                   <div
                     key={service.id}
-                    className="p-4 rounded-xl border border-gray-200 hover:border-indigo-300 hover:shadow-sm transition bg-white flex justify-between items-center"
+                    className="p-4 rounded-xl border border-gray-200 hover:border-indigo-300 hover:shadow-sm transition bg-white flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3"
                   >
                     <div>
                       <h3 className="font-semibold text-gray-900 text-base">
@@ -167,8 +211,11 @@ export const DiscoveryPortfolio: React.FC<DiscoveryPortfolioProps> = ({
                       </span>
                       <button
                         onClick={() => {
-                          if (onSelectService) onSelectService(service);
-                          if (onBookNow) onBookNow(service);
+                          if (onSelectService) {
+                            onSelectService(service);
+                          } else {
+                            onBookNow?.(service);
+                          }
                         }}
                         className="text-xs font-semibold px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition"
                       >
@@ -221,6 +268,21 @@ export const DiscoveryPortfolio: React.FC<DiscoveryPortfolioProps> = ({
                     <strong>Telefon:</strong> {phone}
                   </p>
                 )}
+                {whatsappNumber && (
+                  <p className="text-xs text-gray-600 mb-1">
+                    <strong>WhatsApp:</strong> {whatsappNumber}
+                  </p>
+                )}
+                {safeInstagramUrl && (
+                  <p className="text-xs text-gray-600 mb-1">
+                    <strong>Instagram:</strong> <a href={safeInstagramUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">@{safeInstagramUrl.replace(/^.*instagram\.com\//, '').replace(/\/$/, '')}</a>
+                  </p>
+                )}
+                {safeWebsiteUrl && (
+                  <p className="text-xs text-gray-600 mb-1">
+                    <strong>Web Sitesi:</strong> <a href={safeWebsiteUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{safeWebsiteUrl.replace(/^https?:\/\//, '')}</a>
+                  </p>
+                )}
                 {openingHoursSummary && (
                   <p className="text-xs text-gray-600 mb-1">
                     <strong>Çalışma Saatleri:</strong> {openingHoursSummary}
@@ -228,24 +290,63 @@ export const DiscoveryPortfolio: React.FC<DiscoveryPortfolioProps> = ({
                 )}
               </div>
 
-              {branches.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-2">Şubeler</h3>
-                  <div className="space-y-1">
-                    {branches.map((b) => (
-                      <div key={b.id} className="text-xs text-gray-600 flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                        <span>{b.name}</span>
-                        {b.isPrimary && (
-                          <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">
-                            Merkez
-                          </span>
-                        )}
-                      </div>
-                    ))}
+              <div>
+                {branches.length > 0 && (
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-gray-900 mb-2">Şubeler</h3>
+                    <div className="space-y-1">
+                      {branches.map((b) => (
+                        <div key={b.id} className="text-xs text-gray-600 flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                          <span>{b.name}</span>
+                          {b.isPrimary && (
+                            <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">
+                              Merkez
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+
+                {parkingInfo && (
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-gray-900 mb-2">Otopark Bilgisi</h3>
+                    <p className="text-xs text-gray-600 whitespace-pre-line">{parkingInfo}</p>
+                  </div>
+                )}
+
+                {paymentMethods.length > 0 && (
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-gray-900 mb-2">Ödeme Yöntemleri</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {paymentMethods.map((method, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2.5 py-1 bg-gray-100 text-gray-700 rounded-lg text-xs font-medium"
+                        >
+                          {method}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {cancellationPolicy && (
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-gray-900 mb-2">İptal Politikası</h3>
+                    <p className="text-xs text-gray-600 whitespace-pre-line">{cancellationPolicy}</p>
+                  </div>
+                )}
+
+                {bookingPolicy && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 mb-2">Randevu Politikası</h3>
+                    <p className="text-xs text-gray-600 whitespace-pre-line">{bookingPolicy}</p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -318,6 +419,26 @@ export const DiscoveryPortfolio: React.FC<DiscoveryPortfolioProps> = ({
                 </div>
               </div>
             </div>
+
+            {hasRating && (
+              <div className="space-y-2 text-xs">
+                <h3 className="font-semibold text-gray-900 uppercase tracking-wider">Puan Dağılımı</h3>
+                {getRatingDistributionBars().map(({ star, count, percentage }) => (
+                  <div key={star} className="flex items-center gap-2">
+                    <span className="text-amber-500 font-mono w-6 text-right">
+                      {star}★
+                    </span>
+                    <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
+                    <span className="text-gray-500 w-12 text-right">{count}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {recentReviews.length === 0 ? (
               <p className="text-gray-500 text-sm">Henüz yayınlanmış bir yorum bulunmuyor.</p>
