@@ -1,0 +1,21 @@
+{
+  "receipt_id": "receipt-lari-p7-n3-favorites-rebooking-r2",
+  "project_id": "lari",
+  "lane": "product",
+  "slice_id": "favorites_rebooking_r2",
+  "execution_base_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a",
+  "candidate_sha": "06ebf176e411faf6820ded34987f894cc5e7dc9e",
+  "ci_harness_sha": "f3b4cc8af596b118df9020434ce15ab4026dfe2f",
+  "ci_workflow_name": "lari-phase5-postgres-acceptance.yml",
+  "ci_run_id": 37783633635,
+  "ci_conclusion": "success",
+  "preview_deployment_id": "dpl_9riUfBKbPakuFLrotZKEXM47Mu2G",
+  "preview_evidence_level": "E1_SOURCE_BUILD_ARTIFACT",
+  "customer_appointment_history_status": "DEFERRED_NOT_DELIVERED",
+  "acceptance_result": "ACCEPTED",
+  "controller_authority": "LARI-CONTROLLER-WP5-ACCEPTANCE-20261008-01",
+  "canonical_decision": "DECISION-024",
+  "control_sha_before": "49c138f944252dba7e4c42436ff6dd735f777902",
+  "created_at": "2026-10-08T13:45:00.000000+00:00",
+  "production": "NO_GO"
+}

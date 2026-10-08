@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "updated_at": "2026-10-06T19:56:00.000000+00:00",
+  "updated_at": "2026-10-08T13:45:00.000000+00:00",
   "product": "LARİ SaaS Platform",
   "repository": "MertSGI/Randapp-main",
   "delivery_commitment": {
@@ -16,8 +16,8 @@
     "LARİ Health Tourism",
     "Final Delivery"
   ],
-  "current_milestone": "Program V2 Phase 7 — Node 3 Favorites & Fast Rebooking R2 Product Integration",
-  "current_status": "PHASE_7_NODE_3_FAVORITES_REBOOKING_R2_PRODUCT_INTEGRATION_AUTHORIZED",
+  "current_milestone": "Program V2 Phase 7 — Node 3 Favorites & Fast Rebooking R2 Product Integration Accepted",
+  "current_status": "PHASE_7_NODE_3_FAVORITES_REBOOKING_R2_ACCEPTED",
   "production_status": "NO_GO",
   "candidate_release": {
     "branch": "staging/supabase-staging-consistency",
@@ -45,8 +45,8 @@
       "isolated_project": "miuecvkkmyvaciticwtm",
       "ht_ai_chat_version": "12"
     },
-    "accepted_product_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a",
-    "next_action_execution_base_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a"
+    "accepted_product_sha": "06ebf176e411faf6820ded34987f894cc5e7dc9e",
+    "next_action_execution_base_sha": "06ebf176e411faf6820ded34987f894cc5e7dc9e"
   },
   "aos6_authority": {
     "read_only_shadow_reconciliation_authorized": true,
@@ -483,6 +483,17 @@
       ],
       "closed_at": "2026-10-06T16:06:30Z",
       "reopen_condition": "Contradictory security regression or broken accepted-work manifest"
+    },
+    {
+      "gate": "P7N3-FAVORITES-FAST-REBOOKING-R2",
+      "status": "CLOSED_PROVEN",
+      "evidence_level": "E2_EXECUTABLE_EXACT_SHA_CI",
+      "tested_sha": "06ebf176e411faf6820ded34987f894cc5e7dc9e",
+      "run_ids": [
+        "37783633635"
+      ],
+      "closed_at": "2026-10-08T13:45:00.000000+00:00",
+      "reopen_condition": "Regression in customer auth isolation, appointment manage-token rebooking, or exact-SHA CI verification"
     }
   ],
   "active_workstreams": {
@@ -624,7 +635,7 @@
       "does_not_affect": "Design Intelligence, Design Remediation, Phase 2-7 development"
     }
   ],
-  "next_action": "Implement bounded Phase 7 Node 3 Favorites & Fast Rebooking R2 Product Integration from accepted R1 execution base a8740a4a252c83060e8eaad28f49f58140c0ee5a. Fast rebooking must use the existing appointment manage-token surface and the R1 current-truth seed; the user must select current availability through evaluate_booking_slot and final creation must use create_public_booking, with no direct appointment insert or historical price/duration authority. Favorites must use the R1 RPCs and real Supabase authenticated identity; lari_customer_auth, browser localStorage, raw email, and raw phone are not authorization. If an authenticated customer session is unavailable, hold only that favorites-auth surface; OTP, magic-link, or a new customer-auth architecture is not authorized. UI-V2 remains an independent lane. Production remains NO_GO.",
+  "next_action": "Phase 7 Node 3 Favorites & Fast Rebooking R2 Product Integration accepted at exact product SHA 06ebf176e411faf6820ded34987f894cc5e7dc9e (CI harness f3b4cc8af596b118df9020434ce15ab4026dfe2f, Run 37783633635 SUCCESS). Customer appointment-history viewing deferred/not delivered under customer auth containment. Next canonical action: UI-V2 productization synchronization or Phase 7 Node 3 R3 visual/browser validation from 06ebf176e411faf6820ded34987f894cc5e7dc9e. Production remains NO_GO.",
   "evidence_policy": {
     "strict_levels": true,
     "require_literal_runs": true
@@ -1259,7 +1270,8 @@
     "node2_r1": "814e3ca0c09c3a484e20869f1a47a3545259f6db",
     "node2_r2": "1bc7cfddd4c07b448956521acc86a125bcdea80d",
     "node2_r3": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6",
-    "node3_r1": "d52492b9de18070733c1a565fb691f68f564ba69"
+    "node3_r1": "d52492b9de18070733c1a565fb691f68f564ba69",
+    "node3_r2": "06ebf176e411faf6820ded34987f894cc5e7dc9e"
   },
   "phase7_node2_discovery_marketplace_r1_state": {
     "status": "CLOSED_PROVEN",
@@ -1288,15 +1300,15 @@
   "next_product_action": {
     "phase": "PHASE_7",
     "node": "NODE_3_FAVORITES_FAST_REBOOKING",
-    "slice": "R2_PRODUCT_INTEGRATION_AUTHORIZED",
+    "slice": "R2_PRODUCT_INTEGRATION_ACCEPTED",
     "canonical_capability_order": [
       "Node 1 — Verified Reviews",
       "Node 2 — Discovery Marketplace",
       "Node 3 — Favorites & Fast Rebooking"
     ],
-    "execution_base_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a"
+    "execution_base_sha": "06ebf176e411faf6820ded34987f894cc5e7dc9e"
   },
-  "next_action_execution_base_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a",
+  "next_action_execution_base_sha": "06ebf176e411faf6820ded34987f894cc5e7dc9e",
   "phase7_node2_contract": {
     "contract_id": "LARI-P7-N2-DISCOVERY-MARKETPLACE-R2",
     "authority": "DECISION-022",
@@ -1396,18 +1408,26 @@
     },
     "delivery_slices": {
       "R1": "ACCEPTED_PROVEN",
-      "R2": "AUTHORIZED"
+      "R2": "ACCEPTED_PROVEN"
     },
-    "production": "NO_GO"
+    "production": "NO_GO",
+    "r2_product_integration": {
+      "status": "ACCEPTED_PROVEN",
+      "product_sha": "06ebf176e411faf6820ded34987f894cc5e7dc9e",
+      "ci_harness_sha": "f3b4cc8af596b118df9020434ce15ab4026dfe2f",
+      "ci_run_id": 37783633635,
+      "evidence_id": "EV-097",
+      "appointment_history_status": "DEFERRED_NOT_DELIVERED"
+    }
   },
   "parallel_execution_lanes": {
     "lari": {
       "project_id": "lari",
       "lane_id": "product",
-      "status": "READY_POST_CONVERGENCE",
+      "status": "R2_ACCEPTED",
       "authority": "DECISION-024",
       "authority_revision": "20261007-02",
-      "execution_base_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a",
+      "execution_base_sha": "06ebf176e411faf6820ded34987f894cc5e7dc9e",
       "objective": "Complete canonically authorized Phase 7 Node 3 R2 Favorites & Fast Rebooking Product Integration under DECISION-024 and current canonical control.",
       "gate": "P7N3-FAVORITES-FAST-REBOOKING-R2",
       "production": "NO_GO",
@@ -1428,7 +1448,7 @@
       "status": "READY_POST_CONVERGENCE",
       "authority": "DECISION-024",
       "authority_revision": "20261007-02",
-      "execution_base_sha": "a8740a4a252c83060e8eaad28f49f58140c0ee5a",
+      "execution_base_sha": "06ebf176e411faf6820ded34987f894cc5e7dc9e",
       "objective": "Continue LARI UI-V2 productization from the current accepted product frontier, preserving valid historical UI productization while adapting it to current canonical server-authoritative contracts.",
       "gate": "LARI-UI-V2-PRODUCTIZATION",
       "production": "NO_GO",

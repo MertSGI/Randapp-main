@@ -570,9 +570,12 @@
       "external_provider_or_company_dependency": false,
       "execution_contract_id": "LARI-P7-N3-FAVORITES-REBOOKING-R1",
       "execution_base_sha": "e6b30e0708aa2eb1597caa3155b3c3b3b3e9f0d6",
-      "delivery_slice": "R1_ACCEPTED_R2_AUTHORIZED",
+      "delivery_slice": "R2_ACCEPTED",
       "accepted_r1_sha": "d52492b9de18070733c1a565fb691f68f564ba69",
-      "accepted_r1_ci_run_id": 37417054448
+      "accepted_r1_ci_run_id": 37417054448,
+      "accepted_r2_sha": "06ebf176e411faf6820ded34987f894cc5e7dc9e",
+      "accepted_r2_ci_run_id": 37783633635,
+      "customer_appointment_history_status": "DEFERRED_NOT_DELIVERED"
     },
     {
       "key": "pwa",
