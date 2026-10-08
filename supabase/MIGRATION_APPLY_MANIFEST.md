@@ -65,6 +65,46 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 54. **`20260829_h1e_c_controlled_transition_runtime_fix.sql`** — Stage H1E-C4 Controlled Release Transition Runtime Forward Fix: Aligns transition audit_events INSERT with canonical schema (tenant_id, actor_id, actor_role, action, resource_type, resource_id, payload), enforces actor_user_id match on idempotency replay, and updates evidence read RPC to query canonical action column.
 55. **`20260830_p1c_public_branch_read_contract.sql`** — Server-authoritative public branch read RPC get_public_branches for active tenant storefront branch discovery.
 56. **`20260831_p1c_public_branch_read_contract_runtime_fix.sql`** — Aligns get_public_branches RPC eligibility predicate with canonical can_accept_public_booking contract (status, onboarding_status, public_site_status).
+57. **`20260901_p2a_atomic_tenant_provisioning_rpc.sql`** — Atomic tenant provisioning authority.
+58. **`20260902_p2a_publish_commercial_contract_alignment.sql`** — Published commercial contract alignment.
+59. **`20260903_p2a_owner_onboarding_contracts.sql`** — Owner onboarding contracts.
+60. **`20260904_authenticated_owner_branch_mutations_rpc.sql`** — Authenticated owner branch mutation RPCs.
+61. **`20260905_lari_clinic_domain_server_authority.sql`** — LARI clinic domain server authority.
+62. **`20260906_lari_clinic_operational_integration.sql`** — LARI clinic operational integration.
+63. **`20260907_lari_clinic_workspace_authority_hardening.sql`** — Clinic workspace authority hardening.
+64. **`20260908_commercial_lifecycle_eligibility_alignment.sql`** — Commercial lifecycle eligibility alignment.
+65. **`20260909_clinic_ai_assist_commercial_authority.sql`** — Clinic AI-assist commercial authority.
+66. **`20260910_lari_health_tourism_foundation.sql`** — Health-tourism foundation.
+67. **`20260911_lari_health_tourism_lead_ops_ai_assist.sql`** — Health-tourism lead operations and AI assist.
+68. **`20260912_lari_health_tourism_clinic_acceptance.sql`** — Health-tourism clinic acceptance contracts.
+69. **`20260913_lari_health_tourism_clinic_acceptance_workspace.sql`** — Health-tourism clinic acceptance workspace.
+70. **`20260914_public_booking_branch_id_response_contract_fix.sql`** — Public-booking branch response contract fix.
+71. **`20260916_phase2_staff_scheduling_foundation.sql`** — Phase 2 staff scheduling foundation.
+72. **`20260917_phase3_waitlist_foundation.sql`** — Phase 3 waitlist foundation.
+73. **`20260918_phase3_communications_foundation.sql`** — Phase 3 communications foundation.
+74. **`20260919_phase3_provider_neutral_payment_foundation.sql`** — Provider-neutral payment foundation.
+75. **`20260920_phase3_background_job_calendar_foundation.sql`** — Background-job calendar foundation.
+76. **`20260920_phase3_resource_capacity_foundation.sql`** — Resource-capacity foundation.
+77. **`20260921_phase3_customer360_segmentation_foundation.sql`** — Customer 360 segmentation foundation.
+78. **`20260921_phase3_package_limits_multibranch_completeness.sql`** — Package limits and multi-branch completeness.
+79. **`20260922_phase3_reporting_analytics_foundation.sql`** — Reporting and analytics foundation.
+80. **`20260923_phase3_custom_domain_verification_foundation.sql`** — Custom-domain verification foundation.
+81. **`20260924_phase4_deposit_noshow_policy_foundation.sql`** — Deposit and no-show policy foundation.
+82. **`20260925_phase4_loyalty_reactivation_foundation.sql`** — Loyalty and reactivation foundation.
+83. **`20260925_phase4_packages_memberships_foundation.sql`** — Packages and memberships foundation.
+84. **`20260926_phase4_giftcards_wallet_foundation.sql`** — Gift cards and wallet foundation.
+85. **`20260927_phase5_vertical_skus_commercial_packaging.sql`** — Vertical SKU commercial packaging.
+86. **`20260928_phase5_clinic_practitioners_workspace_hardening.sql`** — Clinic practitioner workspace hardening.
+87. **`20260928_phase5_ht_treatment_journey_quote_itinerary.sql`** — Health-tourism journey, quote, and itinerary contracts.
+88. **`20260929_phase5_scheduling_buffer_parity_hardening.sql`** — Scheduling buffer parity hardening.
+89. **`20260930_phase6_product_inventory_foundation.sql`** — Product inventory foundation.
+90. **`20261001_phase6_node2_suppliers_po_receiving.sql`** — Supplier, purchase-order, and receiving authority.
+91. **`20261002_phase6_node3_pos_mixed_cart_checkout.sql`** — POS mixed-cart checkout authority.
+92. **`20261003_phase6_node4_staff_commissions_tips.sql`** — Staff commissions and tips authority.
+93. **`20261004_phase7_node1_verified_reviews_foundation.sql`** — Verified reviews foundation.
+94. **`20261005_phase7_node2_discovery_marketplace_projection.sql`** — Discovery Marketplace server-authoritative projection.
+95. **`20261006_phase7_node3_favorites_fast_rebooking.sql`** — Customer favorites and fast-rebooking seed authority.
+96. **`20261007_program_v2_security_surface_hardening.sql`** — Program V2 security surface hardening.
 
 ---
 

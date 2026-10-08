@@ -39,16 +39,19 @@ console.log('--- TEST GROUP 1: Component File Existence & Exports ---');
 
 const marketplacePath = path.resolve('src/pages/DiscoveryMarketplace.tsx');
 const portfolioPath = path.resolve('src/components/DiscoveryPortfolio.tsx');
+const tenantServicePath = path.resolve('services/tenantService.ts');
 const routesPath = path.resolve('src/routes.tsx');
 const appPath = path.resolve('App.tsx');
 
 assert(fs.existsSync(marketplacePath), 'src/pages/DiscoveryMarketplace.tsx exists');
 assert(fs.existsSync(portfolioPath), 'src/components/DiscoveryPortfolio.tsx exists');
+assert(fs.existsSync(tenantServicePath), 'services/tenantService.ts exists');
 assert(fs.existsSync(appPath), 'App.tsx exists');
 assert(!fs.existsSync(routesPath), 'unused duplicate src/routes.tsx is absent');
 
 const marketplaceContent = fs.readFileSync(marketplacePath, 'utf8');
 const portfolioContent = fs.readFileSync(portfolioPath, 'utf8');
+const tenantServiceContent = fs.readFileSync(tenantServicePath, 'utf8');
 const appContent = fs.readFileSync(appPath, 'utf8');
 
 assert(
@@ -74,8 +77,13 @@ assert(
 );
 
 assert(
-  marketplaceContent.includes('discoveryMarketplaceService.getDetail'),
-  'DiscoveryMarketplace invokes discoveryMarketplaceService.getDetail'
+  marketplaceContent.includes('tenantService.getTenantDiscoveryConfig'),
+  'DiscoveryMarketplace resolves detail through the canonical tenant service boundary'
+);
+
+assert(
+  tenantServiceContent.includes('discoveryMarketplaceService.getDetail({ slug })'),
+  'tenantService delegates discovery detail to discoveryMarketplaceService.getDetail'
 );
 
 assert(
