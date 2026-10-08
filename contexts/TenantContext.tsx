@@ -48,7 +48,23 @@ export const TenantProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   };
 
   useEffect(() => {
-    loadTenant();
+    void loadTenant();
+
+    // TenantProvider intentionally lives above the router. Re-resolve tenant
+    // context when SPA navigation changes the public route so handoffs such as
+    // appointment management -> /booking/:tenantSlug do not retain the
+    // route-neutral tenant state from the previous screen.
+    const handleRouteChange = () => {
+      void loadTenant();
+    };
+
+    window.addEventListener('hashchange', handleRouteChange);
+    window.addEventListener('popstate', handleRouteChange);
+
+    return () => {
+      window.removeEventListener('hashchange', handleRouteChange);
+      window.removeEventListener('popstate', handleRouteChange);
+    };
   }, []);
 
   const value = {

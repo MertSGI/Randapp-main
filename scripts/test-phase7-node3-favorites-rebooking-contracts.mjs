@@ -35,6 +35,10 @@ const customerLoginSource = fs.readFileSync(
   path.resolve('pages/customer/CustomerLoginPage.tsx'),
   'utf8'
 );
+const tenantContextSource = fs.readFileSync(
+  path.resolve('contexts/TenantContext.tsx'),
+  'utf8'
+);
 
 function functionBody(name) {
   const pattern = new RegExp(
@@ -253,6 +257,13 @@ assertContract(
   '28. R2 does not expand the shared BookingRepository contract',
   !selfServiceSource.includes('repo.getCustomerFavorites(') &&
     !selfServiceSource.includes('repo.getFastRebookingSeedByManageToken(')
+);
+
+assertContract(
+  '29. Route handoffs refresh tenant context without remounting the provider',
+  tenantContextSource.includes("window.addEventListener('hashchange', handleRouteChange)") &&
+    tenantContextSource.includes("window.removeEventListener('hashchange', handleRouteChange)") &&
+    /const handleRouteChange = \(\) => \{\s*void loadTenant\(\);\s*\}/m.test(tenantContextSource)
 );
 
 console.log('---------------------------------------------------------------');
