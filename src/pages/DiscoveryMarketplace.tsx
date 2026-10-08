@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { discoveryMarketplaceService } from '../../services/discoveryMarketplaceService';
+import { tenantService } from '../../services/tenantService';
 import { DiscoveryPortfolio } from '../components/DiscoveryPortfolio';
 import type {
   DiscoveryListingDTO,
   DiscoveryBusinessDetailDTO,
+  DiscoveryServiceDetailDTO,
 } from '../../types/discoveryMarketplaceDTOs';
+
+const PAGE_SIZE = 20;
 
 export const DiscoveryMarketplace: React.FC = () => {
   const navigate = useNavigate();
@@ -16,6 +20,7 @@ export const DiscoveryMarketplace: React.FC = () => {
   const [listings, setListings] = useState<DiscoveryListingDTO[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   // Selected detail state if viewing single business / portfolio
@@ -23,54 +28,46 @@ export const DiscoveryMarketplace: React.FC = () => {
   const [loadingDetail, setLoadingDetail] = useState<boolean>(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
-  // Filter state
+  // Filter state from URL search params
   const searchQuery = searchParams.get('q') || '';
   const city = searchParams.get('city') || '';
+  const district = searchParams.get('district') || '';
   const category = searchParams.get('cat') || '';
   const minRating = Number(searchParams.get('rating')) || 0;
 
-  // Fetch listings
+  // Initial load and filter changes. A short debounce avoids issuing an RPC
+  // for every keystroke; the active flag prevents stale responses winning.
   useEffect(() => {
-    let isCancelled = false;
-
-    const fetchListingsData = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const result = await discoveryMarketplaceService.getListings({
-          searchQuery: searchQuery || undefined,
-          city: city || undefined,
-          category: category || undefined,
-          minRating: minRating > 0 ? minRating : undefined,
-          limit: 20,
-          offset: 0,
-        });
-
-        if (isCancelled) return;
-
-        if (result.success === true) {
-          setListings(result.data.listings);
-          setTotalCount(result.data.totalCount);
-        } else {
-          setError(result.error.message || 'İşletmeler listelenirken bir hata oluştu.');
-        }
-      } catch (err: any) {
-        if (!isCancelled) {
-          setError(err.message || 'Beklenmeyen bir hata oluştu.');
-        }
-      } finally {
-        if (!isCancelled) {
-          setLoading(false);
-        }
+    let active = true;
+    setLoading(true);
+    setError(null);
+    const timer = window.setTimeout(async () => {
+      const result = await discoveryMarketplaceService.getListings({
+        searchQuery: searchQuery || undefined,
+        city: city || undefined,
+        district: district || undefined,
+        category: category || undefined,
+        minRating: minRating > 0 ? minRating : undefined,
+        limit: PAGE_SIZE,
+        offset: 0,
+      });
+      if (!active) return;
+      if (result.success === true) {
+        setListings(result.data.listings);
+        setTotalCount(result.data.totalCount);
+      } else {
+        setListings([]);
+        setTotalCount(0);
+        setError(result.error.message || 'İşletmeler listelenirken bir hata oluştu.');
       }
-    };
-
-    fetchListingsData();
+      setLoading(false);
+    }, 250);
 
     return () => {
-      isCancelled = true;
+      active = false;
+      window.clearTimeout(timer);
     };
-  }, [searchQuery, city, category, minRating]);
+  }, [searchQuery, city, district, category, minRating]);
 
   // Fetch detail if slug present in route
   useEffect(() => {
@@ -84,16 +81,17 @@ export const DiscoveryMarketplace: React.FC = () => {
       setLoadingDetail(true);
       setDetailError(null);
       try {
-        const result = await discoveryMarketplaceService.getDetail({ slug });
+        const business = await tenantService.getTenantDiscoveryConfig(slug);
         if (isCancelled) return;
-        if (result.success === true) {
-          setSelectedBusiness(result.data.business);
+        if (business) {
+          setSelectedBusiness(business);
         } else {
-          setDetailError(result.error.message || 'İşletme detayları yüklenemedi.');
+          setSelectedBusiness(null);
+          setDetailError('Bu işletme şu anda keşif portföyünde görünmüyor.');
         }
       } catch (err: any) {
         if (!isCancelled) {
-          setDetailError(err.message || 'Beklenmeyen hata.');
+          setDetailError(err?.message || 'Beklenmeyen hata.');
         }
       } finally {
         if (!isCancelled) {
@@ -109,6 +107,54 @@ export const DiscoveryMarketplace: React.FC = () => {
     };
   }, [slug]);
 
+  useEffect(() => {
+    const previousTitle = document.title;
+    const description = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+    const previousDescription = description?.content;
+    document.title = selectedBusiness
+      ? `${selectedBusiness.name} | Lari Discovery`
+      : 'Lari Discovery | Klinik ve Salonları Keşfedin';
+    if (description) {
+      description.content = selectedBusiness?.shortDescription
+        || 'Doğrulanmış klinik ve salonları keşfedin, güncel hizmetleri inceleyin.';
+    }
+    return () => {
+      document.title = previousTitle;
+      if (description && previousDescription !== undefined) description.content = previousDescription;
+    };
+  }, [selectedBusiness]);
+
+  const handleLoadMore = async () => {
+    if (loadingMore || listings.length >= totalCount) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const result = await discoveryMarketplaceService.getListings({
+        searchQuery: searchQuery || undefined,
+        city: city || undefined,
+        district: district || undefined,
+        category: category || undefined,
+        minRating: minRating > 0 ? minRating : undefined,
+        limit: PAGE_SIZE,
+        offset: listings.length,
+      });
+      if (result.success === false) {
+        setError(result.error.message || 'Daha fazla işletme yüklenemedi.');
+        return;
+      }
+      setListings(current => {
+        const known = new Set(current.map(item => item.tenantId));
+        return [...current, ...result.data.listings.filter(item => !known.has(item.tenantId))];
+      });
+      setTotalCount(result.data.totalCount);
+    } catch (cause) {
+      console.error('Discovery pagination failed', cause);
+      setError('Daha fazla işletme yüklenemedi.');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
   const handleSearchChange = (field: string, val: string) => {
     const nextParams = new URLSearchParams(searchParams);
     if (val) {
@@ -120,14 +166,16 @@ export const DiscoveryMarketplace: React.FC = () => {
   };
 
   const handleSelectBusiness = (businessSlug: string) => {
-    navigate(`/discovery/${businessSlug}`);
+    const query = searchParams.toString();
+    navigate(`/discovery/${encodeURIComponent(businessSlug)}${query ? `?${query}` : ''}`);
   };
 
   const handleBackToList = () => {
-    navigate('/discovery');
+    const query = searchParams.toString();
+    navigate(`/discovery${query ? `?${query}` : ''}`);
   };
 
-  const handleBookNow = () => {
+  const handleBookNow = (_service?: DiscoveryServiceDetailDTO) => {
     if (selectedBusiness) {
       navigate(`/booking/${encodeURIComponent(selectedBusiness.slug)}`);
     }
@@ -196,7 +244,7 @@ export const DiscoveryMarketplace: React.FC = () => {
           </p>
 
           {/* Search and Filters Bar */}
-          <div className="mt-8 bg-white/95 backdrop-blur-md p-4 rounded-2xl shadow-xl max-w-4xl mx-auto grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-gray-800 text-left">
+          <div className="mt-8 bg-white/95 backdrop-blur-md p-4 rounded-2xl shadow-xl max-w-5xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-gray-800 text-left">
             <div>
               <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">
                 İşletme veya Hizmet
@@ -225,6 +273,18 @@ export const DiscoveryMarketplace: React.FC = () => {
                 <option value="Antalya">Antalya</option>
                 <option value="Bursa">Bursa</option>
               </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">
+                İlçe
+              </label>
+              <input
+                type="text"
+                placeholder="Örn: Kadıköy"
+                value={district}
+                onChange={(e) => handleSearchChange('district', e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">
@@ -278,7 +338,7 @@ export const DiscoveryMarketplace: React.FC = () => {
             <div className="animate-spin w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full mx-auto mb-4" />
             <p className="text-gray-500 font-medium">İşletmeler taranıyor...</p>
           </div>
-        ) : error ? (
+        ) : error && listings.length === 0 ? (
           <div className="p-6 bg-red-50 border border-red-200 rounded-xl text-center text-red-700">
             <p className="font-semibold mb-1">Hata</p>
             <p className="text-sm">{error}</p>
@@ -298,11 +358,20 @@ export const DiscoveryMarketplace: React.FC = () => {
             </button>
           </div>
         ) : (
+          <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {listings.map((item) => (
               <div
                 key={item.tenantId}
                 onClick={() => handleSelectBusiness(item.slug)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    handleSelectBusiness(item.slug);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
                 className="bg-white rounded-2xl border border-gray-200/80 shadow-sm hover:shadow-md hover:border-indigo-300 transition duration-200 overflow-hidden flex flex-col cursor-pointer group"
               >
                 {/* Cover thumbnail */}
@@ -313,6 +382,7 @@ export const DiscoveryMarketplace: React.FC = () => {
                       'https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&w=600&q=80'
                     }
                     alt={item.name}
+                    loading="lazy"
                     className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                   />
                   <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-sm px-2.5 py-0.5 rounded-full text-xs font-semibold text-indigo-800 shadow-sm">
@@ -387,6 +457,24 @@ export const DiscoveryMarketplace: React.FC = () => {
               </div>
             ))}
           </div>
+          {error && (
+            <p role="alert" className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-center text-sm text-red-700">
+              {error}
+            </p>
+          )}
+          {listings.length < totalCount && (
+            <div className="mt-8 text-center">
+              <button
+                type="button"
+                onClick={() => void handleLoadMore()}
+                disabled={loadingMore}
+                className="rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {loadingMore ? 'Daha fazla işletme yükleniyor...' : 'Daha fazla işletme göster'}
+              </button>
+            </div>
+          )}
+          </>
         )}
       </div>
     </div>
