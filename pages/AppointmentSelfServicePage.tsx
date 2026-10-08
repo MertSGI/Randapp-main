@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { 
+import {
   appointmentSelfServiceService,
   SelfServiceAppointmentResult
 } from '../services/appointmentSelfServiceService';
@@ -91,6 +91,9 @@ const AppointmentSelfServicePage: React.FC = () => {
 
   // Idempotency ref per submission attempt
   const idempotencyKeyRef = useRef<string>('');
+
+  const [fastRebookLoading, setFastRebookLoading] = useState(false);
+  const [fastRebookError, setFastRebookError] = useState<string | null>(null);
 
   // KVKK / Data Rights Form state
   const [showKvkkForm, setShowKvkkForm] = useState(false);
@@ -276,6 +279,31 @@ const AppointmentSelfServicePage: React.FC = () => {
       setRescheduleError('Talebiniz şu anda iletilemedi. Lütfen tekrar deneyin.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // ============================================================
+  // Fast rebooking resolves only a current canonical seed, then hands off to
+  // the ordinary booking flow for fresh slot selection and transactional creation.
+  const handleFastRebook = async () => {
+    if (!effectiveToken || fastRebookLoading) return;
+
+    setFastRebookLoading(true);
+    setFastRebookError(null);
+    try {
+      const result = await appointmentSelfServiceService.getFastRebookingSeed(effectiveToken);
+      if (!result.success || !result.seed) {
+        setFastRebookError(result.message || 'Yeniden rezervasyon başlatılamadı.');
+        return;
+      }
+
+      const params = new URLSearchParams({ rebook_token: effectiveToken });
+      navigate(`/booking/${encodeURIComponent(result.seed.tenantSlug)}?${params.toString()}`);
+    } catch (error) {
+      console.error('Fast rebooking handoff failed', error);
+      setFastRebookError('Yeniden rezervasyon şu anda başlatılamıyor. Lütfen tekrar deneyin.');
+    } finally {
+      setFastRebookLoading(false);
     }
   };
 
@@ -503,10 +531,32 @@ const AppointmentSelfServicePage: React.FC = () => {
                 className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition min-h-[44px] shadow-sm flex items-center justify-center gap-2"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 002 2v12a2 2 0 002 2z" />
                 </svg>
                 <span>Randevu Değişikliği Talep Et</span>
               </button>
+            </div>
+          )}
+
+          {/* Completed appointments can be seeded into the canonical booking flow. */}
+          {appointment.status === 'completed' && effectiveToken && (
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={handleFastRebook}
+                disabled={fastRebookLoading}
+                className="w-full py-3 px-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-medium transition min-h-[44px] shadow-sm flex items-center justify-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span>{fastRebookLoading ? 'Hazırlanıyor...' : 'Hızlı Yeniden Rezervasyon'}</span>
+              </button>
+              {fastRebookError && (
+                <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">
+                  {fastRebookError}
+                </p>
+              )}
             </div>
           )}
 
@@ -764,6 +814,7 @@ const AppointmentSelfServicePage: React.FC = () => {
           </div>
         </div>
       )}
+
     </div>
   );
 };

@@ -10,6 +10,50 @@ export interface PublicBookingResult {
   reasonCode: string;
 }
 
+export interface FastRebookingSeedResult {
+  success: boolean;
+  reasonCode: string;
+  seed?: {
+    sourceAppointmentId: string;
+    tenantSlug: string;
+    branchId: string;
+    serviceId: string;
+    serviceName: string;
+    currentServicePrice: number;
+    currentServiceDurationMinutes: number;
+    staffId: string;
+    staffName: string;
+    requiresCurrentAvailabilitySelection: boolean;
+    availabilityAuthority: 'evaluate_booking_slot';
+    bookingAuthority: 'create_public_booking';
+    canonicalBookingRequired: boolean;
+  };
+}
+
+export interface CustomerFavorite {
+  favorite_id: string;
+  tenant_id: string;
+  tenant_slug: string;
+  tenant_name: string;
+  created_at: string;
+}
+
+export interface CustomerFavoritesResult {
+  success: boolean;
+  reasonCode: string;
+  total: number;
+  limit: number;
+  offset: number;
+  favorites: CustomerFavorite[];
+}
+
+export interface SetCustomerFavoriteResult {
+  success: boolean;
+  reasonCode: string;
+  action?: 'ADDED' | 'REMOVED' | 'UNCHANGED';
+  favoriteId?: string;
+  isFavorite?: boolean;
+}
 
 export class SupabaseBookingRepository implements BookingRepository {
   async listAppointments(tenantId: string, filter?: { date?: string, upcomingOnly?: boolean, branchId?: string }): Promise<Appointment[]> {
@@ -250,6 +294,59 @@ export class SupabaseBookingRepository implements BookingRepository {
     };
   }
 
+  /**
+   * getFastRebookingSeedByManageToken — calls the SECURITY DEFINER RPC
+   * get_fast_rebooking_seed_by_manage_token.
+   * Returns current canonical service, staff, branch, price, and duration.
+   * Does NOT create an appointment. The seed guides the caller to
+   * evaluate_booking_slot and create_public_booking.
+   */
+  async getFastRebookingSeedByManageToken(manageToken: string): Promise<FastRebookingSeedResult> {
+    const res = await fetchSupabase('/rest/v1/rpc/get_fast_rebooking_seed_by_manage_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_manage_token: manageToken }),
+    });
+
+    if (!res.ok) {
+      let errBody = '';
+      try { errBody = await res.text(); } catch {}
+      console.error('get_fast_rebooking_seed_by_manage_token RPC failed', res.status, errBody);
+      return { success: false, reasonCode: 'temporary_failure' };
+    }
+
+    const data = await res.json();
+    const result = Array.isArray(data) ? data[0] : data;
+
+    if (!result?.success) {
+      return {
+        success: false,
+        reasonCode: result?.reason_code || 'unknown_error',
+      };
+    }
+
+    const seed = result?.seed;
+    return {
+      success: true,
+      reasonCode: result?.reason_code || 'OK',
+      seed: seed ? {
+        sourceAppointmentId: seed.source_appointment_id,
+        tenantSlug: seed.tenant_slug,
+        branchId: seed.branch_id,
+        serviceId: seed.service_id,
+        serviceName: seed.service_name,
+        currentServicePrice: Number(seed.current_service_price),
+        currentServiceDurationMinutes: Number(seed.current_service_duration_minutes),
+        staffId: seed.staff_id,
+        staffName: seed.staff_name,
+        requiresCurrentAvailabilitySelection: seed.requires_current_availability_selection,
+        availabilityAuthority: seed.availability_authority,
+        bookingAuthority: seed.booking_authority,
+        canonicalBookingRequired: seed.canonical_booking_required,
+      } : undefined,
+    };
+  }
+
   async listCustomers(tenantId: string): Promise<any[]> {
     const res = await fetchSupabase(`/rest/v1/customers?tenant_id=eq.${tenantId}&select=*`);
     if (!res.ok) {
@@ -360,5 +457,149 @@ export class SupabaseBookingRepository implements BookingRepository {
     const existing = await this.findCustomerByPhoneOrEmail(tenantId, input.phone, input.email);
     if (existing) return existing;
     return this.createOrUpdateCustomer(tenantId, input);
+  }
+
+  // Favorites (R1 RPCs: public.get_customer_favorites, public.set_customer_favorite)
+  // Authorization uses real Supabase authenticated identity (auth.uid()) via the existing Supabase client.
+  // Returns 'auth_required' if no authenticated customer session is available.
+  async getCustomerFavorites(limit: number = 50, offset: number = 0): Promise<CustomerFavoritesResult> {
+    const { getDataSourceMode } = await import('../dataSourceConfig');
+    if (getDataSourceMode() !== 'supabase') {
+      return {
+        success: false,
+        reasonCode: 'NOT_IN_SUPABASE_MODE',
+        total: 0,
+        limit,
+        offset,
+        favorites: []
+      };
+    }
+
+    // Validate the identity with Supabase Auth; localStorage is never an authority.
+    const { supabase } = await import('../supabaseClient');
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) {
+      return {
+        success: false,
+        reasonCode: 'auth_required',
+        total: 0,
+        limit,
+        offset,
+        favorites: []
+      };
+    }
+
+    const res = await fetchSupabase('/rest/v1/rpc/get_customer_favorites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_limit: limit, p_offset: offset })
+    });
+
+    if (!res.ok) {
+      console.error(`[supabaseBookingRepository] getCustomerFavorites RPC failed: HTTP ${res.status}`);
+      return {
+        success: false,
+        reasonCode: 'SERVICE_ERROR',
+        total: 0,
+        limit,
+        offset,
+        favorites: []
+      };
+    }
+
+    const raw = await res.json();
+    const result = Array.isArray(raw) ? raw[0] : raw;
+
+    if (!result?.success) {
+      // RPC returns UNAUTHENTICATED if auth.uid() is null
+      if (result?.reason_code === 'UNAUTHENTICATED') {
+        return {
+          success: false,
+          reasonCode: 'auth_required',
+          total: 0,
+          limit,
+          offset,
+          favorites: []
+        };
+      }
+      console.error(`[supabaseBookingRepository] getCustomerFavorites RPC returned error: ${result?.reason_code}`);
+      return {
+        success: false,
+        reasonCode: result?.reason_code || 'SERVICE_ERROR',
+        total: 0,
+        limit,
+        offset,
+        favorites: []
+      };
+    }
+
+    return {
+      success: true,
+      reasonCode: 'OK',
+      total: result?.total || 0,
+      limit: result?.limit || limit,
+      offset: result?.offset || offset,
+      favorites: result?.favorites || []
+    };
+  }
+
+  async setCustomerFavorite(tenantId: string, isFavorite: boolean = true): Promise<SetCustomerFavoriteResult> {
+    const { getDataSourceMode } = await import('../dataSourceConfig');
+    if (getDataSourceMode() !== 'supabase') {
+      return {
+        success: false,
+        reasonCode: 'NOT_IN_SUPABASE_MODE'
+      };
+    }
+
+    // Validate the identity with Supabase Auth; the RPC derives ownership from auth.uid().
+    const { supabase } = await import('../supabaseClient');
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) {
+      return {
+        success: false,
+        reasonCode: 'auth_required'
+      };
+    }
+
+    const res = await fetchSupabase('/rest/v1/rpc/set_customer_favorite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_tenant_id: tenantId, p_is_favorite: isFavorite })
+    });
+
+    if (!res.ok) {
+      console.error(`[supabaseBookingRepository] setCustomerFavorite RPC failed: HTTP ${res.status}`);
+      return {
+        success: false,
+        reasonCode: 'SERVICE_ERROR'
+      };
+    }
+
+    const raw = await res.json();
+    const result = Array.isArray(raw) ? raw[0] : raw;
+
+    if (!result?.success) {
+      // RPC returns UNAUTHENTICATED if auth.uid() is null
+      if (result?.reason_code === 'UNAUTHENTICATED') {
+        return {
+          success: false,
+          reasonCode: 'auth_required'
+        };
+      }
+      console.error(`[supabaseBookingRepository] setCustomerFavorite RPC returned error: ${result?.reason_code}`);
+      return {
+        success: false,
+        reasonCode: result?.reason_code || 'SERVICE_ERROR'
+      };
+    }
+
+    return {
+      success: true,
+      reasonCode: 'OK',
+      action: result?.action,
+      isFavorite: result?.is_favorite,
+      favoriteId: result?.favorite_id
+    };
   }
 }
