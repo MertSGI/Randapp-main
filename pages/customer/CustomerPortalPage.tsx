@@ -22,6 +22,7 @@ const CustomerPortalPage: React.FC = () => {
   const [servicesList, setServicesList] = useState<Service[]>([]);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
+  const isSupabase = getDataSourceMode() === 'supabase';
 
   useEffect(() => {
     const checkAuthAndLoadData = async () => {
@@ -163,75 +164,93 @@ const CustomerPortalPage: React.FC = () => {
           </p>
         </div>
 
-        {/* Upcoming Appointments */}
-        <section>
-          <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-            <svg className="w-5 h-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-            {t.customer_portal.upcoming}
-          </h2>
-          {upcomingApts.length === 0 ? (
-            <div className="bg-white dark:bg-slate-800 rounded-lg p-6 text-center shadow-sm border border-gray-100 dark:border-slate-700">
-              <p className="text-gray-500 dark:text-gray-400 text-sm">{t.customer_portal.no_upcoming}</p>
+        {isSupabase ? (
+          <section className="bg-white dark:bg-slate-800 rounded-xl p-8 text-center shadow-sm border border-gray-100 dark:border-slate-700 space-y-4">
+            <div className="mx-auto h-12 w-12 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
             </div>
-          ) : (
-            <div className="space-y-4">
-              {upcomingApts.map(apt => {
-                const service = servicesList.find(s => s.id === apt.serviceId);
-                const staff = staffList.find(s => s.id === apt.staffId);
-                return (
-                  <div key={apt.id} className="bg-white dark:bg-slate-800 rounded-lg p-5 shadow-sm border-l-4 border-accent relative">
-                    <div className="flex justify-between items-start">
-                       <div>
-                          <h3 className="font-bold text-gray-900 dark:text-white text-lg">{service ? (language === 'tr' ? (service.name_tr || service.name) : service.name) : (t.admin.unknown_service || 'Unknown Service')}</h3>
-                          <p className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-1 mt-1">
-                            {staff?.name || t.admin.unknown_staff || 'Unknown Staff'}
-                          </p>
-                          <div className="flex items-center gap-3 mt-3 text-sm text-gray-500 dark:text-gray-400">
-                            <span className="flex items-center gap-1"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> {apt.date}</span>
-                            <span className="flex items-center gap-1"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> {apt.time}</span>
-                          </div>
-                       </div>
-                       <div className="flex flex-col items-end gap-3">
-                         {getStatusBadge(apt.status)}
-                       </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </section>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Randevu Geçmişi Bu Ekranda Görüntülenemiyor
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-300 max-w-lg mx-auto leading-relaxed">
+              Kişisel veri gizliliği ve güvenliği gereğince tüm randevu geçmişi bu arayüzde listelenmemektedir. Randevunuzu görüntülemek, değişiklik talep etmek veya iptal etmek için randevu oluşturduğunuzda SMS/e-posta ile gönderilen <strong>güvenli randevu yönetim bağlantısını</strong> kullanabilir veya işletmeyle doğrudan iletişime geçebilirsiniz.
+            </p>
+          </section>
+        ) : (
+          <>
+            {/* Upcoming Appointments */}
+            <section>
+              <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                <svg className="w-5 h-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                {t.customer_portal.upcoming}
+              </h2>
+              {upcomingApts.length === 0 ? (
+                <div className="bg-white dark:bg-slate-800 rounded-lg p-6 text-center shadow-sm border border-gray-100 dark:border-slate-700">
+                  <p className="text-gray-500 dark:text-gray-400 text-sm">{t.customer_portal.no_upcoming}</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {upcomingApts.map(apt => {
+                    const service = servicesList.find(s => s.id === apt.serviceId);
+                    const staff = staffList.find(s => s.id === apt.staffId);
+                    return (
+                      <div key={apt.id} className="bg-white dark:bg-slate-800 rounded-lg p-5 shadow-sm border-l-4 border-accent relative">
+                        <div className="flex justify-between items-start">
+                           <div>
+                              <h3 className="font-bold text-gray-900 dark:text-white text-lg">{service ? (language === 'tr' ? (service.name_tr || service.name) : service.name) : (t.admin.unknown_service || 'Unknown Service')}</h3>
+                              <p className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-1 mt-1">
+                                {staff?.name || t.admin.unknown_staff || 'Unknown Staff'}
+                              </p>
+                              <div className="flex items-center gap-3 mt-3 text-sm text-gray-500 dark:text-gray-400">
+                                <span className="flex items-center gap-1"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> {apt.date}</span>
+                                <span className="flex items-center gap-1"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> {apt.time}</span>
+                              </div>
+                           </div>
+                           <div className="flex flex-col items-end gap-3">
+                             {getStatusBadge(apt.status)}
+                           </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
 
-        {/* Past/Cancelled Appointments */}
-        <section>
-          <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-            <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            {t.customer_portal.past}
-          </h2>
-          {pastApts.length === 0 ? (
-            <div className="bg-white dark:bg-slate-800 rounded-lg p-6 text-center shadow-sm border border-gray-100 dark:border-slate-700">
-              <p className="text-gray-500 dark:text-gray-400 text-sm">{t.customer_portal.no_past}</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {pastApts.map(apt => {
-                const service = servicesList.find(s => s.id === apt.serviceId);
-                const staff = staffList.find(s => s.id === apt.staffId);
-                return (
-                  <div key={apt.id} className="bg-gray-50 dark:bg-slate-800/50 rounded-lg p-4 border border-gray-200 dark:border-slate-700 flex justify-between items-center opacity-80 hover:opacity-100 transition">
-                     <div>
-                        <h4 className="font-medium text-gray-800 dark:text-gray-200 text-sm">{service ? (language === 'tr' ? (service.name_tr || service.name) : service.name) : (t.admin.unknown_service || 'Unknown Service')}</h4>
-                        <p className="text-xs text-gray-500 mt-1">{apt.date} {apt.time} • {staff?.name || t.admin.unknown_staff || 'Unknown Staff'}</p>
-                     </div>
-                     <div>
-                       {getStatusBadge(apt.status)}
-                     </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </section>
+            {/* Past/Cancelled Appointments */}
+            <section>
+              <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                {t.customer_portal.past}
+              </h2>
+              {pastApts.length === 0 ? (
+                <div className="bg-white dark:bg-slate-800 rounded-lg p-6 text-center shadow-sm border border-gray-100 dark:border-slate-700">
+                  <p className="text-gray-500 dark:text-gray-400 text-sm">{t.customer_portal.no_past}</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {pastApts.map(apt => {
+                    const service = servicesList.find(s => s.id === apt.serviceId);
+                    const staff = staffList.find(s => s.id === apt.staffId);
+                    return (
+                      <div key={apt.id} className="bg-gray-50 dark:bg-slate-800/50 rounded-lg p-4 border border-gray-200 dark:border-slate-700 flex justify-between items-center opacity-80 hover:opacity-100 transition">
+                         <div>
+                            <h4 className="font-medium text-gray-800 dark:text-gray-200 text-sm">{service ? (language === 'tr' ? (service.name_tr || service.name) : service.name) : (t.admin.unknown_service || 'Unknown Service')}</h4>
+                            <p className="text-xs text-gray-500 mt-1">{apt.date} {apt.time} • {staff?.name || t.admin.unknown_staff || 'Unknown Staff'}</p>
+                         </div>
+                         <div>
+                           {getStatusBadge(apt.status)}
+                         </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </>
+        )}
       </main>
     </div>
   );

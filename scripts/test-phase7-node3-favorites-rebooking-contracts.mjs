@@ -248,10 +248,10 @@ assertContract(
 );
 
 assertContract(
-  '27. Customer authentication uses Supabase OTP rather than mock identity in Supabase mode',
+  '27. Customer authentication recognizes Supabase session and disables OTP initiation under DECISION-024 remediation',
   customerLoginSource.includes("getDataSourceMode() === 'supabase'") &&
-    customerLoginSource.includes('supabase.auth.signInWithOtp') &&
-    customerLoginSource.includes('emailRedirectTo')
+    customerLoginSource.includes('supabase.auth.getSession()') &&
+    !customerLoginSource.includes('supabase.auth.signInWithOtp(')
 );
 
 assertContract(

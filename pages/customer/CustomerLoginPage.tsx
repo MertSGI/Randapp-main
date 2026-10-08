@@ -17,34 +17,31 @@ const CustomerLoginPage: React.FC = () => {
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const isSupabase = getDataSourceMode() === 'supabase';
+
+  React.useEffect(() => {
+    if (!isSupabase) return;
+    const checkSession = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (!error && session) {
+          navigate('/customer/appointments');
+        }
+      } catch (err) {
+        console.error('Session check failed', err);
+      }
+    };
+    void checkSession();
+  }, [isSupabase, navigate]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!contactInfo.trim()) return;
 
-    if (getDataSourceMode() === 'supabase') {
-      setSubmitting(true);
-      setError('');
-      setMessage('');
-      try {
-        const value = contactInfo.trim();
-        const callbackUrl = `${window.location.origin}${window.location.pathname}#/customer/appointments`;
-        const credentials = value.includes('@')
-          ? { email: value, options: { emailRedirectTo: callbackUrl } }
-          : { phone: value };
-        const { error: authError } = await supabase.auth.signInWithOtp(credentials);
-        if (authError) {
-          setError(authError.message);
-          return;
-        }
-        setMessage(value.includes('@')
-          ? 'Güvenli giriş bağlantısı e-posta adresinize gönderildi.'
-          : 'Güvenli giriş kodu telefonunuza gönderildi.');
-      } catch (cause) {
-        console.error('Customer OTP login failed', cause);
-        setError('Giriş şu anda başlatılamıyor. Lütfen tekrar deneyin.');
-      } finally {
-        setSubmitting(false);
-      }
+    if (isSupabase) {
+      setError(
+        'Müşteri paneli için e-posta/SMS ile doğrudan giriş şu anda kapalıdır. Randevularınızı görüntülemek ve yönetmek için randevu onayında size iletilen güvenli yönetim bağlantısını kullanabilirsiniz.'
+      );
       return;
     }
 
@@ -139,6 +136,12 @@ const CustomerLoginPage: React.FC = () => {
             </button>
           </div>
         </form>
+
+        {isSupabase && (
+          <div className="mt-4 p-3 bg-blue-50/60 dark:bg-blue-950/20 rounded-lg border border-blue-100 dark:border-blue-900/40 text-xs text-blue-800 dark:text-blue-300 text-center">
+            Mevcut bir randevunuzu iptal etmek veya detaylarını görmek için randevu onay SMS/e-postasında yer alan <strong>güvenli yönetim bağlantısını</strong> kullanabilirsiniz.
+          </div>
+        )}
         
         <div className="mt-4 text-center">
           <p className="text-xs text-gray-400 mt-6 max-w-sm mx-auto leading-relaxed">
