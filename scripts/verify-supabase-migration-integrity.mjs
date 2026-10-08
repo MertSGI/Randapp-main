@@ -124,8 +124,9 @@ for (const [tableName, definitions] of Object.entries(tableCreationRegistry)) {
       console.log(`  - File: ${d.file}, IF NOT EXISTS: ${d.hasIfNotExists}`);
     }
     
-    // If any duplicate definition does NOT have IF NOT EXISTS, fail
-    const unsafe = definitions.filter(d => !d.hasIfNotExists);
+    // The first definition establishes the canonical object and may be an
+    // unconditional CREATE. Every later definition must be idempotent.
+    const unsafe = definitions.slice(1).filter(d => !d.hasIfNotExists);
     if (unsafe.length > 0) {
       console.error(`[FAIL] Table "${tableName}" has duplicate CREATE TABLE statements without "IF NOT EXISTS" in files: ${unsafe.map(u => u.file).join(', ')}`);
       conflictDetected = true;
@@ -142,7 +143,7 @@ for (const [indexName, definitions] of Object.entries(indexRegistry)) {
     for (const d of definitions) {
       console.log(`  - File: ${d.file}, IF NOT EXISTS: ${d.hasIfNotExists}`);
     }
-    const unsafe = definitions.filter(d => !d.hasIfNotExists);
+    const unsafe = definitions.slice(1).filter(d => !d.hasIfNotExists);
     if (unsafe.length > 0) {
       console.error(`[FAIL] Index "${indexName}" has duplicate CREATE INDEX statements without "IF NOT EXISTS" in files: ${unsafe.map(u => u.file).join(', ')}`);
       conflictDetected = true;
