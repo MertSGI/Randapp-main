@@ -3,6 +3,7 @@ name: LARI Program V2 Phase 5 Disposable Postgres Acceptance & Live Security Mat
 on:
   push:
     branches:
+      - ci/lari-wp5-exact-source-acceptance-20261008-01
       - aos/program-v2-convergence-20261007
       - aos/phase7-node3-favorites-fast-rebooking-r1
       - feature/phase7-node2-discovery-marketplace-r3-review-20261004
@@ -35,10 +36,13 @@ jobs:
     steps:
       - name: Checkout Evidence Composition
         uses: actions/checkout@v4
+        with:
+          ref: 06ebf176e411faf6820ded34987f894cc5e7dc9e
 
       - name: Assert Checked-out Exact SHA Reachability
         run: |
           echo "HEAD SHA: $(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "06ebf176e411faf6820ded34987f894cc5e7dc9e"
           echo "GITHUB_SHA: ${GITHUB_SHA}"
 
       - name: Setup Node.js
