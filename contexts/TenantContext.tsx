@@ -1,4 +1,5 @@
 import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Tenant, TenantBranding } from '../types';
 import { tenantService } from '../services/tenantService';
 
@@ -13,6 +14,7 @@ interface TenantContextType {
 const TenantContext = createContext<TenantContextType | undefined>(undefined);
 
 export const TenantProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const location = useLocation();
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [branding, setBranding] = useState<TenantBranding | null>(null);
   const [isLoadingTenant, setIsLoadingTenant] = useState(true);
@@ -49,23 +51,7 @@ export const TenantProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   useEffect(() => {
     void loadTenant();
-
-    // TenantProvider intentionally lives above the router. Re-resolve tenant
-    // context when SPA navigation changes the public route so handoffs such as
-    // appointment management -> /booking/:tenantSlug do not retain the
-    // route-neutral tenant state from the previous screen.
-    const handleRouteChange = () => {
-      void loadTenant();
-    };
-
-    window.addEventListener('hashchange', handleRouteChange);
-    window.addEventListener('popstate', handleRouteChange);
-
-    return () => {
-      window.removeEventListener('hashchange', handleRouteChange);
-      window.removeEventListener('popstate', handleRouteChange);
-    };
-  }, []);
+  }, [location.pathname, location.search]);
 
   const value = {
     tenant,

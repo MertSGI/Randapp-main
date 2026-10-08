@@ -39,6 +39,7 @@ const tenantContextSource = fs.readFileSync(
   path.resolve('contexts/TenantContext.tsx'),
   'utf8'
 );
+const appSource = fs.readFileSync(path.resolve('App.tsx'), 'utf8');
 
 function functionBody(name) {
   const pattern = new RegExp(
@@ -261,9 +262,10 @@ assertContract(
 
 assertContract(
   '29. Route handoffs refresh tenant context without remounting the provider',
-  tenantContextSource.includes("window.addEventListener('hashchange', handleRouteChange)") &&
-    tenantContextSource.includes("window.removeEventListener('hashchange', handleRouteChange)") &&
-    /const handleRouteChange = \(\) => \{\s*void loadTenant\(\);\s*\}/m.test(tenantContextSource)
+  /<Router>\s*<TenantProvider>/m.test(appSource) &&
+    tenantContextSource.includes("import { useLocation } from 'react-router-dom'") &&
+    tenantContextSource.includes('const location = useLocation()') &&
+    /useEffect\(\(\) => \{\s*void loadTenant\(\);\s*\}, \[location\.pathname, location\.search\]\)/m.test(tenantContextSource)
 );
 
 console.log('---------------------------------------------------------------');

@@ -198,14 +198,14 @@ const App: React.FC = () => {
       <ThemeProvider>
         <DialogProvider>
           <LanguageProvider>
-            <TenantProvider>
-              <AuthProvider>
-                <Router>
+            <Router>
+              <TenantProvider>
+                <AuthProvider>
                   <AppFlowSwitcher />
                   <MockDiagnosticTool />
-                </Router>
-              </AuthProvider>
-            </TenantProvider>
+                </AuthProvider>
+              </TenantProvider>
+            </Router>
           </LanguageProvider>
         </DialogProvider>
       </ThemeProvider>
