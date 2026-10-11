@@ -29,6 +29,7 @@ const MarketingLayout: React.FC = () => {
     setMobileMenuOpen(false);
   }, [location.pathname]);
 
+
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-slate-900 transition-colors duration-300">
       <header className="bg-white dark:bg-slate-800 shadow-sm sticky top-0 z-40 transition-colors duration-300">
@@ -39,11 +40,11 @@ const MarketingLayout: React.FC = () => {
                 <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold tracking-tighter">{marketConfigService.getBrandName().charAt(0)}</div>
                 <span className="font-semibold text-xl text-primary dark:text-white whitespace-nowrap">{marketConfigService.getBrandName()}</span>
               </Link>
-              <nav className="hidden md:ml-8 md:flex md:space-x-8">
-                <Link to="/features" className={`border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-1 py-5 border-b-2 text-sm font-medium ${location.pathname === '/features' ? 'text-gray-900 border-blue-500' : ''}`}>{language === 'tr' ? 'Özellikler' : 'Features'}</Link>
-                <Link to="/mobile-app" className={`border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-1 py-5 border-b-2 text-sm font-medium ${location.pathname === '/mobile-app' ? 'text-gray-900 border-accent' : ''}`}>{language === 'tr' ? 'Mobil Uygulama' : 'Mobile App'}</Link>
-                <Link to="/pricing" className={`border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-1 py-5 border-b-2 text-sm font-medium ${location.pathname === '/pricing' ? 'text-gray-900 border-blue-500' : ''}`}>{language === 'tr' ? 'Fiyatlar' : 'Pricing'}</Link>
-                <Link to="/contact" className={`border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-1 py-5 border-b-2 text-sm font-medium ${location.pathname === '/contact' ? 'text-gray-900 border-blue-500' : ''}`}>{language === 'tr' ? 'İletişim' : 'Contact'}</Link>
+              <nav className="hidden md:ml-8 md:flex md:space-x-8" aria-label={language === 'tr' ? 'Ana gezinme' : 'Main navigation'}>
+                <Link to="/features" className={`border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-1 py-5 border-b-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900 ${location.pathname === '/features' ? 'text-gray-900 border-blue-500' : ''}`}>{language === 'tr' ? 'Özellikler' : 'Features'}</Link>
+                <Link to="/mobile-app" className={`border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-1 py-5 border-b-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900 ${location.pathname === '/mobile-app' ? 'text-gray-900 border-accent' : ''}`}>{language === 'tr' ? 'Mobil Uygulama' : 'Mobile App'}</Link>
+                <Link to="/pricing" className={`border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-1 py-5 border-b-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900 ${location.pathname === '/pricing' ? 'text-gray-900 border-blue-500' : ''}`}>{language === 'tr' ? 'Fiyatlar' : 'Pricing'}</Link>
+                <Link to="/contact" className={`border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-1 py-5 border-b-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900 ${location.pathname === '/contact' ? 'text-gray-900 border-blue-500' : ''}`}>{language === 'tr' ? 'İletişim' : 'Contact'}</Link>
               </nav>
             </div>
             
