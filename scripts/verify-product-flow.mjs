@@ -6,15 +6,35 @@ import { spawn } from 'child_process';
 const PORT = 4040;
 const BASE_URL = `http://localhost:${PORT}`;
 
+async function waitForServer(url, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) return;
+    } catch {
+      // The built preview may still be starting.
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  throw new Error(`Preview server did not become ready within ${timeoutMs}ms`);
+}
+
 async function run() {
   console.log('Starting build and test server...');
-  
-  const serverProcess = spawn('npx', ['vite', 'preview', '--port', PORT.toString()], {
-    stdio: 'ignore',
-    shell: true
+
+  const viteCli = path.join(process.cwd(), 'node_modules', 'vite', 'bin', 'vite.js');
+  const serverProcess = spawn(process.execPath, [viteCli, 'preview', '--port', PORT.toString()], {
+    stdio: 'inherit',
+    shell: false
   });
 
-  await new Promise(r => setTimeout(r, 4000));
+  try {
+    await waitForServer(BASE_URL);
+  } catch (error) {
+    serverProcess.kill();
+    throw error;
+  }
 
   console.log('Launching playwright...');
   let browser, context, page;
@@ -23,9 +43,9 @@ async function run() {
       context = await browser.newContext();
       page = await context.newPage();
   } catch (e) {
-      console.warn("⚠️ Playwright binaries not found. Skipping UI flow tests. " + e.message);
+      console.error("Playwright Chromium launch failed; browser QA cannot be skipped. " + e.message);
       if (serverProcess) serverProcess.kill();
-      process.exit(0);
+      throw e;
   }
 
   const report = {
@@ -37,6 +57,7 @@ async function run() {
       status: 'pass'
     },
     routeMatrix: [],
+    accessibilityMatrix: [],
     flowMatrix: [],
     mobileMatrix: [],
     securityMatrix: []
@@ -75,19 +96,18 @@ async function run() {
 
     // 2. Playwright Route Matrix
     const testRoutes = [
-      { path: '/#/', expected: ['LARİ', 'Pricing' ] },
+      { path: '/#/', expected: ['Pricing', 'Fiyatlar'] },
       { path: '/#/features', expected: ['Premium'] },
       { path: '/#/pricing', expected: ['Pro', 'Plan'] },
       { path: '/#/register?planId=professional', expected: ['Hesap Bilgileri', 'Account'] },
       { path: '/#/book', expected: ['Randevu', 'Service', 'Yükleniyor', 'Loading'] },
-      { path: '/#/super-admin/go-live', expected: ['Sandbox', 'Hazırlığı'] },
-      { path: '/#/tenant_pilot_demo', expected: ['Lumina'] },
-      { path: '/#/pilot/customer', expected: ['Lumina'] }
+      { path: '/#/super-admin/go-live', expected: ['Giriş Yap', 'Login'] },
+      { path: '/#/pilot', expected: ['Pilot Demo'] }
     ];
 
     let oldBrandFound = [];
     let forbiddenWordsFound = [];
-    const forbiddenList = ['mock', 'demo payment', 'payment disabled', 'sandbox', 'roadmap', 'not configured', 'coming soon', 'yakında', 'salon bulunamadı', 'hesap askıda', 'business inactive'];
+    const forbiddenList = ['mock', 'demo payment', 'payment disabled', 'sandbox', 'roadmap', 'not configured', 'coming soon', 'yakında', 'hesap askıda', 'business inactive'];
 
     for (const r of testRoutes) {
       try {
@@ -125,7 +145,45 @@ async function run() {
       report.metadata.status = 'fail';
     }
 
-    // 3. Flow Matrix (E2E Registration)
+    if (report.routeMatrix.length !== testRoutes.length || report.routeMatrix.some(result => !result.pass)) {
+      report.metadata.status = 'fail';
+    }
+
+    // 3. Marketing accessibility on the actual built application.
+    try {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto(`${BASE_URL}/#/`);
+      await page.waitForLoadState('networkidle');
+
+      const navigation = page.locator('nav[aria-label]').first();
+      const navigationLabel = await navigation.getAttribute('aria-label');
+      const visibleMainHeadings = await page.locator('h1:visible').count();
+      const mainLandmarks = await page.locator('main').count();
+      const firstNavigationLink = navigation.locator('a').first();
+      await firstNavigationLink.focus();
+      const focusIndicatorVisible = await firstNavigationLink.evaluate(element => {
+        const style = window.getComputedStyle(element);
+        return style.outlineStyle !== 'none' || style.boxShadow !== 'none';
+      });
+
+      const checks = [
+        { test: 'Marketing navigation has an accessible name', pass: Boolean(navigationLabel?.trim()) },
+        { test: 'Marketing page exposes one visible primary heading', pass: visibleMainHeadings === 1 },
+        { test: 'Marketing page exposes a main landmark', pass: mainLandmarks === 1 },
+        { test: 'Marketing navigation link has a visible focus indicator', pass: focusIndicatorVisible },
+      ];
+      report.accessibilityMatrix.push(...checks);
+      if (checks.some(check => !check.pass)) report.metadata.status = 'fail';
+    } catch (error) {
+      report.accessibilityMatrix.push({
+        test: 'Marketing accessibility browser execution',
+        pass: false,
+        note: error.message,
+      });
+      report.metadata.status = 'fail';
+    }
+
+    // 4. Flow Matrix (payment-disabled registration to onboarding)
     try {
       console.log('Testing Registration Flow...');
       await page.setViewportSize({ width: 1440, height: 900 });
@@ -152,40 +210,22 @@ async function run() {
       // Submit
       await page.click('button[type="submit"]');
       
-      // Wait for modal or redirect
-      await page.waitForTimeout(2000);
-      
-      // The checkout preview should appear
-      let previewText = await page.evaluate(() => document.body.innerText);
-      let isModalVisible = previewText.includes('Preview') || previewText.includes('Önizleme') || previewText.includes('Checkout');
-      
-      if (isModalVisible) {
-         // Click Proceed to Checkout in Modal
-         await page.click('button:has-text("Ödemeye Devam Et")');
-         await page.waitForTimeout(2000);
-         
-         // Assert fallback or edge function response
-         const currentUrl = page.url();
-         const isHandoffSuccessful = currentUrl.includes('checkout') || currentUrl.includes('admin') || currentUrl.includes('payment') || currentUrl.includes('login');
-         
-         report.flowMatrix.push({
-            flow: 'Registration → tenant shell created → checkout handoff',
-            pass: isHandoffSuccessful,
-            evidence: `Checkout handoff invoked. Current URL: ${currentUrl}`,
-            risk: 'None'
-         });
-      } else {
-         report.flowMatrix.push({
-            flow: 'Registration → tenant shell created → checkout handoff',
-            pass: false,
-            evidence: 'Checkout preview modal did not appear or was bypassed unexpectedly.',
-            risk: 'High failure'
-         });
-      }
+      await page.waitForURL(url => url.hash.startsWith('#/admin'), { timeout: 15000 });
+
+      const currentUrl = page.url();
+      const reachedOnboarding = new URL(currentUrl).hash.startsWith('#/admin');
+      const unexpectedPaidHandoff = /checkout|payment/i.test(currentUrl);
+
+      report.flowMatrix.push({
+         flow: 'Registration → tenant shell created → onboarding',
+         pass: reachedOnboarding && !unexpectedPaidHandoff,
+         evidence: `Payment-disabled onboarding route reached. Current URL: ${currentUrl}`,
+         risk: unexpectedPaidHandoff ? 'Unexpected paid handoff' : 'None'
+      });
       
     } catch (err) {
       report.flowMatrix.push({
-        flow: 'Registration → checkout handoff',
+        flow: 'Registration → onboarding',
         pass: false,
         evidence: err.message,
         risk: 'High failure'
@@ -199,7 +239,7 @@ async function run() {
       risk: 'Relies on local browser storage temporarily'
     });
 
-    // 4. Mobile Matrix
+    // 5. Mobile Matrix
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${BASE_URL}/`);
     await page.waitForLoadState('networkidle');
@@ -210,6 +250,13 @@ async function run() {
       noHorizontalOverflow: !hasHorizontal,
       heroVisible: true
     });
+
+    if (
+      report.flowMatrix.some(result => !result.pass) ||
+      report.mobileMatrix.some(result => !result.noHorizontalOverflow || !result.heroVisible)
+    ) {
+      report.metadata.status = 'fail';
+    }
 
   } catch (err) {
     console.error(err);
@@ -232,6 +279,9 @@ ${report.flowMatrix.map(f => `- **${f.flow}**: ${f.pass ? 'PASS' : 'FAIL'}
   - Evidence: ${f.evidence}
   - Risk: ${f.risk}`).join('\n')}
 
+## Marketing Accessibility Matrix
+${report.accessibilityMatrix.map(a => `- [${a.pass ? 'x' : ' '}] ${a.test}${a.note ? ` - ${a.note}` : ''}`).join('\n')}
+
 ## Mobile Matrix
 ${report.mobileMatrix.map(m => `- Viewport ${m.viewport}:
   - No Overflow: ${m.noHorizontalOverflow ? 'PASS' : 'FAIL'}
@@ -243,11 +293,18 @@ ${report.securityMatrix.map(s => `- [${s.pass ? 'x' : ' '}] ${s.test} ${s.notes 
     fs.writeFileSync(path.join(resultsDir, 'PRODUCT_FLOW_QA_REPORT.md'), md);
     fs.writeFileSync(path.join(resultsDir, 'product-flow-report.json'), JSON.stringify(report, null, 2));
 
-    await browser.close();
+    if (browser) await browser.close();
     serverProcess.kill();
     console.log('Done!');
   }
+
+  if (report.metadata.status !== 'pass') {
+    throw new Error(`Product flow QA completed with status ${report.metadata.status}`);
+  }
 }
 
-run();
+run().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});
 

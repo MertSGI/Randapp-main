@@ -105,6 +105,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 94. **`20261005_phase7_node2_discovery_marketplace_projection.sql`** — Discovery Marketplace server-authoritative projection.
 95. **`20261006_phase7_node3_favorites_fast_rebooking.sql`** — Customer favorites and fast-rebooking seed authority.
 96. **`20261007_program_v2_security_surface_hardening.sql`** — Program V2 security surface hardening.
+97. **`20261011155623_appointment_access_tokens_table_access_hardening.sql`** — Revokes direct PUBLIC/anon table access and removes the permissive token-table SELECT policy while preserving scoped authenticated/service-role access and existing SECURITY DEFINER RPC boundaries.
 
 ---
 

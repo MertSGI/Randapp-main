@@ -132,7 +132,8 @@ const CANONICAL_MIGRATIONS = [
   '20261004_phase7_node1_verified_reviews_foundation.sql',
   '20261005_phase7_node2_discovery_marketplace_projection.sql',
   '20261006_phase7_node3_favorites_fast_rebooking.sql',
-  '20261007_program_v2_security_surface_hardening.sql'
+  '20261007_program_v2_security_surface_hardening.sql',
+  '20261011155623_appointment_access_tokens_table_access_hardening.sql'
 ];
 
 // Check actual migration files on disk
