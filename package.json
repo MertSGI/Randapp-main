@@ -142,7 +142,8 @@
     "qa:data-mode-regression": "npx tsx scripts/test-data-mode-regression.mjs",
     "qa:slug-regression": "npx tsx scripts/test-slug-regression.mjs",
     "qa:superadmin-availability-regression": "npx tsx scripts/test-superadmin-and-availability-regression.ts",
-    "qa:appointment-token-security": "node supabase/tests/appointment_access_tokens_security.test.mjs"
+    "qa:appointment-token-security": "node supabase/tests/appointment_access_tokens_security.test.mjs",
+    "qa:migration-reconciliation-evidence": "node scripts/verify-migration-reconciliation-evidence.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",

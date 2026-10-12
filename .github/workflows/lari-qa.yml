@@ -13,6 +13,19 @@ jobs:
   qa:
     name: Build and QA
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15.10-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       VITE_DATA_MODE: local
       VITE_LAUNCH_MODE: local_pre_live
@@ -46,6 +59,15 @@ jobs:
 
       - name: Supabase staging consistency QA
         run: npm run qa:supabase-staging-consistency
+
+      - name: Migration reconciliation evidence QA
+        run: npm run qa:migration-reconciliation-evidence
+
+      - name: Disposable PostgreSQL appointment token security QA
+        env:
+          DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          LARI_DISPOSABLE_DB: "1"
+        run: npm run qa:appointment-token-security
 
       - name: Stage H1A Commercial Schema Foundation QA
         run: npm run qa:commercial-schema-foundation
