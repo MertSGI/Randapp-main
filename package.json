@@ -22,6 +22,7 @@
     "qa:data-source-adapters": "node scripts/verify-data-source-adapters.mjs",
     "qa:catalog-consistency": "node scripts/verify-catalog-consistency.mjs",
     "qa:booking-consistency": "node scripts/verify-booking-customer-consistency.mjs",
+    "qa:zero-cost-backup-workflow": "node scripts/verify-zero-cost-backup-workflow.mjs",
     "qa:pilot-launch": "node scripts/verify-pilot-launch-readiness.mjs",
     "qa:first-sandbox-run": "node scripts/verify-first-sandbox-run-readiness.mjs",
     "qa:sandbox-evidence": "node scripts/verify-sandbox-run-evidence.mjs",
