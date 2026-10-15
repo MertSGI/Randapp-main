@@ -220,7 +220,7 @@ export class LocalCatalogRepository implements CatalogRepository {
     let rules = (localData ? JSON.parse(localData) : []).map((rule: any) => this.normalizeAvailabilityRule(tenantId, rule));
     if (rules.length === 0) {
       const seeded: AvailabilityRule[] = [];
-      const staffIds = ['staff_1', 'staff_2', 'staff_3'];
+      const staffIds = (await this.listStaff(tenantId, { activeOnly: true })).map((staff) => staff.id);
       for (const sid of staffIds) {
         for (let d = 1; d <= 7; d++) {
           seeded.push({

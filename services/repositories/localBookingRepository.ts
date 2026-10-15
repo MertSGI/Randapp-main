@@ -76,6 +76,24 @@ export class LocalBookingRepository implements BookingRepository {
   async createAppointment(tenantId: string, input: Omit<Appointment, 'id' | 'createdAt' | 'tenantId'>): Promise<Appointment> {
     const key = this.getAppointmentsKey(tenantId);
     const existing = await dataProvider.getList<Appointment>(key) || [];
+    const cancelledStatuses = new Set([
+      'cancelled',
+      'cancelled_by_customer',
+      'cancelled_by_salon',
+      'cancelled_by_system',
+      'no_show',
+    ]);
+    const hasSlotConflict = existing.some((appointment) =>
+      appointment.staffId === input.staffId &&
+      appointment.date === input.date &&
+      appointment.time === input.time &&
+      !cancelledStatuses.has(String(appointment.status)),
+    );
+    if (hasSlotConflict) {
+      const error = new Error('slot_conflict');
+      error.name = 'BookingSlotConflictError';
+      throw error;
+    }
     const newApt: Appointment = {
       ...input,
       id: `apt_${Date.now()}`,

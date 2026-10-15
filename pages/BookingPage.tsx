@@ -725,6 +725,13 @@ const BookingPage: React.FC = () => {
             throw new Error('Empty response from local booking service.');
           }
         } catch (e) {
+          if (e instanceof Error && e.name === 'BookingSlotConflictError') {
+            const conflictError = new Error(language === 'tr'
+              ? 'Randevu oluşturulamadı. Seçilen saat dolmuş veya servis dışı olabilir.'
+              : 'Booking failed. The selected slot may no longer be available.');
+            conflictError.name = 'BookingSlotConflictError';
+            throw conflictError;
+          }
           console.error('Core appointment creation failed (local)', e);
           throw new Error(language === 'tr'
             ? 'Randevu oluşturulamadı. Seçilen saat dolmuş veya servis dışı olabilir.'
@@ -829,7 +836,9 @@ const BookingPage: React.FC = () => {
       setStep(5);
 
     } catch (e: any) {
-      console.error("Critical booking failure", e);
+      if (e?.name !== 'BookingSlotConflictError') {
+        console.error("Critical booking failure", e);
+      }
       alert(e.message || (language === 'tr' ? 'Randevu oluşturulurken beklenmedik bir hata oluştu.' : 'An unexpected error occurred while booking.'));
     } finally {
       setIsSubmitting(false);

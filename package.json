@@ -23,6 +23,7 @@
     "qa:catalog-consistency": "node scripts/verify-catalog-consistency.mjs",
     "qa:booking-consistency": "node scripts/verify-booking-customer-consistency.mjs",
     "qa:ui-v2-booking-e2e": "node scripts/test-ui-v2-booking-e2e.mjs",
+    "qa:ui-v2-booking-integrity": "node scripts/test-ui-v2-booking-integrity.mjs",
     "qa:pilot-launch": "node scripts/verify-pilot-launch-readiness.mjs",
     "qa:first-sandbox-run": "node scripts/verify-first-sandbox-run-readiness.mjs",
     "qa:sandbox-evidence": "node scripts/verify-sandbox-run-evidence.mjs",

@@ -1,4 +1,4 @@
-import { getStaffList } from './staffService';
+import { getStaffList, getStaffListForService } from './staffService';
 import { Staff } from '../types';
 import { getAppointments } from './appointmentService';
 import { getAvailabilityRepository, getBookingRepository, getServiceCatalogRepository } from './repositories';
@@ -193,28 +193,27 @@ export const availabilityService = {
     });
   },
 
-  getEarliestAvailableStaff(tenantId: string, serviceId: string): Promise<{staffId: string, date: string, time: string} | null> {
-    return new Promise(async (resolve) => {
-       // Find all staff who can perform this service
-       // Mock approach: just pick the first available staff
-       try {
-         const staff = await getStaffList(tenantId);
-         const serviceStaff = staff;
-         
-         if (serviceStaff.length === 0) {
-            resolve(null);
-            return;
-         }
+  async getEarliestAvailableStaff(tenantId: string, serviceId: string): Promise<{staffId: string, date: string, time: string} | null> {
+     try {
+       const serviceStaff = await getStaffListForService(tenantId, serviceId);
+       if (serviceStaff.length === 0) return null;
 
-         const first = serviceStaff[0];
-         resolve({
-            staffId: first.id,
-            date: new Date().toISOString().split('T')[0],
-            time: '10:00'
-         });
-       } catch (err) {
-         resolve(null);
+       const start = new Date();
+       for (let dayOffset = 0; dayOffset < 30; dayOffset += 1) {
+         const candidateDate = new Date(start);
+         candidateDate.setDate(start.getDate() + dayOffset);
+         const date = candidateDate.toISOString().split('T')[0];
+
+         for (const staff of serviceStaff) {
+           const slots = await this.getAvailableSlotsForStaff(tenantId, staff.id, serviceId, date);
+           if (slots.length > 0) {
+             return { staffId: staff.id, date, time: slots[0].time };
+           }
+         }
        }
-    });
+       return null;
+     } catch {
+       return null;
+     }
   }
 };

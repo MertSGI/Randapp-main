@@ -1,0 +1,57 @@
+name: LARI UI-V2 Booking Integrity
+
+on:
+  push:
+    branches:
+      - "staging/ci-lari-v2-booking-integrity-20261015"
+
+permissions:
+  contents: read
+
+jobs:
+  ui-v2-booking-integrity:
+    name: UI-V2 local booking integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VITE_DATA_MODE: local
+      VITE_LAUNCH_MODE: local_pre_live
+      VITE_PAYMENT_MODE: disabled
+      VITE_PAYMENT_RUN_MODE: local_dry_run
+      VITE_PAYMENT_PROVIDER: disabled
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build local-data payment-disabled application
+        run: npm run build
+
+      - name: Run existing UI-V2 booking E2E
+        run: npm run qa:ui-v2-booking-e2e
+
+      - name: Run UI-V2 booking integrity E2E
+        run: npm run qa:ui-v2-booking-integrity
+
+      - name: Upload UI-V2 booking evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-v2-booking-integrity-${{ github.sha }}
+          path: |
+            test-results/ui-v2-booking-e2e
+            test-results/ui-v2-booking-integrity
+          if-no-files-found: error
+          retention-days: 14
