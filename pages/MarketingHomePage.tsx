@@ -393,7 +393,7 @@ const MarketingHomePage: React.FC = () => {
         </div>
 
         {/* Desktop Table View - Hidden on Mobile */}
-        <div className="hidden md:block overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm bg-white dark:bg-slate-800 hide-scrollbar">
+        <div className="hidden lg:block overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm bg-white dark:bg-slate-800 hide-scrollbar">
           <table className="w-full text-left min-w-[600px]">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
@@ -531,7 +531,7 @@ const MarketingHomePage: React.FC = () => {
         </div>
 
         {/* Mobile Cards View - Shown on Mobile only */}
-        <div className="block md:hidden space-y-4">
+        <div className="block lg:hidden space-y-4">
           {[
             {
               name: language === "tr" ? "Mini Web Sitesi" : "Mini Website",

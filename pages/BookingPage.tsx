@@ -18,6 +18,7 @@ import { SalonBusinessProfile, BusinessBranch } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { canPreviewTenantSite } from '../utils/previewAuth';
 import SalonWebsiteView from '../components/SalonWebsiteView';
+import SalonWebsiteViewV2 from '../components/SalonWebsiteViewV2';
 import { getDataSourceMode } from '../services/dataSourceConfig';
 import { appointmentSelfServiceService } from '../services/appointmentSelfServiceService';
 
@@ -924,7 +925,27 @@ const BookingPage: React.FC = () => {
             )}
           </div>
         )}
-        <SalonWebsiteView 
+        {(() => {
+          const searchParams = new URLSearchParams(
+            window.location.search || (window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '')
+          );
+          const uiParam = searchParams.get('ui');
+          const hostname = window.location.hostname;
+          const isBlockedHost =
+            hostname === 'randevulari.com' ||
+            hostname === 'www.randevulari.com' ||
+            hostname === 'lari-staging.vercel.app';
+          const isAllowedNonProdHost =
+            !isBlockedHost &&
+            (hostname === 'localhost' ||
+              hostname === '127.0.0.1' ||
+              hostname.endsWith('.vercel.app'));
+
+          const shouldRenderV2 = uiParam === 'v2' && isAllowedNonProdHost;
+          const SelectedView = shouldRenderV2 ? SalonWebsiteViewV2 : SalonWebsiteView;
+
+          return (
+        <SelectedView
           tenant={tenant}
           businessProfile={businessProfile}
           staffList={staffList}
@@ -1581,6 +1602,8 @@ const BookingPage: React.FC = () => {
       ) : null
     }
     />
+          );
+        })()}
     </div>
     )}
   </div>

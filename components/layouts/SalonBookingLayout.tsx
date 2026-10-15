@@ -24,21 +24,6 @@ const SalonBookingLayout: React.FC = () => {
   const { tenant, branding, isLoadingTenant, tenantStatus } = useTenant();
   const location = useLocation();
 
-  if (isLoadingTenant) {
-    return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent"></div></div>;
-  }
-
-  if (tenantStatus === 'not_found' || !branding) {
-    return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900"><div className="text-center"><h1 className="text-3xl font-bold dark:text-white">{language === 'tr' ? 'Salon Bulunamadı' : 'Salon Not Found'}</h1><p className="mt-2 text-gray-500">{language === 'tr' ? 'Bu randevu sayfası aktif değil veya henüz yok.' : 'This booking site is not active or doesn\'t exist.'}</p></div></div>;
-  }
-
-  if (tenantStatus === 'suspended') {
-    return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900"><div className="text-center"><h1 className="text-3xl font-bold dark:text-white">{language === 'tr' ? 'Hesap Askıda' : 'Account Suspended'}</h1><p className="mt-2 text-gray-500">{language === 'tr' ? 'Bu salonun hesabı şu anda askıya alınmış durumda.' : 'This salon\'s account is currently suspended.'}</p></div></div>;
-  }
-
-  const businessName = branding.businessName || 'Salon';
-  const logoInitial = businessName.charAt(0).toUpperCase();
-
   const planId = tenant?.planId || 'baslangic';
   const [aiEnabled, setAiEnabled] = useState(false);
 
@@ -56,6 +41,21 @@ const SalonBookingLayout: React.FC = () => {
     }
     checkAi();
   }, [planId]);
+
+  if (isLoadingTenant) {
+    return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent"></div></div>;
+  }
+
+  if (tenantStatus === 'not_found' || !branding) {
+    return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900"><div className="text-center"><h1 className="text-3xl font-bold dark:text-white">{language === 'tr' ? 'Salon Bulunamadı' : 'Salon Not Found'}</h1><p className="mt-2 text-gray-500">{language === 'tr' ? 'Bu randevu sayfası aktif değil veya henüz yok.' : 'This booking site is not active or doesn\'t exist.'}</p></div></div>;
+  }
+
+  if (tenantStatus === 'suspended') {
+    return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900"><div className="text-center"><h1 className="text-3xl font-bold dark:text-white">{language === 'tr' ? 'Hesap Askıda' : 'Account Suspended'}</h1><p className="mt-2 text-gray-500">{language === 'tr' ? 'Bu salonun hesabı şu anda askıya alınmış durumda.' : 'This salon\'s account is currently suspended.'}</p></div></div>;
+  }
+
+  const businessName = branding.businessName || 'Salon';
+  const logoInitial = businessName.charAt(0).toUpperCase();
 
 
   const isBookRoute = location.pathname === '/book' || 
