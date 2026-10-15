@@ -26,3 +26,4 @@ dist-ssr
 # QA Artifacts
 qa-screenshots/
 test-results/
+backup-artifacts/
