@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { SalonBusinessProfile, Staff, Service } from '../types';
 import { customerService } from '../services/customerService';
 
@@ -15,6 +15,39 @@ interface SalonWebsiteViewV2Props {
   bookingComponent?: React.ReactNode;
   isAiEnabled?: boolean;
 }
+
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+const trapDialogFocus = (event: React.KeyboardEvent, dialog: HTMLElement | null) => {
+  if (event.key !== 'Tab' || !dialog) return;
+
+  const focusableElements = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+    .filter((element) => !element.hasAttribute('disabled') && element.getAttribute('aria-hidden') !== 'true');
+
+  if (focusableElements.length === 0) {
+    event.preventDefault();
+    dialog.focus();
+    return;
+  }
+
+  const firstElement = focusableElements[0];
+  const lastElement = focusableElements[focusableElements.length - 1];
+
+  if (event.shiftKey && document.activeElement === firstElement) {
+    event.preventDefault();
+    lastElement.focus();
+  } else if (!event.shiftKey && document.activeElement === lastElement) {
+    event.preventDefault();
+    firstElement.focus();
+  }
+};
 
 const SalonWebsiteViewV2: React.FC<SalonWebsiteViewV2Props> = ({
   tenant,
@@ -35,6 +68,10 @@ const SalonWebsiteViewV2: React.FC<SalonWebsiteViewV2Props> = ({
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [aiStep, setAiStep] = useState<'input' | 'processing' | 'result'>('input');
   const [aiConsentChecked, setAiConsentChecked] = useState(false);
+  const lightboxDialogRef = useRef<HTMLDivElement>(null);
+  const lightboxTriggerRef = useRef<HTMLButtonElement>(null);
+  const aiDialogRef = useRef<HTMLDivElement>(null);
+  const aiTriggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (tenant?.id) {
@@ -58,11 +95,51 @@ const SalonWebsiteViewV2: React.FC<SalonWebsiteViewV2Props> = ({
     ? servicesList
     : servicesList.filter((s) => s.category === activeCategory);
 
+  const openLightbox = (image: string, trigger: HTMLButtonElement) => {
+    lightboxTriggerRef.current = trigger;
+    setLightboxImage(image);
+  };
+
+  const closeLightbox = () => {
+    setLightboxImage(null);
+    window.requestAnimationFrame(() => lightboxTriggerRef.current?.focus());
+  };
+
+  const openAiAssistant = (trigger: HTMLButtonElement) => {
+    aiTriggerRef.current = trigger;
+    setIsAIOpen(true);
+  };
+
+  const closeAiAssistant = () => {
+    setIsAIOpen(false);
+    setAiStep('input');
+    window.requestAnimationFrame(() => aiTriggerRef.current?.focus());
+  };
+
+  useEffect(() => {
+    if (!lightboxImage) return;
+    const frame = window.requestAnimationFrame(() => {
+      lightboxDialogRef.current?.querySelector<HTMLElement>('[data-dialog-close]')?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [lightboxImage]);
+
+  useEffect(() => {
+    if (!isAIOpen) return;
+    const frame = window.requestAnimationFrame(() => {
+      aiDialogRef.current?.querySelector<HTMLElement>('[data-dialog-close]')?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isAIOpen]);
+
   // Lightbox keyboard navigation
   useEffect(() => {
     if (!lightboxImage) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setLightboxImage(null);
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeLightbox();
+      }
       if (e.key === 'ArrowRight') {
         const idx = galleryImages.indexOf(lightboxImage);
         if (idx > -1) setLightboxImage(galleryImages[(idx + 1) % galleryImages.length]);
@@ -76,6 +153,18 @@ const SalonWebsiteViewV2: React.FC<SalonWebsiteViewV2Props> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [lightboxImage, galleryImages]);
 
+  useEffect(() => {
+    if (!isAIOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeAiAssistant();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isAIOpen]);
+
   const handleAiSimulate = () => {
     if (!aiConsentChecked) return;
     setAiStep('processing');
@@ -85,8 +174,7 @@ const SalonWebsiteViewV2: React.FC<SalonWebsiteViewV2Props> = ({
   };
 
   const handleAiBook = () => {
-    setIsAIOpen(false);
-    setAiStep('input');
+    closeAiAssistant();
     if (servicesList.length > 0) {
       onServiceSelect(servicesList[0]);
     } else {
@@ -131,7 +219,7 @@ const SalonWebsiteViewV2: React.FC<SalonWebsiteViewV2Props> = ({
           <div className="flex items-center gap-3">
             {isAiEnabled && (
               <button
-                onClick={() => setIsAIOpen(true)}
+                onClick={(event) => openAiAssistant(event.currentTarget)}
                 className="hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium bg-stone-900 border border-stone-700 text-stone-300 hover:border-amber-500/50 hover:text-amber-300 transition-all"
               >
                 <span className="relative flex h-2 w-2">
@@ -175,7 +263,7 @@ const SalonWebsiteViewV2: React.FC<SalonWebsiteViewV2Props> = ({
 
                 {isAiEnabled && (
                   <button
-                    onClick={() => setIsAIOpen(true)}
+                    onClick={(event) => openAiAssistant(event.currentTarget)}
                     className="px-5 py-3.5 rounded-lg font-medium text-sm bg-stone-900 border border-stone-800 text-stone-300 hover:border-stone-700 hover:text-white transition-all"
                   >
                     ✨ {isTr ? 'Stil Önerisi' : 'Style Guide'}
@@ -323,12 +411,9 @@ const SalonWebsiteViewV2: React.FC<SalonWebsiteViewV2Props> = ({
           </div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {staffList.map((staff) => (
-              <div
-                key={staff.id}
-                onClick={() => onStaffSelect && onStaffSelect(staff)}
-                className="bg-stone-900/70 border border-stone-800/90 rounded-xl p-5 text-center cursor-pointer hover:border-stone-700 transition-all"
-              >
+            {staffList.map((staff) => {
+              const cardContent = (
+                <>
                 {staff.image ? (
                   <img
                     src={staff.image}
@@ -353,8 +438,28 @@ const SalonWebsiteViewV2: React.FC<SalonWebsiteViewV2Props> = ({
                     {isTr ? 'Randevu Seç' : 'Book with'} →
                   </span>
                 </div>
-              </div>
-            ))}
+                </>
+              );
+
+              return onStaffSelect ? (
+                <button
+                  type="button"
+                  key={staff.id}
+                  onClick={() => onStaffSelect(staff)}
+                  aria-label={isTr ? `${staff.name} ile randevu seç` : `Book with ${staff.name}`}
+                  className="w-full bg-stone-900/70 border border-stone-800/90 rounded-xl p-5 text-center cursor-pointer hover:border-stone-700 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-stone-950"
+                >
+                  {cardContent}
+                </button>
+              ) : (
+                <div
+                  key={staff.id}
+                  className="bg-stone-900/70 border border-stone-800/90 rounded-xl p-5 text-center transition-all"
+                >
+                  {cardContent}
+                </div>
+              );
+            })}
           </div>
         </section>
       )}
@@ -372,15 +477,22 @@ const SalonWebsiteViewV2: React.FC<SalonWebsiteViewV2Props> = ({
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {galleryImages.map((img, idx) => (
-              <div
-                key={idx}
-                onClick={() => setLightboxImage(img)}
-                className="aspect-square rounded-xl overflow-hidden bg-stone-900 border border-stone-800 cursor-pointer group relative"
+            {galleryImages.map((img, idx) => {
+              const galleryLabel = isTr
+                ? `${tenantDisplayName} galeri görseli ${idx + 1}`
+                : `${tenantDisplayName} gallery image ${idx + 1}`;
+
+              return (
+              <button
+                type="button"
+                key={img}
+                onClick={(event) => openLightbox(img, event.currentTarget)}
+                aria-label={isTr ? `${galleryLabel} görselini büyüt` : `Open ${galleryLabel}`}
+                className="block w-full aspect-square rounded-xl overflow-hidden bg-stone-900 border border-stone-800 cursor-pointer group relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-stone-950"
               >
                 <img
                   src={img}
-                  alt={`Gallery image ${idx + 1}`}
+                  alt={galleryLabel}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                 />
                 <div className="absolute inset-0 bg-stone-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -388,8 +500,9 @@ const SalonWebsiteViewV2: React.FC<SalonWebsiteViewV2Props> = ({
                     🔍 {isTr ? 'Büyüt' : 'View'}
                   </span>
                 </div>
-              </div>
-            ))}
+              </button>
+              );
+            })}
           </div>
         </section>
       )}
@@ -461,17 +574,33 @@ const SalonWebsiteViewV2: React.FC<SalonWebsiteViewV2Props> = ({
       {/* Lightbox Modal */}
       {lightboxImage && (
         <div
-          onClick={() => setLightboxImage(null)}
+          role="presentation"
+          onClick={closeLightbox}
           className="fixed inset-0 z-50 bg-stone-950/90 backdrop-blur-md flex items-center justify-center p-4"
         >
-          <div className="relative max-w-4xl w-full max-h-[90vh]">
+          <div
+            ref={lightboxDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="salon-gallery-dialog-title"
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => trapDialogFocus(event, lightboxDialogRef.current)}
+            className="relative max-w-4xl w-full max-h-[90vh]"
+          >
+            <h2 id="salon-gallery-dialog-title" className="sr-only">
+              {isTr ? `${tenantDisplayName} büyütülmüş galeri görseli` : `${tenantDisplayName} expanded gallery image`}
+            </h2>
             <img
               src={lightboxImage}
-              alt="Expanded view"
+              alt={isTr ? `${tenantDisplayName} büyütülmüş galeri görseli` : `${tenantDisplayName} expanded gallery image`}
               className="w-full h-full object-contain rounded-xl"
             />
             <button
-              onClick={() => setLightboxImage(null)}
+              type="button"
+              data-dialog-close
+              onClick={closeLightbox}
+              aria-label={isTr ? 'Galeri görselini kapat' : 'Close gallery image'}
               className="absolute top-4 right-4 w-9 h-9 rounded-full bg-stone-900 border border-stone-700 text-stone-200 flex items-center justify-center font-bold text-sm"
             >
               ✕
@@ -482,10 +611,23 @@ const SalonWebsiteViewV2: React.FC<SalonWebsiteViewV2Props> = ({
 
       {/* AI Assistant Modal */}
       {isAIOpen && (
-        <div className="fixed inset-0 z-50 bg-stone-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-stone-900 border border-stone-800 rounded-2xl max-w-md w-full p-6 relative space-y-5">
+        <div role="presentation" className="fixed inset-0 z-50 bg-stone-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div
+            ref={aiDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="salon-ai-dialog-title"
+            aria-describedby="salon-ai-dialog-description"
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => trapDialogFocus(event, aiDialogRef.current)}
+            className="bg-stone-900 border border-stone-800 rounded-2xl max-w-md w-full p-6 relative space-y-5"
+          >
             <button
-              onClick={() => setIsAIOpen(false)}
+              type="button"
+              data-dialog-close
+              onClick={closeAiAssistant}
+              aria-label={isTr ? 'Stil önerisi penceresini kapat' : 'Close style guide'}
               className="absolute top-4 right-4 text-stone-400 hover:text-stone-200 text-sm font-bold"
             >
               ✕
@@ -494,10 +636,10 @@ const SalonWebsiteViewV2: React.FC<SalonWebsiteViewV2Props> = ({
             <div className="flex items-center gap-3">
               <span className="text-xl">✨</span>
               <div>
-                <h3 className="font-semibold text-base text-stone-100">
+                <h3 id="salon-ai-dialog-title" className="font-semibold text-base text-stone-100">
                   {isTr ? 'Stil & Hizmet Önerisi' : 'Style & Service Guide'}
                 </h3>
-                <p className="text-xs text-stone-400">
+                <p id="salon-ai-dialog-description" className="text-xs text-stone-400">
                   {isTr ? 'Kişiselleştirilmiş hizmet eşleşmesi' : 'Personalized service matching'}
                 </p>
               </div>
