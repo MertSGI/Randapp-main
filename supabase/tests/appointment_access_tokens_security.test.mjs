@@ -23,6 +23,28 @@ const migrationPath = path.join(projectRoot, 'supabase', 'migrations', '20261011
 const fixtureSql = fs.readFileSync(fixturePath, 'utf8');
 const migrationSql = fs.readFileSync(migrationPath, 'utf8');
 const admin = new Client({ connectionString: dbUrl });
+const expectedPostgresMajor = process.env.EXPECTED_POSTGRES_MAJOR;
+
+const baselineTablePrivileges = [
+  'SELECT',
+  'INSERT',
+  'UPDATE',
+  'DELETE',
+  'TRUNCATE',
+  'REFERENCES',
+  'TRIGGER',
+];
+
+async function tablePrivilegeMatrix(privileges) {
+  const result = await admin.query(
+    `SELECT requested.privilege,
+            has_table_privilege('anon', 'public.appointment_access_tokens', requested.privilege) AS granted
+       FROM unnest($1::text[]) AS requested(privilege)
+      ORDER BY array_position($1::text[], requested.privilege)`,
+    [privileges],
+  );
+  return result.rows.map((row) => ({ privilege: row.privilege, granted: row.granted }));
+}
 
 async function queryAs(role, sql, params = [], subject = null) {
   const client = new Client({ connectionString: dbUrl });
@@ -54,16 +76,49 @@ async function assertPermissionDenied(label, sql, params = []) {
 
 await admin.connect();
 try {
+  const versionResult = await admin.query(
+    "SELECT current_setting('server_version') AS version, current_setting('server_version_num')::integer AS version_num",
+  );
+  const postgresVersion = versionResult.rows[0].version;
+  const postgresVersionNum = versionResult.rows[0].version_num;
+  const postgresMajor = Math.floor(postgresVersionNum / 10000);
+
+  if (expectedPostgresMajor) {
+    assert.equal(
+      postgresMajor,
+      Number(expectedPostgresMajor),
+      `expected PostgreSQL major ${expectedPostgresMajor}, received ${postgresVersion}`,
+    );
+  }
+
+  const supportedTablePrivileges = postgresMajor >= 17
+    ? [...baselineTablePrivileges, 'MAINTAIN']
+    : baselineTablePrivileges;
+
   const existing = await admin.query("SELECT to_regclass('public.appointment_access_tokens') AS table_identity");
   assert.equal(existing.rows[0].table_identity, null, 'fixture database must be fresh and disposable');
 
   await admin.query(fixtureSql);
+  const anonPrivilegesBefore = await tablePrivilegeMatrix(supportedTablePrivileges);
+  assert.deepEqual(
+    anonPrivilegesBefore,
+    supportedTablePrivileges.map((privilege) => ({ privilege, granted: true })),
+    'fixture must grant every table privilege supported by this PostgreSQL version to anon',
+  );
+
   const unrelatedAclBefore = await admin.query(
     "SELECT relacl::text AS acl FROM pg_class WHERE oid = 'public.unrelated_permission_fixture'::regclass",
   );
 
   await admin.query(migrationSql);
   await admin.query(migrationSql);
+
+  const anonPrivilegesAfter = await tablePrivilegeMatrix(supportedTablePrivileges);
+  assert.deepEqual(
+    anonPrivilegesAfter,
+    supportedTablePrivileges.map((privilege) => ({ privilege, granted: false })),
+    'migration must revoke every table privilege supported by this PostgreSQL version from anon',
+  );
 
   await assertPermissionDenied('anon SELECT', 'SELECT id FROM public.appointment_access_tokens LIMIT 1');
   await assertPermissionDenied(
@@ -141,6 +196,17 @@ try {
   );
   assert.deepEqual(policyCheck.rows.map((row) => row.policyname), ['Owner/Admin manage appointment tokens']);
 
+  const permissivePolicy = await admin.query(
+    `SELECT 1
+       FROM pg_policies
+      WHERE schemaname = 'public'
+        AND tablename = 'appointment_access_tokens'
+        AND policyname = 'Allow public select by token hash'`,
+  );
+  assert.equal(permissivePolicy.rowCount, 0, 'permissive public SELECT policy must be absent');
+
+  console.log(`PostgreSQL version: ${postgresVersion}`);
+  console.log(`anon table privileges verified revoked: ${supportedTablePrivileges.join(', ')}`);
   console.log('appointment_access_tokens disposable security matrix: PASS');
 } finally {
   await admin.end();

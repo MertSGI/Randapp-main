@@ -1,0 +1,54 @@
+name: LARI P0 PostgreSQL 17 Security
+
+on:
+  push:
+    branches:
+      - "staging/ci-lari-p0-postgres17-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  appointment-token-security-postgres17:
+    name: Appointment token security (PostgreSQL 17.6)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run disposable PostgreSQL 17 appointment token security QA
+        env:
+          DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          LARI_DISPOSABLE_DB: "1"
+          EXPECTED_POSTGRES_MAJOR: "17"
+        run: npm run qa:appointment-token-security
