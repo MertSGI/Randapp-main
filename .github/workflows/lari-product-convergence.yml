@@ -1,0 +1,135 @@
+name: LARI Product Convergence L1-L4
+
+on:
+  push:
+    branches:
+      - "staging/ci-lari-product-convergence-l1-l4-*"
+
+permissions:
+  contents: read
+
+jobs:
+  product-journey:
+    name: Combined Product journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      VITE_DATA_MODE: local
+      VITE_LAUNCH_MODE: local_pre_live
+      VITE_PAYMENT_MODE: disabled
+      VITE_PAYMENT_RUN_MODE: local_dry_run
+      VITE_PAYMENT_PROVIDER: disabled
+      VITE_SUPABASE_URL: https://rwedeejhjazwjthdjzrt.supabase.co
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@1e60f620b9541d7b35e0185ac766c8b3b6077a1f
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Typecheck and build
+        run: |
+          npm run lint
+          npm run build
+
+      - name: Product authority and onboarding contracts
+        run: |
+          npm run qa:data-mode-regression
+          npm run qa:plan-entitlement-authority
+          npm run qa:entitlements
+          npm run qa:onboarding
+          npm run qa:auth-isolation
+          npm run qa:product-flow
+
+      - name: Booking and self-service contracts
+        run: |
+          npm run qa:public-booking
+          npm run qa:appointments
+          npm run qa:multi-branch
+          npm run qa:branch-booking
+          npm run qa:booking-self-service
+          npm run qa:self-service-runtime-target
+          npm run qa:customer-cancellation-rpc
+          npm run qa:customer-rescheduling-ui
+          npm run qa:admin-reschedule-decision-rpc
+          npm run qa:admin-reschedule-review-ui
+
+      - name: Commercial and migration contracts
+        run: |
+          npm run qa:supabase-priority1-core
+          npm run qa:commercial-schema-foundation
+          npm run qa:commercial-read-contracts
+          npm run qa:commercial-security
+          npm run qa:commercial-eligibility-enforcement
+          npm run qa:supabase-migration-integrity
+          npm run qa:supabase-active-migration-path
+          npm run qa:migration-reconciliation-evidence
+
+      - name: Local interval and UI-V2 browser journeys
+        run: |
+          npm run qa:booking-interval-integrity
+          npm run qa:ui-v2-booking-e2e
+          npm run qa:ui-v2-booking-integrity
+
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: product-convergence-browser-${{ github.sha }}
+          path: |
+            test-results/ui-v2-booking-e2e
+            test-results/ui-v2-booking-integrity
+          if-no-files-found: error
+          retention-days: 14
+
+  token-security-postgres17:
+    name: Token security and recovery on PostgreSQL 17
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17.11-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@1e60f620b9541d7b35e0185ac766c8b3b6077a1f
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run disposable PostgreSQL 17 security and recovery matrix
+        env:
+          DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          LARI_DISPOSABLE_DB: "1"
+          EXPECTED_POSTGRES_MAJOR: "17"
+        run: npm run qa:appointment-token-security

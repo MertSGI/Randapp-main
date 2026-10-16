@@ -25,13 +25,11 @@ console.log('🏁 Running Stage C1 Runtime-Target & Route Isolation Test Suite..
 // 1. Check .env configuration for expected staging project ref
 const envLocalPath = path.join(ROOT, '.env.local');
 const envPath = path.join(ROOT, '.env');
-const targetEnvPath = fs.existsSync(envLocalPath) ? envLocalPath : envPath;
-const envContent = fs.readFileSync(targetEnvPath, 'utf8');
-
+const targetEnvPath = fs.existsSync(envLocalPath) ? envLocalPath : (fs.existsSync(envPath) ? envPath : null);
+const envContent = targetEnvPath ? fs.readFileSync(targetEnvPath, 'utf8') : '';
 const urlMatch = envContent.match(/VITE_SUPABASE_URL\s*=\s*(.*)/);
-assert(urlMatch, 'VITE_SUPABASE_URL must be defined in .env / .env.local');
-
-const supabaseUrl = urlMatch[1].trim();
+const supabaseUrl = process.env.VITE_SUPABASE_URL || urlMatch?.[1]?.trim();
+assert(supabaseUrl, 'VITE_SUPABASE_URL must be provided by the environment or .env / .env.local');
 const derivedProjectRef = supabaseUrl.replace(/^https?:\/\//, '').split('.')[0];
 assert.strictEqual(
   derivedProjectRef,

@@ -19,8 +19,10 @@ if (!['127.0.0.1', 'localhost', '::1'].includes(parsedUrl.hostname)) {
 
 const projectRoot = path.resolve(import.meta.dirname, '..', '..');
 const fixturePath = path.join(projectRoot, 'supabase', 'tests', 'fixtures', 'appointment_access_tokens_security_fixture.sql');
+const rollbackPath = path.join(projectRoot, 'supabase', 'tests', 'fixtures', 'appointment_access_tokens_security_rollback.sql');
 const migrationPath = path.join(projectRoot, 'supabase', 'migrations', '20261011155623_appointment_access_tokens_table_access_hardening.sql');
 const fixtureSql = fs.readFileSync(fixturePath, 'utf8');
+const rollbackSql = fs.readFileSync(rollbackPath, 'utf8');
 const migrationSql = fs.readFileSync(migrationPath, 'utf8');
 const admin = new Client({ connectionString: dbUrl });
 const expectedPostgresMajor = process.env.EXPECTED_POSTGRES_MAJOR;
@@ -150,6 +152,46 @@ try {
   );
   assert.deepEqual(invalidRpc.rows[0].result, { success: false, reason_code: 'invalid_token' });
 
+  const cancellationRpc = await queryAs(
+    'anon',
+    'SELECT public.cancel_public_appointment_by_manage_token($1, $2) AS result',
+    ['fixture-manage-token-a-not-a-secret', 'fixture cancellation'],
+  );
+  assert.equal(cancellationRpc.rows[0].result.success, true);
+  assert.equal(cancellationRpc.rows[0].result.reason_code, 'ok');
+
+  const cancellationState = await admin.query(
+    `SELECT appointment.status, token.used_at IS NOT NULL AS token_used
+       FROM public.appointments appointment
+       JOIN public.appointment_access_tokens token ON token.appointment_id = appointment.id
+      WHERE appointment.id = '30000000-0000-0000-0000-000000000001'`,
+  );
+  assert.deepEqual(cancellationState.rows, [{ status: 'cancelled_by_customer', token_used: true }]);
+
+  const rescheduleRpc = await queryAs(
+    'anon',
+    `SELECT public.request_public_appointment_reschedule_by_manage_token(
+       $1, current_date + 14, '14:30'::time, $2, $3
+     ) AS result`,
+    ['fixture-manage-token-b-not-a-secret', 'fixture reschedule', 'fixture-idempotency-key'],
+  );
+  assert.equal(rescheduleRpc.rows[0].result.success, true);
+  assert.equal(rescheduleRpc.rows[0].result.reason_code, 'ok');
+  assert.equal(rescheduleRpc.rows[0].result.idempotency_key_present, true);
+
+  const rescheduleState = await admin.query(
+    `SELECT tenant_id, appointment_id, request_type, proposed_time::text, status
+       FROM public.appointment_change_requests
+      WHERE appointment_id = '30000000-0000-0000-0000-000000000002'`,
+  );
+  assert.deepEqual(rescheduleState.rows, [{
+    tenant_id: '20000000-0000-0000-0000-000000000002',
+    appointment_id: '30000000-0000-0000-0000-000000000002',
+    request_type: 'reschedule',
+    proposed_time: '14:30:00',
+    status: 'pending',
+  }]);
+
   const ownerA = await queryAs(
     'authenticated',
     'SELECT tenant_id FROM public.appointment_access_tokens ORDER BY tenant_id',
@@ -205,8 +247,41 @@ try {
   );
   assert.equal(permissivePolicy.rowCount, 0, 'permissive public SELECT policy must be absent');
 
+  await admin.query(rollbackSql);
+  const rollbackPrivileges = await tablePrivilegeMatrix(supportedTablePrivileges);
+  assert.deepEqual(
+    rollbackPrivileges,
+    supportedTablePrivileges.map((privilege) => ({ privilege, granted: true })),
+    'disposable rollback must restore the preceding anon privilege matrix',
+  );
+  const rollbackPolicy = await admin.query(
+    `SELECT 1
+       FROM pg_policies
+      WHERE schemaname = 'public'
+        AND tablename = 'appointment_access_tokens'
+        AND policyname = 'Allow public select by token hash'`,
+  );
+  assert.equal(rollbackPolicy.rowCount, 1, 'disposable rollback must restore the preceding policy');
+
+  await admin.query(migrationSql);
+  const reapplyPrivileges = await tablePrivilegeMatrix(supportedTablePrivileges);
+  assert.deepEqual(
+    reapplyPrivileges,
+    supportedTablePrivileges.map((privilege) => ({ privilege, granted: false })),
+    'hardening must reapply cleanly after a tested rollback',
+  );
+  const reapplyPolicy = await admin.query(
+    `SELECT 1
+       FROM pg_policies
+      WHERE schemaname = 'public'
+        AND tablename = 'appointment_access_tokens'
+        AND policyname = 'Allow public select by token hash'`,
+  );
+  assert.equal(reapplyPolicy.rowCount, 0, 'hardening reapply must remove the permissive policy again');
+
   console.log(`PostgreSQL version: ${postgresVersion}`);
   console.log(`anon table privileges verified revoked: ${supportedTablePrivileges.join(', ')}`);
+  console.log('manage-token read, cancellation, reschedule, rollback and reapply verified');
   console.log('appointment_access_tokens disposable security matrix: PASS');
 } finally {
   await admin.end();

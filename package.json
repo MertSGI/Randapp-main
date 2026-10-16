@@ -146,7 +146,8 @@
     "qa:slug-regression": "npx tsx scripts/test-slug-regression.mjs",
     "qa:superadmin-availability-regression": "npx tsx scripts/test-superadmin-and-availability-regression.ts",
     "qa:appointment-token-security": "node supabase/tests/appointment_access_tokens_security.test.mjs",
-    "qa:migration-reconciliation-evidence": "node scripts/verify-migration-reconciliation-evidence.mjs"
+    "qa:migration-reconciliation-evidence": "node scripts/verify-migration-reconciliation-evidence.mjs",
+    "qa:plan-entitlement-authority": "node scripts/test-plan-entitlement-authority.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",

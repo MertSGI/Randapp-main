@@ -3,25 +3,18 @@ import { planService, PricingPlan } from '../../services/planService';
 import { getDataSourceMode } from '../../services/dataSourceConfig';
 import { Plus, Trash2, Save, Star } from 'lucide-react';
 import { useDialog } from '../../contexts/DialogContext';
-import { useNavigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 
 const SuperAdminPlansPage: React.FC = () => {
-    const navigate = useNavigate();
+    const isSupabaseMode = getDataSourceMode() === 'supabase';
     const [plans, setPlans] = useState<PricingPlan[]>([]);
     const [saved, setSaved] = useState(false);
     const { confirm: showConfirm, alert: showAlert } = useDialog();
 
-    // In supabase mode, redirect to the canonical commercial admin page.
-    // This page performs direct localStorage mutations which violate commercial source-of-truth in supabase mode.
     useEffect(() => {
-        if (getDataSourceMode() === 'supabase') {
-            navigate('/super-admin/commercial', { replace: true });
-        }
-    }, [navigate]);
-
-    useEffect(() => {
+        if (isSupabaseMode) return;
         setPlans(planService.getAllPlans());
-    }, []);
+    }, [isSupabaseMode]);
 
     const handleUpdate = (planId: string, updates: Partial<PricingPlan>) => {
         planService.updatePlan(planId, updates);
@@ -89,6 +82,13 @@ const SuperAdminPlansPage: React.FC = () => {
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
     };
+
+    // Redirect synchronously before the legacy localStorage-backed plan UI can
+    // read or mutate plan state in Supabase mode. The commercial admin route is
+    // the server-authoritative management surface.
+    if (isSupabaseMode) {
+        return <Navigate to="/super-admin/commercial" replace />;
+    }
 
     return (
         <div className="p-4 sm:p-8 max-w-6xl mx-auto space-y-4 sm:space-y-6">
