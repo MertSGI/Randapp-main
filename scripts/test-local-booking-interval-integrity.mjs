@@ -30,6 +30,9 @@ class MemoryStorage {
 
 globalThis.localStorage = new MemoryStorage();
 globalThis.window = { location: { hash: '', pathname: '' } };
+if (!globalThis.WebSocket) {
+  globalThis.WebSocket = class NoopWebSocket {};
+}
 
 await import('../services/appointmentService.ts');
 const { LocalBookingRepository } = await import('../services/repositories/localBookingRepository.ts');
