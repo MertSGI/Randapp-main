@@ -6,14 +6,25 @@ This workflow prepares an encrypted PostgreSQL logical backup for Supabase proje
 
 The workflow uses only `workflow_dispatch`. GitHub requires that a manually dispatched workflow must exist on the repository default branch. Publishing this file on a review branch neither runs it nor makes it dispatchable. The job is additionally bound in source to the currently verified default branch, `staging/supabase-staging-consistency`; a future default-branch change fails closed until reviewed in source. Before any live run, an owner must review and place the workflow on the default branch through the normal protected process.
 
-Create a GitHub Environment named `lari-staging-backup` and configure:
+### Selected operating model: single-owner Option A
 
-- Required reviewers.
-- Prevent self-review, if a second owner is available.
-- No administrator bypass of the environment gate.
-- Deployment branch policy restricted to the repository default branch.
-- Environment secret `LARI_STAGING_DATABASE_URL`: the protected PostgreSQL direct or session-pooler connection string for the exact source project, with TLS required. Do not use the transaction pooler or a frontend key. Rotate it after any suspected disclosure.
-- Environment secret `LARI_BACKUP_AGE_RECIPIENT`: an operator-owned age X25519 public recipient beginning with `age1`.
+The owner has selected a single-owner, manually authorized operating model because no independent second GitHub reviewer exists. The `lari-staging-backup` environment therefore has no required reviewer and does not use Prevent self-review. Automated or AI technical review is not independent human approval.
+
+This is a deliberate security limitation: one owner controls the repository and the protected environment. The owner must make three separate, explicit decisions that do not authorize one another:
+
+1. Authorize and merge the reviewed backup-workflow pull request.
+2. Authorize each backup dispatch after confirming the workflow inputs and environment configuration.
+3. Authorize any later P0 staging migration only after a recoverable backup and its restore evidence have been reviewed.
+
+Configure the GitHub Environment exactly as follows:
+
+1. Open **Repository Settings > Environments**, create `lari-staging-backup`, and leave **Required reviewers** disabled with no reviewers listed.
+2. Under **Deployment branches and tags**, select **Selected branches and tags** and add exactly `staging/supabase-staging-consistency`. Do not add wildcards, tags, or another branch.
+3. Add `LARI_STAGING_DATABASE_URL` under **Environment secrets** only. It must be the protected PostgreSQL direct or session-pooler connection string for the exact source project, with TLS required. Do not use the transaction pooler or a frontend key. Rotate it after any suspected disclosure.
+4. Add `LARI_BACKUP_AGE_RECIPIENT` under **Environment secrets** only. It must be an operator-owned age X25519 public recipient beginning with `age1`.
+5. Do not create repository-level or organization-level copies of either secret. Reopen the environment and verify the exact branch restriction and the two secret names before authorizing a run.
+
+The workflow has no automated trigger: `workflow_dispatch` is its only event. The environment branch restriction is an additional gate and does not replace the workflow's exact source-project and confirmation checks.
 
 The private key never enters GitHub. Generate and retain it only on an operator-controlled machine or offline secret store:
 
@@ -24,7 +35,13 @@ age-keygen -y lari-staging-backup.agekey
 
 Store the first file outside GitHub. Put only the second command's public `age1...` value into `LARI_BACKUP_AGE_RECIPIENT`. Losing the private key makes the artifact unrecoverable.
 
-For an authorized run, select the default branch, enter project reference `rwedeejhjazwjthdjzrt`, and enter the exact confirmation `BACKUP rwedeejhjazwjthdjzrt`. The protected environment must then be approved before its secrets are released. Concurrency permits only one backup run at a time, and the job is bounded to 30 minutes.
+For a separately authorized run, select the exact default branch `staging/supabase-staging-consistency`, enter project reference `rwedeejhjazwjthdjzrt`, and enter the exact confirmation `BACKUP rwedeejhjazwjthdjzrt`. Confirm the displayed ref and inputs before selecting **Run workflow**. In the selected single-owner model there is no second environment approval after dispatch, so this final manual check is the authorization boundary. Concurrency permits only one backup run at a time, and the job is bounded to 30 minutes.
+
+## Vercel production gate before merge
+
+The repository default branch is also the observed Vercel Production Branch for the Git-linked `lari-staging` project. Merging even workflow-only files into `staging/supabase-staging-consistency` can therefore create a production-target deployment and update production aliases.
+
+Before approving the pull-request merge, the owner must first protect the production aliases using one of Vercel's explicit Git controls: either open **Project Settings > Environments > Production > Branch Tracking** and move Production tracking away from `staging/supabase-staging-consistency` to an owner-controlled quarantine branch that will not receive the merge, or open **Project Settings > Git > Connected Git Repository** and disconnect the repository. Read the setting back and verify that a commit to `staging/supabase-staging-consistency` cannot create a production-target deployment or move a production/custom-domain alias. Do not rely on the absence of application-file changes. Restoring Production Branch tracking or reconnecting Git is a separate production authorization after the merge is verified; this backup-workflow approval does not grant it.
 
 ## Backup and verification behavior
 
