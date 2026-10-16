@@ -2,8 +2,16 @@
 import { Appointment, CustomerProfile, CustomerMemoryNote } from '../../types';
 import { dataProvider } from '../dataProvider';
 import { normalizeEmail, normalizePhone } from '../adminCustomerService';
+import {
+  bookingIntervalsOverlap,
+  parseBookingTimeMinutes,
+  requireServiceDurationMinutes,
+} from '../bookingInterval';
+import { LocalCatalogRepository } from './localCatalogRepository';
 
 export class LocalBookingRepository implements BookingRepository {
+  private readonly catalogRepository = new LocalCatalogRepository();
+
   private getAppointmentsKey(tenantId: string) { return `lari:${tenantId}:appointments`; }
   private getCustomersKey(tenantId: string) { return `mock_tenant_customers_${tenantId}`; }
 
@@ -76,6 +84,10 @@ export class LocalBookingRepository implements BookingRepository {
   async createAppointment(tenantId: string, input: Omit<Appointment, 'id' | 'createdAt' | 'tenantId'>): Promise<Appointment> {
     const key = this.getAppointmentsKey(tenantId);
     const existing = await dataProvider.getList<Appointment>(key) || [];
+    const tenantServices = await this.catalogRepository.listServices(tenantId);
+    const servicesById = new Map(tenantServices.map((service) => [service.id, service]));
+    const incomingStart = parseBookingTimeMinutes(input.time);
+    const incomingDuration = requireServiceDurationMinutes(servicesById.get(input.serviceId));
     const cancelledStatuses = new Set([
       'cancelled',
       'cancelled_by_customer',
@@ -83,12 +95,24 @@ export class LocalBookingRepository implements BookingRepository {
       'cancelled_by_system',
       'no_show',
     ]);
-    const hasSlotConflict = existing.some((appointment) =>
-      appointment.staffId === input.staffId &&
-      appointment.date === input.date &&
-      appointment.time === input.time &&
-      !cancelledStatuses.has(String(appointment.status)),
-    );
+    const hasSlotConflict = existing.some((appointment) => {
+      if (
+        appointment.staffId !== input.staffId ||
+        appointment.date !== input.date ||
+        cancelledStatuses.has(String(appointment.status))
+      ) {
+        return false;
+      }
+
+      const existingStart = parseBookingTimeMinutes(appointment.time);
+      const existingDuration = requireServiceDurationMinutes(servicesById.get(appointment.serviceId));
+      return bookingIntervalsOverlap(
+        incomingStart,
+        incomingDuration,
+        existingStart,
+        existingDuration,
+      );
+    });
     if (hasSlotConflict) {
       const error = new Error('slot_conflict');
       error.name = 'BookingSlotConflictError';

@@ -2,6 +2,11 @@ import { getStaffList, getStaffListForService } from './staffService';
 import { Staff } from '../types';
 import { getAppointments } from './appointmentService';
 import { getAvailabilityRepository, getBookingRepository, getServiceCatalogRepository } from './repositories';
+import {
+  bookingIntervalsOverlap,
+  parseBookingTimeMinutes,
+  requireServiceDurationMinutes,
+} from './bookingInterval';
 
 export interface TimeSlot {
   time: string; // HH:mm
@@ -103,8 +108,9 @@ export const availabilityService = {
        if (!rule) return [];
 
        // 2. Fetch service duration
-       const service = await getServiceCatalogRepository().getServiceById(serviceId);
-       const duration = service?.duration || 30;
+       const tenantServices = await getServiceCatalogRepository().listServices(tenantId);
+       const servicesById = new Map(tenantServices.map((service) => [service.id, service]));
+       const duration = requireServiceDurationMinutes(servicesById.get(serviceId));
 
        // 3. Fetch non-cancelled booked slots for this date and staff
        const appointments = await bookingRepo.listAppointments(tenantId, { date: dateStr });
@@ -120,10 +126,8 @@ export const availabilityService = {
 
        // 4. Generate candidate slots between rule.start_time and rule.end_time in 15 minute steps (or business interval)
        const slots: TimeSlot[] = [];
-       const [sh, sm] = rule.start_time.split(':').map(Number);
-       const [eh, em] = rule.end_time.split(':').map(Number);
-       const startMin = sh * 60 + sm;
-       const endMin = eh * 60 + em;
+       const startMin = parseBookingTimeMinutes(rule.start_time);
+       const endMin = parseBookingTimeMinutes(rule.end_time);
 
        // Determine the current local time in Europe/Istanbul to filter past slots
        const istanbulTime = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }));
@@ -146,21 +150,10 @@ export const availabilityService = {
          // Check overlaps with booked appointments
          let isOverlap = false;
          for (const apt of booked) {
-           const [ah, am] = apt.time.split(':').map(Number);
-           const aptStart = ah * 60 + am;
-           // We need the duration of the booked service. Let's find it.
-           // Fallback to 30 mins if not resolvable.
-           let aptDuration = 30;
-           if (apt.serviceId) {
-             const s = await getServiceCatalogRepository().getServiceById(apt.serviceId);
-             if (s?.duration) aptDuration = s.duration;
-           }
+           const aptStart = parseBookingTimeMinutes(apt.time);
+           const aptDuration = requireServiceDurationMinutes(servicesById.get(apt.serviceId));
 
-           const aptEnd = aptStart + aptDuration;
-           const slotStart = min;
-           const slotEnd = min + duration;
-
-           if (slotStart < aptEnd && slotEnd > aptStart) {
+           if (bookingIntervalsOverlap(min, duration, aptStart, aptDuration)) {
              isOverlap = true;
              break;
            }

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "staging/ci-lari-v2-booking-integrity-20261015"
+      - "staging/ci-lari-booking-interval-integrity-20261016"
 
 permissions:
   contents: read
@@ -38,6 +39,9 @@ jobs:
 
       - name: Build local-data payment-disabled application
         run: npm run build
+
+      - name: Run local booking interval integrity regressions
+        run: npm run qa:booking-interval-integrity
 
       - name: Run existing UI-V2 booking E2E
         run: npm run qa:ui-v2-booking-e2e

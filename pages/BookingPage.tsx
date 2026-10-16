@@ -726,6 +726,8 @@ const BookingPage: React.FC = () => {
           }
         } catch (e) {
           if (e instanceof Error && e.name === 'BookingSlotConflictError') {
+            setSelectedTime('');
+            setSlotRefreshKey(prev => prev + 1);
             const conflictError = new Error(language === 'tr'
               ? 'Randevu oluşturulamadı. Seçilen saat dolmuş veya servis dışı olabilir.'
               : 'Booking failed. The selected slot may no longer be available.');
