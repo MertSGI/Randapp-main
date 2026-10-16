@@ -48,7 +48,7 @@ async function tablePrivilegeMatrix(privileges) {
   return result.rows.map((row) => ({ privilege: row.privilege, granted: row.granted }));
 }
 
-async function queryAs(role, sql, params = [], subject = null) {
+async function queryAs(role, sql, params = [], subject = null, commit = false) {
   const client = new Client({ connectionString: dbUrl });
   await client.connect();
   try {
@@ -58,7 +58,7 @@ async function queryAs(role, sql, params = [], subject = null) {
       await client.query("SELECT set_config('request.jwt.claim.sub', $1, true)", [subject]);
     }
     const result = await client.query(sql, params);
-    await client.query('ROLLBACK');
+    await client.query(commit ? 'COMMIT' : 'ROLLBACK');
     return result;
   } catch (error) {
     await client.query('ROLLBACK');
@@ -156,6 +156,8 @@ try {
     'anon',
     'SELECT public.cancel_public_appointment_by_manage_token($1, $2) AS result',
     ['fixture-manage-token-a-not-a-secret', 'fixture cancellation'],
+    null,
+    true,
   );
   assert.equal(cancellationRpc.rows[0].result.success, true);
   assert.equal(cancellationRpc.rows[0].result.reason_code, 'ok');
@@ -172,8 +174,10 @@ try {
     'anon',
     `SELECT public.request_public_appointment_reschedule_by_manage_token(
        $1, current_date + 14, '14:30'::time, $2, $3
-     ) AS result`,
+    ) AS result`,
     ['fixture-manage-token-b-not-a-secret', 'fixture reschedule', 'fixture-idempotency-key'],
+    null,
+    true,
   );
   assert.equal(rescheduleRpc.rows[0].result.success, true);
   assert.equal(rescheduleRpc.rows[0].result.reason_code, 'ok');
