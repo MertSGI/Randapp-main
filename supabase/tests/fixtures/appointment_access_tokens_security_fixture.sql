@@ -256,6 +256,61 @@ REVOKE ALL ON FUNCTION public.request_public_appointment_reschedule_by_manage_to
 GRANT EXECUTE ON FUNCTION public.request_public_appointment_reschedule_by_manage_token(text, date, time, text, text)
     TO anon, authenticated, service_role;
 
+CREATE OR REPLACE FUNCTION public.get_public_pending_reschedule_request_by_manage_token(p_token text)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_token public.appointment_access_tokens%ROWTYPE;
+    v_request public.appointment_change_requests%ROWTYPE;
+BEGIN
+    SELECT *
+      INTO v_token
+      FROM public.appointment_access_tokens token
+     WHERE token.token_hash = encode(digest(trim(p_token), 'sha256'), 'hex')
+       AND token.expires_at > now()
+     LIMIT 1;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_token');
+    END IF;
+
+    SELECT *
+      INTO v_request
+      FROM public.appointment_change_requests request
+     WHERE request.appointment_id = v_token.appointment_id
+       AND request.request_type = 'reschedule'
+       AND request.status IN ('pending', 'requested')
+     ORDER BY request.created_at DESC
+     LIMIT 1;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object(
+            'success', true,
+            'reason_code', 'ok',
+            'has_pending_request', false
+        );
+    END IF;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'reason_code', 'ok',
+        'has_pending_request', true,
+        'change_request_id', v_request.id,
+        'proposed_date', v_request.proposed_date,
+        'proposed_time', v_request.proposed_time,
+        'status', v_request.status,
+        'created_at', v_request.created_at
+    );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.get_public_pending_reschedule_request_by_manage_token(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_public_pending_reschedule_request_by_manage_token(text)
+    TO anon, authenticated, service_role;
+
 CREATE TABLE public.unrelated_permission_fixture (id integer PRIMARY KEY);
 GRANT SELECT ON public.unrelated_permission_fixture TO anon;
 

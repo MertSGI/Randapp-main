@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "staging/ci-lari-product-convergence-l1-l4-*"
+      - "staging/ci-lari-release-gate-c1-c4-*"
 
 permissions:
   contents: read
@@ -43,6 +44,11 @@ jobs:
         run: |
           npm run lint
           npm run build
+
+      - name: Production dependency and release-gate contracts
+        run: |
+          npm audit --omit=dev --audit-level=high
+          npm run qa:release-gate-c1-c4
 
       - name: Product authority and onboarding contracts
         run: |
@@ -133,3 +139,30 @@ jobs:
           LARI_DISPOSABLE_DB: "1"
           EXPECTED_POSTGRES_MAJOR: "17"
         run: npm run qa:appointment-token-security
+
+  release-gate-evidence:
+    name: Versioned release-gate evidence
+    needs: [product-journey, token-security-postgres17]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+
+      - name: Generate non-circular exact-run evidence
+        run: node scripts/generate-release-gate-evidence.mjs
+
+      - name: Upload versioned exact-run evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: lari-release-gate-evidence-${{ github.sha }}-${{ github.run_id }}
+          path: test-results/release-gate-evidence/release-gate-evidence.json
+          if-no-files-found: error
+          retention-days: 14

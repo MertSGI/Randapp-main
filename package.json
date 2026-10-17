@@ -147,7 +147,9 @@
     "qa:superadmin-availability-regression": "npx tsx scripts/test-superadmin-and-availability-regression.ts",
     "qa:appointment-token-security": "node supabase/tests/appointment_access_tokens_security.test.mjs",
     "qa:migration-reconciliation-evidence": "node scripts/verify-migration-reconciliation-evidence.mjs",
-    "qa:plan-entitlement-authority": "node scripts/test-plan-entitlement-authority.mjs"
+    "qa:plan-entitlement-authority": "node scripts/test-plan-entitlement-authority.mjs",
+    "qa:release-gate-c1-c4": "node scripts/test-release-gate-c1-c4.mjs",
+    "qa:release-gate-evidence": "node scripts/generate-release-gate-evidence.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",
@@ -155,7 +157,7 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
-    "react-router-dom": "^7.13.0"
+    "react-router-dom": "7.18.4"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.19",

@@ -196,6 +196,30 @@ try {
     status: 'pending',
   }]);
 
+  const pendingRescheduleRpc = await queryAs(
+    'anon',
+    'SELECT public.get_public_pending_reschedule_request_by_manage_token($1) AS result',
+    ['fixture-manage-token-b-not-a-secret'],
+  );
+  assert.equal(pendingRescheduleRpc.rows[0].result.success, true);
+  assert.equal(pendingRescheduleRpc.rows[0].result.has_pending_request, true);
+  assert.equal(pendingRescheduleRpc.rows[0].result.status, 'pending');
+  assert.equal(
+    pendingRescheduleRpc.rows[0].result.change_request_id,
+    rescheduleRpc.rows[0].result.change_request_id,
+  );
+
+  const invalidPendingRescheduleRpc = await queryAs(
+    'anon',
+    'SELECT public.get_public_pending_reschedule_request_by_manage_token($1) AS result',
+    ['fixture-invalid-token-not-a-secret'],
+  );
+  assert.deepEqual(
+    invalidPendingRescheduleRpc.rows[0].result,
+    { success: false, reason_code: 'invalid_token' },
+    'invalid-token pending reschedule read must remain neutral',
+  );
+
   const ownerA = await queryAs(
     'authenticated',
     'SELECT tenant_id FROM public.appointment_access_tokens ORDER BY tenant_id',
@@ -285,7 +309,7 @@ try {
 
   console.log(`PostgreSQL version: ${postgresVersion}`);
   console.log(`anon table privileges verified revoked: ${supportedTablePrivileges.join(', ')}`);
-  console.log('manage-token read, cancellation, reschedule, rollback and reapply verified');
+  console.log('manage-token read, cancellation, reschedule, pending reschedule read, rollback and reapply verified');
   console.log('appointment_access_tokens disposable security matrix: PASS');
 } finally {
   await admin.end();
