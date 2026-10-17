@@ -5,8 +5,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $expectedProjectRef = 'rwedeejhjazwjthdjzrt'
-$expectedHash = '5FCE2EEE8D21A29C68D7685A744234EAC779FB7BB4D92B6E59CBCBD109826970'
-$expectedConfirmation = "APPLY P0 $expectedProjectRef $expectedHash"
+$expectedCanonicalLfHash = '260F727516CFF4CF0754295206A10E56505A9CA9E22AEC099BB7F21099BD5E13'
+$expectedWindowsCrlfHash = '5FCE2EEE8D21A29C68D7685A744234EAC779FB7BB4D92B6E59CBCBD109826970'
+$expectedConfirmation = "APPLY P0 $expectedProjectRef $expectedCanonicalLfHash"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $migrationPath = Join-Path $repositoryRoot 'supabase\migrations\20261011155623_appointment_access_tokens_table_access_hardening.sql'
 $wrapperPath = Join-Path $repositoryRoot 'scripts\sql\apply-appointment-token-hardening-staging.sql'
@@ -33,9 +34,25 @@ if (-not $connectionIdentity.Contains($expectedProjectRef, [StringComparison]::O
     throw 'The staging connection identity does not match the protected project reference.'
 }
 
-$actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $migrationPath).Hash
-if ($actualHash -cne $expectedHash) {
-    throw 'The appointment-token hardening migration checksum does not match.'
+$actualRawHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $migrationPath).Hash
+if ($actualRawHash -cnotin @($expectedCanonicalLfHash, $expectedWindowsCrlfHash)) {
+    throw 'The appointment-token hardening migration raw checksum does not match an exact Git LF or Windows CRLF representation.'
+}
+
+$migrationText = [System.IO.File]::ReadAllText($migrationPath)
+$crlf = [string][char]13 + [char]10
+$lf = [string][char]10
+$normalizedLf = $migrationText.Replace($crlf, $lf)
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$sha256 = [System.Security.Cryptography.SHA256]::Create()
+try {
+    $actualCanonicalLfHash = ([BitConverter]::ToString($sha256.ComputeHash($utf8NoBom.GetBytes($normalizedLf)))).Replace('-', '')
+}
+finally {
+    $sha256.Dispose()
+}
+if ($actualCanonicalLfHash -cne $expectedCanonicalLfHash) {
+    throw 'The appointment-token hardening migration canonical LF checksum does not match.'
 }
 
 $psql = Get-Command psql -ErrorAction Stop

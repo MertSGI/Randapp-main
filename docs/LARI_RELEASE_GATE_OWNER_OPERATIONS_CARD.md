@@ -61,7 +61,7 @@ The workflow's loopback restore is required evidence; an owner-controlled second
 
 Only after A-E are reviewed:
 
-1. Verify the exact migration checksum 5FCE2EEE8D21A29C68D7685A744234EAC779FB7BB4D92B6E59CBCBD109826970.
+1. Verify the canonical Git LF migration checksum 260F727516CFF4CF0754295206A10E56505A9CA9E22AEC099BB7F21099BD5E13. A Windows CRLF checkout may have raw checksum 5FCE2EEE8D21A29C68D7685A744234EAC779FB7BB4D92B6E59CBCBD109826970, but normalized LF content must still match the canonical checksum.
 2. Verify the connection identity is rwedeejhjazwjthdjzrt without printing credentials.
 3. Review APPOINTMENT_TOKEN_HARDENING_STAGING_CUTOVER.md.
 4. Issue a separate approval for exactly one transactional application.

@@ -6,7 +6,11 @@ Target project: rwedeejhjazwjthdjzrt
 
 Exact migration: supabase/migrations/20261011155623_appointment_access_tokens_table_access_hardening.sql
 
-Required SHA-256: 5FCE2EEE8D21A29C68D7685A744234EAC779FB7BB4D92B6E59CBCBD109826970
+Canonical Git LF SHA-256: 260F727516CFF4CF0754295206A10E56505A9CA9E22AEC099BB7F21099BD5E13
+
+Windows CRLF SHA-256: 5FCE2EEE8D21A29C68D7685A744234EAC779FB7BB4D92B6E59CBCBD109826970
+
+The wrapper accepts only those two raw representations and always requires the normalized UTF-8 LF content to match the canonical Git hash. The migration itself is unchanged.
 
 ## Preconditions
 
@@ -15,7 +19,7 @@ Stop unless all conditions hold:
 1. Owner operations card A-E is complete and retained backup evidence is available.
 2. A separate owner approval explicitly authorizes this migration once.
 3. The connection URL identity contains rwedeejhjazwjthdjzrt in its username or host, uses PostgreSQL, requires TLS, and is not loopback.
-4. The migration checksum matches exactly.
+4. The raw migration checksum is one of the two documented checkout representations and its normalized LF checksum matches the canonical Git hash exactly.
 5. The live table is public.appointment_access_tokens, owned by postgres, has RLS enabled, and has the seven expected columns/types.
 6. Current P0 facts still match the Controller baseline: anon SELECT and TRUNCATE granted, permissive policy present, migration ledger version absent.
 7. No unrelated migration or db push is queued.

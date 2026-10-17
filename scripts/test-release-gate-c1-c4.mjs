@@ -58,8 +58,15 @@ for (const section of [
 assert.ok(ownerCard.includes('single-owner Option A'));
 assert.ok(ownerCard.includes('BACKUP rwedeejhjazwjthdjzrt'));
 
-const migrationHash = crypto.createHash('sha256').update(migration).digest('hex').toUpperCase();
-assert.equal(migrationHash, '5FCE2EEE8D21A29C68D7685A744234EAC779FB7BB4D92B6E59CBCBD109826970');
+const migrationText = migration.toString('utf8');
+const canonicalLfMigration = migrationText.replace(/\r\n/g, '\n');
+const windowsCrlfMigration = canonicalLfMigration.replace(/\n/g, '\r\n');
+const canonicalLfHash = crypto.createHash('sha256').update(canonicalLfMigration, 'utf8').digest('hex').toUpperCase();
+const windowsCrlfHash = crypto.createHash('sha256').update(windowsCrlfMigration, 'utf8').digest('hex').toUpperCase();
+assert.equal(canonicalLfHash, '260F727516CFF4CF0754295206A10E56505A9CA9E22AEC099BB7F21099BD5E13');
+assert.equal(windowsCrlfHash, '5FCE2EEE8D21A29C68D7685A744234EAC779FB7BB4D92B6E59CBCBD109826970');
+assert.ok(cutover.includes('Canonical Git LF SHA-256: 260F727516CFF4CF0754295206A10E56505A9CA9E22AEC099BB7F21099BD5E13'));
+assert.ok(cutover.includes('Windows CRLF SHA-256: 5FCE2EEE8D21A29C68D7685A744234EAC779FB7BB4D92B6E59CBCBD109826970'));
 assert.ok(cutover.includes('Status: PREPARED_NOT_AUTHORIZED'));
 assert.ok(sqlWrapper.includes("SET LOCAL lock_timeout = '5s'"));
 assert.ok(sqlWrapper.includes("SET LOCAL statement_timeout = '60s'"));

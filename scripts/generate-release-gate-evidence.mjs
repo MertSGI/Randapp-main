@@ -34,7 +34,8 @@ const evidence = {
   supabase_project_ref: 'rwedeejhjazwjthdjzrt',
   migration: {
     version: '20261011155623',
-    sha256: '5FCE2EEE8D21A29C68D7685A744234EAC779FB7BB4D92B6E59CBCBD109826970',
+    canonical_git_lf_sha256: '260F727516CFF4CF0754295206A10E56505A9CA9E22AEC099BB7F21099BD5E13',
+    windows_crlf_sha256: '5FCE2EEE8D21A29C68D7685A744234EAC779FB7BB4D92B6E59CBCBD109826970',
     live_staging_applied_by_this_run: false,
   },
   prohibited_actions: {

@@ -41,7 +41,9 @@ The divergent default lineage 3faeced52939c65bbbc49da2ee6c7f375c0f9e59 was not m
 ## Migration identity
 
 - Migration: supabase/migrations/20261011155623_appointment_access_tokens_table_access_hardening.sql
-- Migration SHA-256: 5FCE2EEE8D21A29C68D7685A744234EAC779FB7BB4D92B6E59CBCBD109826970
+- Migration canonical Git LF SHA-256: 260F727516CFF4CF0754295206A10E56505A9CA9E22AEC099BB7F21099BD5E13
+- Migration Windows CRLF SHA-256: 5FCE2EEE8D21A29C68D7685A744234EAC779FB7BB4D92B6E59CBCBD109826970
+- Both hashes identify the same UTF-8 migration text with only the checkout line-ending representation changed.
 - No duplicate migration is permitted.
 - Live staging application remains owner-authorized and separate from source qualification.
 
