@@ -68,9 +68,9 @@ jobs:
         shell: bash
         env:
           SOURCE_PROJECT_REF: ${{ inputs.source_project_ref }}
-          SOURCE_DATABASE_URL: ${{ secrets.LARI_STAGING_DATABASE_URL }}
+          SOURCE_POOLER_HOST: ${{ vars.LARI_STAGING_POOLER_HOST }}
+          SOURCE_DATABASE_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
           BACKUP_AGE_RECIPIENT: ${{ secrets.LARI_BACKUP_AGE_RECIPIENT }}
-          RESTORE_DATABASE_URL: postgresql://lari_restore_admin:disposable-only@127.0.0.1:5432/restore_verification
           LARI_DISPOSABLE_DB: "1"
         run: bash scripts/run-zero-cost-logical-backup.sh
 

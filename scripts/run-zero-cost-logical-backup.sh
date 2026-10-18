@@ -4,12 +4,49 @@ set -Eeuo pipefail
 umask 077
 
 EXPECTED_PROJECT_REF="rwedeejhjazwjthdjzrt"
+SOURCE_DATABASE_USER="postgres.${EXPECTED_PROJECT_REF}"
+SOURCE_DATABASE_PORT="5432"
+SOURCE_DATABASE_NAME="postgres"
+SOURCE_DATABASE_SSLMODE="require"
 VALIDATE_SOURCE_URL_ONLY="--validate-source-url-only"
+TEST_SOURCE_CREDENTIALS_ONLY="--test-source-credential-handling"
+
+SOURCE_DATABASE_PASSWORD_VALUE="${SOURCE_DATABASE_PASSWORD:-}"
+unset SOURCE_DATABASE_PASSWORD
+
+PRIVATE_DIR=""
+SOURCE_PGPASSFILE=""
+RESTORE_PGPASSFILE=""
+
+cleanup() {
+  if [[ -n "$PRIVATE_DIR" && -d "$PRIVATE_DIR" ]]; then
+    rm -rf -- "$PRIVATE_DIR"
+  fi
+}
+
+terminate_on_signal() {
+  local status="$1"
+  trap - EXIT HUP INT TERM
+  cleanup
+  exit "$status"
+}
+
+trap cleanup EXIT
+trap 'terminate_on_signal 129' HUP
+trap 'terminate_on_signal 130' INT
+trap 'terminate_on_signal 143' TERM
 
 require_value() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
     printf 'Required protected input is unavailable: %s\n' "$name" >&2
+    exit 1
+  fi
+}
+
+require_source_database_password() {
+  if [[ -z "$SOURCE_DATABASE_PASSWORD_VALUE" ]]; then
+    printf 'Required protected input is unavailable: SOURCE_DATABASE_PASSWORD\n' >&2
     exit 1
   fi
 }
@@ -24,7 +61,6 @@ import sys
 from urllib.parse import parse_qsl, unquote, urlsplit
 
 EXPECTED_PROJECT_REF = "rwedeejhjazwjthdjzrt"
-DIRECT_HOST = f"db.{EXPECTED_PROJECT_REF}.supabase.co"
 POOLER_HOST = re.compile(r"aws-[0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*\.pooler\.supabase\.com")
 ALLOWED_TLS_MODES = {"require", "verify-ca", "verify-full"}
 ALLOWED_QUERY_KEYS = {"sslmode", "sslrootcert"}
@@ -64,19 +100,15 @@ if source.fragment or not source.netloc or source_host is None:
 if source.path != "/postgres":
     reject("database name must be postgres")
 if source_port != 5432:
-    reject("only the direct or Session Pooler port is allowed")
-if source.password is None or source.password == "":
-    reject("database password is required")
+    reject("only the Session Pooler port is allowed")
+if source.password is not None:
+    reject("database passwords are not allowed in the source URI")
 
 source_username = unquote(source.username or "")
-if source_host == DIRECT_HOST:
-    if source_username != "postgres":
-        reject("direct connection identity is not approved")
-elif POOLER_HOST.fullmatch(source_host):
-    if source_username != f"postgres.{EXPECTED_PROJECT_REF}":
-        reject("Session Pooler project identity is not approved")
-else:
-    reject("database host is not an approved Supabase endpoint")
+if not POOLER_HOST.fullmatch(source_host):
+    reject("database host is not an approved Supabase shared pooler endpoint")
+if source_username != f"postgres.{EXPECTED_PROJECT_REF}":
+    reject("Session Pooler project identity is not approved")
 
 try:
     query_pairs = parse_qsl(
@@ -109,6 +141,120 @@ if "sslrootcert" in query:
 PY
 }
 
+build_and_validate_source_database_url() {
+  local python_command="$1"
+  SOURCE_DATABASE_URL="postgresql://${SOURCE_DATABASE_USER}@${SOURCE_POOLER_HOST}:${SOURCE_DATABASE_PORT}/${SOURCE_DATABASE_NAME}?sslmode=${SOURCE_DATABASE_SSLMODE}"
+  export SOURCE_DATABASE_URL
+  validate_source_database_url "$python_command"
+  unset SOURCE_DATABASE_URL
+}
+
+escape_pgpass_field() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//:/\\:}"
+  printf '%s' "$value"
+}
+
+write_pgpass_file() {
+  local output_path="$1"
+  local host="$2"
+  local port="$3"
+  local database="$4"
+  local username="$5"
+  local password="$6"
+
+  if [[ "$password" == *$'\n'* || "$password" == *$'\r'* ]]; then
+    printf 'Database credential contains an unsupported control character.\n' >&2
+    exit 1
+  fi
+
+  printf '%s:%s:%s:%s:%s\n' \
+    "$(escape_pgpass_field "$host")" \
+    "$(escape_pgpass_field "$port")" \
+    "$(escape_pgpass_field "$database")" \
+    "$(escape_pgpass_field "$username")" \
+    "$(escape_pgpass_field "$password")" \
+    >"$output_path"
+  chmod 0600 "$output_path"
+}
+
+prepare_private_credentials() {
+  local credentials_dir="$PRIVATE_DIR/database-credentials"
+  mkdir -m 0700 -- "$credentials_dir"
+  SOURCE_PGPASSFILE="$credentials_dir/source.pgpass"
+  RESTORE_PGPASSFILE="$credentials_dir/restore.pgpass"
+
+  write_pgpass_file \
+    "$SOURCE_PGPASSFILE" \
+    "$SOURCE_POOLER_HOST" \
+    "$SOURCE_DATABASE_PORT" \
+    "$SOURCE_DATABASE_NAME" \
+    "$SOURCE_DATABASE_USER" \
+    "$SOURCE_DATABASE_PASSWORD_VALUE"
+  write_pgpass_file \
+    "$RESTORE_PGPASSFILE" \
+    "$RESTORE_DATABASE_HOST" \
+    "$RESTORE_DATABASE_PORT" \
+    "$RESTORE_DATABASE_NAME" \
+    "$RESTORE_DATABASE_USER" \
+    "$RESTORE_DATABASE_PASSWORD"
+  unset SOURCE_DATABASE_PASSWORD_VALUE
+}
+
+assert_private_source_credentials() {
+  [[ "$(stat -c '%a' "$PRIVATE_DIR")" == "700" ]] || {
+    printf 'Private temporary directory permissions are invalid.\n' >&2
+    exit 1
+  }
+  [[ "$(stat -c '%a' "$(dirname "$SOURCE_PGPASSFILE")")" == "700" ]] || {
+    printf 'Protected credential directory permissions are invalid.\n' >&2
+    exit 1
+  }
+  [[ "$(stat -c '%a' "$SOURCE_PGPASSFILE")" == "600" ]] || {
+    printf 'Protected source credential file permissions are invalid.\n' >&2
+    exit 1
+  }
+  [[ "$SOURCE_PGPASSFILE" == "$PRIVATE_DIR/"* ]] || {
+    printf 'Protected source credential file is outside the private temporary directory.\n' >&2
+    exit 1
+  }
+  [[ "$SOURCE_PGPASSFILE" != "$ARTIFACT_DIR" && "$SOURCE_PGPASSFILE" != "$ARTIFACT_DIR/"* ]] || {
+    printf 'Protected source credential file overlaps the artifact directory.\n' >&2
+    exit 1
+  }
+}
+
+run_source_postgres_command() {
+  env -i \
+    HOME="$PRIVATE_DIR" \
+    PATH="$PATH" \
+    LC_ALL=C.UTF-8 \
+    PGHOST="$SOURCE_POOLER_HOST" \
+    PGPORT="$SOURCE_DATABASE_PORT" \
+    PGDATABASE="$SOURCE_DATABASE_NAME" \
+    PGUSER="$SOURCE_DATABASE_USER" \
+    PGSSLMODE="$SOURCE_DATABASE_SSLMODE" \
+    PGPASSFILE="$SOURCE_PGPASSFILE" \
+    PGCONNECT_TIMEOUT=15 \
+    "$@"
+}
+
+run_restore_postgres_command() {
+  env -i \
+    HOME="$PRIVATE_DIR" \
+    PATH="$PATH" \
+    LC_ALL=C.UTF-8 \
+    PGHOST="$RESTORE_DATABASE_HOST" \
+    PGPORT="$RESTORE_DATABASE_PORT" \
+    PGDATABASE="$RESTORE_DATABASE_NAME" \
+    PGUSER="$RESTORE_DATABASE_USER" \
+    PGSSLMODE=disable \
+    PGPASSFILE="$RESTORE_PGPASSFILE" \
+    PGCONNECT_TIMEOUT=15 \
+    "$@"
+}
+
 if [[ "${1:-}" == "$VALIDATE_SOURCE_URL_ONLY" ]]; then
   [[ "$#" -eq 1 ]] || {
     printf 'Source database URL validation mode accepts no additional arguments.\n' >&2
@@ -125,6 +271,64 @@ if [[ "${1:-}" == "$VALIDATE_SOURCE_URL_ONLY" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "$TEST_SOURCE_CREDENTIALS_ONLY" ]]; then
+  [[ "$#" -eq 1 ]] || {
+    printf 'Offline credential test mode accepts no additional arguments.\n' >&2
+    exit 1
+  }
+  [[ "${LARI_OFFLINE_TEST_MODE:-}" == "1" ]] || {
+    printf 'Offline credential test guard is not enabled.\n' >&2
+    exit 1
+  }
+  require_value RUNNER_TEMP
+  require_value GITHUB_WORKSPACE
+  PRIVATE_DIR="$(mktemp -d "${RUNNER_TEMP}/lari-logical-backup.XXXXXX")"
+  ARTIFACT_DIR="${GITHUB_WORKSPACE}/backup-artifacts"
+  RESTORE_DATABASE_HOST="127.0.0.1"
+  RESTORE_DATABASE_PORT="5432"
+  RESTORE_DATABASE_NAME="restore_verification"
+  RESTORE_DATABASE_USER="lari_restore_admin"
+  RESTORE_DATABASE_PASSWORD="disposable-only"
+  require_value SOURCE_POOLER_HOST
+  require_source_database_password
+  require_value BACKUP_AGE_RECIPIENT
+  [[ "$BACKUP_AGE_RECIPIENT" == age1* ]] || {
+    printf 'The encryption recipient must be an age X25519 public recipient.\n' >&2
+    exit 1
+  }
+  VALIDATOR_PYTHON="${LARI_SOURCE_VALIDATOR_PYTHON:-python3}"
+  command -v "$VALIDATOR_PYTHON" >/dev/null 2>&1 || {
+    printf 'Required validator runtime is unavailable.\n' >&2
+    exit 1
+  }
+  command -v sha256sum >/dev/null 2>&1 || {
+    printf 'Required credential test runtime is unavailable.\n' >&2
+    exit 1
+  }
+  require_value LARI_EXPECTED_SOURCE_PGPASS_SHA256
+  build_and_validate_source_database_url "$VALIDATOR_PYTHON"
+  prepare_private_credentials
+  assert_private_source_credentials
+  ACTUAL_SOURCE_PGPASS_SHA256="$(sha256sum "$SOURCE_PGPASSFILE" | awk '{print $1}')"
+  [[ "$ACTUAL_SOURCE_PGPASS_SHA256" == "$LARI_EXPECTED_SOURCE_PGPASS_SHA256" ]] || {
+    printf 'Protected source credential escaping check failed.\n' >&2
+    exit 1
+  }
+  unset ACTUAL_SOURCE_PGPASS_SHA256 LARI_EXPECTED_SOURCE_PGPASS_SHA256
+  printf 'Source credential configuration: PASS\n'
+  printf 'PGPASSFILE permission: PASS\n'
+  printf 'PGPASSFILE escaping: PASS\n'
+  printf 'PGPASSFILE artifact exclusion: PASS\n'
+  if [[ "${LARI_OFFLINE_TEST_FAILURE:-}" == "1" ]]; then
+    printf 'Synthetic post-credential failure.\n' >&2
+    exit 1
+  fi
+  if [[ "${LARI_OFFLINE_TEST_SIGNAL:-}" == "TERM" ]]; then
+    kill -TERM "$$"
+  fi
+  exit 0
+fi
+
 [[ "$#" -eq 0 ]] || {
   printf 'Unexpected command argument.\n' >&2
   exit 1
@@ -132,14 +336,14 @@ fi
 
 ARTIFACT_DIR="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}/backup-artifacts"
 PRIVATE_DIR="$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP is required}/lari-logical-backup.XXXXXX")"
+RESTORE_DATABASE_HOST="127.0.0.1"
+RESTORE_DATABASE_PORT="5432"
+RESTORE_DATABASE_NAME="restore_verification"
+RESTORE_DATABASE_USER="lari_restore_admin"
+RESTORE_DATABASE_PASSWORD="disposable-only"
 CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 BACKUP_ID="lari-${EXPECTED_PROJECT_REF}-${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}-${GITHUB_RUN_ATTEMPT:?GITHUB_RUN_ATTEMPT is required}"
 ENCRYPTED_NAME="${BACKUP_ID}.tar.gz.age"
-
-cleanup() {
-  rm -rf -- "$PRIVATE_DIR"
-}
-trap cleanup EXIT
 
 for command_name in age jq pg_dump pg_dumpall pg_restore psql sha256sum tar python3; do
   command -v "$command_name" >/dev/null 2>&1 || {
@@ -149,9 +353,9 @@ for command_name in age jq pg_dump pg_dumpall pg_restore psql sha256sum tar pyth
 done
 
 require_value SOURCE_PROJECT_REF
-require_value SOURCE_DATABASE_URL
+require_value SOURCE_POOLER_HOST
+require_source_database_password
 require_value BACKUP_AGE_RECIPIENT
-require_value RESTORE_DATABASE_URL
 
 [[ "$SOURCE_PROJECT_REF" == "$EXPECTED_PROJECT_REF" ]] || {
   printf 'Source project gate rejected the requested project.\n' >&2
@@ -166,20 +370,16 @@ require_value RESTORE_DATABASE_URL
   exit 1
 }
 
-validate_source_database_url python3
+unset \
+  PGAPPNAME PGCHANNELBINDING PGCLIENTENCODING PGCONNECT_TIMEOUT PGDATABASE \
+  PGHOST PGHOSTADDR PGOPTIONS PGPASSFILE PGPASSWORD PGPORT PGREQUIRESSL \
+  PGSERVICE PGSERVICEFILE PGSSLCERT PGSSLCRL PGSSLCRLDIR PGSSLKEY \
+  PGSSLMODE PGSSLROOTCERT PGSSLSNI PGTARGETSESSIONATTRS PGUSER \
+  SOURCE_DATABASE_URL
 
-python3 <<'PY'
-import os
-from urllib.parse import urlparse
-
-source = urlparse(os.environ["SOURCE_DATABASE_URL"])
-target = urlparse(os.environ["RESTORE_DATABASE_URL"])
-
-if target.scheme not in {"postgres", "postgresql"} or target.hostname not in {"127.0.0.1", "localhost", "::1"}:
-    raise SystemExit("Restore target must be a loopback PostgreSQL database.")
-if source.hostname in {"127.0.0.1", "localhost", "::1"}:
-    raise SystemExit("Source and disposable restore targets must be distinct.")
-PY
+build_and_validate_source_database_url python3
+prepare_private_credentials
+assert_private_source_credentials
 
 PG_DUMP_MAJOR="$(pg_dump --version | awk '{print $3}' | cut -d. -f1)"
 PG_RESTORE_MAJOR="$(pg_restore --version | awk '{print $3}' | cut -d. -f1)"
@@ -191,21 +391,17 @@ PG_RESTORE_MAJOR="$(pg_restore --version | awk '{print $3}' | cut -d. -f1)"
 rm -rf -- "$ARTIFACT_DIR"
 mkdir -p -- "$ARTIFACT_DIR"
 
-export PGCONNECT_TIMEOUT=15
-
 printf 'Creating the bounded logical dump without emitting database output.\n'
-pg_dumpall \
+run_source_postgres_command pg_dumpall \
   --roles-only \
   --no-role-passwords \
-  --database="$SOURCE_DATABASE_URL" \
   >"$PRIVATE_DIR/roles.sql" \
   2>"$PRIVATE_DIR/source-roles.stderr"
 
-pg_dump \
+run_source_postgres_command pg_dump \
   --format=custom \
   --compress=9 \
   --lock-wait-timeout=30000 \
-  --dbname="$SOURCE_DATABASE_URL" \
   --file="$PRIVATE_DIR/database.dump" \
   >"$PRIVATE_DIR/source-dump.stdout" \
   2>"$PRIVATE_DIR/source-dump.stderr"
@@ -214,19 +410,19 @@ pg_restore --list "$PRIVATE_DIR/database.dump" \
   >"$PRIVATE_DIR/archive.list" \
   2>"$PRIVATE_DIR/archive-list.stderr"
 
-psql "$SOURCE_DATABASE_URL" \
+run_source_postgres_command psql \
   -X -qAt --set=ON_ERROR_STOP=1 \
   --file=scripts/backup/catalog-fingerprint.sql \
   >"$PRIVATE_DIR/source-catalog-fingerprint.json" \
   2>"$PRIVATE_DIR/source-catalog-fingerprint.stderr"
 
-psql "$SOURCE_DATABASE_URL" \
+run_source_postgres_command psql \
   -X -qAt --set=ON_ERROR_STOP=1 \
   --file=scripts/backup/dependency-inventory.sql \
   >"$PRIVATE_DIR/source-dependencies.json" \
   2>"$PRIVATE_DIR/source-dependencies.stderr"
 
-psql "$RESTORE_DATABASE_URL" \
+run_restore_postgres_command psql \
   -X -qAt --set=ON_ERROR_STOP=1 \
   --command="SELECT jsonb_agg(jsonb_build_object('name', name, 'default_version', default_version) ORDER BY name) FROM pg_available_extensions" \
   >"$PRIVATE_DIR/restore-available-extensions.json" \
@@ -244,7 +440,7 @@ jq -n \
     ]
   }' >"$PRIVATE_DIR/dependency-report.json"
 
-SERVER_VERSION_NUM="$(psql "$RESTORE_DATABASE_URL" -X -qAt --set=ON_ERROR_STOP=1 --command='SHOW server_version_num' 2>"$PRIVATE_DIR/restore-version.stderr")"
+SERVER_VERSION_NUM="$(run_restore_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command='SHOW server_version_num' 2>"$PRIVATE_DIR/restore-version.stderr")"
 [[ "$SERVER_VERSION_NUM" == 17* ]] || {
   printf 'Disposable restore server is not PostgreSQL 17.\n' >&2
   exit 1
@@ -252,7 +448,7 @@ SERVER_VERSION_NUM="$(psql "$RESTORE_DATABASE_URL" -X -qAt --set=ON_ERROR_STOP=1
 
 printf 'Restoring the exact dump into disposable PostgreSQL 17.\n'
 set +e
-psql "$RESTORE_DATABASE_URL" \
+run_restore_postgres_command psql \
   -X -q --set=ON_ERROR_STOP=1 \
   --file="$PRIVATE_DIR/roles.sql" \
   >"$PRIVATE_DIR/restore-roles.stdout" \
@@ -261,10 +457,10 @@ ROLES_RESTORE_STATUS=$?
 
 DATABASE_RESTORE_STATUS=1
 if [[ "$ROLES_RESTORE_STATUS" -eq 0 ]]; then
-  pg_restore \
+  run_restore_postgres_command pg_restore \
     --exit-on-error \
     --single-transaction \
-    --dbname="$RESTORE_DATABASE_URL" \
+    --dbname="$RESTORE_DATABASE_NAME" \
     "$PRIVATE_DIR/database.dump" \
     >"$PRIVATE_DIR/restore-database.stdout" \
     2>"$PRIVATE_DIR/restore-database.stderr"
@@ -277,7 +473,7 @@ set -e
 
 CATALOG_MATCH=false
 if [[ "$ROLES_RESTORE_STATUS" -eq 0 && "$DATABASE_RESTORE_STATUS" -eq 0 ]]; then
-  psql "$RESTORE_DATABASE_URL" \
+  run_restore_postgres_command psql \
     -X -qAt --set=ON_ERROR_STOP=1 \
     --file=scripts/backup/catalog-fingerprint.sql \
     >"$PRIVATE_DIR/restore-catalog-fingerprint.json" \

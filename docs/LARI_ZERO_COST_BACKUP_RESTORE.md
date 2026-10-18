@@ -20,13 +20,14 @@ Configure the GitHub Environment exactly as follows:
 
 1. Open **Repository Settings > Environments**, create `lari-staging-backup`, and leave **Required reviewers** disabled with no reviewers listed.
 2. Under **Deployment branches and tags**, select **Selected branches and tags** and add exactly `staging/supabase-staging-consistency`. Do not add wildcards, tags, or another branch.
-3. Add `LARI_STAGING_DATABASE_URL` under **Environment secrets** only. It must be the protected PostgreSQL direct or session-pooler connection string for the exact source project, with TLS required. Do not use the transaction pooler or a frontend key. Rotate it after any suspected disclosure.
-4. Add `LARI_BACKUP_AGE_RECIPIENT` under **Environment secrets** only. It must be an operator-owned age X25519 public recipient beginning with `age1`.
-5. Do not create repository-level or organization-level copies of either secret. Reopen the environment and verify the exact branch restriction and the two secret names before authorizing a run.
+3. Retain the existing repository-scoped `STAGING_DB_PASSWORD` secret. Reusing it for this manually authorized backup is an owner-approved exception to the earlier environment-only credential model. A repository-scoped secret has broader availability than an environment-scoped secret; do not reveal, retrieve, copy, rotate, or reset it for this workflow. Its password validity remains unverified until a separately authorized execution.
+4. Add `LARI_STAGING_POOLER_HOST` under **Environment variables**. Copy the exact hostname from **Supabase Dashboard > Connect > Session Pooler**. Do not infer it from the region and do not include a scheme, username, password, port, path, or query string.
+5. Add `LARI_BACKUP_AGE_RECIPIENT` under **Environment secrets**. It must be an operator-owned age X25519 public recipient beginning with `age1`.
+6. Reopen the environment and verify the exact branch restriction, the `LARI_STAGING_POOLER_HOST` variable name, and the `LARI_BACKUP_AGE_RECIPIENT` secret name before authorizing a run. Do not create repository-level or organization-level copies of the age recipient.
 
 The workflow has no automated trigger: `workflow_dispatch` is its only event. The environment branch restriction is an additional gate and does not replace the workflow's exact source-project and confirmation checks.
 
-The private key never enters GitHub. Generate and retain it only on an operator-controlled machine or offline secret store:
+The age private identity stays outside GitHub: the private key never enters GitHub. Generate and retain it only on an operator-controlled machine or offline secret store:
 
 ```text
 age-keygen -o lari-staging-backup.agekey
@@ -47,6 +48,8 @@ Before approving the pull-request merge, the owner must first protect the produc
 
 The runner installs PostgreSQL 17 client binaries and uses:
 
+- The exact shared Session Pooler identity `postgres.rwedeejhjazwjthdjzrt` on the owner-supplied host, port `5432`, database `postgres`, and `sslmode=require`. The password is never embedded in a URI or process argument.
+- A source-only `PGPASSFILE` created under the job's private temporary directory with mode `0600`. Password-file metacharacters are escaped, inherited libpq settings are discarded, disposable restore credentials use a separate password file, and cleanup runs after success, failure, or a termination signal.
 - `pg_dumpall --roles-only --no-role-passwords` for non-secret role definitions and grants.
 - `pg_dump --format=custom` for database schema, table data, RLS policies, ACLs, functions/RPCs, large objects, and visible extension definitions.
 - Source catalog fingerprints for schemas, tables and RLS flags, policies, routines, roles, and extensions.
@@ -59,6 +62,8 @@ Exact source role and extension inventories, unavailable PostgreSQL 17 extension
 Only after the restore attempt does the workflow create an age-encrypted bundle. It deletes the temporary plaintext bundle and allows exactly two uploaded files: the `.age` ciphertext and `manifest.json`. The manifest records the encrypted artifact SHA256, source project identifier, UTC creation time, source revision, PostgreSQL versions, and restore-test verdict. The workflow recomputes and verifies the ciphertext hash before upload.
 
 GitHub retains the encrypted artifact for seven days. The owner must download it before expiry, verify its SHA256 against the manifest, and retain both in operator-controlled storage. GitHub artifact retention is not an archival strategy.
+
+External ciphertext retention and owner-controlled restore verification remain mandatory. The workflow never resets the staging database password, and an offline qualification pass does not establish that the existing secret is valid or that a future live backup is recoverable.
 
 ## Restore use after an incident
 
