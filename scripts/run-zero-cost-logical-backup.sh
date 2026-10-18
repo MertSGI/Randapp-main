@@ -4,6 +4,132 @@ set -Eeuo pipefail
 umask 077
 
 EXPECTED_PROJECT_REF="rwedeejhjazwjthdjzrt"
+VALIDATE_SOURCE_URL_ONLY="--validate-source-url-only"
+
+require_value() {
+  local name="$1"
+  if [[ -z "${!name:-}" ]]; then
+    printf 'Required protected input is unavailable: %s\n' "$name" >&2
+    exit 1
+  fi
+}
+
+validate_source_database_url() {
+  local python_command="$1"
+
+  "$python_command" <<'PY'
+import os
+import re
+import sys
+from urllib.parse import parse_qsl, unquote, urlsplit
+
+EXPECTED_PROJECT_REF = "rwedeejhjazwjthdjzrt"
+DIRECT_HOST = f"db.{EXPECTED_PROJECT_REF}.supabase.co"
+POOLER_HOST = re.compile(r"aws-[0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*\.pooler\.supabase\.com")
+ALLOWED_TLS_MODES = {"require", "verify-ca", "verify-full"}
+ALLOWED_QUERY_KEYS = {"sslmode", "sslrootcert"}
+ROUTING_OVERRIDE_KEYS = {
+    "database",
+    "dbname",
+    "host",
+    "hostaddr",
+    "passfile",
+    "port",
+    "service",
+    "servicefile",
+    "user",
+}
+
+
+def reject(reason):
+    print(f"Source database URL rejected: {reason}.", file=sys.stderr)
+    raise SystemExit(1)
+
+
+source_url = os.environ.get("SOURCE_DATABASE_URL", "")
+if not source_url or any(character.isspace() or ord(character) < 32 for character in source_url):
+    reject("invalid PostgreSQL URI")
+
+try:
+    source = urlsplit(source_url)
+    source_port = source.port
+    source_host = source.hostname
+except (TypeError, ValueError):
+    reject("invalid PostgreSQL URI")
+
+if source.scheme not in {"postgres", "postgresql"}:
+    reject("invalid PostgreSQL URI scheme")
+if source.fragment or not source.netloc or source_host is None:
+    reject("invalid PostgreSQL URI structure")
+if source.path != "/postgres":
+    reject("database name must be postgres")
+if source_port != 5432:
+    reject("only the direct or Session Pooler port is allowed")
+if source.password is None or source.password == "":
+    reject("database password is required")
+
+source_username = unquote(source.username or "")
+if source_host == DIRECT_HOST:
+    if source_username != "postgres":
+        reject("direct connection identity is not approved")
+elif POOLER_HOST.fullmatch(source_host):
+    if source_username != f"postgres.{EXPECTED_PROJECT_REF}":
+        reject("Session Pooler project identity is not approved")
+else:
+    reject("database host is not an approved Supabase endpoint")
+
+try:
+    query_pairs = parse_qsl(
+        source.query,
+        keep_blank_values=True,
+        strict_parsing=True,
+        separator="&",
+    )
+except ValueError:
+    reject("invalid or conflicting connection parameters")
+
+query = {}
+for key, value in query_pairs:
+    if key != key.lower():
+        reject("connection parameter names must be lowercase")
+    if key in query:
+        reject("duplicate connection parameters are not allowed")
+    if key in ROUTING_OVERRIDE_KEYS:
+        reject("connection routing overrides are not allowed")
+    if key not in ALLOWED_QUERY_KEYS:
+        reject("unsupported connection parameter")
+    query[key] = value
+
+sslmode = query.get("sslmode")
+if sslmode not in ALLOWED_TLS_MODES:
+    reject("sslmode=require or a verified mode is required")
+if "sslrootcert" in query:
+    if sslmode not in {"verify-ca", "verify-full"} or not query["sslrootcert"]:
+        reject("sslrootcert requires a verified TLS mode")
+PY
+}
+
+if [[ "${1:-}" == "$VALIDATE_SOURCE_URL_ONLY" ]]; then
+  [[ "$#" -eq 1 ]] || {
+    printf 'Source database URL validation mode accepts no additional arguments.\n' >&2
+    exit 1
+  }
+  require_value SOURCE_DATABASE_URL
+  VALIDATOR_PYTHON="${LARI_SOURCE_VALIDATOR_PYTHON:-python3}"
+  command -v "$VALIDATOR_PYTHON" >/dev/null 2>&1 || {
+    printf 'Required validator runtime is unavailable.\n' >&2
+    exit 1
+  }
+  validate_source_database_url "$VALIDATOR_PYTHON"
+  printf 'Source database URL validation: PASS\n'
+  exit 0
+fi
+
+[[ "$#" -eq 0 ]] || {
+  printf 'Unexpected command argument.\n' >&2
+  exit 1
+}
+
 ARTIFACT_DIR="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}/backup-artifacts"
 PRIVATE_DIR="$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP is required}/lari-logical-backup.XXXXXX")"
 CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -14,14 +140,6 @@ cleanup() {
   rm -rf -- "$PRIVATE_DIR"
 }
 trap cleanup EXIT
-
-require_value() {
-  local name="$1"
-  if [[ -z "${!name:-}" ]]; then
-    printf 'Required protected input is unavailable: %s\n' "$name" >&2
-    exit 1
-  fi
-}
 
 for command_name in age jq pg_dump pg_dumpall pg_restore psql sha256sum tar python3; do
   command -v "$command_name" >/dev/null 2>&1 || {
@@ -48,19 +166,15 @@ require_value RESTORE_DATABASE_URL
   exit 1
 }
 
+validate_source_database_url python3
+
 python3 <<'PY'
 import os
 from urllib.parse import urlparse
 
-expected = os.environ["SOURCE_PROJECT_REF"]
 source = urlparse(os.environ["SOURCE_DATABASE_URL"])
 target = urlparse(os.environ["RESTORE_DATABASE_URL"])
 
-if source.scheme not in {"postgres", "postgresql"}:
-    raise SystemExit("Source database URL must use PostgreSQL.")
-source_identity = f"{source.username or ''}@{source.hostname or ''}"
-if expected not in source_identity:
-    raise SystemExit("Source database URL does not match the gated project reference.")
 if target.scheme not in {"postgres", "postgresql"} or target.hostname not in {"127.0.0.1", "localhost", "::1"}:
     raise SystemExit("Restore target must be a loopback PostgreSQL database.")
 if source.hostname in {"127.0.0.1", "localhost", "::1"}:

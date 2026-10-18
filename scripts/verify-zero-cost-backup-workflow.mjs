@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 
 const workflowPath = '.github/workflows/lari-zero-cost-logical-backup.yml';
 const runnerPath = 'scripts/run-zero-cost-logical-backup.sh';
@@ -16,6 +18,85 @@ const runbook = fs.readFileSync(runbookPath, 'utf8');
 const mustContain = (text, value, message) => {
   assert.ok(text.includes(value), message ?? `Expected ${value}`);
 };
+
+const findBash = () => {
+  const candidates = process.platform === 'win32'
+    ? [
+        process.env.LARI_TEST_BASH,
+        path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'bin', 'bash.exe'),
+        'C:\\Program Files\\Git\\bin\\bash.exe',
+      ]
+    : [process.env.LARI_TEST_BASH, 'bash'];
+  return candidates.find((candidate) => candidate && (candidate === 'bash' || fs.existsSync(candidate)));
+};
+
+const bashExecutable = findBash();
+assert.ok(bashExecutable, 'Bash is required to execute the source database URL validator tests');
+
+const runSourceValidator = (sourceDatabaseUrl) => {
+  const env = { ...process.env, SOURCE_DATABASE_URL: sourceDatabaseUrl };
+  if (process.platform === 'win32') {
+    env.LARI_SOURCE_VALIDATOR_PYTHON = 'python';
+  } else {
+    delete env.LARI_SOURCE_VALIDATOR_PYTHON;
+  }
+  return spawnSync(bashExecutable, [runnerPath, '--validate-source-url-only'], {
+    cwd: process.cwd(),
+    env,
+    encoding: 'utf8',
+  });
+};
+
+const positiveValidatorCases = [
+  {
+    name: 'direct staging endpoint with required TLS',
+    url: 'postgresql://postgres:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co:5432/postgres?sslmode=require',
+  },
+  {
+    name: 'official-format shared Session Pooler with required TLS',
+    url: 'postgresql://postgres.rwedeejhjazwjthdjzrt:offline-test-password@aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=require',
+  },
+  {
+    name: 'direct staging endpoint with verified TLS',
+    url: 'postgresql://postgres:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co:5432/postgres?sslmode=verify-full&sslrootcert=%2Ftmp%2Fsupabase-ca.pem',
+  },
+];
+
+const negativeValidatorCases = [
+  ['lookalike hostname containing project reference', 'postgresql://postgres:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co.evil.example:5432/postgres?sslmode=require'],
+  ['correct direct hostname with wrong username', 'postgresql://postgres.rwedeejhjazwjthdjzrt:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co:5432/postgres?sslmode=require'],
+  ['another project pooler username', 'postgresql://postgres.anotherprojectref123:offline-test-password@aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=require'],
+  ['missing TLS requirement', 'postgresql://postgres:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co:5432/postgres'],
+  ['disabled TLS', 'postgresql://postgres:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co:5432/postgres?sslmode=disable'],
+  ['preferred but non-required TLS', 'postgresql://postgres:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co:5432/postgres?sslmode=prefer'],
+  ['transaction pooler port', 'postgresql://postgres.rwedeejhjazwjthdjzrt:offline-test-password@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require'],
+  ['query-string host override', 'postgresql://postgres:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co:5432/postgres?sslmode=require&host=evil.example'],
+  ['query-string hostaddr override', 'postgresql://postgres:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co:5432/postgres?sslmode=require&hostaddr=203.0.113.10'],
+  ['query-string service override', 'postgresql://postgres:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co:5432/postgres?sslmode=require&service=evil'],
+  ['query-string port override', 'postgresql://postgres:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co:5432/postgres?sslmode=require&port=5432'],
+  ['alternate direct port', 'postgresql://postgres:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co:5433/postgres?sslmode=require'],
+  ['duplicated connection parameter', 'postgresql://postgres:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co:5432/postgres?sslmode=require&sslmode=require'],
+  ['conflicting connection parameters', 'postgresql://postgres:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co:5432/postgres?sslmode=require&sslmode=disable'],
+  ['localhost endpoint', 'postgresql://postgres:offline-test-password@localhost:5432/postgres?sslmode=require'],
+  ['non-approved external host', 'postgresql://postgres:offline-test-password@database.example.com:5432/postgres?sslmode=require'],
+  ['lookalike pooler hostname', 'postgresql://postgres.rwedeejhjazwjthdjzrt:offline-test-password@aws-0-eu-central-1.pooler.supabase.com.evil.example:5432/postgres?sslmode=require'],
+  ['wrong database name', 'postgresql://postgres:offline-test-password@db.rwedeejhjazwjthdjzrt.supabase.co:5432/template1?sslmode=require'],
+  ['malformed URL', 'this-is-not-a-postgresql-uri'],
+];
+
+for (const testCase of positiveValidatorCases) {
+  const result = runSourceValidator(testCase.url);
+  assert.equal(result.status, 0, `${testCase.name} must pass: ${result.stderr}`);
+  assert.equal(result.stdout.trim(), 'Source database URL validation: PASS');
+  assert.ok(!`${result.stdout}${result.stderr}`.includes('offline-test-password'), `${testCase.name} leaked credentials`);
+}
+
+for (const [name, url] of negativeValidatorCases) {
+  const result = runSourceValidator(url);
+  assert.notEqual(result.status, 0, `${name} must fail closed`);
+  assert.ok(!`${result.stdout}${result.stderr}`.includes('offline-test-password'), `${name} leaked credentials`);
+  assert.ok(!`${result.stdout}${result.stderr}`.includes(url), `${name} leaked the connection string`);
+}
 
 mustContain(workflow, 'workflow_dispatch:', 'Backup workflow must be explicitly dispatched');
 for (const forbiddenTrigger of ['\n  push:', '\n  pull_request:', '\n  schedule:', '\n  repository_dispatch:']) {
@@ -39,6 +120,8 @@ mustContain(workflow, 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43
 assert.ok(!/AGE_(SECRET|PRIVATE|IDENTITY)|PRIVATE_KEY/i.test(workflow), 'Private age key material must never be referenced by the workflow');
 assert.ok(!workflow.includes('--identity'), 'Age private identities must never be used in GitHub Actions');
 assert.ok(!runner.includes('set -x'), 'Shell tracing could disclose protected values');
+mustContain(runner, '--validate-source-url-only', 'Source URL validation must be independently executable without a database connection');
+mustContain(runner, 'validate_source_database_url python3', 'The backup path must invoke the tested source URL validator');
 mustContain(runner, 'pg_dumpall', 'Role definitions must be captured');
 mustContain(runner, '--roles-only', 'Only global role definitions are captured by pg_dumpall');
 mustContain(runner, '--no-role-passwords', 'Role password hashes must not be included');
@@ -72,5 +155,8 @@ mustContain(runbook, 'Supabase Storage object bytes', 'Storage object exclusion 
 mustContain(runbook, 'not a verified complete Supabase platform backup', 'Completeness boundary must be documented');
 mustContain(runbook, 'REMOTE_BACKUP_EXECUTED=NO', 'Current no-execution state must be explicit');
 
+console.log(`Source database URL validator positive cases: ${positiveValidatorCases.length}/${positiveValidatorCases.length} PASS`);
+console.log(`Source database URL validator negative cases: ${negativeValidatorCases.length}/${negativeValidatorCases.length} PASS`);
+console.log('Source database URL validator: PASS');
 console.log('Zero-cost backup workflow static qualification: PASS');
 console.log('Remote database connections attempted: 0');
