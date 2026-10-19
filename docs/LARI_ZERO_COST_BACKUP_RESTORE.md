@@ -59,7 +59,7 @@ The runner installs PostgreSQL 17 client binaries and uses:
 
 Exact source role and extension inventories, unavailable PostgreSQL 17 extensions, and sanitized restore diagnostics are placed inside the encrypted bundle. A managed role, missing extension, ownership failure, restore error, or catalog mismatch produces `NOT_RESTORABLE_IN_DISPOSABLE_POSTGRES_17`; it is never reported as a verified restore.
 
-Only after the restore attempt does the workflow create an age-encrypted bundle. It deletes the temporary plaintext bundle and allows exactly two uploaded files: the `.age` ciphertext and `manifest.json`. The manifest records the encrypted artifact SHA256, source project identifier, UTC creation time, source revision, PostgreSQL versions, and restore-test verdict. The workflow recomputes and verifies the ciphertext hash before upload.
+Only after the restore attempt does the workflow create an age-encrypted bundle. It deletes the temporary plaintext bundle and allows exactly two uploaded files: the `.age` ciphertext and `manifest.json`. The manifest records the encrypted artifact SHA256, source project identifier, UTC creation time, source revision, PostgreSQL versions, and restore-test verdict. The workflow recomputes and verifies the ciphertext hash before upload. A non-passing restore verdict deletes the upload candidates and fails the backup step; both the runner and the workflow upload condition require `VERIFIED_LOGICAL_RESTORE`.
 
 GitHub retains the encrypted artifact for seven days. The owner must download it before expiry, verify its SHA256 against the manifest, and retain both in operator-controlled storage. GitHub artifact retention is not an archival strategy.
 

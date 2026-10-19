@@ -10,6 +10,7 @@ SOURCE_DATABASE_NAME="postgres"
 SOURCE_DATABASE_SSLMODE="require"
 VALIDATE_SOURCE_URL_ONLY="--validate-source-url-only"
 TEST_SOURCE_CREDENTIALS_ONLY="--test-source-credential-handling"
+TEST_RESTORE_VERDICT_ONLY="--test-restore-verdict-handling"
 
 SOURCE_DATABASE_PASSWORD_VALUE="${SOURCE_DATABASE_PASSWORD:-}"
 unset SOURCE_DATABASE_PASSWORD
@@ -48,6 +49,16 @@ require_source_database_password() {
   if [[ -z "$SOURCE_DATABASE_PASSWORD_VALUE" ]]; then
     printf 'Required protected input is unavailable: SOURCE_DATABASE_PASSWORD\n' >&2
     exit 1
+  fi
+}
+
+enforce_verified_restore() {
+  if [[ "${VERDICT:-}" != "VERIFIED_LOGICAL_RESTORE" ]]; then
+    if [[ -n "${ARTIFACT_DIR:-}" && -d "$ARTIFACT_DIR" ]]; then
+      rm -rf -- "$ARTIFACT_DIR"
+    fi
+    printf 'Logical restore verification failed; no backup artifact is eligible for upload.\n' >&2
+    return 1
   fi
 }
 
@@ -329,6 +340,24 @@ if [[ "${1:-}" == "$TEST_SOURCE_CREDENTIALS_ONLY" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "$TEST_RESTORE_VERDICT_ONLY" ]]; then
+  [[ "$#" -eq 1 ]] || {
+    printf 'Offline restore-verdict test mode accepts no additional arguments.\n' >&2
+    exit 1
+  }
+  [[ "${LARI_OFFLINE_TEST_MODE:-}" == "1" ]] || {
+    printf 'Offline restore-verdict test guard is not enabled.\n' >&2
+    exit 1
+  }
+  require_value GITHUB_WORKSPACE
+  require_value LARI_TEST_RESTORE_VERDICT
+  ARTIFACT_DIR="${GITHUB_WORKSPACE}/backup-artifacts"
+  VERDICT="$LARI_TEST_RESTORE_VERDICT"
+  enforce_verified_restore
+  printf 'Verified restore publication gate: PASS\n'
+  exit 0
+fi
+
 [[ "$#" -eq 0 ]] || {
   printf 'Unexpected command argument.\n' >&2
   exit 1
@@ -601,6 +630,8 @@ mapfile -t ARTIFACT_FILES < <(find "$ARTIFACT_DIR" -maxdepth 1 -type f -printf '
 [[ "${#ARTIFACT_FILES[@]}" -eq 2 ]]
 [[ "${ARTIFACT_FILES[0]}" == "$ENCRYPTED_NAME" || "${ARTIFACT_FILES[1]}" == "$ENCRYPTED_NAME" ]]
 [[ "${ARTIFACT_FILES[0]}" == "manifest.json" || "${ARTIFACT_FILES[1]}" == "manifest.json" ]]
+
+enforce_verified_restore
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   printf 'restore_verdict=%s\n' "$VERDICT" >>"$GITHUB_OUTPUT"

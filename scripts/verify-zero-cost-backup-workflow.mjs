@@ -213,6 +213,33 @@ assertNoOutputLeak(
   'signal credential cleanup',
 );
 
+const runRestoreVerdictHandling = (verdict) => {
+  const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), `lari-restore-verdict-${process.pid}-`));
+  const artifactDirectory = path.join(testRoot, 'backup-artifacts');
+  fs.mkdirSync(artifactDirectory, { mode: 0o700 });
+  fs.writeFileSync(path.join(artifactDirectory, 'synthetic.age'), 'offline-only');
+  const result = spawnSync(bashExecutable, [runnerPath, '--test-restore-verdict-handling'], {
+    cwd: process.cwd(),
+    env: sanitizedEnvironment({
+      GITHUB_WORKSPACE: toBashPath(testRoot),
+      LARI_OFFLINE_TEST_MODE: '1',
+      LARI_TEST_RESTORE_VERDICT: verdict,
+    }),
+    encoding: 'utf8',
+  });
+  const artifactDirectoryExists = fs.existsSync(artifactDirectory);
+  fs.rmSync(testRoot, { recursive: true, force: true });
+  return { result, artifactDirectoryExists };
+};
+
+const failedRestoreVerdictTest = runRestoreVerdictHandling('NOT_RESTORABLE_IN_DISPOSABLE_POSTGRES_17');
+assert.notEqual(failedRestoreVerdictTest.result.status, 0, 'A failed restore verdict must fail the backup step');
+assert.ok(!failedRestoreVerdictTest.artifactDirectoryExists, 'A failed restore verdict must remove upload candidates');
+
+const verifiedRestoreVerdictTest = runRestoreVerdictHandling('VERIFIED_LOGICAL_RESTORE');
+assert.equal(verifiedRestoreVerdictTest.result.status, 0, verifiedRestoreVerdictTest.result.stderr);
+assert.ok(verifiedRestoreVerdictTest.artifactDirectoryExists, 'A verified restore verdict may retain upload candidates');
+
 mustContain(workflow, 'workflow_dispatch:', 'Backup workflow must be explicitly dispatched');
 for (const forbiddenTrigger of ['\n  push:', '\n  pull_request:', '\n  schedule:', '\n  repository_dispatch:']) {
   assert.ok(!workflow.includes(forbiddenTrigger), `Forbidden automatic trigger: ${forbiddenTrigger.trim()}`);
@@ -230,6 +257,7 @@ mustContain(workflow, 'postgresql-client-17', 'PostgreSQL 17 client must be inst
 mustContain(workflow, 'timeout-minutes: 30', 'Execution must be bounded');
 mustContain(workflow, 'path: backup-artifacts', 'Only the guarded artifact directory may be uploaded');
 mustContain(workflow, "steps.backup.outcome == 'success'", 'Partial preparation must never upload an artifact');
+mustContain(workflow, "steps.backup.outputs.restore_verdict == 'VERIFIED_LOGICAL_RESTORE'", 'Only a verified restore verdict may upload');
 mustContain(workflow, 'compression-level: 0', 'GitHub must not repackage plaintext input');
 mustContain(workflow, 'actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683', 'Checkout action must be commit-pinned');
 mustContain(workflow, 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02', 'Artifact upload action must be commit-pinned');
@@ -258,6 +286,8 @@ assert.match(runner, /age \\\n  --recipient/, 'Encryption must use the public re
 mustContain(runner, 'complete_database_backup: false', 'Logical scope must not be mislabeled as a complete platform backup');
 mustContain(runner, 'Supabase Storage object bytes are not included', 'Storage byte exclusion must be explicit');
 mustContain(runner, 'mapfile -t ARTIFACT_FILES', 'Artifact allowlist must be enforced');
+mustContain(runner, 'enforce_verified_restore', 'A failed restore verdict must terminate before upload');
+mustContain(runner, 'rm -rf -- "$ARTIFACT_DIR"', 'Failed restore artifacts must be removed before upload');
 
 const dumpIndex = runner.search(/pg_dump \\\n  --format=custom/);
 const restoreIndex = runner.search(/pg_restore \\\n    --exit-on-error/);
@@ -295,5 +325,6 @@ console.log('Password exposure tests: PASS');
 console.log('PGPASSFILE permission and escaping tests: PASS');
 console.log('PGPASSFILE normal, failure, and signal cleanup tests: PASS');
 console.log('PGPASSFILE artifact exclusion test: PASS');
+console.log('Failed restore publication suppression test: PASS');
 console.log('Zero-cost backup workflow static qualification: PASS');
 console.log('Remote database connections attempted: 0');

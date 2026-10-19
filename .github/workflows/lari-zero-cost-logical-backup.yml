@@ -75,7 +75,7 @@ jobs:
         run: bash scripts/run-zero-cost-logical-backup.sh
 
       - name: Upload encrypted backup and verified manifest only
-        if: ${{ always() && steps.backup.outcome == 'success' }}
+        if: ${{ always() && steps.backup.outcome == 'success' && steps.backup.outputs.restore_verdict == 'VERIFIED_LOGICAL_RESTORE' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: lari-staging-encrypted-logical-backup-${{ github.run_id }}-${{ github.run_attempt }}
