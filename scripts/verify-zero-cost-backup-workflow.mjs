@@ -738,7 +738,8 @@ assert.notEqual(missingFileResult.status, 0, 'Missing roles file must fail close
 const findPsql = () => {
   const localCandidates = [
     process.env.LARI_TEST_PSQL,
-    'C:\\Users\\mozcelikbas\\AppData\\Local\\Temp\\ephemeral-pg17\\inst\\pgsql\\bin\\psql.exe',
+    process.env.LARI_PG17_BIN_DIR ? path.join(process.env.LARI_PG17_BIN_DIR, process.platform === 'win32' ? 'psql.exe' : 'psql') : null,
+    process.platform === 'win32' ? null : '/usr/lib/postgresql/17/bin/psql',
   ];
   return localCandidates.find((c) => c && fs.existsSync(c)) || 'psql';
 };
@@ -747,24 +748,28 @@ const testPgPort = process.env.LARI_TEST_PG_PORT || '54333';
 const psqlCandidate = findPsql();
 const versionCheck = spawnSync(psqlCandidate, ['-X', '-qAt', '-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', 'SHOW server_version_num;'], {
   encoding: 'utf8',
+  env: { ...process.env, PGCONNECT_TIMEOUT: '2' },
 });
 
 if (versionCheck.status === 0 && versionCheck.stdout.trim().startsWith('17')) {
   // 8.1: Reproduce run 39397783444 grantor failure on actual PG 17.6 server
-  spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', 'DROP ROLE IF EXISTS t_anon, t_auth, t_grantor, t_admin; CREATE ROLE t_admin SUPERUSER LOGIN; CREATE ROLE t_grantor; CREATE ROLE t_anon; CREATE ROLE t_auth;'], { encoding: 'utf8' });
+  const setupGrantorRes = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', 'DROP ROLE IF EXISTS t_anon, t_auth, t_grantor, t_admin; CREATE ROLE t_admin SUPERUSER LOGIN; CREATE ROLE t_grantor; CREATE ROLE t_anon; CREATE ROLE t_auth;'], { encoding: 'utf8' });
+  assert.equal(setupGrantorRes.status, 0, `Grantor setup must succeed: ${setupGrantorRes.stderr}`);
   const liveFail = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 't_admin', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', 'GRANT t_anon TO t_auth GRANTED BY t_grantor;'], { encoding: 'utf8' });
   assert.notEqual(liveFail.status, 0, 'Actual PG 17.6 must reject grant where grantor lacks ADMIN option');
   mustContain(liveFail.stderr, 'The grantor must have the ADMIN option on role');
 
   // 8.2: Reproduce circular role membership rejection on actual PG 17.6 server
-  spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', 'DROP ROLE IF EXISTS t_rx, t_ry; CREATE ROLE t_rx; CREATE ROLE t_ry; GRANT t_rx TO t_ry WITH ADMIN OPTION;'], { encoding: 'utf8' });
+  const setupCycleRes = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', 'DROP ROLE IF EXISTS t_rx, t_ry; CREATE ROLE t_rx; CREATE ROLE t_ry; GRANT t_rx TO t_ry WITH ADMIN OPTION;'], { encoding: 'utf8' });
+  assert.equal(setupCycleRes.status, 0, `Cycle setup must succeed: ${setupCycleRes.stderr}`);
   const liveCycle = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', 'GRANT t_ry TO t_rx WITH ADMIN OPTION;'], { encoding: 'utf8' });
   assert.notEqual(liveCycle.status, 0, 'Actual PG 17.6 must reject circular role membership');
   mustContain(liveCycle.stderr, 'is a member of role');
 
   // 8.3: Clean and replay prepared restore-roles.sql on actual PG 17.6 server
   const cleanupSql = 'DROP ROLE IF EXISTS authenticator, anon, authenticated, dashboard_user, postgres, service_role, t_anon, t_auth, t_grantor, t_admin, t_rx, t_ry, test_target, test_user, non_bootstrap_admin, other_super, alice, bob;';
-  spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', cleanupSql], { encoding: 'utf8' });
+  const cleanupRes = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', cleanupSql], { encoding: 'utf8' });
+  assert.equal(cleanupRes.status, 0, `Cleanup before replay must succeed: ${cleanupRes.stderr}`);
   const liveReplay = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-f', preparedRestoreRolesFile], { encoding: 'utf8' });
   assert.equal(liveReplay.status, 0, `Actual PG 17.6 restore replay must succeed: ${liveReplay.stderr}`);
 
@@ -787,8 +792,12 @@ if (versionCheck.status === 0 && versionCheck.stdout.trim().startsWith('17')) {
   assert.equal(liveFp.status, 0, `Catalog fingerprint query on PG 17.6 must succeed: ${liveFp.stderr}`);
   const [liveCount, liveHash] = liveFp.stdout.trim().split('|');
   assert.equal(liveCount, `${expectedSourceFingerprintResult.object_count}`, 'Actual PG 17.6 role memberships count must match');
-  assert.equal(liveHash, expectedSourceFingerprintResult.fingerprint, 'Actual PG 17.6 catalog fingerprint must match live Supabase with 0 exclusions');
-  console.log('Actual PostgreSQL 17.6 server role restore verification: PASS');
+  assert.equal(liveHash, expectedSourceFingerprintResult.fingerprint, 'Actual PG 17.6 catalog fingerprint must match synthetic fixture equivalence (4/4 roles, 0 exclusions)');
+  console.log('Actual PostgreSQL 17.6 server role restore verification (synthetic fixture equivalence): PASS');
+
+  // 8.5: Teardown on actual PG 17.6 server
+  const teardownRes = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', cleanupSql], { encoding: 'utf8' });
+  assert.equal(teardownRes.status, 0, `Teardown after test must succeed: ${teardownRes.stderr}`);
 }
 
 fs.rmSync(roleRestoreTestRoot, { recursive: true, force: true });
@@ -902,8 +911,14 @@ mustContain(runbook, 'official Supabase CA certificate', 'Runbook must document 
 mustContain(runbook, 'Disposable PostgreSQL 17 role restoration and grantor delegation', 'Runbook must document role grantor delegation');
 mustContain(runbook, 'The grantor must have the ADMIN option on role', 'Runbook must document grantor error detail');
 mustContain(runbook, 'restore-roles.sql', 'Runbook must document restore-roles.sql preparation');
+mustContain(runbook, 'qa:disposable-pg17-role-restore', 'Runbook must document dedicated qualification command');
+mustContain(runbook, 'synthetic fixture equivalence', 'Runbook must document synthetic fixture equivalence');
 assert.ok(!runbook.includes('sslmode=require'), 'Runbook must not document sslmode=require');
 mustContain(runbook, 'REMOTE_BACKUP_EXECUTED=NO', 'Current no-execution state must be explicit');
+
+const packageJson = fs.readFileSync('package.json', 'utf8');
+mustContain(packageJson, '"qa:disposable-pg17-role-restore"', 'package.json must configure dedicated qualification script');
+assert.ok(fs.existsSync('scripts/verify-disposable-pg17-role-restore.mjs'), 'Dedicated qualification script must exist');
 
 const supabaseCaPath = 'scripts/backup/supabase-prod-ca-2021.crt';
 assert.ok(fs.existsSync(supabaseCaPath), 'Authentic Supabase Root CA certificate file must exist');
