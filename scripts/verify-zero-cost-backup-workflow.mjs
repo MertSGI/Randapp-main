@@ -353,7 +353,7 @@ fs.rmSync(pgSelectionTestRoot, { recursive: true, force: true });
 // =========================================================================
 
 class Pg17Engine {
-  constructor(bootstrapSuperuser = 'lari_restore_admin') {
+  constructor(bootstrapSuperuser = 'supabase_admin') {
     this.currentUser = bootstrapSuperuser;
     this.roles = new Map();
     this.authMembers = [];
@@ -371,12 +371,35 @@ class Pg17Engine {
     });
   }
 
+  isAncestor(startRole, targetRole) {
+    const visited = new Set();
+    const queue = [startRole];
+    while (queue.length > 0) {
+      const curr = queue.shift();
+      if (curr === targetRole) return true;
+      if (!visited.has(curr)) {
+        visited.add(curr);
+        for (const m of this.authMembers) {
+          if (m.member === curr && !visited.has(m.role)) {
+            queue.push(m.role);
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   isAdminOfRole(grantor, targetRole) {
     if (!this.roles.has(grantor) || !this.roles.has(targetRole)) {
       return false;
     }
-    if (grantor === targetRole) {
+    // In PostgreSQL 17, only the cluster bootstrap superuser (OID 10) has inherent admin option on itself
+    if (grantor === this.currentUser) {
       return true;
+    }
+    // Non-bootstrap roles do NOT have admin on themselves and cannot self-grant
+    if (grantor === targetRole) {
+      return false;
     }
     return this.authMembers.some(
       (m) => m.role === targetRole && m.member === grantor && m.admin_option === true
@@ -390,6 +413,33 @@ class Pg17Engine {
       const line = lines[i].trim();
       i++;
       if (!line || line.startsWith('--') || line.startsWith('SET ')) {
+        continue;
+      }
+
+      if (line.startsWith('DO $lari_role_init$')) {
+        let blockContent = '';
+        while (i < lines.length && !lines[i].includes('END $lari_role_init$;')) {
+          blockContent += lines[i] + '\n';
+          i++;
+        }
+        i++;
+        const m = blockContent.match(/CREATE\s+ROLE\s+"?([A-Za-z0-9_]+)"?/i);
+        if (m) {
+          const roleName = m[1];
+          if (!this.roles.has(roleName)) {
+            this.roles.set(roleName, {
+              rolname: roleName,
+              rolsuper: false,
+              rolinherit: true,
+              rolcreaterole: false,
+              rolcreatedb: false,
+              rolcanlogin: false,
+              rolreplication: false,
+              rolbypassrls: false,
+              rolconfig: null,
+            });
+          }
+        }
         continue;
       }
 
@@ -421,13 +471,6 @@ class Pg17Engine {
           rolbypassrls: false,
           rolconfig: null,
         });
-        // In PostgreSQL 16+, creator is implicitly given ADMIN OPTION on created role
-        this.authMembers.push({
-          role: roleName,
-          member: this.currentUser,
-          grantor: this.currentUser,
-          admin_option: true,
-        });
         continue;
       }
 
@@ -456,7 +499,11 @@ class Pg17Engine {
         if (!this.roles.has(targetRole)) throw new Error(`ERROR: role "${targetRole}" does not exist`);
         if (!this.roles.has(memberRole)) throw new Error(`ERROR: role "${memberRole}" does not exist`);
         if (!this.roles.has(grantor)) throw new Error(`ERROR: role "${grantor}" does not exist`);
-        if (targetRole === memberRole) throw new Error(`ERROR: role "${targetRole}" is a member of role "${memberRole}"`);
+
+        // Membership cycle check in PG17:
+        if (targetRole === memberRole || this.isAncestor(targetRole, memberRole)) {
+          throw new Error(`ERROR: role "${targetRole}" is a member of role "${memberRole}"`);
+        }
 
         // PostgreSQL 16/17 check_role_grantor validation:
         if (!this.isAdminOfRole(grantor, targetRole)) {
@@ -484,31 +531,27 @@ class Pg17Engine {
   }
 
   executeBootstrapBlock(blockContent) {
-    const match = blockContent.match(/grantor_names\s+text\[\]\s*:=\s*ARRAY\[(.*?)\];/i);
-    if (!match) return;
-    const grantorNames = match[1]
-      .split(',')
-      .map((s) => s.trim().replace(/^'|'$/g, ''))
-      .filter(Boolean);
-
-    for (const grantor of grantorNames) {
-      if (this.roles.has(grantor)) {
-        for (const [rolname] of this.roles) {
-          if (!rolname.startsWith('pg_') && rolname !== this.currentUser && rolname !== grantor) {
-            const existing = this.authMembers.find(
-              (m) => m.role === rolname && m.member === grantor && m.grantor === this.currentUser
-            );
-            if (existing) {
-              existing.admin_option = true;
-            } else {
-              this.authMembers.push({
-                role: rolname,
-                member: grantor,
-                grantor: this.currentUser,
-                admin_option: true,
-              });
-            }
-          }
+    const grantRegex = /GRANT\s+([A-Za-z0-9_]+)\s+TO\s+([A-Za-z0-9_]+)\s+WITH\s+ADMIN\s+OPTION\s+GRANTED\s+BY\s+current_user/gi;
+    let match;
+    while ((match = grantRegex.exec(blockContent)) !== null) {
+      const targetRole = match[1];
+      const memberRole = match[2];
+      if (this.roles.has(targetRole) && this.roles.has(memberRole)) {
+        if (this.isAncestor(targetRole, memberRole)) {
+          throw new Error(`ERROR: role "${targetRole}" is a member of role "${memberRole}"`);
+        }
+        const existing = this.authMembers.find(
+          (m) => m.role === targetRole && m.member === memberRole && m.grantor === this.currentUser
+        );
+        if (existing) {
+          existing.admin_option = true;
+        } else {
+          this.authMembers.push({
+            role: targetRole,
+            member: memberRole,
+            grantor: this.currentUser,
+            admin_option: true,
+          });
         }
       }
     }
@@ -516,13 +559,7 @@ class Pg17Engine {
 
   computeRoleMembershipsFingerprint() {
     const filtered = this.authMembers.filter((m) => {
-      return (
-        !m.role.startsWith('pg_') &&
-        !m.member.startsWith('pg_') &&
-        m.role !== 'lari_restore_admin' &&
-        m.member !== 'lari_restore_admin' &&
-        m.grantor !== 'lari_restore_admin'
-      );
+      return !m.role.startsWith('pg_') && !m.member.startsWith('pg_');
     });
 
     filtered.sort((a, b) => {
@@ -533,7 +570,7 @@ class Pg17Engine {
       return a.grantor.localeCompare(b.grantor);
     });
 
-    const lines = filtered.map((m) => `"${m.role}"|"${m.member}"|"${m.grantor}"|${m.admin_option}`);
+    const lines = filtered.map((m) => `${m.role}|${m.member}|${m.grantor}|${m.admin_option ? 't' : 'f'}`);
     const aggregated = lines.join('\n');
     const hash = createHash('md5').update(aggregated).digest('hex');
 
@@ -568,10 +605,10 @@ const fixtureRolesSql = [
 ].join('\n');
 
 const expectedSourceMemberships = [
-  '"anon"|"authenticator"|"supabase_admin"|false',
-  '"authenticated"|"authenticator"|"supabase_admin"|false',
-  '"service_role"|"authenticator"|"supabase_admin"|false',
-  '"supabase_admin"|"postgres"|"supabase_admin"|true',
+  'anon|authenticator|supabase_admin|f',
+  'authenticated|authenticator|supabase_admin|f',
+  'service_role|authenticator|supabase_admin|f',
+  'supabase_admin|postgres|supabase_admin|t',
 ];
 expectedSourceMemberships.sort();
 const expectedAggregatedSource = expectedSourceMemberships.join('\n');
@@ -581,19 +618,35 @@ const expectedSourceFingerprintResult = {
   rows: expectedSourceMemberships,
 };
 
-// Test 1: Reproduce actual failed run 39397783444 (un-delegated replay fails closed)
-const brokenEngine = new Pg17Engine('lari_restore_admin');
+// Test 1: Reproduce actual failed run 39397783444 (un-delegated replay as non-bootstrap user fails closed)
+const brokenEngine = new Pg17Engine('non_bootstrap_admin');
 let reproductionError = null;
 try {
   brokenEngine.execute(fixtureRolesSql);
 } catch (err) {
   reproductionError = err.message;
 }
-assert.ok(reproductionError, 'Un-delegated restore must fail');
+assert.ok(reproductionError, 'Un-delegated restore must fail when grantor lacks ADMIN option');
 mustContain(reproductionError, 'permission denied to grant privileges as role "supabase_admin"');
 mustContain(reproductionError, 'The grantor must have the ADMIN option on role "anon"');
 
-// Test 2: Execute runner CLI --test-disposable-role-restore to generate restore-roles.sql
+// Test 2: Reproduce controller-flagged reciprocal cycle defect
+const cyclicEngine = new Pg17Engine('supabase_admin');
+let cycleError = null;
+try {
+  cyclicEngine.execute([
+    'CREATE ROLE test_role_x;',
+    'CREATE ROLE test_role_y;',
+    'GRANT test_role_x TO test_role_y WITH ADMIN OPTION;',
+    'GRANT test_role_y TO test_role_x WITH ADMIN OPTION;',
+  ].join('\n'));
+} catch (err) {
+  cycleError = err.message;
+}
+assert.ok(cycleError, 'Reciprocal circular role memberships must be rejected');
+mustContain(cycleError, 'is a member of role');
+
+// Test 3: Execute runner CLI --test-disposable-role-restore to generate restore-roles.sql
 const roleRestoreTestRoot = fs.mkdtempSync(path.join(os.tmpdir(), `lari-role-restore-${process.pid}-`));
 const fixtureRolesFile = path.join(roleRestoreTestRoot, 'roles.sql');
 const preparedRestoreRolesFile = path.join(roleRestoreTestRoot, 'restore-roles.sql');
@@ -623,24 +676,45 @@ mustContain(preparedRestoreRolesContent, 'GRANT "authenticated" TO "authenticato
 mustContain(preparedRestoreRolesContent, 'GRANT "service_role" TO "authenticator" GRANTED BY "supabase_admin";');
 mustContain(preparedRestoreRolesContent, 'GRANT "supabase_admin" TO "postgres" WITH ADMIN OPTION GRANTED BY "supabase_admin";');
 
-// Test 3: Positive replay of prepared restore-roles.sql in PG17 engine
-const successEngine = new Pg17Engine('lari_restore_admin');
+// Test 4: Positive replay of prepared restore-roles.sql in PG17 engine (aligned bootstrap superuser)
+const successEngine = new Pg17Engine('supabase_admin');
 successEngine.execute(preparedRestoreRolesContent);
 const restoreFingerprintResult = successEngine.computeRoleMembershipsFingerprint();
 assert.equal(restoreFingerprintResult.object_count, expectedSourceFingerprintResult.object_count);
 assert.equal(restoreFingerprintResult.fingerprint, expectedSourceFingerprintResult.fingerprint);
 assert.deepEqual(restoreFingerprintResult.rows, expectedSourceFingerprintResult.rows);
 
-// Test 4: Negative test - Forbidden naive fix (stripping GRANTED BY)
-const strippedRolesSql = fixtureRolesSql.replace(/\s+GRANTED\s+BY\s+"[^"]+"/gi, '');
-const strippedEngine = new Pg17Engine('lari_restore_admin');
-strippedEngine.execute(strippedRolesSql);
-const strippedFingerprintResult = strippedEngine.computeRoleMembershipsFingerprint();
-assert.equal(strippedFingerprintResult.object_count, 0, 'Stripping GRANTED BY filters out all grants');
-assert.notEqual(strippedFingerprintResult.fingerprint, expectedSourceFingerprintResult.fingerprint);
+// Test 5a: Negative test - Raw roles dump fails without idempotent preparation
+const rawReplayEngine = new Pg17Engine('supabase_admin');
+let rawReplayError = null;
+try {
+  rawReplayEngine.execute(fixtureRolesSql);
+} catch (err) {
+  rawReplayError = err.message;
+}
+assert.ok(rawReplayError, 'Raw roles.sql without preparation must fail because bootstrap superuser already exists');
+mustContain(rawReplayError, 'role "supabase_admin" already exists');
 
-// Test 5: Negative test - Omitted grant causes fingerprint mismatch
-const omittedGrantEngine = new Pg17Engine('lari_restore_admin');
+// Test 5b: Negative test - Stripping GRANTED BY alters grantor attribution in catalog
+const customRolesDump = [
+  'CREATE ROLE "anon";',
+  'CREATE ROLE "custom_grantor";',
+  'CREATE ROLE "custom_member";',
+  'GRANT "anon" TO "custom_grantor" WITH ADMIN OPTION;',
+  'GRANT "anon" TO "custom_member" GRANTED BY "custom_grantor";',
+].join('\n');
+const customEngine = new Pg17Engine('supabase_admin');
+customEngine.execute(customRolesDump);
+const customFpOriginal = customEngine.computeRoleMembershipsFingerprint();
+
+const strippedCustomDump = customRolesDump.replace(/\s+GRANTED\s+BY\s+"custom_grantor"/gi, '');
+const strippedCustomEngine = new Pg17Engine('supabase_admin');
+strippedCustomEngine.execute(strippedCustomDump);
+const strippedCustomFp = strippedCustomEngine.computeRoleMembershipsFingerprint();
+assert.notEqual(strippedCustomFp.fingerprint, customFpOriginal.fingerprint, 'Stripping GRANTED BY alters grantor attribution and fails catalog fingerprint equivalence');
+
+// Test 6: Negative test - Omitted grant causes fingerprint mismatch
+const omittedGrantEngine = new Pg17Engine('supabase_admin');
 const omittedGrantSql = preparedRestoreRolesContent.replace(/GRANT\s+"service_role"\s+TO\s+"authenticator"\s+GRANTED\s+BY\s+"supabase_admin";\r?\n?/i, '');
 assert.notEqual(omittedGrantSql, preparedRestoreRolesContent, 'Regex must successfully omit the target grant statement');
 omittedGrantEngine.execute(omittedGrantSql);
@@ -648,7 +722,7 @@ const omittedFingerprintResult = omittedGrantEngine.computeRoleMembershipsFinger
 assert.notEqual(omittedFingerprintResult.fingerprint, expectedSourceFingerprintResult.fingerprint);
 assert.equal(omittedFingerprintResult.object_count, expectedSourceFingerprintResult.object_count - 1);
 
-// Test 6: Negative test - Missing input file for runner CLI fails closed
+// Test 7: Negative test - Missing input file for runner CLI fails closed
 const missingFileResult = spawnSync(
   bashExecutable,
   [runnerPath, '--test-disposable-role-restore', '/nonexistent/roles.sql', toBashPath(preparedRestoreRolesFile)],
@@ -659,6 +733,63 @@ const missingFileResult = spawnSync(
   }
 );
 assert.notEqual(missingFileResult.status, 0, 'Missing roles file must fail closed');
+
+// Test 8: Actual PostgreSQL 17.6 Server Verification (if ephemeral PG17 instance is available)
+const findPsql = () => {
+  const localCandidates = [
+    process.env.LARI_TEST_PSQL,
+    'C:\\Users\\mozcelikbas\\AppData\\Local\\Temp\\ephemeral-pg17\\inst\\pgsql\\bin\\psql.exe',
+  ];
+  return localCandidates.find((c) => c && fs.existsSync(c)) || 'psql';
+};
+
+const testPgPort = process.env.LARI_TEST_PG_PORT || '54333';
+const psqlCandidate = findPsql();
+const versionCheck = spawnSync(psqlCandidate, ['-X', '-qAt', '-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', 'SHOW server_version_num;'], {
+  encoding: 'utf8',
+});
+
+if (versionCheck.status === 0 && versionCheck.stdout.trim().startsWith('17')) {
+  // 8.1: Reproduce run 39397783444 grantor failure on actual PG 17.6 server
+  spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', 'DROP ROLE IF EXISTS t_anon, t_auth, t_grantor, t_admin; CREATE ROLE t_admin SUPERUSER LOGIN; CREATE ROLE t_grantor; CREATE ROLE t_anon; CREATE ROLE t_auth;'], { encoding: 'utf8' });
+  const liveFail = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 't_admin', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', 'GRANT t_anon TO t_auth GRANTED BY t_grantor;'], { encoding: 'utf8' });
+  assert.notEqual(liveFail.status, 0, 'Actual PG 17.6 must reject grant where grantor lacks ADMIN option');
+  mustContain(liveFail.stderr, 'The grantor must have the ADMIN option on role');
+
+  // 8.2: Reproduce circular role membership rejection on actual PG 17.6 server
+  spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', 'DROP ROLE IF EXISTS t_rx, t_ry; CREATE ROLE t_rx; CREATE ROLE t_ry; GRANT t_rx TO t_ry WITH ADMIN OPTION;'], { encoding: 'utf8' });
+  const liveCycle = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', 'GRANT t_ry TO t_rx WITH ADMIN OPTION;'], { encoding: 'utf8' });
+  assert.notEqual(liveCycle.status, 0, 'Actual PG 17.6 must reject circular role membership');
+  mustContain(liveCycle.stderr, 'is a member of role');
+
+  // 8.3: Clean and replay prepared restore-roles.sql on actual PG 17.6 server
+  const cleanupSql = 'DROP ROLE IF EXISTS authenticator, anon, authenticated, dashboard_user, postgres, service_role, t_anon, t_auth, t_grantor, t_admin, t_rx, t_ry, test_target, test_user, non_bootstrap_admin, other_super, alice, bob;';
+  spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', cleanupSql], { encoding: 'utf8' });
+  const liveReplay = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-f', preparedRestoreRolesFile], { encoding: 'utf8' });
+  assert.equal(liveReplay.status, 0, `Actual PG 17.6 restore replay must succeed: ${liveReplay.stderr}`);
+
+  // 8.4: Verify exact catalog fingerprint on actual PG 17.6 server (zero user exclusions)
+  const fpQuery = `
+    SELECT
+      count(*) AS object_count,
+      md5(coalesce(string_agg(
+        format('%I|%I|%I|%s', role.rolname, member.rolname, grantor.rolname, m.admin_option),
+        E'\\n' ORDER BY role.rolname, member.rolname, grantor.rolname
+      ), '')) AS fingerprint
+    FROM pg_auth_members AS m
+    JOIN pg_roles AS role ON role.oid = m.roleid
+    JOIN pg_roles AS member ON member.oid = m.member
+    JOIN pg_roles AS grantor ON grantor.oid = m.grantor
+    WHERE role.rolname !~ '^pg_'
+      AND member.rolname !~ '^pg_';
+  `;
+  const liveFp = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-X', '-qAt', '-c', fpQuery], { encoding: 'utf8' });
+  assert.equal(liveFp.status, 0, `Catalog fingerprint query on PG 17.6 must succeed: ${liveFp.stderr}`);
+  const [liveCount, liveHash] = liveFp.stdout.trim().split('|');
+  assert.equal(liveCount, `${expectedSourceFingerprintResult.object_count}`, 'Actual PG 17.6 role memberships count must match');
+  assert.equal(liveHash, expectedSourceFingerprintResult.fingerprint, 'Actual PG 17.6 catalog fingerprint must match live Supabase with 0 exclusions');
+  console.log('Actual PostgreSQL 17.6 server role restore verification: PASS');
+}
 
 fs.rmSync(roleRestoreTestRoot, { recursive: true, force: true });
 
@@ -675,7 +806,8 @@ mustContain(workflow, '${{ vars.LARI_STAGING_POOLER_HOST }}', 'Session Pooler ho
 mustContain(workflow, '${{ secrets.LARI_BACKUP_AGE_RECIPIENT }}', 'Age recipient must come from operator configuration');
 assert.ok(!workflow.includes('LARI_STAGING_DATABASE_URL'), 'The missing database URL secret must no longer be referenced');
 mustContain(workflow, 'postgres:17.6-alpine', 'Restore service must be PostgreSQL 17.6');
-mustContain(workflow, 'POSTGRES_USER: lari_restore_admin', 'Disposable bootstrap role must not collide with source postgres');
+mustContain(workflow, 'POSTGRES_USER: supabase_admin', 'Disposable bootstrap role must match the source cluster bootstrap superuser');
+mustContain(runner, 'RESTORE_DATABASE_USER="supabase_admin"', 'Disposable restore user must match supabase_admin');
 mustContain(workflow, 'postgresql-client-17', 'PostgreSQL 17 client must be installed');
 mustContain(workflow, 'echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"', 'Workflow must configure GITHUB_PATH for PostgreSQL 17');
 mustContain(workflow, 'export PATH="/usr/lib/postgresql/17/bin:$PATH"', 'Workflow step must prioritize PostgreSQL 17 binaries in PATH');

@@ -65,18 +65,17 @@ Because Supabase Session Pooler endpoints use Supabase's private root authority 
 
 ### Disposable PostgreSQL 17 role restoration and grantor delegation
 
-In PostgreSQL 16 and newer, role grants using `GRANT <role> TO <member> GRANTED BY <grantor>` require that the `<grantor>` hold the `ADMIN OPTION` on `<role>`. In live Supabase environments, `supabase_admin` was the creator of the managed roles (`anon`, `authenticated`, `service_role`, etc.) and thus possessed the implicit `ADMIN OPTION`.
+In PostgreSQL 16 and newer, role grants using `GRANT <role> TO <member> GRANTED BY <grantor>` require that the `<grantor>` hold the `ADMIN OPTION` on `<role>`. In live Supabase environments, `supabase_admin` is the cluster bootstrap superuser (OID 10) that created the managed roles (`anon`, `authenticated`, `service_role`, etc.) and possesses inherent `ADMIN OPTION` on both created roles and itself.
 
-When replaying the global role dump (`roles.sql`) into a fresh disposable PostgreSQL 17 cluster initialized with `POSTGRES_USER: lari_restore_admin`, `lari_restore_admin` is the initial superuser that creates the roles. Consequently, `lari_restore_admin` holds the `ADMIN OPTION` on the created roles, while `supabase_admin` initially does not. Attempting to execute `GRANT ... GRANTED BY "supabase_admin"` without prior delegation fails with:
-`ERROR: permission denied to grant privileges as role "supabase_admin"`
-`DETAIL: The grantor must have the ADMIN option on role "anon".`
+In vanilla PostgreSQL 17, `is_admin_of_role(X, X)` evaluates to true if and only if `X` is the bootstrap superuser (`BOOTSTRAP_SUPERUSERID`). No non-bootstrap role can grant itself to another role under `GRANTED BY <self>` because a role cannot be granted to itself (`role "X" is a member of role "X"`). Consequently, replaying `roles.sql` into a disposable container initialized with an arbitrary user (such as `lari_restore_admin`) causes `GRANT "supabase_admin" TO "postgres" WITH ADMIN OPTION GRANTED BY "supabase_admin"` to fail closed with `DETAIL: The grantor must have the ADMIN option on role "supabase_admin"`. Furthermore, blanket cross-product grants between detected grantors (`supabase_admin` and `postgres`) create circular role memberships strictly prohibited by PostgreSQL 17 (`role "X" is a member of role "Y"`).
 
-To maintain an authentic restore without modifying the source dump:
-1. The pristine `roles.sql` dumped by `pg_dumpall` remains completely unmodified on disk and in the encrypted archive (`backup-bundle.tar.gz`).
-2. For the disposable restore qualification, the runner prepares `restore-roles.sql`, inserting an isolated bootstrap block between role definitions and role membership grants.
-3. The bootstrap block executes as the bootstrap superuser (`lari_restore_admin`), granting `WITH ADMIN OPTION GRANTED BY lari_restore_admin` to the detected grantors (`supabase_admin`, `postgres`) for all managed roles.
-4. Because `scripts/backup/catalog-fingerprint.sql` explicitly excludes any role membership where `grantor.rolname = 'lari_restore_admin'`, these intermediate delegation grants do not affect the catalog fingerprint.
-5. All original `GRANTED BY` clauses and ACL checks are strictly preserved. Naive workarounds that strip `GRANTED BY` attribute grants to `lari_restore_admin`, which causes the fingerprint query to filter them out (reducing role memberships to 0) and fails the catalog equivalence gate.
+To achieve 100% faithful restore without modifying the source dump:
+1. The disposable PostgreSQL 17 container is initialized with `POSTGRES_USER: supabase_admin`, aligning the disposable cluster's bootstrap superuser with the source Supabase cluster topology.
+2. The pristine `roles.sql` dumped by `pg_dumpall` remains completely unmodified on disk and in the encrypted archive (`backup-bundle.tar.gz`).
+3. For disposable restore qualification, the runner prepares `restore-roles.sql`, transforming role creation to idempotent blocks (`IF NOT EXISTS`) so the bootstrap superuser is safely preserved while all subsequent `ALTER ROLE` commands configure attributes and privileges exactly as exported.
+4. For any external or custom non-bootstrap grantors, `prepare_disposable_role_restore()` analyzes the role membership graph, performs cycle reachability checks, and injects only the minimal required `ADMIN OPTION` delegations from the bootstrap superuser before role membership replay. Circular memberships fail closed before restore execution.
+5. `scripts/backup/catalog-fingerprint.sql` enforces strict catalog equality across all non-system roles and memberships with zero user exclusions. No excessive bootstrap grants are created, and no exclusions are used to conceal membership discrepancies.
+6. All original `GRANTED BY` clauses, role memberships, and ACL checks are strictly preserved and verified on actual PostgreSQL 17.6.
 
 Exact source role and extension inventories, unavailable PostgreSQL 17 extensions, and sanitized restore diagnostics are placed inside the encrypted bundle. A managed role, missing extension, ownership failure, restore error, or catalog mismatch produces `NOT_RESTORABLE_IN_DISPOSABLE_POSTGRES_17`; it is never reported as a verified restore.
 

@@ -267,58 +267,129 @@ output_path = sys.argv[2]
 with open(input_path, 'r', encoding='utf-8') as f:
     lines = f.readlines()
 
-grantor_pattern = re.compile(r'GRANTED\s+BY\s+("?[A-Za-z0-9_]+"?)\s*;?', re.IGNORECASE)
-grantors = set()
-for line in lines:
-    for match in grantor_pattern.findall(line):
-        cleaned = match.strip().strip('"')
-        if cleaned:
-            grantors.add(cleaned)
-
-grantors.add('supabase_admin')
-grantors.add('postgres')
-sorted_grantors = sorted(grantors)
-
-first_grant_idx = None
-for idx, line in enumerate(lines):
-    stripped = line.strip()
-    if stripped.startswith('--') or not stripped:
-        continue
-    if re.match(r'^GRANT\s+', stripped, re.IGNORECASE):
-        first_grant_idx = idx
-        break
-
-array_literal = ", ".join(f"'{g}'" for g in sorted_grantors)
-bootstrap_block = (
-    "\n-- LARİ Disposable Restore: Delegate ADMIN OPTION from bootstrap superuser to dump grantors\n"
-    "DO $lari_role_grant_bootstrap$\n"
-    "DECLARE\n"
-    "  target_role record;\n"
-    "  grantor_name text;\n"
-    f"  grantor_names text[] := ARRAY[{array_literal}];\n"
-    "BEGIN\n"
-    "  FOREACH grantor_name IN ARRAY grantor_names LOOP\n"
-    "    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = grantor_name) THEN\n"
-    "      FOR target_role IN\n"
-    "        SELECT rolname FROM pg_roles\n"
-    "        WHERE rolname !~ '^pg_'\n"
-    "          AND rolname <> current_user\n"
-    "          AND rolname <> grantor_name\n"
-    "      LOOP\n"
-    "        EXECUTE format('GRANT %I TO %I WITH ADMIN OPTION GRANTED BY %I', target_role.rolname, grantor_name, current_user);\n"
-    "      END LOOP;\n"
-    "    END IF;\n"
-    "  END LOOP;\n"
-    "END $lari_role_grant_bootstrap$;\n\n"
+grant_pattern = re.compile(
+    r'^GRANT\s+("?[A-Za-z0-9_]+"?)\s+TO\s+("?[A-Za-z0-9_]+"?)(?:\s+WITH\s+ADMIN\s+OPTION)?(?:\s+GRANTED\s+BY\s+("?[A-Za-z0-9_]+"?))?\s*;?',
+    re.IGNORECASE
+)
+create_role_pattern = re.compile(
+    r'^CREATE\s+ROLE\s+("?[A-Za-z0-9_]+"?)\s*;',
+    re.IGNORECASE
 )
 
-if first_grant_idx is not None:
-    new_content = "".join(lines[:first_grant_idx]) + bootstrap_block + "".join(lines[first_grant_idx:])
+grants = []
+for line in lines:
+    stripped = line.strip()
+    m = grant_pattern.match(stripped)
+    if m:
+        target = m.group(1).strip('"')
+        member = m.group(2).strip('"')
+        grantor = m.group(3).strip('"') if m.group(3) else None
+        grants.append({'target': target, 'member': member, 'grantor': grantor})
+
+# Build membership graph: member -> set of targets granted to member
+graph = {}
+for g in grants:
+    graph.setdefault(g['member'], set()).add(g['target'])
+
+def is_ancestor(start, target):
+    # Returns True if start is a member of target (directly or transitively)
+    visited = set()
+    queue = [start]
+    while queue:
+        curr = queue.pop(0)
+        if curr == target:
+            return True
+        if curr not in visited:
+            visited.add(curr)
+            for parent in graph.get(curr, []):
+                if parent not in visited:
+                    queue.append(parent)
+    return False
+
+delegations = []
+seen_pairs = set()
+for g in grants:
+    target = g['target']
+    grantor = g['grantor']
+    if not grantor:
+        continue
+    # In PostgreSQL, a role cannot be granted to itself.
+    # The cluster bootstrap superuser has inherent authority; non-bootstrap roles cannot self-grant.
+    if target == grantor:
+        continue
+
+    pair = (target, grantor)
+    if pair in seen_pairs:
+        continue
+    seen_pairs.add(pair)
+
+    # Adding target to grantor creates edge grantor -> target.
+    # Cycle occurs if target is already an ancestor of grantor (i.e. target is a member of grantor).
+    if is_ancestor(target, grantor):
+        raise ValueError(f"Cycle detected in role dump: granting {target} to {grantor} creates a circular role membership")
+
+    delegations.append(pair)
+    graph.setdefault(grantor, set()).add(target)
+
+# Transform content:
+# 1. Make CREATE ROLE idempotent so pre-existing bootstrap role does not fail
+# 2. Insert minimal cycle-checked bootstrap delegation DO block before first GRANT
+out_lines = []
+first_grant_idx = None
+for line in lines:
+    stripped = line.strip()
+    if first_grant_idx is None and re.match(r'^GRANT\s+', stripped, re.IGNORECASE):
+        first_grant_idx = len(out_lines)
+
+    m_create = create_role_pattern.match(stripped)
+    if m_create:
+        rolname = m_create.group(1).strip('"')
+        idempotent_block = (
+            f"DO $lari_role_init$\n"
+            f"BEGIN\n"
+            f"  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{rolname}') THEN\n"
+            f"    CREATE ROLE \"{rolname}\";\n"
+            f"  END IF;\n"
+            f"END $lari_role_init$;\n"
+        )
+        out_lines.append(idempotent_block)
+    else:
+        out_lines.append(line)
+
+bootstrap_statements = []
+for target, grantor in delegations:
+    bootstrap_statements.append(
+        f"  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{grantor}') "
+        f"AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{target}') "
+        f"AND current_user <> '{grantor}' THEN\n"
+        f"    EXECUTE format('GRANT %I TO %I WITH ADMIN OPTION GRANTED BY %I', '{target}', '{grantor}', current_user);\n"
+        f"  END IF;\n"
+    )
+
+if bootstrap_statements:
+    bootstrap_block = (
+        "\n-- LARİ Disposable Restore: Minimal cycle-checked ADMIN OPTION delegations\n"
+        "DO $lari_role_grant_bootstrap$\n"
+        "BEGIN\n"
+        + "".join(bootstrap_statements) +
+        "END $lari_role_grant_bootstrap$;\n\n"
+    )
 else:
-    new_content = "".join(lines) + "\n" + bootstrap_block
+    bootstrap_block = (
+        "\n-- LARİ Disposable Restore: Bootstrap superuser matches dump grantor; no intermediate delegations required\n"
+        "DO $lari_role_grant_bootstrap$\n"
+        "BEGIN\n"
+        "  NULL;\n"
+        "END $lari_role_grant_bootstrap$;\n\n"
+    )
+
+if first_grant_idx is not None:
+    final_lines = out_lines[:first_grant_idx] + [bootstrap_block] + out_lines[first_grant_idx:]
+else:
+    final_lines = out_lines + [bootstrap_block]
 
 with open(output_path, 'w', encoding='utf-8') as f:
-    f.write(new_content)
+    f.writelines(final_lines)
 PY
 }
 
@@ -461,7 +532,7 @@ if [[ "${1:-}" == "$TEST_SOURCE_CREDENTIALS_ONLY" ]]; then
   RESTORE_DATABASE_HOST="127.0.0.1"
   RESTORE_DATABASE_PORT="5432"
   RESTORE_DATABASE_NAME="restore_verification"
-  RESTORE_DATABASE_USER="lari_restore_admin"
+  RESTORE_DATABASE_USER="supabase_admin"
   RESTORE_DATABASE_PASSWORD="disposable-only"
   require_value SOURCE_POOLER_HOST
   require_source_database_password
@@ -583,7 +654,7 @@ PRIVATE_DIR="$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP is required}/lari-logical-b
 RESTORE_DATABASE_HOST="127.0.0.1"
 RESTORE_DATABASE_PORT="5432"
 RESTORE_DATABASE_NAME="restore_verification"
-RESTORE_DATABASE_USER="lari_restore_admin"
+RESTORE_DATABASE_USER="supabase_admin"
 RESTORE_DATABASE_PASSWORD="disposable-only"
 CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 BACKUP_ID="lari-${EXPECTED_PROJECT_REF}-${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}-${GITHUB_RUN_ATTEMPT:?GITHUB_RUN_ATTEMPT is required}"

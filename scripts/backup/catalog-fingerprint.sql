@@ -101,7 +101,6 @@ WITH schemas AS (
     ), '')) AS fingerprint
   FROM pg_roles
   WHERE rolname !~ '^pg_'
-    AND rolname <> 'lari_restore_admin'
 ), role_memberships AS (
   SELECT
     count(*) AS object_count,
@@ -115,9 +114,6 @@ WITH schemas AS (
   JOIN pg_roles AS grantor ON grantor.oid = m.grantor
   WHERE role.rolname !~ '^pg_'
     AND member.rolname !~ '^pg_'
-    AND role.rolname <> 'lari_restore_admin'
-    AND member.rolname <> 'lari_restore_admin'
-    AND grantor.rolname <> 'lari_restore_admin'
 ), extensions AS (
   SELECT
     count(*) AS object_count,
