@@ -1,0 +1,47 @@
+name: LARI PG17 Role Restore Qualification
+
+on:
+  pull_request:
+    branches:
+      - staging/supabase-staging-consistency
+
+permissions:
+  contents: read
+
+jobs:
+  qualification:
+    name: PostgreSQL 17.6 Role Restore Qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout pull request HEAD
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: 1. Verify runner script syntax
+        run: bash -n scripts/run-zero-cost-logical-backup.sh
+
+      - name: 2. Zero-cost backup workflow static & security QA
+        run: npm run qa:zero-cost-backup-workflow
+
+      - name: 3. Disposable PG 17.6 Docker role restore qualification
+        run: npm run qa:disposable-pg17-role-restore
+
+      - name: 4. Supabase staging consistency QA
+        run: npm run qa:supabase-staging-consistency

@@ -18,7 +18,7 @@ const dependencies = fs.readFileSync(dependencyPath, 'utf8');
 const runbook = fs.readFileSync(runbookPath, 'utf8');
 
 const mustContain = (text, value, message) => {
-  assert.ok(text.includes(value), message ?? `Expected ${value}`);
+  assert.ok(typeof text === 'string' && text.includes(value), message ?? `Expected ${value}`);
 };
 
 const findBash = () => {
@@ -28,7 +28,12 @@ const findBash = () => {
         path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'bin', 'bash.exe'),
         'C:\\Program Files\\Git\\bin\\bash.exe',
       ]
-    : [process.env.LARI_TEST_BASH, 'bash'];
+    : [
+        process.env.LARI_TEST_BASH,
+        '/bin/bash',
+        '/usr/bin/bash',
+        'bash',
+      ];
   return candidates.find((candidate) => candidate && (candidate === 'bash' || fs.existsSync(candidate)));
 };
 
@@ -292,6 +297,29 @@ const pg17MockDir = path.join(pgSelectionTestRoot, 'pg17');
 const pg16MockDir = path.join(pgSelectionTestRoot, 'pg16');
 const pgIncompleteDir = path.join(pgSelectionTestRoot, 'pg-incomplete');
 const pgMixedDir = path.join(pgSelectionTestRoot, 'pg-mixed');
+const commonToolsDir = path.join(pgSelectionTestRoot, 'common-tools');
+
+fs.mkdirSync(commonToolsDir, { recursive: true, mode: 0o755 });
+if (process.platform === 'win32') {
+  const gitUsrBin = path.join(path.dirname(bashExecutable), '..', 'usr', 'bin');
+  for (const cmd of ['awk.exe', 'cut.exe']) {
+    const src = path.join(gitUsrBin, cmd);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, path.join(commonToolsDir, cmd));
+    }
+  }
+} else {
+  for (const cmd of ['awk', 'cut']) {
+    const src = ['/usr/bin/' + cmd, '/bin/' + cmd].find((p) => fs.existsSync(p));
+    if (src) {
+      try {
+        fs.symlinkSync(src, path.join(commonToolsDir, cmd));
+      } catch {
+        fs.copyFileSync(src, path.join(commonToolsDir, cmd));
+      }
+    }
+  }
+}
 
 createMockPgBinaries(pg17MockDir, '17.2');
 createMockPgBinaries(pg16MockDir, '16.4');
@@ -312,7 +340,7 @@ const runPg17Selection = (extraEnv = {}) => {
 
 const positivePg17Selection = runPg17Selection({
   LARI_PG17_BIN_DIR: toMsysPath(pg17MockDir),
-  PATH: `${toMsysPath(pg16MockDir)}:${process.env.PATH || ''}`,
+  PATH: `${toMsysPath(pg16MockDir)}:${toMsysPath(commonToolsDir)}:${process.env.PATH || ''}`,
 });
 assert.equal(positivePg17Selection.status, 0, `PG17 selection must succeed: ${positivePg17Selection.stderr}`);
 mustContain(positivePg17Selection.stdout, 'PostgreSQL 17 client binary verification:');
@@ -323,7 +351,7 @@ mustContain(positivePg17Selection.stdout, 'PostgreSQL 17 client binary selection
 assertNoOutputLeak(positivePg17Selection, ['offline-test-password', approvedUser, 'postgresql://'], 'PG17 selection');
 
 const pg16FailureSelection = runPg17Selection({
-  PATH: toMsysPath(pg16MockDir),
+  PATH: `${toMsysPath(pg16MockDir)}:${toMsysPath(commonToolsDir)}`,
   LARI_PG17_BIN_DIR: '',
 });
 assert.notEqual(pg16FailureSelection.status, 0, 'PG16 client binaries must fail closed');
@@ -332,7 +360,7 @@ assertNoOutputLeak(pg16FailureSelection, ['offline-test-password', approvedUser,
 
 const incompletePgFailure = runPg17Selection({
   LARI_PG17_BIN_DIR: toMsysPath(pgIncompleteDir),
-  PATH: toMsysPath(pgIncompleteDir),
+  PATH: `${toMsysPath(pgIncompleteDir)}:${toMsysPath(commonToolsDir)}`,
 });
 assert.notEqual(incompletePgFailure.status, 0, 'Incomplete client binaries must fail closed');
 mustContain(incompletePgFailure.stderr, 'NOT FOUND in PATH');
@@ -340,7 +368,7 @@ assertNoOutputLeak(incompletePgFailure, ['offline-test-password', approvedUser, 
 
 const mixedVersionFailure = runPg17Selection({
   LARI_PG17_BIN_DIR: toMsysPath(pgMixedDir),
-  PATH: toMsysPath(pgMixedDir),
+  PATH: `${toMsysPath(pgMixedDir)}:${toMsysPath(commonToolsDir)}`,
 });
 assert.notEqual(mixedVersionFailure.status, 0, 'Mixed version toolset must fail closed');
 mustContain(mixedVersionFailure.stderr, 'pg_restore resolved to major version 16, but PostgreSQL 17 is required');
@@ -734,72 +762,6 @@ const missingFileResult = spawnSync(
 );
 assert.notEqual(missingFileResult.status, 0, 'Missing roles file must fail closed');
 
-// Test 8: Actual PostgreSQL 17.6 Server Verification (if ephemeral PG17 instance is available)
-const findPsql = () => {
-  const localCandidates = [
-    process.env.LARI_TEST_PSQL,
-    process.env.LARI_PG17_BIN_DIR ? path.join(process.env.LARI_PG17_BIN_DIR, process.platform === 'win32' ? 'psql.exe' : 'psql') : null,
-    process.platform === 'win32' ? null : '/usr/lib/postgresql/17/bin/psql',
-  ];
-  return localCandidates.find((c) => c && fs.existsSync(c)) || 'psql';
-};
-
-const testPgPort = process.env.LARI_TEST_PG_PORT || '54333';
-const psqlCandidate = findPsql();
-const versionCheck = spawnSync(psqlCandidate, ['-X', '-qAt', '-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', 'SHOW server_version_num;'], {
-  encoding: 'utf8',
-  env: { ...process.env, PGCONNECT_TIMEOUT: '2' },
-});
-
-if (versionCheck.status === 0 && versionCheck.stdout.trim().startsWith('17')) {
-  // 8.1: Reproduce run 39397783444 grantor failure on actual PG 17.6 server
-  const setupGrantorRes = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', 'DROP ROLE IF EXISTS t_anon, t_auth, t_grantor, t_admin; CREATE ROLE t_admin SUPERUSER LOGIN; CREATE ROLE t_grantor; CREATE ROLE t_anon; CREATE ROLE t_auth;'], { encoding: 'utf8' });
-  assert.equal(setupGrantorRes.status, 0, `Grantor setup must succeed: ${setupGrantorRes.stderr}`);
-  const liveFail = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 't_admin', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', 'GRANT t_anon TO t_auth GRANTED BY t_grantor;'], { encoding: 'utf8' });
-  assert.notEqual(liveFail.status, 0, 'Actual PG 17.6 must reject grant where grantor lacks ADMIN option');
-  mustContain(liveFail.stderr, 'The grantor must have the ADMIN option on role');
-
-  // 8.2: Reproduce circular role membership rejection on actual PG 17.6 server
-  const setupCycleRes = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', 'DROP ROLE IF EXISTS t_rx, t_ry; CREATE ROLE t_rx; CREATE ROLE t_ry; GRANT t_rx TO t_ry WITH ADMIN OPTION;'], { encoding: 'utf8' });
-  assert.equal(setupCycleRes.status, 0, `Cycle setup must succeed: ${setupCycleRes.stderr}`);
-  const liveCycle = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', 'GRANT t_ry TO t_rx WITH ADMIN OPTION;'], { encoding: 'utf8' });
-  assert.notEqual(liveCycle.status, 0, 'Actual PG 17.6 must reject circular role membership');
-  mustContain(liveCycle.stderr, 'is a member of role');
-
-  // 8.3: Clean and replay prepared restore-roles.sql on actual PG 17.6 server
-  const cleanupSql = 'DROP ROLE IF EXISTS authenticator, anon, authenticated, dashboard_user, postgres, service_role, t_anon, t_auth, t_grantor, t_admin, t_rx, t_ry, test_target, test_user, non_bootstrap_admin, other_super, alice, bob;';
-  const cleanupRes = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', cleanupSql], { encoding: 'utf8' });
-  assert.equal(cleanupRes.status, 0, `Cleanup before replay must succeed: ${cleanupRes.stderr}`);
-  const liveReplay = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-f', preparedRestoreRolesFile], { encoding: 'utf8' });
-  assert.equal(liveReplay.status, 0, `Actual PG 17.6 restore replay must succeed: ${liveReplay.stderr}`);
-
-  // 8.4: Verify exact catalog fingerprint on actual PG 17.6 server (zero user exclusions)
-  const fpQuery = `
-    SELECT
-      count(*) AS object_count,
-      md5(coalesce(string_agg(
-        format('%I|%I|%I|%s', role.rolname, member.rolname, grantor.rolname, m.admin_option),
-        E'\\n' ORDER BY role.rolname, member.rolname, grantor.rolname
-      ), '')) AS fingerprint
-    FROM pg_auth_members AS m
-    JOIN pg_roles AS role ON role.oid = m.roleid
-    JOIN pg_roles AS member ON member.oid = m.member
-    JOIN pg_roles AS grantor ON grantor.oid = m.grantor
-    WHERE role.rolname !~ '^pg_'
-      AND member.rolname !~ '^pg_';
-  `;
-  const liveFp = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-X', '-qAt', '-c', fpQuery], { encoding: 'utf8' });
-  assert.equal(liveFp.status, 0, `Catalog fingerprint query on PG 17.6 must succeed: ${liveFp.stderr}`);
-  const [liveCount, liveHash] = liveFp.stdout.trim().split('|');
-  assert.equal(liveCount, `${expectedSourceFingerprintResult.object_count}`, 'Actual PG 17.6 role memberships count must match');
-  assert.equal(liveHash, expectedSourceFingerprintResult.fingerprint, 'Actual PG 17.6 catalog fingerprint must match synthetic fixture equivalence (4/4 roles, 0 exclusions)');
-  console.log('Actual PostgreSQL 17.6 server role restore verification (synthetic fixture equivalence): PASS');
-
-  // 8.5: Teardown on actual PG 17.6 server
-  const teardownRes = spawnSync(psqlCandidate, ['-h', '127.0.0.1', '-p', testPgPort, '-U', 'supabase_admin', '-d', 'postgres', '-c', cleanupSql], { encoding: 'utf8' });
-  assert.equal(teardownRes.status, 0, `Teardown after test must succeed: ${teardownRes.stderr}`);
-}
-
 fs.rmSync(roleRestoreTestRoot, { recursive: true, force: true });
 
 
@@ -918,7 +880,18 @@ mustContain(runbook, 'REMOTE_BACKUP_EXECUTED=NO', 'Current no-execution state mu
 
 const packageJson = fs.readFileSync('package.json', 'utf8');
 mustContain(packageJson, '"qa:disposable-pg17-role-restore"', 'package.json must configure dedicated qualification script');
+mustContain(packageJson, '"test:disposable-pg17-negative"', 'package.json must configure negative qualification test script');
 assert.ok(fs.existsSync('scripts/verify-disposable-pg17-role-restore.mjs'), 'Dedicated qualification script must exist');
+assert.ok(fs.existsSync('scripts/test-disposable-pg17-negative.mjs'), 'Negative qualification test script must exist');
+
+const qualificationWorkflowPath = '.github/workflows/lari-pg17-role-qualification.yml';
+assert.ok(fs.existsSync(qualificationWorkflowPath), 'PR role qualification workflow must exist');
+const qualWorkflow = fs.readFileSync(qualificationWorkflowPath, 'utf8');
+mustContain(qualWorkflow, 'pull_request:', 'Qualification workflow must trigger on pull_request');
+mustContain(qualWorkflow, 'staging/supabase-staging-consistency', 'Qualification workflow must target default base branch');
+mustContain(qualWorkflow, 'ubuntu-24.04', 'Qualification workflow must run on ubuntu-24.04');
+mustContain(qualWorkflow, 'npm run qa:disposable-pg17-role-restore', 'Qualification workflow must run disposable role restore QA');
+mustContain(qualWorkflow, 'npm run qa:supabase-staging-consistency', 'Qualification workflow must run staging consistency QA');
 
 const supabaseCaPath = 'scripts/backup/supabase-prod-ca-2021.crt';
 assert.ok(fs.existsSync(supabaseCaPath), 'Authentic Supabase Root CA certificate file must exist');

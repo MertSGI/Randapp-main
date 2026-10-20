@@ -24,6 +24,7 @@
     "qa:booking-consistency": "node scripts/verify-booking-customer-consistency.mjs",
     "qa:zero-cost-backup-workflow": "node scripts/verify-zero-cost-backup-workflow.mjs",
     "qa:disposable-pg17-role-restore": "node scripts/verify-disposable-pg17-role-restore.mjs",
+    "test:disposable-pg17-negative": "node scripts/test-disposable-pg17-negative.mjs",
     "qa:pilot-launch": "node scripts/verify-pilot-launch-readiness.mjs",
     "qa:first-sandbox-run": "node scripts/verify-first-sandbox-run-readiness.mjs",
     "qa:sandbox-evidence": "node scripts/verify-sandbox-run-evidence.mjs",
