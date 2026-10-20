@@ -46,7 +46,7 @@ Before approving the pull-request merge, the owner must first protect the produc
 
 ## Backup and verification behavior
 
-The runner installs PostgreSQL 17 client binaries and uses:
+The runner installs PostgreSQL 17 client binaries, explicitly prepends `/usr/lib/postgresql/17/bin` to `PATH` (and inside the runner's isolated `env -i` execution), verifies that `pg_dump`, `pg_restore`, `psql`, and `pg_dumpall` resolve to major version 17 with non-sensitive version diagnostics, and uses:
 
 - The exact shared Session Pooler identity `postgres.rwedeejhjazwjthdjzrt` on the owner-supplied host, port `5432`, database `postgres`, and `sslmode=verify-full` with CA trust verification via `sslrootcert=system` (or an explicit CA certificate path). The password is never embedded in a URI or process argument. Downgrading to unverified TLS modes (such as require or verify-ca) or disabling certificate verification is strictly rejected.
 - A source-only `PGPASSFILE` created under the job's private temporary directory with mode `0600`. Password-file metacharacters are escaped, inherited libpq settings are discarded, disposable restore credentials use a separate password file, and cleanup runs after success, failure, or a termination signal.

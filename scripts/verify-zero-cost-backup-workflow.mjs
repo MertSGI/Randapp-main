@@ -273,6 +273,82 @@ const verifiedRestoreVerdictTest = runRestoreVerdictHandling('VERIFIED_LOGICAL_R
 assert.equal(verifiedRestoreVerdictTest.result.status, 0, verifiedRestoreVerdictTest.result.stderr);
 assert.ok(verifiedRestoreVerdictTest.artifactDirectoryExists, 'A verified restore verdict may retain upload candidates');
 
+const toMsysPath = (p) => p.replaceAll('\\', '/').replace(/^([A-Za-z]):/, (_, drive) => `/${drive.toLowerCase()}`);
+
+const createMockPgBinaries = (targetDir, versionString, tools = ['pg_dump', 'pg_restore', 'psql', 'pg_dumpall']) => {
+  fs.mkdirSync(targetDir, { recursive: true, mode: 0o755 });
+  for (const tool of tools) {
+    const filePath = path.join(targetDir, tool);
+    const content = `#!/bin/sh\necho "${tool} (PostgreSQL) ${versionString}"\n`;
+    fs.writeFileSync(filePath, content, { mode: 0o755 });
+    if (process.platform === 'win32') {
+      spawnSync(bashExecutable, ['-c', `chmod +x "${toMsysPath(filePath)}"`]);
+    }
+  }
+};
+
+const pgSelectionTestRoot = fs.mkdtempSync(path.join(os.tmpdir(), `lari-pg-select-${process.pid}-`));
+const pg17MockDir = path.join(pgSelectionTestRoot, 'pg17');
+const pg16MockDir = path.join(pgSelectionTestRoot, 'pg16');
+const pgIncompleteDir = path.join(pgSelectionTestRoot, 'pg-incomplete');
+const pgMixedDir = path.join(pgSelectionTestRoot, 'pg-mixed');
+
+createMockPgBinaries(pg17MockDir, '17.2');
+createMockPgBinaries(pg16MockDir, '16.4');
+createMockPgBinaries(pgIncompleteDir, '17.2', ['pg_dump']);
+createMockPgBinaries(pgMixedDir, '17.2', ['pg_dump', 'psql', 'pg_dumpall']);
+createMockPgBinaries(pgMixedDir, '16.4', ['pg_restore']);
+
+const runPg17Selection = (extraEnv = {}) => {
+  return spawnSync(bashExecutable, [runnerPath, '--test-pg17-client-selection'], {
+    cwd: process.cwd(),
+    env: sanitizedEnvironment({
+      LARI_OFFLINE_TEST_MODE: '1',
+      ...extraEnv,
+    }),
+    encoding: 'utf8',
+  });
+};
+
+const positivePg17Selection = runPg17Selection({
+  LARI_PG17_BIN_DIR: toMsysPath(pg17MockDir),
+  PATH: `${toMsysPath(pg16MockDir)}:${process.env.PATH || ''}`,
+});
+assert.equal(positivePg17Selection.status, 0, `PG17 selection must succeed: ${positivePg17Selection.stderr}`);
+mustContain(positivePg17Selection.stdout, 'PostgreSQL 17 client binary verification:');
+mustContain(positivePg17Selection.stdout, 'pg_dump:');
+mustContain(positivePg17Selection.stdout, '(PostgreSQL) 17.2');
+mustContain(positivePg17Selection.stdout, 'PostgreSQL 17 isolated env -i execution: PASS');
+mustContain(positivePg17Selection.stdout, 'PostgreSQL 17 client binary selection: PASS');
+assertNoOutputLeak(positivePg17Selection, ['offline-test-password', approvedUser, 'postgresql://'], 'PG17 selection');
+
+const pg16FailureSelection = runPg17Selection({
+  PATH: toMsysPath(pg16MockDir),
+  LARI_PG17_BIN_DIR: '',
+});
+assert.notEqual(pg16FailureSelection.status, 0, 'PG16 client binaries must fail closed');
+mustContain(pg16FailureSelection.stderr, 'resolved to major version 16, but PostgreSQL 17 is required');
+assertNoOutputLeak(pg16FailureSelection, ['offline-test-password', approvedUser, 'postgresql://'], 'PG16 failure');
+
+const incompletePgFailure = runPg17Selection({
+  LARI_PG17_BIN_DIR: toMsysPath(pgIncompleteDir),
+  PATH: toMsysPath(pgIncompleteDir),
+});
+assert.notEqual(incompletePgFailure.status, 0, 'Incomplete client binaries must fail closed');
+mustContain(incompletePgFailure.stderr, 'NOT FOUND in PATH');
+assertNoOutputLeak(incompletePgFailure, ['offline-test-password', approvedUser, 'postgresql://'], 'incomplete tools');
+
+const mixedVersionFailure = runPg17Selection({
+  LARI_PG17_BIN_DIR: toMsysPath(pgMixedDir),
+  PATH: toMsysPath(pgMixedDir),
+});
+assert.notEqual(mixedVersionFailure.status, 0, 'Mixed version toolset must fail closed');
+mustContain(mixedVersionFailure.stderr, 'pg_restore resolved to major version 16, but PostgreSQL 17 is required');
+assertNoOutputLeak(mixedVersionFailure, ['offline-test-password', approvedUser, 'postgresql://'], 'mixed versions');
+
+fs.rmSync(pgSelectionTestRoot, { recursive: true, force: true });
+
+
 mustContain(workflow, 'workflow_dispatch:', 'Backup workflow must be explicitly dispatched');
 for (const forbiddenTrigger of ['\n  push:', '\n  pull_request:', '\n  schedule:', '\n  repository_dispatch:']) {
   assert.ok(!workflow.includes(forbiddenTrigger), `Forbidden automatic trigger: ${forbiddenTrigger.trim()}`);
@@ -287,6 +363,10 @@ assert.ok(!workflow.includes('LARI_STAGING_DATABASE_URL'), 'The missing database
 mustContain(workflow, 'postgres:17.6-alpine', 'Restore service must be PostgreSQL 17.6');
 mustContain(workflow, 'POSTGRES_USER: lari_restore_admin', 'Disposable bootstrap role must not collide with source postgres');
 mustContain(workflow, 'postgresql-client-17', 'PostgreSQL 17 client must be installed');
+mustContain(workflow, 'echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"', 'Workflow must configure GITHUB_PATH for PostgreSQL 17');
+mustContain(workflow, 'export PATH="/usr/lib/postgresql/17/bin:$PATH"', 'Workflow step must prioritize PostgreSQL 17 binaries in PATH');
+mustContain(workflow, 'for tool in pg_dump pg_restore psql pg_dumpall; do', 'Workflow must iterate and verify all four PostgreSQL tools');
+mustContain(workflow, 'PostgreSQL 17 client binary diagnostics:', 'Workflow must emit explicit client diagnostics');
 mustContain(workflow, 'timeout-minutes: 30', 'Execution must be bounded');
 mustContain(workflow, 'path: backup-artifacts', 'Only the guarded artifact directory may be uploaded');
 mustContain(workflow, "steps.backup.outcome == 'success'", 'Partial preparation must never upload an artifact');
@@ -312,6 +392,10 @@ mustContain(runner, 'PINNED_SUPABASE_ROOT_CA_SHA256="807025ad50d4ed219d2c9c7d299
 mustContain(runner, 'SOURCE_DATABASE_SSLROOTCERT="${SOURCE_DATABASE_SSLROOTCERT-$DEFAULT_SUPABASE_CA_FILE}"', 'Source database CA root certificate must default to authentic Supabase CA');
 mustContain(runner, 'validate_ca_root_certificate', 'CA root certificate validation must be invoked');
 mustContain(runner, 'require_value SOURCE_DATABASE_SSLROOTCERT', 'Source database CA root certificate must be non-empty');
+mustContain(runner, 'configure_postgresql17_path', 'Runner must configure PostgreSQL 17 PATH');
+mustContain(runner, 'verify_postgres17_client_binaries', 'Runner must verify PostgreSQL 17 client binaries');
+mustContain(runner, 'TEST_PG17_CLIENT_SELECTION_ONLY="--test-pg17-client-selection"', 'Runner must support client selection test mode');
+mustContain(runner, 'PostgreSQL 17 isolated env -i execution: PASS', 'Runner test mode must verify env -i execution');
 mustContain(runner, 'env -i', 'PostgreSQL commands must discard inherited libpq environment overrides');
 mustContain(runner, 'PGSSLMODE="$SOURCE_DATABASE_SSLMODE"', 'Source commands must pass PGSSLMODE');
 mustContain(runner, 'PGSSLROOTCERT="$SOURCE_DATABASE_SSLROOTCERT"', 'Source commands must pass PGSSLROOTCERT');
@@ -394,5 +478,9 @@ console.log('Failed restore publication suppression test: PASS');
 console.log('Authentic Supabase Root CA certificate integrity: PASS');
 console.log('Tampered CA fingerprint mismatch fail-closed test: PASS');
 console.log('Malformed CA fail-closed test: PASS');
+console.log('PostgreSQL 17 client binary PATH selection test: PASS');
+console.log('PostgreSQL 17 client version mismatch fail-closed test: PASS');
+console.log('PostgreSQL 17 missing tools fail-closed test: PASS');
+console.log('PostgreSQL 17 isolated env -i execution test: PASS');
 console.log('Zero-cost backup workflow static qualification: PASS');
 console.log('Remote database connections attempted: 0');

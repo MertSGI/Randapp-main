@@ -14,6 +14,7 @@ SOURCE_DATABASE_SSLROOTCERT="${SOURCE_DATABASE_SSLROOTCERT-$DEFAULT_SUPABASE_CA_
 VALIDATE_SOURCE_URL_ONLY="--validate-source-url-only"
 TEST_SOURCE_CREDENTIALS_ONLY="--test-source-credential-handling"
 TEST_RESTORE_VERDICT_ONLY="--test-restore-verdict-handling"
+TEST_PG17_CLIENT_SELECTION_ONLY="--test-pg17-client-selection"
 
 SOURCE_DATABASE_PASSWORD_VALUE="${SOURCE_DATABASE_PASSWORD:-}"
 unset SOURCE_DATABASE_PASSWORD
@@ -100,6 +101,49 @@ except Exception:
 
   if [[ -n "$expected_sha256" && "$cert_sha256" != "$expected_sha256" ]]; then
     printf 'Configured CA root certificate fingerprint mismatch.\n' >&2
+    exit 1
+  fi
+}
+
+configure_postgresql17_path() {
+  if [[ -n "${LARI_PG17_BIN_DIR:-}" && -d "$LARI_PG17_BIN_DIR" ]]; then
+    if [[ ":$PATH:" != *":$LARI_PG17_BIN_DIR:"* ]]; then
+      PATH="$LARI_PG17_BIN_DIR:$PATH"
+    fi
+  elif [[ -d "/usr/lib/postgresql/17/bin" ]]; then
+    if [[ ":$PATH:" != *":/usr/lib/postgresql/17/bin:"* ]]; then
+      PATH="/usr/lib/postgresql/17/bin:$PATH"
+    fi
+  fi
+  export PATH
+}
+
+verify_postgres17_client_binaries() {
+  local tool
+  local tool_path
+  local tool_version
+  local tool_major
+  local failure=0
+
+  printf 'PostgreSQL 17 client binary verification:\n'
+  for tool in pg_dump pg_restore psql pg_dumpall; do
+    tool_path="$(command -v "$tool" 2>/dev/null || true)"
+    if [[ -z "$tool_path" ]]; then
+      printf '  %s: NOT FOUND in PATH\n' "$tool" >&2
+      failure=1
+      continue
+    fi
+    tool_version="$("$tool" --version 2>&1 || true)"
+    printf '  %s: %s (%s)\n' "$tool" "$tool_path" "$tool_version"
+    tool_major="$(printf '%s' "$tool_version" | awk '{print $3}' | cut -d. -f1)"
+    if [[ "$tool_major" != "17" ]]; then
+      printf '  ERROR: %s resolved to major version %s, but PostgreSQL 17 is required.\n' "$tool" "$tool_major" >&2
+      failure=1
+    fi
+  done
+
+  if [[ "$failure" -ne 0 ]]; then
+    printf 'PostgreSQL 17 client binaries verification failed.\n' >&2
     exit 1
   fi
 }
@@ -402,6 +446,28 @@ if [[ "${1:-}" == "$TEST_RESTORE_VERDICT_ONLY" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "$TEST_PG17_CLIENT_SELECTION_ONLY" ]]; then
+  [[ "$#" -eq 1 ]] || {
+    printf 'PostgreSQL 17 client selection test mode accepts no additional arguments.\n' >&2
+    exit 1
+  }
+  [[ "${LARI_OFFLINE_TEST_MODE:-}" == "1" ]] || {
+    printf 'Offline test guard is not enabled.\n' >&2
+    exit 1
+  }
+  configure_postgresql17_path
+  verify_postgres17_client_binaries
+  env_i_version="$(env -i PATH="$PATH" LC_ALL=C.UTF-8 pg_dump --version 2>&1 || true)"
+  env_i_major="$(printf '%s' "$env_i_version" | awk '{print $3}' | cut -d. -f1)"
+  if [[ "$env_i_major" != "17" ]]; then
+    printf 'PostgreSQL 17 isolated env -i execution check failed: expected 17, got %s\n' "$env_i_major" >&2
+    exit 1
+  fi
+  printf 'PostgreSQL 17 isolated env -i execution: PASS\n'
+  printf 'PostgreSQL 17 client binary selection: PASS\n'
+  exit 0
+fi
+
 [[ "$#" -eq 0 ]] || {
   printf 'Unexpected command argument.\n' >&2
   exit 1
@@ -418,6 +484,7 @@ CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 BACKUP_ID="lari-${EXPECTED_PROJECT_REF}-${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}-${GITHUB_RUN_ATTEMPT:?GITHUB_RUN_ATTEMPT is required}"
 ENCRYPTED_NAME="${BACKUP_ID}.tar.gz.age"
 
+configure_postgresql17_path
 for command_name in age jq pg_dump pg_dumpall pg_restore psql sha256sum tar python3; do
   command -v "$command_name" >/dev/null 2>&1 || {
     printf 'Required command is unavailable: %s\n' "$command_name" >&2
@@ -455,6 +522,7 @@ build_and_validate_source_database_url python3
 prepare_private_credentials
 assert_private_source_credentials
 
+verify_postgres17_client_binaries
 PG_DUMP_MAJOR="$(pg_dump --version | awk '{print $3}' | cut -d. -f1)"
 PG_RESTORE_MAJOR="$(pg_restore --version | awk '{print $3}' | cut -d. -f1)"
 [[ "$PG_DUMP_MAJOR" == "17" && "$PG_RESTORE_MAJOR" == "17" ]] || {
