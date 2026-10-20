@@ -60,8 +60,23 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends age jq postgresql-client-17
-          test "$(pg_dump --version | awk '{print $3}' | cut -d. -f1)" = "17"
-          test "$(pg_restore --version | awk '{print $3}' | cut -d. -f1)" = "17"
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          export PATH="/usr/lib/postgresql/17/bin:$PATH"
+          printf 'PostgreSQL 17 client binary diagnostics:\n'
+          for tool in pg_dump pg_restore psql pg_dumpall; do
+            tool_path="$(command -v "$tool" 2>/dev/null || true)"
+            if [[ -z "$tool_path" ]]; then
+              printf 'Required PostgreSQL client tool %s not found in PATH.\n' "$tool" >&2
+              exit 1
+            fi
+            tool_version="$("$tool" --version 2>&1 || true)"
+            printf '  %s: %s (%s)\n' "$tool" "$tool_path" "$tool_version"
+            tool_major="$(printf '%s' "$tool_version" | awk '{print $3}' | cut -d. -f1)"
+            if [[ "$tool_major" != "17" ]]; then
+              printf 'Tool %s version mismatch: expected major version 17, got %s\n' "$tool" "$tool_major" >&2
+              exit 1
+            fi
+          done
 
       - name: Verify authentic Supabase Root CA certificate
         shell: bash
