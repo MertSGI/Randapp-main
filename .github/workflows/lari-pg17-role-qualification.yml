@@ -43,5 +43,8 @@ jobs:
       - name: 3. Disposable PG 17.6 Docker role restore qualification
         run: npm run qa:disposable-pg17-role-restore
 
-      - name: 4. Supabase staging consistency QA
+      - name: 4. Docker isolation negative security tests
+        run: npm run test:disposable-pg17-negative
+
+      - name: 5. Supabase staging consistency QA
         run: npm run qa:supabase-staging-consistency

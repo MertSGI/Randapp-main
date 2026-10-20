@@ -24,21 +24,28 @@ console.log(`Container Name:   ${containerName}`);
 console.log(`Nonce Label:      ${nonceLabel}`);
 console.log('-'.repeat(72));
 
-// 2. Verify Docker daemon is local Unix socket or Windows named pipe
+// 2. Verify and pin Docker daemon endpoint
 const dockerBin = process.env.LARI_TEST_SIMULATE_DOCKER_BIN || process.env.LARI_DOCKER_BIN || 'docker';
-const dockerHost = process.env.DOCKER_HOST;
 
-if (dockerHost) {
-  const isLocalSocket = dockerHost.startsWith('unix://') || dockerHost.startsWith('npipe://');
-  if (!isLocalSocket) {
-    console.error(`FATAL: Remote Docker daemon rejected: DOCKER_HOST="${dockerHost}".`);
-    console.error('Security invariant: Only local Unix socket (unix://) or Windows named pipe (npipe://) is permitted.');
-    process.exit(1);
-  }
+const endpoint = process.platform === 'win32' ? 'npipe:////./pipe/docker_engine' : 'unix:///var/run/docker.sock';
+if (process.env.DOCKER_HOST && process.env.DOCKER_HOST !== endpoint) {
+  throw new Error('UNAPPROVED_DOCKER_ENDPOINT');
 }
-
-const probeDaemon = spawnSync(dockerBin, ['info', '--format', '{{.OperatingSystem}}'], {
+if (process.env.DOCKER_CONTEXT && process.env.DOCKER_CONTEXT !== 'default') {
+  throw new Error('UNAPPROVED_DOCKER_CONTEXT');
+}
+const dockerEnv = { ...process.env };
+delete dockerEnv.DOCKER_HOST;
+delete dockerEnv.DOCKER_CONTEXT;
+delete dockerEnv.DOCKER_TLS_VERIFY;
+delete dockerEnv.DOCKER_CERT_PATH;
+const dockerCmd = (args, options = {}) => spawnSync(dockerBin, ['-H', endpoint, ...args], {
   encoding: 'utf8',
+  ...options,
+  env: dockerEnv,
+});
+
+const probeDaemon = dockerCmd(['info', '--format', '{{.OperatingSystem}}'], {
   timeout: 10000,
 });
 
@@ -48,18 +55,6 @@ if (probeDaemon.error || probeDaemon.status !== 0) {
   console.error(`Error details: ${probeDaemon.stderr || probeDaemon.error?.message || 'unknown'}`);
   process.exit(1);
 }
-
-const dockerEndpointArgs = [];
-if (dockerHost) {
-  dockerEndpointArgs.push('-H', dockerHost);
-}
-
-const dockerCmd = (args, options = {}) => {
-  return spawnSync(dockerBin, [...dockerEndpointArgs, ...args], {
-    encoding: 'utf8',
-    ...options,
-  });
-};
 
 const findBash = () => {
   const candidates = process.platform === 'win32'
@@ -77,6 +72,15 @@ const toBashPath = (filePath) => {
   const resolved = path.resolve(filePath).replace(/\\/g, '/');
   return resolved.replace(/^([A-Za-z]):\//, (_, drive) => `/${drive.toLowerCase()}/`);
 };
+
+let verifiedContainerId = null;
+
+if (process.platform === 'linux') {
+  if (!fs.existsSync('/var/run/docker.sock') || !fs.statSync('/var/run/docker.sock').isSocket()) {
+    console.error('FATAL: /var/run/docker.sock does not exist or is not a Unix domain socket.');
+    process.exit(1);
+  }
+}
 
 // 3. Launch isolated container
 console.log(`Launching isolated container [${containerName}]...`);
@@ -99,7 +103,7 @@ if (runRes.status !== 0 || !runRes.stdout.trim()) {
   process.exit(1);
 }
 
-const verifiedContainerId = runRes.stdout.trim().split(/\r?\n/)[0];
+verifiedContainerId = runRes.stdout.trim().split(/\r?\n/)[0];
 assert.match(
   verifiedContainerId,
   /^[a-f0-9]{64}$/,
@@ -175,7 +179,7 @@ try {
   assert.equal(inspectLabelsRes.status, 0, 'Container inspection for labels must succeed');
   const labels = JSON.parse(inspectLabelsRes.stdout.trim() || '{}');
   const activeNonce = process.env.LARI_TEST_SIMULATE_NONCE_MISMATCH ? 'tampered-nonce' : labels['lari.qa.nonce'];
-  assert.equal(activeNonce, uniqueId, `Nonce label mismatch! Expected: ${uniqueId}, found: ${activeNonce}`);
+  assert.equal(activeNonce, uniqueId, `Nonce mismatch: expected ${uniqueId}, found ${activeNonce}`);
 
   // 4.2 Running state check
   const inspectStateRes = dockerCmd([
@@ -225,8 +229,8 @@ try {
   console.log(`server_version_num: ${versionNum} (required: 170006)`);
   console.log(`server_version:     ${versionStr} (required: 17.6)`);
 
-  assert.equal(versionNum, '170006', `server_version_num must be exactly 170006, got: ${versionNum}`);
-  assert.ok(versionStr.includes('17.6'), `server_version must show PostgreSQL 17.6, got: ${versionStr}`);
+  assert.equal(versionNum, '170006', `PostgreSQL version rejection: server_version_num must be exactly 170006, got: ${versionNum}`);
+  assert.ok(versionStr.includes('17.6'), `PostgreSQL version rejection: server_version must show PostgreSQL 17.6, got: ${versionStr}`);
 
   // 4.5 Bootstrap superuser OID 10 is supabase_admin
   const oidQueryRes = execPsql('\\set QUIET 1\n\\pset tuples_only on\n\\pset format unaligned\nSELECT rolname FROM pg_roles WHERE oid = 10;\n', {
@@ -476,12 +480,12 @@ try {
   actualRows.forEach((r) => console.log(`  - ${r}`));
 
   if (process.env.LARI_TEST_SIMULATE_CATALOG_MISMATCH) {
-    throw new Error('Simulated catalog mismatch error');
+    throw new Error('Catalog mismatch: simulated fingerprint or role membership mismatch');
   }
 
-  assert.equal(objCountStr, '4', 'Must contain exactly 4 non-system role memberships');
-  assert.equal(actualFingerprint, expectedFingerprint, 'MD5 catalog fingerprint must match synthetic fixture');
-  assert.deepEqual(actualRows, expectedMemberships, 'Role membership rows must match expected synthetic fixture rows');
+  assert.equal(objCountStr, '4', 'Catalog mismatch: must contain exactly 4 non-system role memberships');
+  assert.equal(actualFingerprint, expectedFingerprint, 'Catalog mismatch: MD5 catalog fingerprint must match synthetic fixture');
+  assert.deepEqual(actualRows, expectedMemberships, 'Catalog mismatch: role membership rows must match expected synthetic fixture rows');
 
   console.log('\n[QUALIFICATION REPORT]');
   console.log('STATUS: PASS');
@@ -494,41 +498,56 @@ try {
   console.log('='.repeat(72));
 } finally {
   console.log('--- Teardown: Container Cleanup ---');
-  if (verifiedContainerId) {
+  if (verifiedContainerId && /^[a-f0-9]{64}$/.test(verifiedContainerId)) {
     try {
-      // 1. Re-verify container ID and nonce label match
+      // 1. Before deletion, docker inspect <captured-id> must succeed and its nonce label must match the current run. Inspection failure is an error, not proof the container was removed.
       const inspectRes = dockerCmd([
         'inspect',
         '--format', '{{json .Config.Labels}}',
         verifiedContainerId,
       ]);
-
-      if (inspectRes.status === 0) {
-        const labels = JSON.parse(inspectRes.stdout.trim() || '{}');
-        const candidateNonce = process.env.LARI_TEST_SIMULATE_CLEANUP_MISMATCH ? 'mismatched-nonce' : labels['lari.qa.nonce'];
-        if (candidateNonce !== uniqueId) {
-          console.error(`SECURITY REFUSAL: Container ${verifiedContainerId} nonce does not match current run! Refusing to delete foreign container.`);
-          process.exit(1);
-        }
-
-        // 2. Remove ONLY the container created in this run
-        const rmRes = dockerCmd(['rm', '-f', verifiedContainerId]);
-        if (rmRes.status !== 0) {
-          console.error(`FATAL: Failed to remove test container ${verifiedContainerId}: ${rmRes.stderr}`);
-          process.exit(1);
-        }
-      }
-
-      // 3. Verify container is no longer present
-      const verifyGone = dockerCmd(['inspect', verifiedContainerId]);
-      if (verifyGone.status === 0) {
-        console.error(`FATAL: Container ${verifiedContainerId} still exists after removal!`);
+      if (inspectRes.error || inspectRes.status !== 0 || !inspectRes.stdout.trim()) {
+        console.error(`FATAL: Cannot inspect container ${verifiedContainerId} before removal: ${inspectRes.error?.message || inspectRes.stderr || 'empty output'}`);
         process.exit(1);
       }
 
+      const labels = JSON.parse(inspectRes.stdout.trim() || '{}');
+      const candidateNonce = process.env.LARI_TEST_SIMULATE_CLEANUP_MISMATCH ? 'mismatched-nonce' : labels['lari.qa.nonce'];
+      if (candidateNonce !== uniqueId) {
+        console.error(`SECURITY REFUSAL: Container ${verifiedContainerId} nonce does not match current run! Refusing to delete foreign container.`);
+        process.exit(1);
+      }
+
+      // 2. Execute docker rm -f <captured-id> and require exit code 0.
+      const rmRes = dockerCmd(['rm', '-f', verifiedContainerId]);
+      if (rmRes.error || rmRes.status !== 0) {
+        console.error(`FATAL: docker rm -f failed with status ${rmRes.status}: ${rmRes.error?.message || rmRes.stderr}`);
+        process.exit(1);
+      }
+
+      // 3. Execute docker info against the same pinned endpoint and require exit code 0.
+      const infoRes = dockerCmd(['info', '--format', '{{.OperatingSystem}}']);
+      if (infoRes.error || infoRes.status !== 0) {
+        console.error(`FATAL: docker info probe failed during cleanup verification: ${infoRes.error?.message || infoRes.stderr}`);
+        process.exit(1);
+      }
+
+      // 4. Execute docker ps -aq --no-trunc --filter id=<captured-id> against that endpoint, require exit code 0 and empty output.
+      const psRes = dockerCmd(['ps', '-aq', '--no-trunc', '--filter', `id=${verifiedContainerId}`]);
+      if (psRes.error || psRes.status !== 0) {
+        console.error(`FATAL: docker ps check failed with status ${psRes.status}: ${psRes.error?.message || psRes.stderr}`);
+        process.exit(1);
+      }
+      if (psRes.stdout.trim() !== '') {
+        console.error(`FATAL: Container ${verifiedContainerId} still visible in docker ps: "${psRes.stdout.trim()}"`);
+        process.exit(1);
+      }
+
+      // 5. Only then emit CLEANUP_VERIFIED.
+      console.log('CLEANUP_VERIFIED');
       console.log(`Container ${verifiedContainerId.slice(0, 12)} successfully removed and verified absent.`);
     } catch (cleanupErr) {
-      console.error(`FATAL: Cleanup exception: ${cleanupErr.message}`);
+      console.error(`FATAL: Cleanup verification failed: ${cleanupErr.message}`);
       process.exit(1);
     }
   }
