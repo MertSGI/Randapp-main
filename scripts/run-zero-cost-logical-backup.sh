@@ -8,7 +8,9 @@ SOURCE_DATABASE_USER="postgres.${EXPECTED_PROJECT_REF}"
 SOURCE_DATABASE_PORT="5432"
 SOURCE_DATABASE_NAME="postgres"
 SOURCE_DATABASE_SSLMODE="verify-full"
-SOURCE_DATABASE_SSLROOTCERT="${SOURCE_DATABASE_SSLROOTCERT-system}"
+DEFAULT_SUPABASE_CA_FILE="scripts/backup/supabase-prod-ca-2021.crt"
+PINNED_SUPABASE_ROOT_CA_SHA256="807025ad50d4ed219d2c9c7d299c004f824eb00cf7f65afef607d07b72e6cafa"
+SOURCE_DATABASE_SSLROOTCERT="${SOURCE_DATABASE_SSLROOTCERT-$DEFAULT_SUPABASE_CA_FILE}"
 VALIDATE_SOURCE_URL_ONLY="--validate-source-url-only"
 TEST_SOURCE_CREDENTIALS_ONLY="--test-source-credential-handling"
 TEST_RESTORE_VERDICT_ONLY="--test-restore-verdict-handling"
@@ -60,6 +62,45 @@ enforce_verified_restore() {
     fi
     printf 'Logical restore verification failed; no backup artifact is eligible for upload.\n' >&2
     return 1
+  fi
+}
+
+validate_ca_root_certificate() {
+  local python_command="$1"
+  require_value SOURCE_DATABASE_SSLROOTCERT
+
+  if [[ "$SOURCE_DATABASE_SSLROOTCERT" == "system" ]]; then
+    return 0
+  fi
+
+  if [[ ! -f "$SOURCE_DATABASE_SSLROOTCERT" ]]; then
+    printf 'Configured CA root certificate file does not exist.\n' >&2
+    exit 1
+  fi
+
+  local cert_sha256
+  cert_sha256="$("$python_command" -c "
+import base64, hashlib, sys
+try:
+    content = open(sys.argv[1], 'r', encoding='utf-8').read()
+    b64 = ''.join([line.strip() for line in content.splitlines() if not line.startswith('-----')])
+    der = base64.b64decode(b64)
+    print(hashlib.sha256(der).hexdigest())
+except Exception:
+    sys.exit(1)
+" "$SOURCE_DATABASE_SSLROOTCERT" 2>/dev/null)" || {
+    printf 'Configured CA root certificate is malformed or unreadable.\n' >&2
+    exit 1
+  }
+
+  local expected_sha256="${LARI_EXPECTED_CA_SHA256:-}"
+  if [[ -z "$expected_sha256" && "$SOURCE_DATABASE_SSLROOTCERT" == *"supabase"* ]]; then
+    expected_sha256="$PINNED_SUPABASE_ROOT_CA_SHA256"
+  fi
+
+  if [[ -n "$expected_sha256" && "$cert_sha256" != "$expected_sha256" ]]; then
+    printf 'Configured CA root certificate fingerprint mismatch.\n' >&2
+    exit 1
   fi
 }
 
@@ -319,11 +360,7 @@ if [[ "${1:-}" == "$TEST_SOURCE_CREDENTIALS_ONLY" ]]; then
     exit 1
   }
   require_value LARI_EXPECTED_SOURCE_PGPASS_SHA256
-  require_value SOURCE_DATABASE_SSLROOTCERT
-  if [[ "$SOURCE_DATABASE_SSLROOTCERT" != "system" && ! -f "$SOURCE_DATABASE_SSLROOTCERT" ]]; then
-    printf 'Configured CA root certificate file does not exist.\n' >&2
-    exit 1
-  fi
+  validate_ca_root_certificate "$VALIDATOR_PYTHON"
   build_and_validate_source_database_url "$VALIDATOR_PYTHON"
   prepare_private_credentials
   assert_private_source_credentials
@@ -413,11 +450,7 @@ unset \
   PGSSLMODE PGSSLROOTCERT PGSSLSNI PGTARGETSESSIONATTRS PGUSER \
   SOURCE_DATABASE_URL
 
-require_value SOURCE_DATABASE_SSLROOTCERT
-if [[ "$SOURCE_DATABASE_SSLROOTCERT" != "system" && ! -f "$SOURCE_DATABASE_SSLROOTCERT" ]]; then
-  printf 'Configured CA root certificate file does not exist.\n' >&2
-  exit 1
-fi
+validate_ca_root_certificate python3
 build_and_validate_source_database_url python3
 prepare_private_credentials
 assert_private_source_credentials

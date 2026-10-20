@@ -63,6 +63,17 @@ jobs:
           test "$(pg_dump --version | awk '{print $3}' | cut -d. -f1)" = "17"
           test "$(pg_restore --version | awk '{print $3}' | cut -d. -f1)" = "17"
 
+      - name: Verify authentic Supabase Root CA certificate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          EXPECTED_FINGERPRINT="807025ad50d4ed219d2c9c7d299c004f824eb00cf7f65afef607d07b72e6cafa"
+          CA_FILE="scripts/backup/supabase-prod-ca-2021.crt"
+          test -f "$CA_FILE"
+          ACTUAL_FINGERPRINT="$(openssl x509 -in "$CA_FILE" -outform DER | sha256sum | awk '{print $1}')"
+          test "$ACTUAL_FINGERPRINT" = "$EXPECTED_FINGERPRINT"
+          test "$(openssl x509 -in "$CA_FILE" -noout -subject -nameopt RFC2253)" = "subject=CN=Supabase Root 2021 CA,O=Supabase Inc,L=New Castle,ST=Delware,C=US"
+
       - name: Create encrypted logical backup and verify disposable restore
         id: backup
         shell: bash
@@ -71,6 +82,7 @@ jobs:
           SOURCE_POOLER_HOST: ${{ vars.LARI_STAGING_POOLER_HOST }}
           SOURCE_DATABASE_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
           BACKUP_AGE_RECIPIENT: ${{ secrets.LARI_BACKUP_AGE_RECIPIENT }}
+          SOURCE_DATABASE_SSLROOTCERT: scripts/backup/supabase-prod-ca-2021.crt
           LARI_DISPOSABLE_DB: "1"
         run: bash scripts/run-zero-cost-logical-backup.sh
 

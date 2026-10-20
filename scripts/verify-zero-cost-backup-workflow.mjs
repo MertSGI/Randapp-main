@@ -186,11 +186,29 @@ assertNoOutputLeak(
 );
 
 const customCaFile = path.join(os.tmpdir(), `test-ca-${process.pid}.pem`);
-fs.writeFileSync(customCaFile, '-----BEGIN CERTIFICATE-----\nOFFLINE-TEST-CA\n-----END CERTIFICATE-----\n');
+const dummyDer = Buffer.from('offline-test-custom-ca-der-payload');
+fs.writeFileSync(customCaFile, `-----BEGIN CERTIFICATE-----\n${dummyDer.toString('base64')}\n-----END CERTIFICATE-----\n`);
 const customCaCredentialTest = runCredentialHandling({ SOURCE_DATABASE_SSLROOTCERT: toBashPath(customCaFile) });
 fs.rmSync(customCaFile, { force: true });
 assert.equal(customCaCredentialTest.result.status, 0, customCaCredentialTest.result.stderr);
 assert.ok(customCaCredentialTest.cleanupObserved, 'Private credential directory must be removed after custom CA test');
+
+const tamperedCaFile = path.join(os.tmpdir(), `supabase-tampered-ca-${process.pid}.crt`);
+const tamperedDer = Buffer.from('tampered-supabase-ca-payload');
+fs.writeFileSync(tamperedCaFile, `-----BEGIN CERTIFICATE-----\n${tamperedDer.toString('base64')}\n-----END CERTIFICATE-----\n`);
+const tamperedCaTest = runCredentialHandling({ SOURCE_DATABASE_SSLROOTCERT: toBashPath(tamperedCaFile) });
+fs.rmSync(tamperedCaFile, { force: true });
+assert.notEqual(tamperedCaTest.result.status, 0, 'Tampered Supabase CA certificate must fail closed');
+assert.ok(tamperedCaTest.result.stderr.includes('Configured CA root certificate fingerprint mismatch.'));
+assert.ok(tamperedCaTest.cleanupObserved, 'Private credential directory must be removed after tampered CA test');
+
+const malformedCaFile = path.join(os.tmpdir(), `malformed-ca-${process.pid}.pem`);
+fs.writeFileSync(malformedCaFile, '-----BEGIN CERTIFICATE-----\nthis-is-not-valid-base64-content!!!\n-----END CERTIFICATE-----\n');
+const malformedCaTest = runCredentialHandling({ SOURCE_DATABASE_SSLROOTCERT: toBashPath(malformedCaFile) });
+fs.rmSync(malformedCaFile, { force: true });
+assert.notEqual(malformedCaTest.result.status, 0, 'Malformed CA root certificate must fail closed');
+assert.ok(malformedCaTest.result.stderr.includes('Configured CA root certificate is malformed or unreadable.'));
+assert.ok(malformedCaTest.cleanupObserved, 'Private credential directory must be removed after malformed CA test');
 
 const missingCredentialCases = [
   ['missing pooler variable', { SOURCE_POOLER_HOST: '' }],
@@ -276,6 +294,9 @@ mustContain(workflow, "steps.backup.outputs.restore_verdict == 'VERIFIED_LOGICAL
 mustContain(workflow, 'compression-level: 0', 'GitHub must not repackage plaintext input');
 mustContain(workflow, 'actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683', 'Checkout action must be commit-pinned');
 mustContain(workflow, 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02', 'Artifact upload action must be commit-pinned');
+mustContain(workflow, 'Verify authentic Supabase Root CA certificate', 'Supabase Root CA verification step must be present');
+mustContain(workflow, 'EXPECTED_FINGERPRINT="807025ad50d4ed219d2c9c7d299c004f824eb00cf7f65afef607d07b72e6cafa"', 'Workflow must verify pinned CA fingerprint');
+mustContain(workflow, 'SOURCE_DATABASE_SSLROOTCERT: scripts/backup/supabase-prod-ca-2021.crt', 'Workflow backup step must supply the verified Supabase Root CA');
 
 assert.ok(!/AGE_(SECRET|PRIVATE|IDENTITY)|PRIVATE_KEY/i.test(workflow), 'Private age key material must never be referenced by the workflow');
 assert.ok(!workflow.includes('--identity'), 'Age private identities must never be used in GitHub Actions');
@@ -286,7 +307,10 @@ mustContain(runner, '--validate-source-url-only', 'Source URL validation must be
 mustContain(runner, 'build_and_validate_source_database_url python3', 'The backup path must invoke the tested source URL validator');
 mustContain(runner, 'SOURCE_DATABASE_URL="postgresql://${SOURCE_DATABASE_USER}@${SOURCE_POOLER_HOST}', 'The validated source URI must remain passwordless');
 mustContain(runner, 'SOURCE_DATABASE_SSLMODE="verify-full"', 'Source database TLS mode must be verify-full');
-mustContain(runner, 'SOURCE_DATABASE_SSLROOTCERT="${SOURCE_DATABASE_SSLROOTCERT-system}"', 'Source database CA root certificate must default to system trust');
+mustContain(runner, 'DEFAULT_SUPABASE_CA_FILE="scripts/backup/supabase-prod-ca-2021.crt"', 'Default Supabase CA file must be configured');
+mustContain(runner, 'PINNED_SUPABASE_ROOT_CA_SHA256="807025ad50d4ed219d2c9c7d299c004f824eb00cf7f65afef607d07b72e6cafa"', 'Pinned Supabase Root CA SHA-256 must be configured');
+mustContain(runner, 'SOURCE_DATABASE_SSLROOTCERT="${SOURCE_DATABASE_SSLROOTCERT-$DEFAULT_SUPABASE_CA_FILE}"', 'Source database CA root certificate must default to authentic Supabase CA');
+mustContain(runner, 'validate_ca_root_certificate', 'CA root certificate validation must be invoked');
 mustContain(runner, 'require_value SOURCE_DATABASE_SSLROOTCERT', 'Source database CA root certificate must be non-empty');
 mustContain(runner, 'env -i', 'PostgreSQL commands must discard inherited libpq environment overrides');
 mustContain(runner, 'PGSSLMODE="$SOURCE_DATABASE_SSLMODE"', 'Source commands must pass PGSSLMODE');
@@ -343,6 +367,21 @@ mustContain(runbook, 'official Supabase CA certificate', 'Runbook must document 
 assert.ok(!runbook.includes('sslmode=require'), 'Runbook must not document sslmode=require');
 mustContain(runbook, 'REMOTE_BACKUP_EXECUTED=NO', 'Current no-execution state must be explicit');
 
+const supabaseCaPath = 'scripts/backup/supabase-prod-ca-2021.crt';
+assert.ok(fs.existsSync(supabaseCaPath), 'Authentic Supabase Root CA certificate file must exist');
+const supabaseCaContent = fs.readFileSync(supabaseCaPath, 'utf8');
+const caB64 = supabaseCaContent
+  .split(/\r?\n/)
+  .filter((line) => line && !line.startsWith('-----'))
+  .join('');
+const caDer = Buffer.from(caB64, 'base64');
+const caDerSha256 = createHash('sha256').update(caDer).digest('hex');
+const expectedDerSha256 = '807025ad50d4ed219d2c9c7d299c004f824eb00cf7f65afef607d07b72e6cafa';
+assert.equal(caDerSha256, expectedDerSha256, 'Supabase Root CA DER SHA-256 fingerprint must match pinned value');
+const expectedFileSha256 = '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7';
+const fileSha256 = createHash('sha256').update(fs.readFileSync(supabaseCaPath)).digest('hex');
+assert.equal(fileSha256, expectedFileSha256, 'Supabase Root CA file SHA-256 must match official distribution');
+
 console.log(`Source database URL validator positive cases: ${positiveValidatorCases.length}/${positiveValidatorCases.length} PASS`);
 console.log(`Source database URL validator negative cases: ${negativeValidatorCases.length}/${negativeValidatorCases.length} PASS`);
 console.log(`Credential preflight negative cases: ${missingCredentialCases.length}/${missingCredentialCases.length} PASS`);
@@ -352,5 +391,8 @@ console.log('PGPASSFILE permission and escaping tests: PASS');
 console.log('PGPASSFILE normal, failure, and signal cleanup tests: PASS');
 console.log('PGPASSFILE artifact exclusion test: PASS');
 console.log('Failed restore publication suppression test: PASS');
+console.log('Authentic Supabase Root CA certificate integrity: PASS');
+console.log('Tampered CA fingerprint mismatch fail-closed test: PASS');
+console.log('Malformed CA fail-closed test: PASS');
 console.log('Zero-cost backup workflow static qualification: PASS');
 console.log('Remote database connections attempted: 0');
