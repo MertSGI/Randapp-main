@@ -48,7 +48,7 @@ Before approving the pull-request merge, the owner must first protect the produc
 
 The runner installs PostgreSQL 17 client binaries and uses:
 
-- The exact shared Session Pooler identity `postgres.rwedeejhjazwjthdjzrt` on the owner-supplied host, port `5432`, database `postgres`, and `sslmode=require`. The password is never embedded in a URI or process argument.
+- The exact shared Session Pooler identity `postgres.rwedeejhjazwjthdjzrt` on the owner-supplied host, port `5432`, database `postgres`, and `sslmode=verify-full` with CA trust verification via `sslrootcert=system` (or an explicit CA certificate path). The password is never embedded in a URI or process argument. Downgrading to unverified TLS modes (such as require or verify-ca) or disabling certificate verification is strictly rejected.
 - A source-only `PGPASSFILE` created under the job's private temporary directory with mode `0600`. Password-file metacharacters are escaped, inherited libpq settings are discarded, disposable restore credentials use a separate password file, and cleanup runs after success, failure, or a termination signal.
 - `pg_dumpall --roles-only --no-role-passwords` for non-secret role definitions and grants.
 - `pg_dump --format=custom` for database schema, table data, RLS policies, ACLs, functions/RPCs, large objects, and visible extension definitions.
@@ -56,6 +56,12 @@ The runner installs PostgreSQL 17 client binaries and uses:
 - A disposable `postgres:17.6-alpine` restore target reachable only at loopback.
 - `psql` role restoration and `pg_restore --exit-on-error --single-transaction` for atomic, fail-closed restore testing.
 - A source-versus-restored catalog fingerprint comparison.
+
+### TLS and CA trust verification
+
+Source PostgreSQL connections strictly enforce `sslmode=verify-full` with complete hostname and certificate verification. PostgreSQL 17 supports `sslrootcert=system` to validate certificates against the operating system's trusted certificate authorities.
+
+If the Supabase Session Pooler certificate cannot be validated using system trust (for example, because Supabase uses its own root authority `prod-ca-2021` rather than a standard public CA in the OS trust bundle), the runner must not downgrade to `require`. Instead, download the official Supabase CA certificate (`prod-ca-2021.crt`) from **Supabase Dashboard > Database Settings > SSL Configuration**, provide the certificate path via `SOURCE_DATABASE_SSLROOTCERT`, and verify trust with `sslmode=verify-full`. Connections with missing CA trust, wrong hostname, or TLS downgrade fail closed.
 
 Exact source role and extension inventories, unavailable PostgreSQL 17 extensions, and sanitized restore diagnostics are placed inside the encrypted bundle. A managed role, missing extension, ownership failure, restore error, or catalog mismatch produces `NOT_RESTORABLE_IN_DISPOSABLE_POSTGRES_17`; it is never reported as a verified restore.
 

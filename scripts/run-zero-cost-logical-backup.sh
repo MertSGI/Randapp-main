@@ -7,7 +7,8 @@ EXPECTED_PROJECT_REF="rwedeejhjazwjthdjzrt"
 SOURCE_DATABASE_USER="postgres.${EXPECTED_PROJECT_REF}"
 SOURCE_DATABASE_PORT="5432"
 SOURCE_DATABASE_NAME="postgres"
-SOURCE_DATABASE_SSLMODE="require"
+SOURCE_DATABASE_SSLMODE="verify-full"
+SOURCE_DATABASE_SSLROOTCERT="${SOURCE_DATABASE_SSLROOTCERT-system}"
 VALIDATE_SOURCE_URL_ONLY="--validate-source-url-only"
 TEST_SOURCE_CREDENTIALS_ONLY="--test-source-credential-handling"
 TEST_RESTORE_VERDICT_ONLY="--test-restore-verdict-handling"
@@ -73,7 +74,7 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 
 EXPECTED_PROJECT_REF = "rwedeejhjazwjthdjzrt"
 POOLER_HOST = re.compile(r"aws-[0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*\.pooler\.supabase\.com")
-ALLOWED_TLS_MODES = {"require", "verify-ca", "verify-full"}
+ALLOWED_TLS_MODES = {"verify-full"}
 ALLOWED_QUERY_KEYS = {"sslmode", "sslrootcert"}
 ROUTING_OVERRIDE_KEYS = {
     "database",
@@ -145,16 +146,16 @@ for key, value in query_pairs:
 
 sslmode = query.get("sslmode")
 if sslmode not in ALLOWED_TLS_MODES:
-    reject("sslmode=require or a verified mode is required")
-if "sslrootcert" in query:
-    if sslmode not in {"verify-ca", "verify-full"} or not query["sslrootcert"]:
-        reject("sslrootcert requires a verified TLS mode")
+    reject("sslmode=verify-full is required")
+sslrootcert = query.get("sslrootcert")
+if not sslrootcert:
+    reject("sslrootcert is required for CA trust verification")
 PY
 }
 
 build_and_validate_source_database_url() {
   local python_command="$1"
-  SOURCE_DATABASE_URL="postgresql://${SOURCE_DATABASE_USER}@${SOURCE_POOLER_HOST}:${SOURCE_DATABASE_PORT}/${SOURCE_DATABASE_NAME}?sslmode=${SOURCE_DATABASE_SSLMODE}"
+  SOURCE_DATABASE_URL="postgresql://${SOURCE_DATABASE_USER}@${SOURCE_POOLER_HOST}:${SOURCE_DATABASE_PORT}/${SOURCE_DATABASE_NAME}?sslmode=${SOURCE_DATABASE_SSLMODE}&sslrootcert=${SOURCE_DATABASE_SSLROOTCERT}"
   export SOURCE_DATABASE_URL
   validate_source_database_url "$python_command"
   unset SOURCE_DATABASE_URL
@@ -246,6 +247,7 @@ run_source_postgres_command() {
     PGDATABASE="$SOURCE_DATABASE_NAME" \
     PGUSER="$SOURCE_DATABASE_USER" \
     PGSSLMODE="$SOURCE_DATABASE_SSLMODE" \
+    PGSSLROOTCERT="$SOURCE_DATABASE_SSLROOTCERT" \
     PGPASSFILE="$SOURCE_PGPASSFILE" \
     PGCONNECT_TIMEOUT=15 \
     "$@"
@@ -317,6 +319,11 @@ if [[ "${1:-}" == "$TEST_SOURCE_CREDENTIALS_ONLY" ]]; then
     exit 1
   }
   require_value LARI_EXPECTED_SOURCE_PGPASS_SHA256
+  require_value SOURCE_DATABASE_SSLROOTCERT
+  if [[ "$SOURCE_DATABASE_SSLROOTCERT" != "system" && ! -f "$SOURCE_DATABASE_SSLROOTCERT" ]]; then
+    printf 'Configured CA root certificate file does not exist.\n' >&2
+    exit 1
+  fi
   build_and_validate_source_database_url "$VALIDATOR_PYTHON"
   prepare_private_credentials
   assert_private_source_credentials
@@ -406,6 +413,11 @@ unset \
   PGSSLMODE PGSSLROOTCERT PGSSLSNI PGTARGETSESSIONATTRS PGUSER \
   SOURCE_DATABASE_URL
 
+require_value SOURCE_DATABASE_SSLROOTCERT
+if [[ "$SOURCE_DATABASE_SSLROOTCERT" != "system" && ! -f "$SOURCE_DATABASE_SSLROOTCERT" ]]; then
+  printf 'Configured CA root certificate file does not exist.\n' >&2
+  exit 1
+fi
 build_and_validate_source_database_url python3
 prepare_private_credentials
 assert_private_source_credentials

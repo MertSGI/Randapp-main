@@ -74,36 +74,42 @@ const approvedHost = 'aws-0-eu-central-1.pooler.supabase.com';
 const approvedUser = 'postgres.rwedeejhjazwjthdjzrt';
 const positiveValidatorCases = [
   {
-    name: 'official-format shared Session Pooler with required TLS',
-    url: `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=require`,
+    name: 'official-format shared Session Pooler with verified system CA trust',
+    url: `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=verify-full&sslrootcert=system`,
   },
   {
-    name: 'official-format shared Session Pooler with verified TLS',
+    name: 'official-format shared Session Pooler with verified custom CA trust',
     url: `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=verify-full&sslrootcert=%2Ftmp%2Fsupabase-ca.pem`,
   },
 ];
 
 const negativeValidatorCases = [
-  ['lookalike pooler hostname', `postgresql://${approvedUser}@${approvedHost}.evil.example:5432/postgres?sslmode=require`],
-  ['wrong username for the correct project', `postgresql://postgres@${approvedHost}:5432/postgres?sslmode=require`],
-  ['another project pooler username', `postgresql://postgres.anotherprojectref123@${approvedHost}:5432/postgres?sslmode=require`],
-  ['direct endpoint instead of the approved shared pooler', 'postgresql://postgres@db.rwedeejhjazwjthdjzrt.supabase.co:5432/postgres?sslmode=require'],
-  ['transaction pooler port', `postgresql://${approvedUser}@${approvedHost}:6543/postgres?sslmode=require`],
-  ['missing TLS requirement', `postgresql://${approvedUser}@${approvedHost}:5432/postgres`],
-  ['disabled TLS', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=disable`],
+  ['lookalike pooler hostname', `postgresql://${approvedUser}@${approvedHost}.evil.example:5432/postgres?sslmode=verify-full&sslrootcert=system`],
+  ['wrong username for the correct project', `postgresql://postgres@${approvedHost}:5432/postgres?sslmode=verify-full&sslrootcert=system`],
+  ['another project pooler username', `postgresql://postgres.anotherprojectref123@${approvedHost}:5432/postgres?sslmode=verify-full&sslrootcert=system`],
+  ['direct endpoint instead of the approved shared pooler', 'postgresql://postgres@db.rwedeejhjazwjthdjzrt.supabase.co:5432/postgres?sslmode=verify-full&sslrootcert=system'],
+  ['transaction pooler port', `postgresql://${approvedUser}@${approvedHost}:6543/postgres?sslmode=verify-full&sslrootcert=system`],
+  ['missing TLS mode', `postgresql://${approvedUser}@${approvedHost}:5432/postgres`],
+  ['disabled TLS mode', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=disable`],
+  ['allow TLS mode', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=allow`],
   ['preferred but non-required TLS', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=prefer`],
-  ['source URI containing a password', `postgresql://${approvedUser}:offline-test-password@${approvedHost}:5432/postgres?sslmode=require`],
-  ['query-string host override', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=require&host=evil.example`],
-  ['query-string hostaddr override', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=require&hostaddr=203.0.113.10`],
-  ['query-string service override', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=require&service=evil`],
-  ['query-string port override', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=require&port=5432`],
-  ['query-string passfile override', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=require&passfile=%2Ftmp%2Fevil`],
-  ['connection parameter injection', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=require&options=-csearch_path%3Devil`],
-  ['duplicated connection parameter', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=require&sslmode=require`],
-  ['conflicting connection parameters', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=require&sslmode=disable`],
-  ['localhost endpoint', `postgresql://${approvedUser}@localhost:5432/postgres?sslmode=require`],
-  ['non-approved external host', `postgresql://${approvedUser}@database.example.com:5432/postgres?sslmode=require`],
-  ['wrong database name', `postgresql://${approvedUser}@${approvedHost}:5432/template1?sslmode=require`],
+  ['unverified required TLS downgrade', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=require`],
+  ['unverified required TLS with root cert', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=require&sslrootcert=system`],
+  ['verify-ca TLS downgrade without hostname verification', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=verify-ca&sslrootcert=system`],
+  ['missing CA trust root certificate', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=verify-full`],
+  ['empty CA trust root certificate', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=verify-full&sslrootcert=`],
+  ['source URI containing a password', `postgresql://${approvedUser}:offline-test-password@${approvedHost}:5432/postgres?sslmode=verify-full&sslrootcert=system`],
+  ['query-string host override', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=verify-full&sslrootcert=system&host=evil.example`],
+  ['query-string hostaddr override', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=verify-full&sslrootcert=system&hostaddr=203.0.113.10`],
+  ['query-string service override', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=verify-full&sslrootcert=system&service=evil`],
+  ['query-string port override', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=verify-full&sslrootcert=system&port=5432`],
+  ['query-string passfile override', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=verify-full&sslrootcert=system&passfile=%2Ftmp%2Fevil`],
+  ['connection parameter injection', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=verify-full&sslrootcert=system&options=-csearch_path%3Devil`],
+  ['duplicated connection parameter', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=verify-full&sslrootcert=system&sslmode=verify-full`],
+  ['conflicting connection parameters', `postgresql://${approvedUser}@${approvedHost}:5432/postgres?sslmode=verify-full&sslrootcert=system&sslmode=disable`],
+  ['localhost endpoint', `postgresql://${approvedUser}@localhost:5432/postgres?sslmode=verify-full&sslrootcert=system`],
+  ['non-approved external host', `postgresql://${approvedUser}@database.example.com:5432/postgres?sslmode=verify-full&sslrootcert=system`],
+  ['wrong database name', `postgresql://${approvedUser}@${approvedHost}:5432/template1?sslmode=verify-full&sslrootcert=system`],
   ['malformed URL', 'this-is-not-a-postgresql-uri'],
 ];
 
@@ -179,10 +185,19 @@ assertNoOutputLeak(
   'successful credential handling',
 );
 
+const customCaFile = path.join(os.tmpdir(), `test-ca-${process.pid}.pem`);
+fs.writeFileSync(customCaFile, '-----BEGIN CERTIFICATE-----\nOFFLINE-TEST-CA\n-----END CERTIFICATE-----\n');
+const customCaCredentialTest = runCredentialHandling({ SOURCE_DATABASE_SSLROOTCERT: toBashPath(customCaFile) });
+fs.rmSync(customCaFile, { force: true });
+assert.equal(customCaCredentialTest.result.status, 0, customCaCredentialTest.result.stderr);
+assert.ok(customCaCredentialTest.cleanupObserved, 'Private credential directory must be removed after custom CA test');
+
 const missingCredentialCases = [
   ['missing pooler variable', { SOURCE_POOLER_HOST: '' }],
   ['missing repository password secret', { SOURCE_DATABASE_PASSWORD: '' }],
   ['missing age recipient', { BACKUP_AGE_RECIPIENT: '' }],
+  ['missing CA root certificate parameter', { SOURCE_DATABASE_SSLROOTCERT: '' }],
+  ['nonexistent custom CA root certificate file', { SOURCE_DATABASE_SSLROOTCERT: '/nonexistent/supabase-ca.pem' }],
 ];
 
 for (const [name, overrides] of missingCredentialCases) {
@@ -270,8 +285,15 @@ mustContain(runner, 'unset SOURCE_DATABASE_PASSWORD', 'The repository password m
 mustContain(runner, '--validate-source-url-only', 'Source URL validation must be independently executable without a database connection');
 mustContain(runner, 'build_and_validate_source_database_url python3', 'The backup path must invoke the tested source URL validator');
 mustContain(runner, 'SOURCE_DATABASE_URL="postgresql://${SOURCE_DATABASE_USER}@${SOURCE_POOLER_HOST}', 'The validated source URI must remain passwordless');
+mustContain(runner, 'SOURCE_DATABASE_SSLMODE="verify-full"', 'Source database TLS mode must be verify-full');
+mustContain(runner, 'SOURCE_DATABASE_SSLROOTCERT="${SOURCE_DATABASE_SSLROOTCERT-system}"', 'Source database CA root certificate must default to system trust');
+mustContain(runner, 'require_value SOURCE_DATABASE_SSLROOTCERT', 'Source database CA root certificate must be non-empty');
 mustContain(runner, 'env -i', 'PostgreSQL commands must discard inherited libpq environment overrides');
+mustContain(runner, 'PGSSLMODE="$SOURCE_DATABASE_SSLMODE"', 'Source commands must pass PGSSLMODE');
+mustContain(runner, 'PGSSLROOTCERT="$SOURCE_DATABASE_SSLROOTCERT"', 'Source commands must pass PGSSLROOTCERT');
 mustContain(runner, 'PGPASSFILE="$SOURCE_PGPASSFILE"', 'Source commands must use the private password file');
+assert.ok(!runner.includes('SOURCE_DATABASE_SSLMODE="require"'), 'sslmode=require must not be configured as the source database SSL mode');
+assert.ok(!runner.includes('ALLOWED_TLS_MODES = {"require"'), 'require must not be an allowed TLS mode in the validator');
 mustContain(runner, "trap 'terminate_on_signal 143' TERM", 'Signal cleanup must be installed');
 mustContain(runner, 'run_source_postgres_command pg_dumpall', 'Role capture must use the approved source identity');
 mustContain(runner, 'run_source_postgres_command pg_dump', 'Database capture must use the approved source identity');
@@ -315,6 +337,10 @@ mustContain(runbook, 'private key never enters GitHub', 'Off-GitHub private-key 
 mustContain(runbook, 'seven days', 'GitHub artifact retention must remain documented');
 mustContain(runbook, 'Supabase Storage object bytes', 'Storage object exclusion must be documented');
 mustContain(runbook, 'not a verified complete Supabase platform backup', 'Completeness boundary must be documented');
+mustContain(runbook, 'sslmode=verify-full', 'Runbook must document sslmode=verify-full');
+mustContain(runbook, 'sslrootcert=system', 'Runbook must document sslrootcert=system');
+mustContain(runbook, 'official Supabase CA certificate', 'Runbook must document the official Supabase CA certificate requirement');
+assert.ok(!runbook.includes('sslmode=require'), 'Runbook must not document sslmode=require');
 mustContain(runbook, 'REMOTE_BACKUP_EXECUTED=NO', 'Current no-execution state must be explicit');
 
 console.log(`Source database URL validator positive cases: ${positiveValidatorCases.length}/${positiveValidatorCases.length} PASS`);
