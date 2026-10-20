@@ -1,0 +1,105 @@
+name: LARI Zero-Cost Logical Backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_project_ref:
+        description: Supabase project reference to back up
+        required: true
+        type: string
+        default: rwedeejhjazwjthdjzrt
+      confirmation:
+        description: Type BACKUP rwedeejhjazwjthdjzrt to authorize this one run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lari-staging-logical-backup
+  cancel-in-progress: false
+
+jobs:
+  backup-and-restore-verify:
+    name: Encrypted backup and PostgreSQL 17 restore verification
+    if: ${{ github.ref == 'refs/heads/staging/supabase-staging-consistency' && inputs.source_project_ref == 'rwedeejhjazwjthdjzrt' && inputs.confirmation == 'BACKUP rwedeejhjazwjthdjzrt' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: lari-staging-backup
+    services:
+      restore-postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_USER: lari_restore_admin
+          POSTGRES_PASSWORD: disposable-only
+          POSTGRES_DB: restore_verification
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lari_restore_admin -d restore_verification"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 6
+
+    steps:
+      - name: Checkout the operator-selected source revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Install PostgreSQL 17 client and encryption tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
+          curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends age jq postgresql-client-17
+          test "$(pg_dump --version | awk '{print $3}' | cut -d. -f1)" = "17"
+          test "$(pg_restore --version | awk '{print $3}' | cut -d. -f1)" = "17"
+
+      - name: Verify authentic Supabase Root CA certificate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          EXPECTED_FINGERPRINT="807025ad50d4ed219d2c9c7d299c004f824eb00cf7f65afef607d07b72e6cafa"
+          CA_FILE="scripts/backup/supabase-prod-ca-2021.crt"
+          test -f "$CA_FILE"
+          ACTUAL_FINGERPRINT="$(openssl x509 -in "$CA_FILE" -outform DER | sha256sum | awk '{print $1}')"
+          test "$ACTUAL_FINGERPRINT" = "$EXPECTED_FINGERPRINT"
+          test "$(openssl x509 -in "$CA_FILE" -noout -subject -nameopt RFC2253)" = "subject=CN=Supabase Root 2021 CA,O=Supabase Inc,L=New Castle,ST=Delware,C=US"
+
+      - name: Create encrypted logical backup and verify disposable restore
+        id: backup
+        shell: bash
+        env:
+          SOURCE_PROJECT_REF: ${{ inputs.source_project_ref }}
+          SOURCE_POOLER_HOST: ${{ vars.LARI_STAGING_POOLER_HOST }}
+          SOURCE_DATABASE_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+          BACKUP_AGE_RECIPIENT: ${{ secrets.LARI_BACKUP_AGE_RECIPIENT }}
+          SOURCE_DATABASE_SSLROOTCERT: scripts/backup/supabase-prod-ca-2021.crt
+          LARI_DISPOSABLE_DB: "1"
+        run: bash scripts/run-zero-cost-logical-backup.sh
+
+      - name: Upload encrypted backup and verified manifest only
+        if: ${{ always() && steps.backup.outcome == 'success' && steps.backup.outputs.restore_verdict == 'VERIFIED_LOGICAL_RESTORE' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: lari-staging-encrypted-logical-backup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: backup-artifacts
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Enforce restore-test verdict
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -f backup-artifacts/manifest.json
+          test "$(jq -r '.restore_test.verdict' backup-artifacts/manifest.json)" = "VERIFIED_LOGICAL_RESTORE"
