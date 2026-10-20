@@ -15,6 +15,7 @@ VALIDATE_SOURCE_URL_ONLY="--validate-source-url-only"
 TEST_SOURCE_CREDENTIALS_ONLY="--test-source-credential-handling"
 TEST_RESTORE_VERDICT_ONLY="--test-restore-verdict-handling"
 TEST_PG17_CLIENT_SELECTION_ONLY="--test-pg17-client-selection"
+TEST_DISPOSABLE_ROLE_RESTORE_ONLY="--test-disposable-role-restore"
 
 SOURCE_DATABASE_PASSWORD_VALUE="${SOURCE_DATABASE_PASSWORD:-}"
 unset SOURCE_DATABASE_PASSWORD
@@ -246,6 +247,81 @@ build_and_validate_source_database_url() {
   unset SOURCE_DATABASE_URL
 }
 
+prepare_disposable_role_restore() {
+  local input_roles_sql="$1"
+  local output_restore_sql="$2"
+  local python_command="${3:-python3}"
+
+  [[ -f "$input_roles_sql" ]] || {
+    printf 'Input roles dump file not found: %s\n' "$input_roles_sql" >&2
+    return 1
+  }
+
+  "$python_command" - "$input_roles_sql" "$output_restore_sql" <<'PY'
+import re
+import sys
+
+input_path = sys.argv[1]
+output_path = sys.argv[2]
+
+with open(input_path, 'r', encoding='utf-8') as f:
+    lines = f.readlines()
+
+grantor_pattern = re.compile(r'GRANTED\s+BY\s+("?[A-Za-z0-9_]+"?)\s*;?', re.IGNORECASE)
+grantors = set()
+for line in lines:
+    for match in grantor_pattern.findall(line):
+        cleaned = match.strip().strip('"')
+        if cleaned:
+            grantors.add(cleaned)
+
+grantors.add('supabase_admin')
+grantors.add('postgres')
+sorted_grantors = sorted(grantors)
+
+first_grant_idx = None
+for idx, line in enumerate(lines):
+    stripped = line.strip()
+    if stripped.startswith('--') or not stripped:
+        continue
+    if re.match(r'^GRANT\s+', stripped, re.IGNORECASE):
+        first_grant_idx = idx
+        break
+
+array_literal = ", ".join(f"'{g}'" for g in sorted_grantors)
+bootstrap_block = (
+    "\n-- LARİ Disposable Restore: Delegate ADMIN OPTION from bootstrap superuser to dump grantors\n"
+    "DO $lari_role_grant_bootstrap$\n"
+    "DECLARE\n"
+    "  target_role record;\n"
+    "  grantor_name text;\n"
+    f"  grantor_names text[] := ARRAY[{array_literal}];\n"
+    "BEGIN\n"
+    "  FOREACH grantor_name IN ARRAY grantor_names LOOP\n"
+    "    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = grantor_name) THEN\n"
+    "      FOR target_role IN\n"
+    "        SELECT rolname FROM pg_roles\n"
+    "        WHERE rolname !~ '^pg_'\n"
+    "          AND rolname <> current_user\n"
+    "          AND rolname <> grantor_name\n"
+    "      LOOP\n"
+    "        EXECUTE format('GRANT %I TO %I WITH ADMIN OPTION GRANTED BY %I', target_role.rolname, grantor_name, current_user);\n"
+    "      END LOOP;\n"
+    "    END IF;\n"
+    "  END LOOP;\n"
+    "END $lari_role_grant_bootstrap$;\n\n"
+)
+
+if first_grant_idx is not None:
+    new_content = "".join(lines[:first_grant_idx]) + bootstrap_block + "".join(lines[first_grant_idx:])
+else:
+    new_content = "".join(lines) + "\n" + bootstrap_block
+
+with open(output_path, 'w', encoding='utf-8') as f:
+    f.write(new_content)
+PY
+}
+
 escape_pgpass_field() {
   local value="$1"
   value="${value//\\/\\\\}"
@@ -468,6 +544,35 @@ if [[ "${1:-}" == "$TEST_PG17_CLIENT_SELECTION_ONLY" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "$TEST_DISPOSABLE_ROLE_RESTORE_ONLY" ]]; then
+  [[ "$#" -eq 3 ]] || {
+    printf 'Disposable role restore test mode requires input and output file paths.\n' >&2
+    exit 1
+  }
+  [[ "${LARI_OFFLINE_TEST_MODE:-}" == "1" ]] || {
+    printf 'Offline test guard is not enabled.\n' >&2
+    exit 1
+  }
+  input_roles="$2"
+  output_roles="$3"
+  VALIDATOR_PYTHON="${LARI_SOURCE_VALIDATOR_PYTHON:-python3}"
+  command -v "$VALIDATOR_PYTHON" >/dev/null 2>&1 || {
+    printf 'Required validator runtime is unavailable.\n' >&2
+    exit 1
+  }
+  prepare_disposable_role_restore "$input_roles" "$output_roles" "$VALIDATOR_PYTHON"
+  [[ -f "$output_roles" ]] || {
+    printf 'Prepared restore roles file was not created.\n' >&2
+    exit 1
+  }
+  grep -q 'DO \$lari_role_grant_bootstrap\$' "$output_roles" || {
+    printf 'Prepared restore roles file is missing the bootstrap delegation block.\n' >&2
+    exit 1
+  }
+  printf 'Disposable role restore preparation: PASS\n'
+  exit 0
+fi
+
 [[ "$#" -eq 0 ]] || {
   printf 'Unexpected command argument.\n' >&2
   exit 1
@@ -590,12 +695,16 @@ SERVER_VERSION_NUM="$(run_restore_postgres_command psql -X -qAt --set=ON_ERROR_S
 
 printf 'Restoring the exact dump into disposable PostgreSQL 17.\n'
 set +e
-run_restore_postgres_command psql \
-  -X -q --set=ON_ERROR_STOP=1 \
-  --file="$PRIVATE_DIR/roles.sql" \
-  >"$PRIVATE_DIR/restore-roles.stdout" \
-  2>"$PRIVATE_DIR/restore-roles.stderr"
-ROLES_RESTORE_STATUS=$?
+if ! prepare_disposable_role_restore "$PRIVATE_DIR/roles.sql" "$PRIVATE_DIR/restore-roles.sql" python3 2>>"$PRIVATE_DIR/restore-roles.stderr"; then
+  ROLES_RESTORE_STATUS=1
+else
+  run_restore_postgres_command psql \
+    -X -q --set=ON_ERROR_STOP=1 \
+    --file="$PRIVATE_DIR/restore-roles.sql" \
+    >"$PRIVATE_DIR/restore-roles.stdout" \
+    2>>"$PRIVATE_DIR/restore-roles.stderr"
+  ROLES_RESTORE_STATUS=$?
+fi
 
 DATABASE_RESTORE_STATUS=1
 if [[ "$ROLES_RESTORE_STATUS" -eq 0 ]]; then

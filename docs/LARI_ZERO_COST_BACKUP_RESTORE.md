@@ -63,6 +63,21 @@ Source PostgreSQL connections strictly enforce `sslmode=verify-full` with comple
 
 Because Supabase Session Pooler endpoints use Supabase's private root authority (`CN=Supabase Root 2021 CA`) rather than a public certificate authority in standard operating system root bundles, relying solely on `sslrootcert=system` cannot validate pooler certificates. To achieve complete automated provisioning without owner manual configuration, the repository embeds the authentic official Supabase CA certificate at `scripts/backup/supabase-prod-ca-2021.crt`. Both the GitHub Actions workflow and the backup runner validate its pinned DER SHA-256 fingerprint (`807025ad50d4ed219d2c9c7d299c004f824eb00cf7f65afef607d07b72e6cafa`) and exact subject before connecting, passing the verified path via `SOURCE_DATABASE_SSLROOTCERT`. If an alternative CA file is provided, it must exist, parse as a valid certificate, and match any expected fingerprint. Downgrading to unverified TLS modes (such as require or verify-ca) is strictly forbidden. Connections with missing CA trust, unreadable certificates, fingerprint mismatches, wrong hostname, or TLS downgrade fail closed.
 
+### Disposable PostgreSQL 17 role restoration and grantor delegation
+
+In PostgreSQL 16 and newer, role grants using `GRANT <role> TO <member> GRANTED BY <grantor>` require that the `<grantor>` hold the `ADMIN OPTION` on `<role>`. In live Supabase environments, `supabase_admin` was the creator of the managed roles (`anon`, `authenticated`, `service_role`, etc.) and thus possessed the implicit `ADMIN OPTION`.
+
+When replaying the global role dump (`roles.sql`) into a fresh disposable PostgreSQL 17 cluster initialized with `POSTGRES_USER: lari_restore_admin`, `lari_restore_admin` is the initial superuser that creates the roles. Consequently, `lari_restore_admin` holds the `ADMIN OPTION` on the created roles, while `supabase_admin` initially does not. Attempting to execute `GRANT ... GRANTED BY "supabase_admin"` without prior delegation fails with:
+`ERROR: permission denied to grant privileges as role "supabase_admin"`
+`DETAIL: The grantor must have the ADMIN option on role "anon".`
+
+To maintain an authentic restore without modifying the source dump:
+1. The pristine `roles.sql` dumped by `pg_dumpall` remains completely unmodified on disk and in the encrypted archive (`backup-bundle.tar.gz`).
+2. For the disposable restore qualification, the runner prepares `restore-roles.sql`, inserting an isolated bootstrap block between role definitions and role membership grants.
+3. The bootstrap block executes as the bootstrap superuser (`lari_restore_admin`), granting `WITH ADMIN OPTION GRANTED BY lari_restore_admin` to the detected grantors (`supabase_admin`, `postgres`) for all managed roles.
+4. Because `scripts/backup/catalog-fingerprint.sql` explicitly excludes any role membership where `grantor.rolname = 'lari_restore_admin'`, these intermediate delegation grants do not affect the catalog fingerprint.
+5. All original `GRANTED BY` clauses and ACL checks are strictly preserved. Naive workarounds that strip `GRANTED BY` attribute grants to `lari_restore_admin`, which causes the fingerprint query to filter them out (reducing role memberships to 0) and fails the catalog equivalence gate.
+
 Exact source role and extension inventories, unavailable PostgreSQL 17 extensions, and sanitized restore diagnostics are placed inside the encrypted bundle. A managed role, missing extension, ownership failure, restore error, or catalog mismatch produces `NOT_RESTORABLE_IN_DISPOSABLE_POSTGRES_17`; it is never reported as a verified restore.
 
 Only after the restore attempt does the workflow create an age-encrypted bundle. It deletes the temporary plaintext bundle and allows exactly two uploaded files: the `.age` ciphertext and `manifest.json`. The manifest records the encrypted artifact SHA256, source project identifier, UTC creation time, source revision, PostgreSQL versions, and restore-test verdict. The workflow recomputes and verifies the ciphertext hash before upload. A non-passing restore verdict deletes the upload candidates and fails the backup step; both the runner and the workflow upload condition require `VERIFIED_LOGICAL_RESTORE`.

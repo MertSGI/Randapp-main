@@ -348,6 +348,320 @@ assertNoOutputLeak(mixedVersionFailure, ['offline-test-password', approvedUser, 
 
 fs.rmSync(pgSelectionTestRoot, { recursive: true, force: true });
 
+// =========================================================================
+// POSTGRESQL 17.6 ROLE GRANTOR REPRODUCTION & RESOLUTION FIXTURE
+// =========================================================================
+
+class Pg17Engine {
+  constructor(bootstrapSuperuser = 'lari_restore_admin') {
+    this.currentUser = bootstrapSuperuser;
+    this.roles = new Map();
+    this.authMembers = [];
+
+    this.roles.set(bootstrapSuperuser, {
+      rolname: bootstrapSuperuser,
+      rolsuper: true,
+      rolinherit: true,
+      rolcreaterole: true,
+      rolcreatedb: true,
+      rolcanlogin: true,
+      rolreplication: true,
+      rolbypassrls: true,
+      rolconfig: null,
+    });
+  }
+
+  isAdminOfRole(grantor, targetRole) {
+    if (!this.roles.has(grantor) || !this.roles.has(targetRole)) {
+      return false;
+    }
+    if (grantor === targetRole) {
+      return true;
+    }
+    return this.authMembers.some(
+      (m) => m.role === targetRole && m.member === grantor && m.admin_option === true
+    );
+  }
+
+  execute(sql) {
+    const lines = sql.split('\n');
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i].trim();
+      i++;
+      if (!line || line.startsWith('--') || line.startsWith('SET ')) {
+        continue;
+      }
+
+      if (line.startsWith('DO $lari_role_grant_bootstrap$')) {
+        let blockContent = '';
+        while (i < lines.length && !lines[i].includes('END $lari_role_grant_bootstrap$;')) {
+          blockContent += lines[i] + '\n';
+          i++;
+        }
+        i++;
+        this.executeBootstrapBlock(blockContent);
+        continue;
+      }
+
+      const createMatch = line.match(/^CREATE\s+ROLE\s+"?([A-Za-z0-9_]+)"?;?/i);
+      if (createMatch) {
+        const roleName = createMatch[1];
+        if (this.roles.has(roleName)) {
+          throw new Error(`ERROR: role "${roleName}" already exists`);
+        }
+        this.roles.set(roleName, {
+          rolname: roleName,
+          rolsuper: false,
+          rolinherit: true,
+          rolcreaterole: false,
+          rolcreatedb: false,
+          rolcanlogin: false,
+          rolreplication: false,
+          rolbypassrls: false,
+          rolconfig: null,
+        });
+        // In PostgreSQL 16+, creator is implicitly given ADMIN OPTION on created role
+        this.authMembers.push({
+          role: roleName,
+          member: this.currentUser,
+          grantor: this.currentUser,
+          admin_option: true,
+        });
+        continue;
+      }
+
+      const alterMatch = line.match(/^ALTER\s+ROLE\s+"?([A-Za-z0-9_]+)"?\s+WITH\s+(.*?);?$/i);
+      if (alterMatch) {
+        const roleName = alterMatch[1];
+        const attrs = alterMatch[2].toUpperCase();
+        const role = this.roles.get(roleName);
+        if (role) {
+          if (attrs.includes('SUPERUSER') && !attrs.includes('NOSUPERUSER')) role.rolsuper = true;
+          if (attrs.includes('NOSUPERUSER')) role.rolsuper = false;
+          if (attrs.includes('CREATEROLE') && !attrs.includes('NOCREATEROLE')) role.rolcreaterole = true;
+          if (attrs.includes('LOGIN') && !attrs.includes('NOLOGIN')) role.rolcanlogin = true;
+          if (attrs.includes('BYPASSRLS') && !attrs.includes('NOBYPASSRLS')) role.rolbypassrls = true;
+        }
+        continue;
+      }
+
+      const grantMatch = line.match(/^GRANT\s+"?([A-Za-z0-9_]+)"?\s+TO\s+"?([A-Za-z0-9_]+)"?(?:\s+WITH\s+ADMIN\s+OPTION)?(?:\s+GRANTED\s+BY\s+"?([A-Za-z0-9_]+)"?)?;?$/i);
+      if (grantMatch) {
+        const targetRole = grantMatch[1];
+        const memberRole = grantMatch[2];
+        const hasAdminOption = /WITH\s+ADMIN\s+OPTION/i.test(line);
+        const grantor = grantMatch[3] || this.currentUser;
+
+        if (!this.roles.has(targetRole)) throw new Error(`ERROR: role "${targetRole}" does not exist`);
+        if (!this.roles.has(memberRole)) throw new Error(`ERROR: role "${memberRole}" does not exist`);
+        if (!this.roles.has(grantor)) throw new Error(`ERROR: role "${grantor}" does not exist`);
+        if (targetRole === memberRole) throw new Error(`ERROR: role "${targetRole}" is a member of role "${memberRole}"`);
+
+        // PostgreSQL 16/17 check_role_grantor validation:
+        if (!this.isAdminOfRole(grantor, targetRole)) {
+          throw new Error(
+            `ERROR: permission denied to grant privileges as role "${grantor}"\nDETAIL: The grantor must have the ADMIN option on role "${targetRole}".`
+          );
+        }
+
+        const existing = this.authMembers.find(
+          (m) => m.role === targetRole && m.member === memberRole && m.grantor === grantor
+        );
+        if (existing) {
+          existing.admin_option = existing.admin_option || hasAdminOption;
+        } else {
+          this.authMembers.push({
+            role: targetRole,
+            member: memberRole,
+            grantor: grantor,
+            admin_option: hasAdminOption,
+          });
+        }
+        continue;
+      }
+    }
+  }
+
+  executeBootstrapBlock(blockContent) {
+    const match = blockContent.match(/grantor_names\s+text\[\]\s*:=\s*ARRAY\[(.*?)\];/i);
+    if (!match) return;
+    const grantorNames = match[1]
+      .split(',')
+      .map((s) => s.trim().replace(/^'|'$/g, ''))
+      .filter(Boolean);
+
+    for (const grantor of grantorNames) {
+      if (this.roles.has(grantor)) {
+        for (const [rolname] of this.roles) {
+          if (!rolname.startsWith('pg_') && rolname !== this.currentUser && rolname !== grantor) {
+            const existing = this.authMembers.find(
+              (m) => m.role === rolname && m.member === grantor && m.grantor === this.currentUser
+            );
+            if (existing) {
+              existing.admin_option = true;
+            } else {
+              this.authMembers.push({
+                role: rolname,
+                member: grantor,
+                grantor: this.currentUser,
+                admin_option: true,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  computeRoleMembershipsFingerprint() {
+    const filtered = this.authMembers.filter((m) => {
+      return (
+        !m.role.startsWith('pg_') &&
+        !m.member.startsWith('pg_') &&
+        m.role !== 'lari_restore_admin' &&
+        m.member !== 'lari_restore_admin' &&
+        m.grantor !== 'lari_restore_admin'
+      );
+    });
+
+    filtered.sort((a, b) => {
+      const cmpRole = a.role.localeCompare(b.role);
+      if (cmpRole !== 0) return cmpRole;
+      const cmpMember = a.member.localeCompare(b.member);
+      if (cmpMember !== 0) return cmpMember;
+      return a.grantor.localeCompare(b.grantor);
+    });
+
+    const lines = filtered.map((m) => `"${m.role}"|"${m.member}"|"${m.grantor}"|${m.admin_option}`);
+    const aggregated = lines.join('\n');
+    const hash = createHash('md5').update(aggregated).digest('hex');
+
+    return {
+      object_count: filtered.length,
+      fingerprint: hash,
+      rows: lines,
+    };
+  }
+}
+
+const fixtureRolesSql = [
+  'CREATE ROLE "anon";',
+  'ALTER ROLE "anon" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;',
+  'CREATE ROLE "authenticated";',
+  'ALTER ROLE "authenticated" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;',
+  'CREATE ROLE "authenticator";',
+  'ALTER ROLE "authenticator" WITH NOSUPERUSER NOINHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
+  'CREATE ROLE "dashboard_user";',
+  'ALTER ROLE "dashboard_user" WITH NOSUPERUSER INHERIT CREATEROLE CREATEDB NOLOGIN REPLICATION NOBYPASSRLS;',
+  'CREATE ROLE "postgres";',
+  'ALTER ROLE "postgres" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN REPLICATION BYPASSRLS;',
+  'CREATE ROLE "service_role";',
+  'ALTER ROLE "service_role" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION BYPASSRLS;',
+  'CREATE ROLE "supabase_admin";',
+  'ALTER ROLE "supabase_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN REPLICATION BYPASSRLS;',
+  '-- Role memberships',
+  'GRANT "anon" TO "authenticator" GRANTED BY "supabase_admin";',
+  'GRANT "authenticated" TO "authenticator" GRANTED BY "supabase_admin";',
+  'GRANT "service_role" TO "authenticator" GRANTED BY "supabase_admin";',
+  'GRANT "supabase_admin" TO "postgres" WITH ADMIN OPTION GRANTED BY "supabase_admin";',
+].join('\n');
+
+const expectedSourceMemberships = [
+  '"anon"|"authenticator"|"supabase_admin"|false',
+  '"authenticated"|"authenticator"|"supabase_admin"|false',
+  '"service_role"|"authenticator"|"supabase_admin"|false',
+  '"supabase_admin"|"postgres"|"supabase_admin"|true',
+];
+expectedSourceMemberships.sort();
+const expectedAggregatedSource = expectedSourceMemberships.join('\n');
+const expectedSourceFingerprintResult = {
+  object_count: expectedSourceMemberships.length,
+  fingerprint: createHash('md5').update(expectedAggregatedSource).digest('hex'),
+  rows: expectedSourceMemberships,
+};
+
+// Test 1: Reproduce actual failed run 39397783444 (un-delegated replay fails closed)
+const brokenEngine = new Pg17Engine('lari_restore_admin');
+let reproductionError = null;
+try {
+  brokenEngine.execute(fixtureRolesSql);
+} catch (err) {
+  reproductionError = err.message;
+}
+assert.ok(reproductionError, 'Un-delegated restore must fail');
+mustContain(reproductionError, 'permission denied to grant privileges as role "supabase_admin"');
+mustContain(reproductionError, 'The grantor must have the ADMIN option on role "anon"');
+
+// Test 2: Execute runner CLI --test-disposable-role-restore to generate restore-roles.sql
+const roleRestoreTestRoot = fs.mkdtempSync(path.join(os.tmpdir(), `lari-role-restore-${process.pid}-`));
+const fixtureRolesFile = path.join(roleRestoreTestRoot, 'roles.sql');
+const preparedRestoreRolesFile = path.join(roleRestoreTestRoot, 'restore-roles.sql');
+fs.writeFileSync(fixtureRolesFile, fixtureRolesSql, 'utf8');
+
+const roleRestoreCliEnv = sanitizedEnvironment({
+  LARI_OFFLINE_TEST_MODE: '1',
+  ...(process.platform === 'win32' ? { LARI_SOURCE_VALIDATOR_PYTHON: 'python' } : {}),
+});
+const roleRestoreCliResult = spawnSync(
+  bashExecutable,
+  [runnerPath, '--test-disposable-role-restore', toBashPath(fixtureRolesFile), toBashPath(preparedRestoreRolesFile)],
+  {
+    cwd: process.cwd(),
+    env: roleRestoreCliEnv,
+    encoding: 'utf8',
+  }
+);
+assert.equal(roleRestoreCliResult.status, 0, `Role restore test mode must succeed: ${roleRestoreCliResult.stderr}`);
+mustContain(roleRestoreCliResult.stdout, 'Disposable role restore preparation: PASS');
+assert.ok(fs.existsSync(preparedRestoreRolesFile), 'Prepared restore roles file must exist');
+
+const preparedRestoreRolesContent = fs.readFileSync(preparedRestoreRolesFile, 'utf8');
+mustContain(preparedRestoreRolesContent, 'DO $lari_role_grant_bootstrap$');
+mustContain(preparedRestoreRolesContent, 'GRANT "anon" TO "authenticator" GRANTED BY "supabase_admin";');
+mustContain(preparedRestoreRolesContent, 'GRANT "authenticated" TO "authenticator" GRANTED BY "supabase_admin";');
+mustContain(preparedRestoreRolesContent, 'GRANT "service_role" TO "authenticator" GRANTED BY "supabase_admin";');
+mustContain(preparedRestoreRolesContent, 'GRANT "supabase_admin" TO "postgres" WITH ADMIN OPTION GRANTED BY "supabase_admin";');
+
+// Test 3: Positive replay of prepared restore-roles.sql in PG17 engine
+const successEngine = new Pg17Engine('lari_restore_admin');
+successEngine.execute(preparedRestoreRolesContent);
+const restoreFingerprintResult = successEngine.computeRoleMembershipsFingerprint();
+assert.equal(restoreFingerprintResult.object_count, expectedSourceFingerprintResult.object_count);
+assert.equal(restoreFingerprintResult.fingerprint, expectedSourceFingerprintResult.fingerprint);
+assert.deepEqual(restoreFingerprintResult.rows, expectedSourceFingerprintResult.rows);
+
+// Test 4: Negative test - Forbidden naive fix (stripping GRANTED BY)
+const strippedRolesSql = fixtureRolesSql.replace(/\s+GRANTED\s+BY\s+"[^"]+"/gi, '');
+const strippedEngine = new Pg17Engine('lari_restore_admin');
+strippedEngine.execute(strippedRolesSql);
+const strippedFingerprintResult = strippedEngine.computeRoleMembershipsFingerprint();
+assert.equal(strippedFingerprintResult.object_count, 0, 'Stripping GRANTED BY filters out all grants');
+assert.notEqual(strippedFingerprintResult.fingerprint, expectedSourceFingerprintResult.fingerprint);
+
+// Test 5: Negative test - Omitted grant causes fingerprint mismatch
+const omittedGrantEngine = new Pg17Engine('lari_restore_admin');
+const omittedGrantSql = preparedRestoreRolesContent.replace(/GRANT\s+"service_role"\s+TO\s+"authenticator"\s+GRANTED\s+BY\s+"supabase_admin";\r?\n?/i, '');
+assert.notEqual(omittedGrantSql, preparedRestoreRolesContent, 'Regex must successfully omit the target grant statement');
+omittedGrantEngine.execute(omittedGrantSql);
+const omittedFingerprintResult = omittedGrantEngine.computeRoleMembershipsFingerprint();
+assert.notEqual(omittedFingerprintResult.fingerprint, expectedSourceFingerprintResult.fingerprint);
+assert.equal(omittedFingerprintResult.object_count, expectedSourceFingerprintResult.object_count - 1);
+
+// Test 6: Negative test - Missing input file for runner CLI fails closed
+const missingFileResult = spawnSync(
+  bashExecutable,
+  [runnerPath, '--test-disposable-role-restore', '/nonexistent/roles.sql', toBashPath(preparedRestoreRolesFile)],
+  {
+    cwd: process.cwd(),
+    env: roleRestoreCliEnv,
+    encoding: 'utf8',
+  }
+);
+assert.notEqual(missingFileResult.status, 0, 'Missing roles file must fail closed');
+
+fs.rmSync(roleRestoreTestRoot, { recursive: true, force: true });
+
 
 mustContain(workflow, 'workflow_dispatch:', 'Backup workflow must be explicitly dispatched');
 for (const forbiddenTrigger of ['\n  push:', '\n  pull_request:', '\n  schedule:', '\n  repository_dispatch:']) {
@@ -418,6 +732,11 @@ mustContain(runner, 'Supabase Storage object bytes are not included', 'Storage b
 mustContain(runner, 'mapfile -t ARTIFACT_FILES', 'Artifact allowlist must be enforced');
 mustContain(runner, 'enforce_verified_restore', 'A failed restore verdict must terminate before upload');
 mustContain(runner, 'rm -rf -- "$ARTIFACT_DIR"', 'Failed restore artifacts must be removed before upload');
+mustContain(runner, 'prepare_disposable_role_restore', 'Disposable role restore preparation must be present');
+mustContain(runner, 'DO $lari_role_grant_bootstrap$', 'Bootstrap delegation DO block must be configured');
+mustContain(runner, 'TEST_DISPOSABLE_ROLE_RESTORE_ONLY="--test-disposable-role-restore"', 'Runner must support disposable role restore test mode');
+mustContain(runner, 'prepare_disposable_role_restore "$PRIVATE_DIR/roles.sql" "$PRIVATE_DIR/restore-roles.sql"', 'Runner must prepare restore-roles.sql from roles.sql');
+mustContain(runner, '--file="$PRIVATE_DIR/restore-roles.sql"', 'Disposable restore must execute restore-roles.sql');
 
 const dumpIndex = runner.search(/pg_dump \\\n  --format=custom/);
 const restoreIndex = runner.search(/pg_restore \\\n    --exit-on-error/);
@@ -448,6 +767,9 @@ mustContain(runbook, 'not a verified complete Supabase platform backup', 'Comple
 mustContain(runbook, 'sslmode=verify-full', 'Runbook must document sslmode=verify-full');
 mustContain(runbook, 'sslrootcert=system', 'Runbook must document sslrootcert=system');
 mustContain(runbook, 'official Supabase CA certificate', 'Runbook must document the official Supabase CA certificate requirement');
+mustContain(runbook, 'Disposable PostgreSQL 17 role restoration and grantor delegation', 'Runbook must document role grantor delegation');
+mustContain(runbook, 'The grantor must have the ADMIN option on role', 'Runbook must document grantor error detail');
+mustContain(runbook, 'restore-roles.sql', 'Runbook must document restore-roles.sql preparation');
 assert.ok(!runbook.includes('sslmode=require'), 'Runbook must not document sslmode=require');
 mustContain(runbook, 'REMOTE_BACKUP_EXECUTED=NO', 'Current no-execution state must be explicit');
 
@@ -482,5 +804,7 @@ console.log('PostgreSQL 17 client binary PATH selection test: PASS');
 console.log('PostgreSQL 17 client version mismatch fail-closed test: PASS');
 console.log('PostgreSQL 17 missing tools fail-closed test: PASS');
 console.log('PostgreSQL 17 isolated env -i execution test: PASS');
+console.log('PostgreSQL 17.6 role grantor reproduction & resolution fixture: PASS');
+console.log('Disposable role restore preparation test: PASS');
 console.log('Zero-cost backup workflow static qualification: PASS');
 console.log('Remote database connections attempted: 0');
