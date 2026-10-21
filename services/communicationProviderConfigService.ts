@@ -1,3 +1,5 @@
+import { getDataSourceMode } from './dataSourceConfig';
+
 export type ProviderMode = 
   | 'local_outbox_only'
   | 'email_provider_ready'
@@ -15,8 +17,44 @@ export interface CommunicationProviderConfig {
 
 const STORAGE_KEY = 'lari_communication_provider_config';
 
+function resolveEnv(): Record<string, any> {
+  try {
+    if (typeof import.meta !== 'undefined' && (import.meta as any)?.env) {
+      return (import.meta as any).env;
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    if (typeof globalThis !== 'undefined' && (globalThis as any)?.import?.meta?.env) {
+      return (globalThis as any).import.meta.env;
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    if (typeof process !== 'undefined' && process?.env) {
+      return process.env;
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function isPersistentMode(): boolean {
+  try {
+    if (getDataSourceMode() === 'supabase') return true;
+  } catch {
+    // fallback
+  }
+  const env = resolveEnv();
+  const mode = env.VITE_DATA_MODE || env.VITE_LARI_DATA_SOURCE;
+  return mode === 'supabase' || mode === 'supabase_staging' || mode === 'supabase_production';
+}
+
 const DEFAULT_CONFIG: CommunicationProviderConfig = {
-  mode: (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_COMMUNICATION_MODE as any) || 'local_outbox_only',
+  mode: 'local_outbox_only',
   emailProvider: 'mock',
   whatsappProvider: 'mock',
   smsProvider: 'mock',
@@ -26,7 +64,7 @@ const DEFAULT_CONFIG: CommunicationProviderConfig = {
 
 export const communicationProviderConfigService = {
   getConfig(): CommunicationProviderConfig {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && window.localStorage) {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         try {
@@ -42,20 +80,20 @@ export const communicationProviderConfigService = {
   updateConfig(patch: Partial<CommunicationProviderConfig>): CommunicationProviderConfig {
     const current = this.getConfig();
     const updated = { ...current, ...patch };
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && window.localStorage) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
     }
     return updated;
   },
 
   isProviderActive(channel: 'email' | 'whatsapp' | 'sms'): boolean {
-    const config = this.getConfig();
-    if (config.mode === 'local_outbox_only') {
+    // Fail closed: In persistent/Supabase mode or client browser without server attestation,
+    // external live provider delivery is strictly false.
+    if (isPersistentMode()) {
       return false;
     }
-    if (channel === 'email' && config.mode === 'email_provider_ready') return true;
-    if (channel === 'whatsapp' && config.mode === 'whatsapp_provider_ready') return true;
-    if (channel === 'sms' && config.mode === 'sms_provider_ready') return true;
+
+    // Client localStorage or VITE_COMMUNICATION_MODE cannot grant real external provider delivery authority.
     return false;
   }
 };
