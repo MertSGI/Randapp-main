@@ -160,7 +160,8 @@
     "qa:disposable-pg17-role-restore": "node scripts/verify-disposable-pg17-role-restore.mjs",
     "test:disposable-pg17-negative": "node scripts/test-disposable-pg17-negative.mjs",
     "qa:legal-persistence-failclosed": "node --import tsx scripts/test-legal-persistence-failclosed.mjs",
-    "qa:legal-schema-security-plan": "node --test scripts/test-legal-schema-security-plan.test.mjs"
+    "qa:legal-schema-security-plan": "node --test scripts/test-legal-schema-security-plan.test.mjs",
+    "qa:dev247-windows-supervisor": "node --test scripts/test-lari-dev-windows-supervisor.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",
