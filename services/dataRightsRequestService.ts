@@ -5,6 +5,7 @@ import {
 } from '../types';
 import { auditLogService } from './auditLogService';
 import { supportTicketService } from './supportTicketService';
+import { getDataSourceMode } from './dataSourceConfig';
 
 const RIGHTS_STORAGE_KEY = 'lari_data_rights_requests_v1';
 
@@ -23,8 +24,15 @@ export interface CreateRightsRequestInput {
 export const dataRightsRequestService = {
   /**
    * Creates a data rights request and creates an associated high-priority support ticket for manual team verification.
+   * In persistent (supabase) mode, direct client creation is rejected fail-closed.
    */
   createDataRightsRequest(input: CreateRightsRequestInput): DataRightsRequest {
+    if (getDataSourceMode() === 'supabase') {
+      throw new Error(
+        'LEGAL_PERSISTENCE_REQUIRED: Direct client data rights request cannot be recorded in persistent mode. Trusted server capability required.'
+      );
+    }
+
     const list = this._getRequestsFromStore();
     const id = `drq_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
@@ -131,8 +139,15 @@ export const dataRightsRequestService = {
 
   /**
    * Updates status of a data rights request.
+   * In persistent mode, client mutation is rejected fail-closed.
    */
   updateDataRightsRequestStatus(id: string, status: DataRightsRequestStatus, internalNotes?: string): DataRightsRequest | null {
+    if (getDataSourceMode() === 'supabase') {
+      throw new Error(
+        'LEGAL_PERSISTENCE_REQUIRED: Direct client data rights request status update cannot be performed in persistent mode. Trusted server capability required.'
+      );
+    }
+
     const list = this._getRequestsFromStore();
     const request = list.find(r => r.id === id);
     if (request) {
@@ -149,25 +164,17 @@ export const dataRightsRequestService = {
       // Log event
       auditLogService.logAuditEvent({
         tenantId: request.tenantId,
-        actorType: 'system',
+        actorType: 'tenant_owner',
         category: 'data_export',
-        severity: 'notice',
+        severity: 'info',
         action: 'data_rights_request_status_updated',
-        summary: `KVKK veri hakkı talebi durumu güncellendi: ${request.id} -> ${status}`,
-        safeDetails: { requestId: id, status, internalNotes }
-      });
-
-      // Synchronize linked support ticket if available
-      const linkedTicketId = request.metadata?.linkedSupportTicketId;
-      if (linkedTicketId && (status === 'completed' || status === 'cancelled' || status === 'rejected')) {
-        try {
-          const mappedStatus = status === 'completed' ? 'resolved' : (status === 'rejected' ? 'closed' : 'closed');
-          supportTicketService.updateSupportTicketStatus(linkedTicketId, mappedStatus as any);
-          supportTicketService.addInternalNote(linkedTicketId, `İlişkili KVKK Veri Hakkı Talebi tamamlandı/iptal edildi. Notlar: ${internalNotes || 'Yok'}`);
-        } catch (err) {
-          console.warn('Failed to update linked support ticket:', err);
+        summary: `KVKK talebi güncellendi: ${request.type} -> ${status}`,
+        safeDetails: {
+          requestId: id,
+          status,
+          type: request.type
         }
-      }
+      });
 
       return request;
     }
@@ -201,6 +208,7 @@ export const dataRightsRequestService = {
    * Generates a readiness summary report.
    */
   getDataRightsReadinessSummary() {
+    const isSupabase = getDataSourceMode() === 'supabase';
     const list = this._getRequestsFromStore();
     return {
       totalRequests: list.length,
@@ -216,7 +224,9 @@ export const dataRightsRequestService = {
         consent_withdrawal: list.filter(r => r.type === 'consent_withdrawal').length
       },
       requiresManualApproval: true,
-      hasLinkedSupportTickets: list.every(r => !!r.metadata?.linkedSupportTicketId || r.status !== 'submitted')
+      hasLinkedSupportTickets: list.every(r => !!r.metadata?.linkedSupportTicketId || r.status !== 'submitted'),
+      serverProofVerified: false,
+      persistenceMode: isSupabase ? 'unconfigured_server' : 'local_preview_simulation'
     };
   },
 
@@ -233,7 +243,7 @@ export const dataRightsRequestService = {
 
   _saveRequestsToStore(list: DataRightsRequest[]): void {
     try {
-      if (typeof window !== 'undefined') {
+      if (typeof window !== 'undefined' && getDataSourceMode() !== 'supabase') {
         localStorage.setItem(RIGHTS_STORAGE_KEY, JSON.stringify(list));
       }
     } catch (e) {
