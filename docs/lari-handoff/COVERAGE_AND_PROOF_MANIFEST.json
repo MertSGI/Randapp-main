@@ -1,0 +1,363 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at_utc": "2026-10-21T10:49:56Z",
+  "scope": "LARI-ONLY",
+  "handoff_branch": "handoff/lari-only-20261021",
+  "handoff_base_branch": "staging/supabase-staging-consistency",
+  "handoff_base_commit_sha": "c8dfd3d247c8669b3e21f883451c777a376133ed",
+  "selected_product_source_shas": {
+    "default_branch_head_sha": "c8dfd3d247c8669b3e21f883451c777a376133ed",
+    "integrated_full_product_release_gate_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+    "earlier_accepted_lari_source_sha": "06ebf176e411faf6820ded34987f894cc5e7dc9e",
+    "ui_accessibility_verified_sha": "ed3f1232c578ec969fb83e01335ab10659408d1b",
+    "p0_security_remediation_candidate_sha": "87ab5963dce92411db63d4616554eb63ca7f34f8",
+    "ui_v2_latest_remote_sha": "10fd95cf7bfac9d6d04d53647589dd0df6512054",
+    "ui_v2_local_worktree_head_sha": "1d4d31f2f5ab0de96dc464a476bf25a41e779458",
+    "backup_restore_pr3_head_sha": "2b238ed66c5ef4f47fd35b613f8dda405c85f60d",
+    "auxiliary_growth_os_main_sha": "b6d09c49e199d49e65ccbacc74d5bcd5ea440427"
+  },
+  "collection_completeness_verification": {
+    "canonical_product_repository": {
+      "full_name": "MertSGI/Randapp-main",
+      "github_repo_id": 1293251098,
+      "html_url": "https://github.com/MertSGI/Randapp-main",
+      "branches": {
+        "expected_total": 207,
+        "collected_count": 207,
+        "pagination_pages_fetched": 3,
+        "per_page": 100,
+        "exhausted_with_empty_or_partial_last_page": true,
+        "last_page_count": 7,
+        "source_endpoint": "https://api.github.com/repos/MertSGI/Randapp-main/branches?per_page=100",
+        "status": "COMPLETE_VERIFIED"
+      },
+      "reachable_git_commits": {
+        "expected_total": 1267,
+        "collected_count": 1267,
+        "traversal_method": "git rev-list --all --remotes across complete clone of all 207 remote branches",
+        "remote_tips_verified_against_github_api": 207,
+        "local_only_unpushed_commits_indexed": 4,
+        "status": "COMPLETE_VERIFIED"
+      },
+      "pull_requests": {
+        "expected_total": 3,
+        "collected_count": 3,
+        "pagination_pages_fetched": 1,
+        "per_page": 100,
+        "pr_numbers": [
+          1,
+          2,
+          3
+        ],
+        "merged_count": 2,
+        "open_count": 1,
+        "source_endpoint": "https://api.github.com/repos/MertSGI/Randapp-main/pulls?state=all&per_page=100",
+        "status": "COMPLETE_VERIFIED"
+      },
+      "github_actions_workflows": {
+        "expected_total": 66,
+        "collected_count": 66,
+        "pagination_pages_fetched": 1,
+        "per_page": 100,
+        "source_endpoint": "https://api.github.com/repos/MertSGI/Randapp-main/actions/workflows?per_page=100",
+        "status": "COMPLETE_VERIFIED"
+      },
+      "github_actions_workflow_runs": {
+        "github_reported_total_count": 779,
+        "collected_count": 779,
+        "pagination_pages_fetched": 8,
+        "per_page": 100,
+        "exhausted_with_empty_or_partial_last_page": true,
+        "last_page_count": 79,
+        "conclusion_breakdown": {
+          "success": 616,
+          "failure": 157,
+          "cancelled": 6
+        },
+        "key_ci_runs_deep_inspected_with_jobs_and_steps": 17,
+        "source_endpoint": "https://api.github.com/repos/MertSGI/Randapp-main/actions/runs?per_page=100",
+        "status": "COMPLETE_VERIFIED"
+      },
+      "repository_files_and_migrations": {
+        "default_branch_sha": "c8dfd3d247c8669b3e21f883451c777a376133ed",
+        "default_branch_tracked_files_count": 699,
+        "default_branch_sql_migrations_count": 56,
+        "integrated_release_gate_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+        "integrated_release_gate_tracked_files_count": 898,
+        "integrated_release_gate_sql_migrations_count": 97,
+        "all_97_migrations_sha256_hashed": true,
+        "status": "COMPLETE_VERIFIED"
+      }
+    },
+    "auxiliary_growth_os_repository": {
+      "full_name": "MertSGI/LARI-Growth-OS",
+      "github_repo_id": 1375587602,
+      "html_url": "https://github.com/MertSGI/LARI-Growth-OS",
+      "classification": "AUXILIARY_STANDALONE_NOT_MERGED_INTO_CORE_PRODUCT",
+      "branches_collected": 1,
+      "commits_collected": 2,
+      "pull_requests_collected": 0,
+      "workflows_collected": 0,
+      "workflow_runs_collected": 0,
+      "status": "COMPLETE_VERIFIED"
+    },
+    "protected_local_continuation_records": {
+      "local_lari_workspaces_inspected_readonly": 41,
+      "local_worktrees_mutated": 0,
+      "local_evidence_manifests_and_reports_reconciled": 30,
+      "status": "COMPLETE_VERIFIED"
+    },
+    "supabase_staging_metadata_reconciliation": {
+      "project_ref": "rwedeejhjazwjthdjzrt",
+      "project_name": "lari-staging",
+      "region": "eu-central-1",
+      "observed_status": "ACTIVE_HEALTHY",
+      "applied_migration_entries_count": 79,
+      "shared_version_entries_with_default_branch": 54,
+      "remote_only_applied_versions_count": 25,
+      "default_branch_only_unapplied_versions_count": 2,
+      "token_table_rows_read": 0,
+      "live_database_mutations_executed": 0,
+      "status": "COMPLETE_VERIFIED"
+    }
+  },
+  "explicit_unknowns_and_unavailable_records": [
+    {
+      "id": "UNKNOWN-01",
+      "category": "GITHUB_ENVIRONMENT_ADMIN_SETTINGS",
+      "item": "GitHub Environment `lari-staging-backup` branch deployment policy and environment secret names",
+      "status": "UNKNOWN_UNAVAILABLE_WITHOUT_OWNER_ADMIN_READBACK",
+      "explanation": "Workflow run 39397783444 failed on c8dfd3d2 because job `logical-backup` referenced `environment: lari-staging-backup` and failed with missing `STAGING_DB_URL` (`STAGING_DB_URL is required and must be provided via GitHub Secrets`). Reading or modifying GitHub Environment protection rules and secret bindings requires repository owner/admin settings access."
+    },
+    {
+      "id": "UNKNOWN-02",
+      "category": "GITHUB_BILLING_QUOTA",
+      "item": "Account-level GitHub Actions billing minutes and storage quota telemetry",
+      "status": "UNKNOWN_UNAVAILABLE",
+      "explanation": "Account-level billing endpoints are outside repository-scoped read inspection. Workflow design constraints (manual workflow_dispatch, zero-cost logical backup design, and 14-day artifact retention) were verified directly from `.github/workflows/staging-logical-backup.yml`."
+    },
+    {
+      "id": "UNKNOWN-03",
+      "category": "SUPABASE_STORAGE_BUCKETS",
+      "item": "Live Supabase Storage bucket object counts and byte volumes outside PostgreSQL `supabase_migrations.schema_migrations`",
+      "status": "UNKNOWN_NOT_QUERIED",
+      "explanation": "Read-only staging verification inspected PostgreSQL catalog metadata (`information_schema.role_table_grants`, `pg_policies`, `pg_class`, `supabase_migrations.schema_migrations`) without reading application rows or storage bucket objects."
+    },
+    {
+      "id": "UNKNOWN-04",
+      "category": "REMOTE_ONLY_MIGRATION_BODY_EQUIVALENCE",
+      "item": "Exact SQL DDL statement-by-statement equivalence of 4 remote-only `wp6_*` staging migration entries (`20261008063020`, `20261008063027`, `20261008063034`, `20261008063041`) against consolidated git migrations",
+      "status": "UNVERIFIED_PENDING_RESTORED_CLONE_SCHEMA_DIFF",
+      "explanation": "21 of the 25 remote-only applied migration versions on `lari-staging` match exact filenames on `72911e4fb68dd4f85f7fafef575089104102064e`; the remaining 4 `wp6_*` entries (`wp6_provider_availability_overrides`, `wp6_slot_holds_and_Dynamic_Buffers`, `wp6_create_hold_and_confirm_booking_rpcs`, `wp6_booking_lifecycle_transitions_and_audit`) correspond by name to capabilities later consolidated in `20261015000001_phase5_booking_holds_and_atomic_lifecycle.sql`, but exact live catalog DDL equivalence must be verified against a restored clone schema dump."
+    },
+    {
+      "id": "UNKNOWN-05",
+      "category": "POST_PR3_LIVE_BACKUP_AND_RESTORE_PROOF",
+      "item": "Live post-PR-#3 logical backup run and non-destructive disposable restore drill against `lari-staging`",
+      "status": "NOT_EXECUTED_BLOCKED_ON_PR3_MERGE_AND_SECRET",
+      "explanation": "PR #3 (`2b238ed66c5ef4f47fd35b613f8dda405c85f60d`) passed hosted qualification runs (39535433814, 39535439970, 39535473644), which use mock/fixture validation. It has not been merged into `staging/supabase-staging-consistency` and has not yet executed a real `pg_dump` / `pg_restore` against `lari-staging`."
+    },
+    {
+      "id": "UNKNOWN-06",
+      "category": "POST_P0_STAGING_SYNTHETIC_E2E",
+      "item": "Post-remediation synthetic staging E2E verification (`verify-staging-e2e-synthetic.mjs` / `verify-staging-release-gate.mjs`) against live `lari-staging`",
+      "status": "NOT_EXECUTED_PENDING_DB_REMEDIATION",
+      "explanation": "Hosted CI run 38530574971 verified the integrated release gate against an ephemeral local/CI stack on `72911e4fb68dd4f85f7fafef575089104102064e`, not against the live `lari-staging` database post-remediation."
+    },
+    {
+      "id": "UNKNOWN-07",
+      "category": "PRODUCTION_ENVIRONMENT",
+      "item": "Production Supabase project, production custom domain, live payment processor cutover, and production deployment telemetry",
+      "status": "NO_GO_NOT_PROVISIONED_OR_AUTHORIZED",
+      "explanation": "Production remains strictly NO_GO until staging backup/restore proof, staging P0 database token lockdown, migration convergence, and human release sign-off are completed."
+    }
+  ],
+  "publication_safety_and_hygiene_checks": {
+    "target_repository": "MertSGI/Randapp-main",
+    "target_branch": "handoff/lari-only-20261021",
+    "target_directory": "docs/lari-handoff/",
+    "documentation_only_diff": true,
+    "product_source_files_modified": 0,
+    "protected_branches_modified": 0,
+    "protected_local_worktrees_modified": 0,
+    "workflows_triggered_on_handoff_branch_push": 0,
+    "workflow_trigger_verification_detail": "Inspected all 8 `.github/workflows/*.yml` files on `c8dfd3d247c8669b3e21f883451c777a376133ed`; push triggers exist only for `staging/**` or `staging/supabase-staging-consistency`. Pushing `refs/heads/handoff/lari-only-20261021` triggers zero workflows and zero deployments.",
+    "secret_and_pii_scan_passed": true,
+    "secret_and_pii_findings_count": 0,
+    "aos_and_orchestration_history_excluded": true
+  },
+  "deliverable_files_manifest": [
+    {
+      "filename": "START_HERE.md",
+      "relative_path": "docs/lari-handoff/START_HERE.md",
+      "github_blob_url": "https://github.com/MertSGI/Randapp-main/blob/handoff/lari-only-20261021/docs/lari-handoff/START_HERE.md",
+      "bytes_disk": 12357,
+      "bytes_lf_normalized": 12298,
+      "sha256_disk": "64663956e8a007c87e2d8e13fe7ae065dc7831cc6363b25943cba5282abf6307",
+      "sha256_git_lf": "f53a4ef0347249b66391d39cce8f285e655db3b9d4165ae5de61014ec7e7df3f",
+      "line_count": 59
+    },
+    {
+      "filename": "CURRENT_PRODUCT_STATE.md",
+      "relative_path": "docs/lari-handoff/CURRENT_PRODUCT_STATE.md",
+      "github_blob_url": "https://github.com/MertSGI/Randapp-main/blob/handoff/lari-only-20261021/docs/lari-handoff/CURRENT_PRODUCT_STATE.md",
+      "bytes_disk": 18937,
+      "bytes_lf_normalized": 18852,
+      "sha256_disk": "8290718253f3356b33508875f98e65ce5179a6625f44d3850149bcab4d55caff",
+      "sha256_git_lf": "ea00d1b90bfa1b29ab5b63ed82c099df17fb8aec143fa58344628971b4b1d47f",
+      "line_count": 85
+    },
+    {
+      "filename": "COMPLETED_WORK_LEDGER.md",
+      "relative_path": "docs/lari-handoff/COMPLETED_WORK_LEDGER.md",
+      "github_blob_url": "https://github.com/MertSGI/Randapp-main/blob/handoff/lari-only-20261021/docs/lari-handoff/COMPLETED_WORK_LEDGER.md",
+      "bytes_disk": 23837,
+      "bytes_lf_normalized": 23737,
+      "sha256_disk": "173cf10a10ebe0bc12c4cd2dc4b11309b011379c6c8888b2ccfacaacc260fb1e",
+      "sha256_git_lf": "3291779c6792329bc4896b3fb732e407a633d50b12807eae651052d20711e80c",
+      "line_count": 100
+    },
+    {
+      "filename": "OPEN_WORK_AND_DEPENDENCIES.md",
+      "relative_path": "docs/lari-handoff/OPEN_WORK_AND_DEPENDENCIES.md",
+      "github_blob_url": "https://github.com/MertSGI/Randapp-main/blob/handoff/lari-only-20261021/docs/lari-handoff/OPEN_WORK_AND_DEPENDENCIES.md",
+      "bytes_disk": 10892,
+      "bytes_lf_normalized": 10784,
+      "sha256_disk": "6dc9321f4e2aed64c5c0820b69e8c341339d5ad40c1e2f5473cac1d2dfb71251",
+      "sha256_git_lf": "0e3aa8d16e9d3cc6e98f970f370a2142bfb6907a3ddec4e1e0d2bcedfca78dff",
+      "line_count": 108
+    },
+    {
+      "filename": "UI_V2_AND_DESIGN_CONTINUITY.md",
+      "relative_path": "docs/lari-handoff/UI_V2_AND_DESIGN_CONTINUITY.md",
+      "github_blob_url": "https://github.com/MertSGI/Randapp-main/blob/handoff/lari-only-20261021/docs/lari-handoff/UI_V2_AND_DESIGN_CONTINUITY.md",
+      "bytes_disk": 12095,
+      "bytes_lf_normalized": 12004,
+      "sha256_disk": "60a038f449db1c39abd6bb093ff1292108fc6a9118da68d4a14d63b546974702",
+      "sha256_git_lf": "f465efb25749f6f7d1e669761afeec881d067f5a0d3977974386b2bc485f9a49",
+      "line_count": 91
+    },
+    {
+      "filename": "STAGING_SECURITY_MIGRATIONS_AND_RELEASE.md",
+      "relative_path": "docs/lari-handoff/STAGING_SECURITY_MIGRATIONS_AND_RELEASE.md",
+      "github_blob_url": "https://github.com/MertSGI/Randapp-main/blob/handoff/lari-only-20261021/docs/lari-handoff/STAGING_SECURITY_MIGRATIONS_AND_RELEASE.md",
+      "bytes_disk": 19699,
+      "bytes_lf_normalized": 19586,
+      "sha256_disk": "bef50095f8d83cd3f8f56196094f7e686e08fa2b1738d572105938cb7b2b9e41",
+      "sha256_git_lf": "31489baad6cd32bac73863cd836fe131187f7df892a0eae5361ff494f4c3295c",
+      "line_count": 113
+    },
+    {
+      "filename": "GITHUB_HISTORY_INDEX.json",
+      "relative_path": "docs/lari-handoff/GITHUB_HISTORY_INDEX.json",
+      "github_blob_url": "https://github.com/MertSGI/Randapp-main/blob/handoff/lari-only-20261021/docs/lari-handoff/GITHUB_HISTORY_INDEX.json",
+      "bytes_disk": 1523935,
+      "bytes_lf_normalized": 1490268,
+      "sha256_disk": "8f0e53e182bb61180e8dbe64207b125ea01ab4e834b08f4674bd2eed5732750a",
+      "sha256_git_lf": "4f6e7998286613685abf4953724a6d7a3651b49f30592a8156a7ef6b79297841",
+      "line_count": 33668
+    },
+    {
+      "filename": "NEW_CHAT_START.md",
+      "relative_path": "docs/lari-handoff/NEW_CHAT_START.md",
+      "github_blob_url": "https://github.com/MertSGI/Randapp-main/blob/handoff/lari-only-20261021/docs/lari-handoff/NEW_CHAT_START.md",
+      "bytes_disk": 3524,
+      "bytes_lf_normalized": 3491,
+      "sha256_disk": "8eeffb47bb3052ce67018dded1abfef25af07971035ab6e695ad99ec7589f303",
+      "sha256_git_lf": "041e751280a1df639485cb6eb33d0dd5b4d3e1a1ceffeebba6036d4c6010f8e0",
+      "line_count": 33
+    }
+  ],
+  "checkpoint_files_manifest": [
+    {
+      "checkpoint_file": "00_initial_workspace_discovery.json",
+      "bytes": 1543,
+      "sha256": "8b2798dda4278519af0023917c078a4a16bda4d671599fa7c79b3bc2f8fefdd0"
+    },
+    {
+      "checkpoint_file": "01a_randapp_metadata.json",
+      "bytes": 472,
+      "sha256": "6ed6f58fca76e247584156aeee609738dd8c8ea26251f2e4b42121ae4d9b1455"
+    },
+    {
+      "checkpoint_file": "01b_randapp_branches.json",
+      "bytes": 34814,
+      "sha256": "23a3b656badae3c5fdd4e77a95e4b4675a99bf2466a699d842ee1659385424dd"
+    },
+    {
+      "checkpoint_file": "01c_randapp_pulls.json",
+      "bytes": 7265,
+      "sha256": "145c5448feae2ecf020367ae6d9ad9b0ba6d1557dfcf595514c14991946796fd"
+    },
+    {
+      "checkpoint_file": "01d_randapp_workflows.json",
+      "bytes": 25606,
+      "sha256": "57754e31bddf28d20869fcf23915189ef036d03d661ef074294d32ecd64b61e5"
+    },
+    {
+      "checkpoint_file": "01e_lari_growth_os_all.json",
+      "bytes": 1631,
+      "sha256": "0c8722c43f77a4a0a02db9022d5caadb13ed7445ace85a065702ae0cee18e83e"
+    },
+    {
+      "checkpoint_file": "02a_randapp_workflow_runs.json",
+      "bytes": 500788,
+      "sha256": "1cc5167bda91a910d235dd8751bea87041a1bd3b88f569f9922049a239921345"
+    },
+    {
+      "checkpoint_file": "02b_randapp_specific_ci_runs.json",
+      "bytes": 103861,
+      "sha256": "f5af1ceeee9161d74dbd027cc62a8bfea3f0e8f756f5f9765be3011c13513f43"
+    },
+    {
+      "checkpoint_file": "03a_local_lari_workspaces.json",
+      "bytes": 21021,
+      "sha256": "ce73f94cb42c831f88f1a2d7158ae2530a14ed09c605c368b0cfa17e8ef515a6"
+    },
+    {
+      "checkpoint_file": "03b_randapp_reachable_commits.json",
+      "bytes": 654605,
+      "sha256": "c3bef9a82f9ff17a9c1dc0a8abababac043a3726e25fbb132cbf75b7d4ae3bbd"
+    },
+    {
+      "checkpoint_file": "03c_branch_lineage_and_local_reconciliation.json",
+      "bytes": 1811,
+      "sha256": "d8bcab598cb08a77b053f8ec96a615e824a59237cc816b1f397cc8d8fe80166e"
+    },
+    {
+      "checkpoint_file": "03d_randapp_default_branch_files.json",
+      "bytes": 48266,
+      "sha256": "34d0d0f702127f58a7f51237098a6a0b99cb7a7450fda64d82e5c724fa8afb8b"
+    },
+    {
+      "checkpoint_file": "03e_local_lari_evidence_docs.json",
+      "bytes": 20038,
+      "sha256": "eeae21a18341569d2f2e4caf4c0ece2d4b9e08009ac4d28d7dd750ebc2fba2a6"
+    },
+    {
+      "checkpoint_file": "04a_enriched_branches_reconciliation.json",
+      "bytes": 131519,
+      "sha256": "fe09fece45244ab1185ddb6e950456a5a30393d161eb89275ae5fb0e770fed40"
+    },
+    {
+      "checkpoint_file": "04b_key_refs_structure.json",
+      "bytes": 116006,
+      "sha256": "c8df1e33f1c52a726ae7e1676d38d5ccc9c90eee4275880f885fb8f7678528a7"
+    },
+    {
+      "checkpoint_file": "04c_extracted_key_source_and_docs.json",
+      "bytes": 3080992,
+      "sha256": "f05ea0fa03994ae7149a1da18062eb4abab38a303871ca0c5ae1ae960b86b1b8"
+    },
+    {
+      "checkpoint_file": "05_rel_gate_docs_and_workflow_triggers.json",
+      "bytes": 303891,
+      "sha256": "baf991de2d56e8c4753897a145c12f5683b7656f88b558131534c45a37e34dbd"
+    }
+  ],
+  "self_verification": {
+    "canonical_payload_sha256": "9c90d21bc1fe6083d9f80d4a257202e4cc50f2b5eb88ca39c2d32bade49686f6",
+    "required_deliverables_count": 9,
+    "sibling_deliverables_hashed_count": 8
+  }
+}
