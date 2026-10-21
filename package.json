@@ -152,7 +152,8 @@
     "qa:release-gate-evidence": "node scripts/generate-release-gate-evidence.mjs",
     "qa:dev247-runner": "node --test scripts/test-lari-dev-runner.test.mjs",
     "dev247:once": "node scripts/lari-dev-runner/index.mjs once",
-    "dev247:status": "node scripts/lari-dev-runner/index.mjs status"
+    "dev247:status": "node scripts/lari-dev-runner/index.mjs status",
+    "qa:payment-client-failclosed": "node --import tsx scripts/test-payment-client-failclosed.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",

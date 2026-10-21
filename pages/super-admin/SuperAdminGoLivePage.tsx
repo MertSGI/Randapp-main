@@ -30,7 +30,15 @@ const SuperAdminGoLivePage: React.FC = () => {
   }, []);
 
   const handleSetMode = (mode: PaymentRunMode) => {
-    paymentRunModeService.setInternalDiagnosticsMode(mode);
+    if (mode === 'production_live') {
+      alert('Production Live modu istemci üzerinden aktif edilemez. Sunucu doğrulaması ve kurumsal onay gereklidir.');
+      return;
+    }
+    try {
+      paymentRunModeService.setInternalDiagnosticsMode(mode);
+    } catch {
+      return;
+    }
     setRunModeStatus(paymentRunModeService.getStatus(report?.blockers.length || 0));
   };
 
@@ -86,14 +94,14 @@ const SuperAdminGoLivePage: React.FC = () => {
                  >
                    <div className="flex items-center justify-between mb-2">
                      <span className={`font-bold ${isActive ? 'text-indigo-900 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-300'}`}>
-                       {mode === 'local_dry_run' ? 'QA Dry Run' : mode === 'sandbox_live' ? 'Sandbox Live' : 'Production Live'}
+                       {mode === 'local_dry_run' ? 'QA Dry Run' : mode === 'sandbox_live' ? 'Sandbox Live' : 'Production Live (Aktivasyon Bekliyor)'}
                      </span>
                      {isActive && <span className="bg-indigo-600 w-2.5 h-2.5 rounded-full animate-pulse"></span>}
                    </div>
                    <p className="text-xs text-slate-500 dark:text-slate-400">
                       {mode === 'local_dry_run' && 'Local simülasyon. Iyzico bağlantısı yok.'}
                       {mode === 'sandbox_live' && 'Gerçek test. Supabase + Iyzico Sandbox.'}
-                      {mode === 'production_live' && 'Gerçek para. Tamamlanan testler sonrası canlı ortam.'}
+                      {mode === 'production_live' && 'Aktivasyon bekliyor. Sunucu doğrulaması ve kurumsal onay olmadan açılamaz.'}
                    </p>
                  </button>
               );
