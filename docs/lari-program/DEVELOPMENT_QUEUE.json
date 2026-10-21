@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "program_id": "LARI-PROGRAM-20261021",
+  "base_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+  "tasks": [
+    {
+      "task_id": "DEV247-A",
+      "kind": "documentation",
+      "dependency_ids": [],
+      "base_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+      "target_paths": [
+        "docs/lari-program/MASTER_DECISIONS.md",
+        "docs/lari-program/DEVELOPMENT_QUEUE.json",
+        "docs/lari-program/ACCEPTANCE_MATRIX.md"
+      ],
+      "acceptance_checks": [
+        "json_parse_valid",
+        "acyclic_dependencies",
+        "three_files_present"
+      ],
+      "risk_class": "low",
+      "authority": "autonomous",
+      "model_preference": "flash",
+      "state": "READY"
+    },
+    {
+      "task_id": "DEV247-B",
+      "kind": "native_qa",
+      "dependency_ids": [
+        "DEV247-A"
+      ],
+      "base_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+      "target_paths": [
+        "scripts/lari-dev-runner/index.mjs",
+        "scripts/lari-dev-runner/core.mjs",
+        "scripts/lari-dev-runner/checkpoint.mjs",
+        "scripts/lari-dev-runner/adapters.mjs",
+        "scripts/test-lari-dev-runner.test.mjs",
+        ".gitignore",
+        "package.json"
+      ],
+      "acceptance_checks": [
+        "node_test_runner_pass",
+        "exclusive_lock_check",
+        "zero_network_side_effects",
+        "npm_run_qa_dev247_runner_pass"
+      ],
+      "risk_class": "medium",
+      "authority": "autonomous",
+      "model_preference": "argon",
+      "state": "READY"
+    },
+    {
+      "task_id": "V1-PAY-GUARD",
+      "kind": "security",
+      "dependency_ids": [
+        "DEV247-A"
+      ],
+      "base_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+      "target_paths": [
+        "services/paymentRunModeService.ts",
+        "services/subscriptionService.ts",
+        "scripts/test-payment-client-failclosed.mjs",
+        "package.json"
+      ],
+      "acceptance_checks": [
+        "fail_closed_production_live",
+        "tamper_storage_rejected",
+        "supabase_mode_blocks_checkout",
+        "npm_run_qa_payment_client_failclosed_pass"
+      ],
+      "risk_class": "high",
+      "authority": "autonomous",
+      "model_preference": "flash",
+      "state": "READY"
+    },
+    {
+      "task_id": "V1-BACKUP-PR3-OWNER",
+      "kind": "owner_gate",
+      "dependency_ids": [
+        "DEV247-A"
+      ],
+      "base_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+      "target_paths": [
+        ".github/workflows/backup-*.yml"
+      ],
+      "acceptance_checks": [
+        "owner_signature_verified",
+        "pr3_merge_approved",
+        "zero_workflow_dispatch_autonomous"
+      ],
+      "risk_class": "critical",
+      "authority": "owner_approval_required",
+      "model_preference": "none",
+      "state": "HOLD_OWNER"
+    },
+    {
+      "task_id": "V1-RESTORE-OWNER",
+      "kind": "owner_gate",
+      "dependency_ids": [
+        "V1-BACKUP-PR3-OWNER"
+      ],
+      "base_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+      "target_paths": [
+        "scripts/restore-*.sh"
+      ],
+      "acceptance_checks": [
+        "dry_run_drill_complete",
+        "owner_drill_signoff",
+        "rto_rpo_conformance"
+      ],
+      "risk_class": "critical",
+      "authority": "owner_approval_required",
+      "model_preference": "none",
+      "state": "HOLD_OWNER"
+    },
+    {
+      "task_id": "V1-STAGING-P0-OWNER",
+      "kind": "owner_gate",
+      "dependency_ids": [
+        "DEV247-A"
+      ],
+      "base_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+      "target_paths": [
+        "supabase/migrations/*"
+      ],
+      "acceptance_checks": [
+        "staging_sql_migration_safe",
+        "owner_db_migration_signoff",
+        "zero_destructive_ddl"
+      ],
+      "risk_class": "critical",
+      "authority": "owner_approval_required",
+      "model_preference": "none",
+      "state": "HOLD_OWNER"
+    },
+    {
+      "task_id": "V1-STAGING-E2E",
+      "kind": "native_qa",
+      "dependency_ids": [
+        "DEV247-B",
+        "V1-PAY-GUARD"
+      ],
+      "base_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+      "target_paths": [
+        "scripts/qa-*.mjs"
+      ],
+      "acceptance_checks": [
+        "booking_lifecycle_pass",
+        "auth_isolation_pass",
+        "tenant_scoping_pass"
+      ],
+      "risk_class": "medium",
+      "authority": "autonomous",
+      "model_preference": "flash",
+      "state": "READY"
+    },
+    {
+      "task_id": "V1-SOURCE-CONVERGENCE",
+      "kind": "integration",
+      "dependency_ids": [
+        "V1-STAGING-E2E",
+        "V1-STAGING-P0-OWNER"
+      ],
+      "base_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+      "target_paths": [
+        "*"
+      ],
+      "acceptance_checks": [
+        "full_source_tree_reconciled",
+        "zero_untracked_drift",
+        "ci_clean_build"
+      ],
+      "risk_class": "critical",
+      "authority": "owner_approval_required",
+      "model_preference": "flash",
+      "state": "HOLD_OWNER"
+    },
+    {
+      "task_id": "V1-LEGAL-PERSISTENCE",
+      "kind": "compliance",
+      "dependency_ids": [
+        "V1-STAGING-E2E"
+      ],
+      "base_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+      "target_paths": [
+        "services/legalConsentService.ts",
+        "supabase/migrations/*legal*"
+      ],
+      "acceptance_checks": [
+        "kvkk_consent_persisted",
+        "audit_log_immutable",
+        "retention_policy_checked"
+      ],
+      "risk_class": "medium",
+      "authority": "autonomous",
+      "model_preference": "flash",
+      "state": "READY"
+    },
+    {
+      "task_id": "V1-COMM-REAL-STATE",
+      "kind": "service",
+      "dependency_ids": [
+        "V1-STAGING-E2E"
+      ],
+      "base_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+      "target_paths": [
+        "services/communicationStateService.ts"
+      ],
+      "acceptance_checks": [
+        "notification_state_machine_valid",
+        "webhook_contract_verified",
+        "mock_provider_fallback_safe"
+      ],
+      "risk_class": "low",
+      "authority": "autonomous",
+      "model_preference": "flash",
+      "state": "READY"
+    },
+    {
+      "task_id": "V1-PILOT",
+      "kind": "deployment",
+      "dependency_ids": [
+        "V1-SOURCE-CONVERGENCE",
+        "V1-LEGAL-PERSISTENCE",
+        "V1-COMM-REAL-STATE"
+      ],
+      "base_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+      "target_paths": [
+        "*"
+      ],
+      "acceptance_checks": [
+        "pilot_tenant_onboarded",
+        "real_booking_executed",
+        "owner_launch_authorization"
+      ],
+      "risk_class": "critical",
+      "authority": "owner_approval_required",
+      "model_preference": "none",
+      "state": "HOLD_OWNER"
+    },
+    {
+      "task_id": "V2-UI-CONVERGENCE",
+      "kind": "feature",
+      "dependency_ids": [
+        "V1-PILOT"
+      ],
+      "base_sha": "72911e4fb68dd4f85f7fafef575089104102064e",
+      "target_paths": [
+        "components/ui-v2/*",
+        "pages/*"
+      ],
+      "acceptance_checks": [
+        "design_token_consistency",
+        "responsive_layout_tested",
+        "a11y_wcag_aa_pass"
+      ],
+      "risk_class": "medium",
+      "authority": "owner_approval_required",
+      "model_preference": "flash",
+      "state": "HOLD_OWNER"
+    }
+  ]
+}
