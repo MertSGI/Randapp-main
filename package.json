@@ -159,7 +159,8 @@
     "qa:zero-cost-backup-workflow": "node scripts/verify-zero-cost-backup-workflow.mjs",
     "qa:disposable-pg17-role-restore": "node scripts/verify-disposable-pg17-role-restore.mjs",
     "test:disposable-pg17-negative": "node scripts/test-disposable-pg17-negative.mjs",
-    "qa:legal-persistence-failclosed": "node --import tsx scripts/test-legal-persistence-failclosed.mjs"
+    "qa:legal-persistence-failclosed": "node --import tsx scripts/test-legal-persistence-failclosed.mjs",
+    "qa:legal-schema-security-plan": "node --test scripts/test-legal-schema-security-plan.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",
