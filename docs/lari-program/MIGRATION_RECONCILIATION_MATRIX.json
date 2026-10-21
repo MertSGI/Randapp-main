@@ -1,0 +1,479 @@
+{
+  "schema_version": "1.0",
+  "program": "LARI-MIGRATION-RECONCILIATION-20261021",
+  "baseline_source_sql_count": 97,
+  "evidence_baseline_ledger_count": 79,
+  "total_differences_count": 25,
+  "p0_cutover_count": 1,
+  "total_entries": 26,
+  "items": [
+    {
+      "item_id": "DIFF-01",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20260920_phase3_resource_capacity_foundation.sql",
+      "source_sha256": "cd22a1e591acf27736564a21ab4bf6164bd2f50eaf90ce384a94471c89b2b10b",
+      "version": "20260920",
+      "class": "DRIFT_OR_CONFLICT",
+      "collision_group": "COLLISION_20260920",
+      "remote_counterpart": null,
+      "required_catalog_proof": "RESTORED_CLONE_VERIFY_DEPENDENCY_CHAIN",
+      "target_forward_operation": "FORWARD_MIGRATION_ONLY",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-02",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20260921_phase3_customer360_segmentation_foundation.sql",
+      "source_sha256": "7d2a4883a04cd763c66770fa37dff9965110656af952a78975eb9bd7472e323a",
+      "version": "20260921",
+      "class": "DRIFT_OR_CONFLICT",
+      "collision_group": "COLLISION_20260921",
+      "remote_counterpart": null,
+      "required_catalog_proof": "NEEDS_CLONE_DIFF",
+      "target_forward_operation": "NEEDS_CLONE_DIFF",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-03",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20260921_phase3_package_limits_multibranch_completeness.sql",
+      "source_sha256": "3355c621ab1878a9e147d236201d34c1d2910bcfd03346d1dfc0b82fad0beacb",
+      "version": "20260921",
+      "class": "DRIFT_OR_CONFLICT",
+      "collision_group": "COLLISION_20260921",
+      "remote_counterpart": null,
+      "required_catalog_proof": "NEEDS_CLONE_DIFF",
+      "target_forward_operation": "NEEDS_CLONE_DIFF",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-04",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20260922_phase3_reporting_analytics_foundation.sql",
+      "source_sha256": "66b9a3a8ed562e820d932e11e3d243d6ca669b21e73050fd451f58c18c2fb239",
+      "version": "20260922",
+      "class": "MISSING_UNAPPLIED_PROVEN",
+      "collision_group": null,
+      "remote_counterpart": null,
+      "required_catalog_proof": "RESTORED_CLONE_VERIFY_DEPENDENCY_CHAIN",
+      "target_forward_operation": "FORWARD_MIGRATION_ONLY",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-05",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20260923_phase3_custom_domain_verification_foundation.sql",
+      "source_sha256": "b07bffb5e684d84e016930d016de1dfae2df6e2f3947b631d4e836bbd936d09b",
+      "version": "20260923",
+      "class": "MISSING_UNAPPLIED_PROVEN",
+      "collision_group": null,
+      "remote_counterpart": null,
+      "required_catalog_proof": "RESTORED_CLONE_VERIFY_DEPENDENCY_CHAIN",
+      "target_forward_operation": "FORWARD_MIGRATION_ONLY",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-06",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20260924_phase4_deposit_noshow_policy_foundation.sql",
+      "source_sha256": "72a4837c9dcbf989a37b914fded294d30f26640b524bc06c2fd2eac633a0fa05",
+      "version": "20260924",
+      "class": "MISSING_UNAPPLIED_PROVEN",
+      "collision_group": null,
+      "remote_counterpart": null,
+      "required_catalog_proof": "RESTORED_CLONE_VERIFY_DEPENDENCY_CHAIN",
+      "target_forward_operation": "FORWARD_MIGRATION_ONLY",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-07",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20260925_phase4_loyalty_reactivation_foundation.sql",
+      "source_sha256": "facc274c7760287f650000803b319c4c726f7bbb172293f39d1d56c1118d5e52",
+      "version": "20260925",
+      "class": "DRIFT_OR_CONFLICT",
+      "collision_group": "COLLISION_20260925",
+      "remote_counterpart": null,
+      "required_catalog_proof": "RESTORED_CLONE_VERIFY_DEPENDENCY_CHAIN",
+      "target_forward_operation": "FORWARD_MIGRATION_ONLY",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-08",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20260925_phase4_packages_memberships_foundation.sql",
+      "source_sha256": "214ea0b5ac237ad9978ea5980e6e9c335e3786f80ac87a137af3072e6e5384d6",
+      "version": "20260925",
+      "class": "DRIFT_OR_CONFLICT",
+      "collision_group": "COLLISION_20260925",
+      "remote_counterpart": null,
+      "required_catalog_proof": "RESTORED_CLONE_VERIFY_DEPENDENCY_CHAIN",
+      "target_forward_operation": "FORWARD_MIGRATION_ONLY",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-09",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20260926_phase4_giftcards_wallet_foundation.sql",
+      "source_sha256": "7ae4f8c62aa7a4afe5f3192cf8a799627c72078e57e3af9ae47d9a83b4a0d4f9",
+      "version": "20260926",
+      "class": "MISSING_UNAPPLIED_PROVEN",
+      "collision_group": null,
+      "remote_counterpart": null,
+      "required_catalog_proof": "RESTORED_CLONE_VERIFY_DEPENDENCY_CHAIN",
+      "target_forward_operation": "FORWARD_MIGRATION_ONLY",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-10",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20260927_phase5_vertical_skus_commercial_packaging.sql",
+      "source_sha256": "393b1b39c4a8b1c5d0d144c9a5c3b0cb49a6b51bf008cc91215d393269334fdf",
+      "version": "20260927",
+      "class": "MISSING_UNAPPLIED_PROVEN",
+      "collision_group": null,
+      "remote_counterpart": null,
+      "required_catalog_proof": "RESTORED_CLONE_VERIFY_DEPENDENCY_CHAIN",
+      "target_forward_operation": "FORWARD_MIGRATION_ONLY",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-11",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20260928_phase5_clinic_practitioners_workspace_hardening.sql",
+      "source_sha256": "a40a4ff56d8e6f35746b4fdb31e15da1b0f5b4f835c4f3496e0637482993e269",
+      "version": "20260928",
+      "class": "DRIFT_OR_CONFLICT",
+      "collision_group": "COLLISION_20260928",
+      "remote_counterpart": null,
+      "required_catalog_proof": "NEEDS_CLONE_DIFF",
+      "target_forward_operation": "NEEDS_CLONE_DIFF",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-12",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20260928_phase5_ht_treatment_journey_quote_itinerary.sql",
+      "source_sha256": "11b436a8977cc515aa947d78820e6bbf4d99846d3db45dcdbf9e2fee26c514bb",
+      "version": "20260928",
+      "class": "DRIFT_OR_CONFLICT",
+      "collision_group": "COLLISION_20260928",
+      "remote_counterpart": null,
+      "required_catalog_proof": "RESTORED_CLONE_VERIFY_DEPENDENCY_CHAIN",
+      "target_forward_operation": "FORWARD_MIGRATION_ONLY",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-13",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20260929_phase5_scheduling_buffer_parity_hardening.sql",
+      "source_sha256": "4f4a199c73decce1a3f681c44f93cd989ec6791ccebd25ee30aae184f9dcd4ad",
+      "version": "20260929",
+      "class": "DRIFT_OR_CONFLICT",
+      "collision_group": null,
+      "remote_counterpart": null,
+      "required_catalog_proof": "NEEDS_CLONE_DIFF",
+      "target_forward_operation": "NEEDS_CLONE_DIFF",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-14",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20260930_phase6_product_inventory_foundation.sql",
+      "source_sha256": "493e2057c6fa91529dc965b6d1b1175ae9de39e99f46a76bb11f64641825f391",
+      "version": "20260930",
+      "class": "MISSING_UNAPPLIED_PROVEN",
+      "collision_group": null,
+      "remote_counterpart": null,
+      "required_catalog_proof": "RESTORED_CLONE_VERIFY_DEPENDENCY_CHAIN",
+      "target_forward_operation": "FORWARD_MIGRATION_ONLY",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-15",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20261001_phase6_node2_suppliers_po_receiving.sql",
+      "source_sha256": "07ce01b67d32a37a9602c3e1bed7752001f8fb5dc82fc3142a3744c42c6c685b",
+      "version": "20261001",
+      "class": "MISSING_UNAPPLIED_PROVEN",
+      "collision_group": null,
+      "remote_counterpart": null,
+      "required_catalog_proof": "RESTORED_CLONE_VERIFY_DEPENDENCY_CHAIN",
+      "target_forward_operation": "FORWARD_MIGRATION_ONLY",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-16",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20261002_phase6_node3_pos_mixed_cart_checkout.sql",
+      "source_sha256": "e96db26d50ac57ce0f206281805935a205cebbf59688e44cb03aff2b61dd2d92",
+      "version": "20261002",
+      "class": "MISSING_UNAPPLIED_PROVEN",
+      "collision_group": null,
+      "remote_counterpart": null,
+      "required_catalog_proof": "RESTORED_CLONE_VERIFY_DEPENDENCY_CHAIN",
+      "target_forward_operation": "FORWARD_MIGRATION_ONLY",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-17",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20261003_phase6_node4_staff_commissions_tips.sql",
+      "source_sha256": "be084edc1e0822b1830beca918f263a6e5a6929abc7867344a0a10d46605b59e",
+      "version": "20261003",
+      "class": "MISSING_UNAPPLIED_PROVEN",
+      "collision_group": null,
+      "remote_counterpart": null,
+      "required_catalog_proof": "RESTORED_CLONE_VERIFY_DEPENDENCY_CHAIN",
+      "target_forward_operation": "FORWARD_MIGRATION_ONLY",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-18",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20261004_phase7_node1_verified_reviews_foundation.sql",
+      "source_sha256": "323b643610a0135e135c154564020fbcb49d4185a29fbf8f22b0bd359c820d3b",
+      "version": "20261004",
+      "class": "UNKNOWN",
+      "collision_group": null,
+      "remote_counterpart": "wp6_phase7_node1_verified_reviews_foundation@20261008063020",
+      "required_catalog_proof": "RESTORED_PG17_CLONE_CATALOG_PROOF",
+      "target_forward_operation": "RESTORED_CLONE_FINGERPRINT",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-19",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20261005_phase7_node2_discovery_marketplace_projection.sql",
+      "source_sha256": "22c578726ad5e6efbae09923c0ca25d3dde95b2ea5330d1fbcbdcd77923f860f",
+      "version": "20261005",
+      "class": "UNKNOWN",
+      "collision_group": null,
+      "remote_counterpart": "wp6_phase7_node2_discovery_marketplace_projection@20261008063027",
+      "required_catalog_proof": "RESTORED_PG17_CLONE_CATALOG_PROOF",
+      "target_forward_operation": "RESTORED_CLONE_FINGERPRINT",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-20",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20261006_phase7_node3_favorites_fast_rebooking.sql",
+      "source_sha256": "d80747f80ebb7e8e152114558cad75258251be338e4fa3f6b22da80055bf8539",
+      "version": "20261006",
+      "class": "UNKNOWN",
+      "collision_group": null,
+      "remote_counterpart": "wp6_phase7_node3_favorites_fast_rebooking@20261008063031",
+      "required_catalog_proof": "RESTORED_PG17_CLONE_CATALOG_PROOF",
+      "target_forward_operation": "RESTORED_CLONE_FINGERPRINT",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-21",
+      "side": "LOCAL_ONLY",
+      "local_filename": "20261007_program_v2_security_surface_hardening.sql",
+      "source_sha256": "f5948464c2cdca5956022afe58cd4cef15ef384f1bbc6390d5d65cb431876b0b",
+      "version": "20261007",
+      "class": "UNKNOWN",
+      "collision_group": null,
+      "remote_counterpart": "wp6_program_v2_security_surface_hardening@20261008063041",
+      "required_catalog_proof": "RESTORED_PG17_CLONE_CATALOG_PROOF",
+      "target_forward_operation": "RESTORED_CLONE_FINGERPRINT",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-22",
+      "side": "REMOTE_ONLY",
+      "local_filename": null,
+      "source_sha256": null,
+      "version": "20261008063020",
+      "class": "UNKNOWN",
+      "collision_group": null,
+      "remote_counterpart": "20261004_phase7_node1_verified_reviews_foundation.sql",
+      "required_catalog_proof": "RESTORED_PG17_CLONE_CATALOG_PROOF",
+      "target_forward_operation": "RESTORED_CLONE_FINGERPRINT",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-23",
+      "side": "REMOTE_ONLY",
+      "local_filename": null,
+      "source_sha256": null,
+      "version": "20261008063027",
+      "class": "UNKNOWN",
+      "collision_group": null,
+      "remote_counterpart": "20261005_phase7_node2_discovery_marketplace_projection.sql",
+      "required_catalog_proof": "RESTORED_PG17_CLONE_CATALOG_PROOF",
+      "target_forward_operation": "RESTORED_CLONE_FINGERPRINT",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-24",
+      "side": "REMOTE_ONLY",
+      "local_filename": null,
+      "source_sha256": null,
+      "version": "20261008063031",
+      "class": "UNKNOWN",
+      "collision_group": null,
+      "remote_counterpart": "20261006_phase7_node3_favorites_fast_rebooking.sql",
+      "required_catalog_proof": "RESTORED_PG17_CLONE_CATALOG_PROOF",
+      "target_forward_operation": "RESTORED_CLONE_FINGERPRINT",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "DIFF-25",
+      "side": "REMOTE_ONLY",
+      "local_filename": null,
+      "source_sha256": null,
+      "version": "20261008063041",
+      "class": "UNKNOWN",
+      "collision_group": null,
+      "remote_counterpart": "20261007_program_v2_security_surface_hardening.sql",
+      "required_catalog_proof": "RESTORED_PG17_CLONE_CATALOG_PROOF",
+      "target_forward_operation": "RESTORED_CLONE_FINGERPRINT",
+      "blocked_by": [
+        "CONTROLLER_AUTHORITY",
+        "RESTORED_PG17_CLONE_VALIDATION"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "NOT_APPLIED_OR_UNKNOWN"
+    },
+    {
+      "item_id": "P0-SECURITY-MIGRATION",
+      "side": "SECURITY_CUTOVER_ONLY",
+      "local_filename": "20261011155623_appointment_access_tokens_table_access_hardening.sql",
+      "source_sha256": "260F727516CFF4CF0754295206A10E56505A9CA9E22AEC099BB7F21099BD5E13",
+      "version": "20261011155623",
+      "class": "SECURITY_CUTOVER_ONLY",
+      "collision_group": null,
+      "remote_counterpart": null,
+      "required_catalog_proof": "VERIFIED_OFFLINE_RESTORE_BEFORE_APPLY",
+      "target_forward_operation": "SQL_WRITE_STAGING_P0",
+      "blocked_by": [
+        "BACKUP_RESTORE_QUALIFICATION",
+        "SQL_WRITE_STAGING_P0_GATE"
+      ],
+      "source_evidence": "docs/evidence/migration-reconciliation-20261011.json",
+      "state": "SECURITY_CUTOVER_ONLY"
+    }
+  ]
+}

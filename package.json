@@ -154,7 +154,8 @@
     "dev247:once": "node scripts/lari-dev-runner/index.mjs once",
     "dev247:status": "node scripts/lari-dev-runner/index.mjs status",
     "qa:payment-client-failclosed": "node --import tsx scripts/test-payment-client-failclosed.mjs",
-    "qa:communication-failclosed": "node --import tsx scripts/test-communication-failclosed.mjs"
+    "qa:communication-failclosed": "node --import tsx scripts/test-communication-failclosed.mjs",
+    "qa:lari-migration-plan": "node scripts/verify-lari-migration-plan.mjs && node --test scripts/test-lari-migration-plan.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",
