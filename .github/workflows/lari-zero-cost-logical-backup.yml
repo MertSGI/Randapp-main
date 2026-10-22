@@ -29,7 +29,7 @@ jobs:
     environment: lari-staging-backup
     services:
       restore-postgres:
-        image: postgres:17.6-alpine
+        image: supabase/postgres:17.6.1.141@sha256:ba10e934f0a59990379f78ab9ed93926f1c291dd61a12fe4026f4202f1b89770
         env:
           POSTGRES_USER: supabase_admin
           POSTGRES_PASSWORD: disposable-only
@@ -40,7 +40,7 @@ jobs:
           --health-cmd "pg_isready -U supabase_admin -d restore_verification"
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 6
+          --health-retries 10
 
     steps:
       - name: Checkout the operator-selected source revision

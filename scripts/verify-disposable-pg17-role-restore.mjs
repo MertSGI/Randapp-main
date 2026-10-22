@@ -82,7 +82,16 @@ if (process.platform === 'linux') {
   }
 }
 
-// 3. Launch isolated container
+// 3. Launch isolated container using pinned official Supabase PostgreSQL 17 image
+const qualifiedImage = 'supabase/postgres:17.6.1.141@sha256:ba10e934f0a59990379f78ab9ed93926f1c291dd61a12fe4026f4202f1b89770';
+
+console.log(`Pulling qualified Supabase PostgreSQL 17 image [${qualifiedImage}]...`);
+const pullRes = dockerCmd(['pull', qualifiedImage], { timeout: 300000 });
+if (pullRes.status !== 0) {
+  console.error(`FATAL: Failed to pull qualified Supabase PostgreSQL 17 image: ${pullRes.stderr}`);
+  process.exit(1);
+}
+
 console.log(`Launching isolated container [${containerName}]...`);
 const runArgs = [
   'run',
@@ -94,12 +103,12 @@ const runArgs = [
   '-e', 'POSTGRES_USER=supabase_admin',
   '-e', 'POSTGRES_DB=postgres',
   '-e', `POSTGRES_PASSWORD=${disposablePassword}`,
-  'postgres:17.6-alpine',
+  qualifiedImage,
 ];
 
 const runRes = dockerCmd(runArgs);
 if (runRes.status !== 0 || !runRes.stdout.trim()) {
-  console.error(`FATAL: Failed to launch isolated postgres:17.6-alpine container: ${runRes.stderr}`);
+  console.error(`FATAL: Failed to launch isolated container: ${runRes.stderr}`);
   process.exit(1);
 }
 
@@ -190,28 +199,53 @@ try {
   assert.equal(inspectStateRes.status, 0, 'Container inspection for running state must succeed');
   assert.equal(inspectStateRes.stdout.trim(), 'true', 'Container must be actively running');
 
-  // 4.3 PostgreSQL readiness via pg_isready inside container (up to 60s)
-  console.log('Waiting for PostgreSQL inside container to be ready (up to 60s)...');
+  // 4.3 PostgreSQL readiness via pg_isready inside container (up to 120s)
+  console.log('Waiting for PostgreSQL inside container to be ready (up to 120s)...');
   let isReady = false;
   const startWait = Date.now();
-  while (Date.now() - startWait < 60000) {
-    const readyProbe = dockerCmd([
-      'exec',
-      '-i',
-      '--user', 'postgres',
-      verifiedContainerId,
-      'pg_isready',
-      '-h', '/var/run/postgresql',
-      '-U', 'supabase_admin',
-      '-d', 'postgres',
-    ]);
-    if (readyProbe.status === 0) {
-      isReady = true;
-      break;
+  while (Date.now() - startWait < 120000) {
+    const logsRes = dockerCmd(['logs', verifiedContainerId]);
+    const logs = (logsRes.stdout || '') + (logsRes.stderr || '');
+
+    const initComplete =
+      logs.includes('PostgreSQL init process complete; ready for start up.') ||
+      logs.includes('ready for start up') ||
+      logs.includes('PostgreSQL Database directory appears to contain a database; Skipping initialization') ||
+      (Date.now() - startWait > 30000);
+
+    if (initComplete) {
+      const readyProbe = dockerCmd([
+        'exec',
+        '-i',
+        '--user', 'postgres',
+        verifiedContainerId,
+        'pg_isready',
+        '-h', '/var/run/postgresql',
+        '-U', 'supabase_admin',
+        '-d', 'postgres',
+      ]);
+      if (readyProbe.status === 0) {
+        const queryProbe = dockerCmd([
+          'exec',
+          '-i',
+          '--user', 'postgres',
+          verifiedContainerId,
+          'psql',
+          '-X',
+          '-h', '/var/run/postgresql',
+          '-U', 'supabase_admin',
+          '-d', 'postgres',
+          '-c', 'SELECT 1;',
+        ], { timeout: 5000 });
+        if (queryProbe.status === 0) {
+          isReady = true;
+          break;
+        }
+      }
     }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
   }
-  assert.ok(isReady, 'PostgreSQL server inside container failed to become ready within 60s');
+  assert.ok(isReady, 'PostgreSQL server inside container failed to become ready within 120s');
   console.log(`PostgreSQL is ready (${Math.round((Date.now() - startWait) / 1000)}s).`);
 
   // 4.4 Engine version checks
@@ -242,6 +276,33 @@ try {
   const oidRole = oidLines.find((l) => l === 'supabase_admin') || oidLines[oidLines.length - 1];
   console.log(`OID 10 role:        ${oidRole} (required: supabase_admin)`);
   assert.equal(oidRole, 'supabase_admin', `pg_roles OID 10 must be supabase_admin, got: ${oidRole}`);
+
+  // 4.6 Ensure local container domain socket allows trust authentication for ephemeral test users
+  const hbaPathRes = execPsql('\\set QUIET 1\n\\pset tuples_only on\n\\pset format unaligned\nSHOW hba_file;\n', {
+    user: 'supabase_admin',
+    description: 'Query hba_file path',
+    isPreflight: true,
+  });
+  const hbaFile = hbaPathRes.stdout.trim().split(/\r?\n/)[0].trim();
+  console.log(`hba_file path: ${hbaFile}`);
+  if (hbaFile) {
+    const patchHbaRes = dockerCmd([
+      'exec',
+      '-i',
+      '--user', 'postgres',
+      verifiedContainerId,
+      'sh',
+      '-c',
+      `printf 'local all all trust\\nhost all all 127.0.0.1/32 trust\\nhost all all ::1/128 trust\\n' | cat - "${hbaFile}" > "${hbaFile}.tmp" && mv "${hbaFile}.tmp" "${hbaFile}"`,
+    ]);
+    assert.equal(patchHbaRes.status, 0, `Failed to update pg_hba.conf: ${patchHbaRes.stderr}`);
+    execPsql('SELECT pg_reload_conf();', {
+      user: 'supabase_admin',
+      description: 'Reload PostgreSQL configuration after pg_hba update',
+      isPreflight: true,
+    });
+    console.log('Local container trust authentication configured and reloaded.');
+  }
 
   preflightPassed = true;
   console.log('Pre-flight container & database verification: PASS\n');
@@ -408,10 +469,23 @@ try {
   assert.ok(preparedRestoreContent.includes('DO $lari_role_grant_bootstrap$'), 'Prepared restore must contain cycle-checked delegation block');
   assert.ok(preparedRestoreContent.includes('GRANT "anon" TO "authenticator" GRANTED BY "supabase_admin";'), 'Must preserve exact grant statement');
 
-  // Clean target roles prior to replay inside container
+  // Reset non-system role memberships prior to replay inside container
   execPsql(
-    'DROP ROLE IF EXISTS authenticator, anon, authenticated, dashboard_user, postgres, service_role;',
-    { description: 'Clean target managed roles prior to replay' }
+    `DO $lari_clean$
+    DECLARE
+      rec RECORD;
+    BEGIN
+      FOR rec IN (
+        SELECT role.rolname AS role_name, member.rolname AS member_name
+        FROM pg_auth_members m
+        JOIN pg_roles role ON role.oid = m.roleid
+        JOIN pg_roles member ON member.oid = m.member
+        WHERE role.rolname !~ '^pg_' AND member.rolname !~ '^pg_'
+      ) LOOP
+        EXECUTE format('REVOKE %I FROM %I CASCADE', rec.role_name, rec.member_name);
+      END LOOP;
+    END $lari_clean$;`,
+    { description: 'Reset non-system role memberships prior to replay' }
   );
 
   // Send content strictly via stdin to psql -f - inside container
@@ -487,15 +561,75 @@ try {
   assert.equal(actualFingerprint, expectedFingerprint, 'Catalog mismatch: MD5 catalog fingerprint must match synthetic fixture');
   assert.deepEqual(actualRows, expectedMemberships, 'Catalog mismatch: role membership rows must match expected synthetic fixture rows');
 
-  console.log('\n[QUALIFICATION REPORT]');
-  console.log('STATUS: PASS');
-  console.log('EVALUATION LEVEL: SYNTHETIC FIXTURE EQUIVALENCE (4/4 roles)');
-  console.log('NOTE: Full source-to-restored catalog matching against live Supabase remains a later live acceptance requirement.');
   console.log('Test 5 PASS: Synthetic fixture catalog equivalence verified on container PG 17.6\n');
 
+  // ===========================================================================
+  // Test 6: Official Supabase Extension Qualification (supabase_vault)
+  // ===========================================================================
+  console.log('--- Test 6: Official Supabase Extension Qualification ---');
+
+  // 6a. Verify supabase_vault presence in pg_available_extensions
+  const extAvailRes = execPsql(
+    "\\set QUIET 1\n\\pset tuples_only on\n\\pset format unaligned\nSELECT default_version FROM pg_available_extensions WHERE name = 'supabase_vault';",
+    { user: 'supabase_admin', description: 'Query supabase_vault availability in pg_available_extensions' }
+  );
+  const vaultVersion = extAvailRes.stdout.trim();
+  console.log(`Available supabase_vault default version: ${vaultVersion}`);
+  assert.ok(vaultVersion.length > 0, 'supabase_vault extension must be available in official Supabase PG17 container');
+
+  // 6b. Real extension creation in dedicated schema
+  execPsql(
+    'CREATE SCHEMA IF NOT EXISTS vault; CREATE EXTENSION IF NOT EXISTS supabase_vault WITH SCHEMA vault;',
+    { user: 'supabase_admin', description: 'Create supabase_vault extension in schema vault' }
+  );
+
+  // 6c. Verify extension installation in pg_extension
+  const extInstalledRes = execPsql(
+    "\\set QUIET 1\n\\pset tuples_only on\n\\pset format unaligned\nSELECT extname, extversion FROM pg_extension WHERE extname = 'supabase_vault';",
+    { user: 'supabase_admin', description: 'Verify supabase_vault installed in pg_extension' }
+  );
+  const installedInfo = extInstalledRes.stdout.trim();
+  console.log(`Installed extension info: ${installedInfo}`);
+  assert.ok(installedInfo.startsWith('supabase_vault|'), `supabase_vault must be present in pg_extension, got: ${installedInfo}`);
+
+  // 6d. Fail-closed verification: attempting to create a non-existent or fake extension fails closed
+  execPsqlExpectingFailure(
+    'CREATE EXTENSION nonexistent_fake_extension_failclosed;',
+    { user: 'supabase_admin', description: 'Nonexistent extension creation rejection', expectedErrorPatterns: ['extension "nonexistent_fake_extension_failclosed" is not available'] }
+  );
+
+  // 6e. Clean up qualified test extension
+  execPsql(
+    'DROP EXTENSION IF EXISTS supabase_vault CASCADE; DROP SCHEMA IF EXISTS vault CASCADE;',
+    { user: 'supabase_admin', description: 'Teardown qualified test extension and schema' }
+  );
+
+  console.log('Test 6 PASS: Real supabase_vault extension creation and fail-closed unknown extension rejection verified on container PG 17.6\n');
+
+  console.log('\n[QUALIFICATION REPORT]');
+  console.log('STATUS: PASS');
+  console.log(`QUALIFIED IMAGE: ${qualifiedImage}`);
+  console.log(`SUPABASE_VAULT VERSION: ${vaultVersion}`);
+  console.log('EVALUATION LEVEL: SYNTHETIC FIXTURE EQUIVALENCE (4/4 roles) + REAL EXTENSION QUALIFICATION');
+  console.log('NOTE: Full source-to-restored catalog matching against live Supabase remains a later live acceptance requirement.');
+  console.log('All 6 tests PASS on official Supabase PG 17.6 container\n');
+
   console.log('='.repeat(72));
-  console.log('ALL MANDATORY POSTGRESQL 17.6 QUALIFICATION TESTS PASSED');
+  console.log('ALL MANDATORY SUPABASE POSTGRESQL 17.6 QUALIFICATION TESTS PASSED');
   console.log('='.repeat(72));
+} catch (err) {
+  console.error(`ERROR during container qualification: ${err.message}`);
+  try {
+    if (verifiedContainerId) {
+      const dumpLogs = dockerCmd(['logs', '--tail', '50', verifiedContainerId]);
+      console.error('--- Container Logs (last 50 lines) ---');
+      console.error(dumpLogs.stdout || dumpLogs.stderr || '(no logs)');
+      console.error('--------------------------------------');
+    }
+  } catch (e) {
+    // ignore
+  }
+  throw err;
 } finally {
   console.log('--- Teardown: Container Cleanup ---');
   if (verifiedContainerId && /^[a-f0-9]{64}$/.test(verifiedContainerId)) {
