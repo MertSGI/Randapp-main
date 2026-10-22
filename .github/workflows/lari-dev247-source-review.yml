@@ -9,6 +9,7 @@ on:
       - main
       - master
       - production
+      - staging/ci-lari-release-gate-c1-c4-20261017
       - work/lari-dev247-batch-20261021
 
 permissions:
@@ -64,6 +65,15 @@ jobs:
           npm run qa:zero-cost-backup-workflow
           npm run qa:auth-isolation
           npm run qa:subscription-lifecycle
+      - name: Bounded PostgreSQL 17 disposable SQL proposal validation
+        shell: bash
+        timeout-minutes: 5
+        env:
+          LARI_REQUIRE_PG17_DOCKER: '1'
+        run: |
+          set -euo pipefail
+          npm run qa:legal-schema-security-plan
+          npm run qa:disposable-pg17-role-restore
       - name: Batch04 behavioral QA when source is present
         shell: bash
         run: |
