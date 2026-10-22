@@ -204,32 +204,43 @@ try {
   let isReady = false;
   const startWait = Date.now();
   while (Date.now() - startWait < 120000) {
-    const readyProbe = dockerCmd([
-      'exec',
-      '-i',
-      '--user', 'postgres',
-      verifiedContainerId,
-      'pg_isready',
-      '-h', '/var/run/postgresql',
-      '-U', 'supabase_admin',
-      '-d', 'postgres',
-    ]);
-    if (readyProbe.status === 0) {
-      const queryProbe = dockerCmd([
+    const logsRes = dockerCmd(['logs', verifiedContainerId]);
+    const logs = (logsRes.stdout || '') + (logsRes.stderr || '');
+
+    const initComplete =
+      logs.includes('PostgreSQL init process complete; ready for start up.') ||
+      logs.includes('ready for start up') ||
+      logs.includes('PostgreSQL Database directory appears to contain a database; Skipping initialization') ||
+      (Date.now() - startWait > 30000);
+
+    if (initComplete) {
+      const readyProbe = dockerCmd([
         'exec',
         '-i',
         '--user', 'postgres',
         verifiedContainerId,
-        'psql',
-        '-X',
+        'pg_isready',
         '-h', '/var/run/postgresql',
         '-U', 'supabase_admin',
         '-d', 'postgres',
-        '-c', 'SELECT 1;',
-      ], { timeout: 5000 });
-      if (queryProbe.status === 0) {
-        isReady = true;
-        break;
+      ]);
+      if (readyProbe.status === 0) {
+        const queryProbe = dockerCmd([
+          'exec',
+          '-i',
+          '--user', 'postgres',
+          verifiedContainerId,
+          'psql',
+          '-X',
+          '-h', '/var/run/postgresql',
+          '-U', 'supabase_admin',
+          '-d', 'postgres',
+          '-c', 'SELECT 1;',
+        ], { timeout: 5000 });
+        if (queryProbe.status === 0) {
+          isReady = true;
+          break;
+        }
       }
     }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
@@ -606,6 +617,19 @@ try {
   console.log('='.repeat(72));
   console.log('ALL MANDATORY SUPABASE POSTGRESQL 17.6 QUALIFICATION TESTS PASSED');
   console.log('='.repeat(72));
+} catch (err) {
+  console.error(`ERROR during container qualification: ${err.message}`);
+  try {
+    if (verifiedContainerId) {
+      const dumpLogs = dockerCmd(['logs', '--tail', '50', verifiedContainerId]);
+      console.error('--- Container Logs (last 50 lines) ---');
+      console.error(dumpLogs.stdout || dumpLogs.stderr || '(no logs)');
+      console.error('--------------------------------------');
+    }
+  } catch (e) {
+    // ignore
+  }
+  throw err;
 } finally {
   console.log('--- Teardown: Container Cleanup ---');
   if (verifiedContainerId && /^[a-f0-9]{64}$/.test(verifiedContainerId)) {
