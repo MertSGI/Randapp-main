@@ -674,7 +674,7 @@ create_and_verify_pristine_restore_database() {
   fi
 
   local template0_info
-  template0_info="$(run_restore_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command="SELECT oid || '|' || datistemplate FROM pg_database WHERE datname = 'template0'" 2>>"$PRIVATE_DIR/restore-pristine-target.stderr")" || {
+  template0_info="$(run_restore_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command="SELECT oid || '|' || CASE WHEN datistemplate THEN 't' ELSE 'f' END FROM pg_database WHERE datname = 'template0'" 2>>"$PRIVATE_DIR/restore-pristine-target.stderr")" || {
     write_failed_pristine_target_receipt "template0_lookup_failed"
     return 1
   }
@@ -718,7 +718,7 @@ create_and_verify_pristine_restore_database() {
   }
 
   local target_meta
-  target_meta="$(run_restore_target_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command="SELECT d.oid || '|' || d.datname || '|' || d.datistemplate || '|' || pg_get_userbyid(d.datdba) || '|' || current_setting('server_version_num') FROM pg_database d WHERE d.datname = current_database()" 2>>"$PRIVATE_DIR/restore-pristine-target.stderr")" || {
+  target_meta="$(run_restore_target_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command="SELECT d.oid || '|' || d.datname || '|' || CASE WHEN d.datistemplate THEN 't' ELSE 'f' END || '|' || pg_get_userbyid(d.datdba) || '|' || current_setting('server_version_num') FROM pg_database d WHERE d.datname = current_database()" 2>>"$PRIVATE_DIR/restore-pristine-target.stderr")" || {
     write_failed_pristine_target_receipt "target_metadata_verification_failed"
     return 1
   }

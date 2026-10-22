@@ -775,12 +775,12 @@ try {
   \\set QUIET 1
   \\pset tuples_only on
   \\pset format unaligned
-  SELECT current_database() || '|' || pg_get_userbyid(d.datdba) || '|' || d.datistemplate
+  SELECT current_database() || '|' || pg_get_userbyid(d.datdba) || '|' || CASE WHEN d.datistemplate THEN 't' ELSE 'f' END
     FROM pg_database d WHERE d.datname = current_database();
   SELECT count(*) || '|' || string_agg(email, ',' ORDER BY email) FROM auth.users_synthetic;
   SELECT extname || '|' || extversion || '|' || n.nspname
     FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace WHERE e.extname = 'supabase_vault';
-  SELECT c.relrowsecurity || '|' || c.relforcerowsecurity || '|' || pg_get_userbyid(c.relowner)
+  SELECT CASE WHEN c.relrowsecurity THEN 't' ELSE 'f' END || '|' || CASE WHEN c.relforcerowsecurity THEN 't' ELSE 'f' END || '|' || pg_get_userbyid(c.relowner)
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = 'lari_app' AND c.relname = 'tenant_bookings_synthetic';
   SELECT count(*) FROM lari_app.tenant_bookings_synthetic;
