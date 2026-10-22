@@ -1,94 +1,82 @@
 # LARI — Consent & Policy Trusted Server Write Contract
 
-**Document Status:** `SOURCE_PROPOSED_ONLY / ARCHITECTURE_CONTRACT`  
-**Batch Authority:** `LARI-AG-BATCH-20261021-03` (WP-K)  
+**Document Status:** `SOURCE_PROPOSED_ONLY / RLS_PROPOSAL_NOT_ACCEPTED / ARCHITECTURE_CONTRACT`  
+**Batch Authority:** `LARI-B04-CORR-20261022-01` (C03 Remediation of WP-K)  
 **Security Classification:** Level 3 — Legal Evidence Integrity  
-**Target Environment:** Gated Future Staging / Production Implementation  
+**Target Environment:** Gated Future Staging / Production Implementation (DO NOT EXECUTE ON LIVE STAGING)  
 
 ---
 
-## 1. Executive Summary & Problem Definition
+## 1. Executive Summary & Verified Schema Grounding
 
-The controller metadata audit identified that the existing Supabase staging schema exposed direct write policies on `public.consent_ledger` (`Allow public insertion during checkout`) and `public.policy_acceptances` (`Allow public insert acceptances`), with `anon` granted direct `INSERT` permissions.
+The Controller metadata audit confirmed that live Supabase staging currently exposes permissive public `INSERT` policies on `public.consent_ledger` (`Allow public insertion during checkout`) and `public.policy_acceptances` (`Allow public insert acceptances`), with `anon` and `authenticated` holding table write privileges.
 
-This structure introduces severe legal evidentiary risk:
-1. Untrusted browser clients can spoof `actorId`, `tenantId`, `ip_address`, `digital_signature`, and `accepted_at`.
-2. Compromised or malicious clients can forge consent records for non-existent users or alternate tenants.
-3. Client-side mutations (`UPDATE`/`PATCH`) on `consent_ledger` violate immutable audit trail principles under KVKK / GDPR regulations.
-
-This contract defines the strict server-authoritative boundary required before any live SQL or server function is deployed. **No live server implementation is created or deployed in Batch 03; this document establishes the binding architectural contract.**
+### 1.1 Verified Real Staging Table Schemas
+Per `supabase/migrations/20260620_paymentless_production_core_tables.sql` and read-only live staging column metadata:
+- **`public.policy_acceptances`**:
+  - Columns: `id` (`uuid`), `tenant_id` (`text`), `user_id` (`text`), `policy_type` (`text`), `version` (`text`), `ip_address` (`text`), `user_agent` (`text`), `accepted_at` (`timestamptz`).
+  - Note: Does **not** contain an `actor_id` column; the user identifier column is `policy_acceptances.user_id`.
+- **`public.consent_ledger`**:
+  - Columns: `id` (`uuid`), `tenant_id` (`text`), `customer_id` (`text`), `consent_type` (`text`), `is_granted` (`boolean`), `ip_address` (`text`), `digital_signature` (`text`), `created_at` (`timestamptz`).
+  - Note: Does **not** contain an `actor_id` column; the subject identifier column is `consent_ledger.customer_id` (storing `public.customers.id::text` during booking).
+- **Canonical Tenant Identity Model (`20260622_paymentless_production_rls_identity_alignment.sql`)**:
+  - Tenant ownership and Super Admin status are resolved authoritatively via `public.users_profile` (`up.id = auth.uid() AND up.active = true AND (up.role = 'super_admin' OR (up.role = 'tenant_owner' AND up.tenant_id::text = tenant_id))`), **not** via unverified `app_metadata.tenant_id` JWT claims.
 
 ---
 
 ## 2. Core Security & Architectural Principles
 
 ### 2.1 Zero Client Service-Role Exposure
-- The Supabase `service_role` key (and `SUPABASE_SERVICE_ROLE_KEY`) must **never** be included in client bundles, Vite environment variables (`VITE_*`), or accessible via frontend JavaScript. The browser runtime has zero access to the `service_role` credential.
-- Direct table `INSERT`, `UPDATE`, and `DELETE` privileges for `public`, `anon`, and `authenticated` roles are revoked in the companion proposal `PUBLIC_CONSENT_RLS_FORWARD_PROPOSAL.sql`.
+- The Supabase `service_role` key (`SUPABASE_SERVICE_ROLE_KEY`) must **never** be included in client bundles, Vite environment variables (`VITE_*`), or accessible via frontend JavaScript.
+- Direct table `INSERT`, `UPDATE`, and `DELETE` privileges for `public`, `anon`, and `authenticated` roles on `public.consent_ledger` and `public.policy_acceptances` are revoked in `PUBLIC_CONSENT_RLS_FORWARD_PROPOSAL.sql`.
+- Over-broad `FOR ALL` policy `"Owner/Admin manage consent ledger"` is replaced with `FOR SELECT` policy `tenant_scoped_consent_ledger_read` so authenticated tenant owners cannot mutate or delete immutable consent ledger rows from the client.
 
-### 2.2 Authoritative Identity Extraction
-All legal records must bind identity exclusively on the server side:
-1. **Authenticated Users (Staff / Logged-in Customers):**
-   - `tenant_id` and `actor_id` (`sub`) are extracted authoritatively from the cryptographically verified Supabase Auth JWT (`auth.jwt()`).
-   - Any client-supplied tenant or actor identifier in request payloads is ignored or rejected upon mismatch.
-2. **Anonymous / Public Booking Checkout:**
-   - Public users completing appointment bookings cannot write arbitrary tenant or customer IDs.
-   - The server write must require a cryptographically signed one-time booking capability token (HMAC-SHA256 or ephemeral JWT) containing `booking_id`, `tenant_id`, and `expires_at`.
-   - The token is verified server-side against an active pending booking before any consent row is generated.
+### 2.2 Protection of Existing `SECURITY DEFINER` Public Booking RPC (`create_public_booking`)
+- `public.create_public_booking` is an existing `SECURITY DEFINER` function owned by table owner `postgres` that atomically creates customer records, inserts three consent records into `public.consent_ledger` (`booking_terms`, `marketing`, `reminders`), creates the appointment, and issues a hashed self-service manage token in `public.appointment_access_tokens`.
+- During anonymous public booking checkout, `create_public_booking` runs with `auth.uid() IS NULL`.
+- Enabling `FORCE ROW LEVEL SECURITY` on `public.consent_ledger` without an owner/definer insert policy causes `create_public_booking` to fail if the function/table owner does not hold `BYPASSRLS`.
+- Therefore, `PUBLIC_CONSENT_RLS_FORWARD_PROPOSAL.sql` explicitly sets `ENABLE ROW LEVEL SECURITY` and `NO FORCE ROW LEVEL SECURITY` on `public.consent_ledger` and `public.policy_acceptances`:
+  - Untrusted client roles (`anon`, `authenticated`) are non-owners with `NOBYPASSRLS` and have `INSERT, UPDATE, DELETE` revoked, so they cannot forge or mutate rows.
+  - The trusted `SECURITY DEFINER` function `public.create_public_booking` continues to insert booking consent rows atomically.
 
-### 2.3 Nonce & Replay Prevention
-- Each write request must include a single-use idempotency nonce (`nonce_id`).
-- The server validates that the nonce has not been previously consumed within a 15-minute sliding window, preventing replay and automated flooding attacks.
+### 2.3 Explicit `UNRESOLVED_IDENTITY_BOUNDARY` & Safe Default Deny
+- **Customer-to-Auth Mapping (`consent_ledger.customer_id`)**:
+  - In the verified schema, `consent_ledger.customer_id` stores `public.customers.id::text` generated during booking, which has no verified foreign key or 1:1 binding to `auth.uid()::text` (`sub`).
+  - Naively comparing `auth.uid()::text = consent_ledger.customer_id` is architecturally invalid and could misbind or fail silently.
+  - This boundary is formally marked as **`UNRESOLVED_IDENTITY_BOUNDARY`**. Until a server-verified customer identity or token-scoped read RPC is implemented, direct `SELECT` on `public.consent_ledger` is restricted to verified `tenant_owner` and `super_admin` profiles in `public.users_profile` (safe default deny for direct customer reads).
+- **Standalone Policy & Consent Writes Outside Public Booking**:
+  - For registration (`RegistrationPage`) and standalone consent withdrawal / KVKK requests (`AppointmentSelfServicePage`), no trusted server write RPC currently exists in live staging.
+  - These flows are marked `UNRESOLVED_IDENTITY_BOUNDARY` / `LEGAL_PERSISTENCE_REQUIRED` and fail closed in persistent mode without fabricating client-side legal receipts.
 
-### 2.4 Server-Authoritative Document Versioning
-- Clients specify the document key (e.g. `'terms_of_service'`, `'privacy_policy'`).
-- The trusted server queries `public.legal_documents` to resolve the current active, published version ID and document hash.
-- Browser clients are strictly prohibited from declaring arbitrary version numbers, effective dates, or custom terms texts.
+### 2.4 Nonce & Replay Prevention for Future Server Endpoints
+- Any future standalone server write endpoint must require a single-use idempotency nonce (`nonce_id`) validated within a bounded window to prevent replay and automated flooding.
 
-### 2.5 Server Timestamp and Network Provenance
-- `accepted_at` and `recorded_at` timestamps are generated using PostgreSQL `clock_timestamp()` on the server. Client timestamps are discarded.
-- Client IP addresses are resolved from trusted reverse proxy headers (e.g., Cloudflare `CF-Connecting-IP`, `X-Real-IP`, or validated `X-Forwarded-For`).
-- **IP De-Identification / Redaction:**
-  - IPv4: The final octet is masked (e.g., `198.51.100.0/24`).
-  - IPv6: The final 80 bits are masked.
-  - This satisfies both regulatory auditability (demonstrating reasonable geographic/network proof of origin) and privacy minimization standards under KVKK Article 4.
+### 2.5 Server-Authoritative Document Versioning & Timestamps
+- Future server write endpoints must resolve active document versions from `public.legal_documents` on the server and record timestamps via `clock_timestamp()`, never trusting client-supplied version strings or timestamps.
+- Client IP provenance must be resolved server-side from trusted proxy headers and de-identified (IPv4 `/24` masking, IPv6 `/48` masking) prior to storage.
 
 ### 2.6 Immutable Append-Only Ledger for Consent & Revocation
-- Consent status is modeled as an immutable event stream.
-- When a user grants consent, a row is inserted with `is_granted = true`.
-- When a user revokes or withdraws consent, an `UPDATE` or `PATCH` on the existing row is **strictly prohibited**.
-- Revocation is recorded by appending a **new** event row with:
-  - `is_granted = false`
-  - `revoked_at = clock_timestamp()`
-  - `revocation_reason = <sanitized_reason>`
-  - `supersedes_record_id = <original_record_id>`
-- The latest active state is resolved via view or indexed window query (`SELECT ... ORDER BY recorded_at DESC LIMIT 1`).
-
-### 2.7 Tenant-Scoped Read Access
-- Frontend reads (`listAcceptances`, `listConsentRecords`) remain accessible to authenticated users strictly scoped to their verified `tenant_id` via Postgres Row Level Security (RLS).
-- Read failures must return typed machine-readable errors (`LEGAL_READ_FAILED`) rather than collapsing to empty arrays (`[]`), ensuring auditing failures are not masked.
+- Consent state is an append-only event stream (`is_granted = true` / `is_granted = false`); `UPDATE` and `DELETE` on `public.consent_ledger` remain prohibited for all client roles.
 
 ---
 
-## 3. Trusted Server Interface Specification (Future RPC / Edge Endpoint)
+## 3. Future Trusted Server Interface Specification (Not Yet Deployed)
 
 ```typescript
 /**
- * Proposed interface for future Edge Function or Postgres SECURITY DEFINER RPC.
- * Executed solely in trusted server runtime with service_role permissions.
+ * Proposed contract for future Postgres SECURITY DEFINER RPC or Edge Function.
+ * Status: RLS_PROPOSAL_NOT_ACCEPTED / UNRESOLVED_IDENTITY_BOUNDARY
  */
 interface RecordPolicyAcceptanceServerPayload {
-  // Provided by client:
   documentType: LegalDocumentType;
-  bookingCapabilityToken?: string; // Required for unauthenticated checkout
+  bookingCapabilityToken?: string;
   nonce: string;
-
-  // Resolved strictly server-side:
-  // tenantId: extracted from auth.jwt() OR verified bookingCapabilityToken
-  // actorId: extracted from auth.jwt() OR verified customer identity
-  // documentVersion: resolved from public.legal_documents
-  // recordedAt: clock_timestamp()
-  // clientIpMasked: anonymized proxy header
+  // Server-resolved columns:
+  // policy_acceptances.tenant_id: from public.users_profile (via auth.uid())
+  // policy_acceptances.user_id: auth.uid()::text
+  // policy_acceptances.version: resolved from public.legal_documents
+  // policy_acceptances.accepted_at: clock_timestamp()
+  // policy_acceptances.ip_address: masked proxy IP
 }
 
 interface RecordConsentServerPayload {
@@ -96,8 +84,11 @@ interface RecordConsentServerPayload {
   isGranted: boolean;
   bookingCapabilityToken?: string;
   nonce: string;
-  revocationReason?: string;
-  supersedesRecordId?: string;
+  // Server-resolved columns:
+  // consent_ledger.tenant_id: from verified booking / tenant context
+  // consent_ledger.customer_id: verified public.customers.id::text
+  // consent_ledger.created_at: clock_timestamp()
+  // consent_ledger.ip_address: masked proxy IP
 }
 ```
 
@@ -105,9 +96,9 @@ interface RecordConsentServerPayload {
 
 ## 4. Release & Deployment Gate Checklist
 
-Before this trusted write architecture can be applied to staging or production:
-- [ ] Staging database verified offline backup completed and checksum validated.
-- [ ] Disposable PostgreSQL 17 clone verification passed.
+Before `PUBLIC_CONSENT_RLS_FORWARD_PROPOSAL.sql` can transition from `RLS_PROPOSAL_NOT_ACCEPTED` to live staging execution:
+- [ ] Staging database verified offline logical backup completed and checksum validated.
+- [x] Disposable PostgreSQL 17.6 synthetic schema & `create_public_booking` behavioral qualification implemented in CI.
+- [ ] Full live staging clone replay verified against production-equivalent dataset.
 - [ ] P0 `appointment_access_tokens` security cutover deployed and verified.
-- [ ] Trusted Edge Function / RPC deployed and end-to-end integration tested.
-- [ ] `PUBLIC_CONSENT_RLS_FORWARD_PROPOSAL.sql` executed with zero regression on booking flow.
+- [ ] Trusted server write RPC / Edge Function for registration policy acceptance and customer KVKK requests deployed to resolve `UNRESOLVED_IDENTITY_BOUNDARY`.
