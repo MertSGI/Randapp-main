@@ -4,27 +4,45 @@ on:
   pull_request:
     branches:
       - staging/supabase-staging-consistency
+  push:
+    branches:
+      - 'review/lari-backup-pristine-restore-*'
 
 permissions:
   contents: read
 
 jobs:
   qualification:
-    name: PostgreSQL 17.6 Role Restore Qualification
+    name: PostgreSQL 17.6 Role & Pristine Restore Qualification
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
-      - name: Checkout pull request HEAD
+      - name: Checkout target revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+
+      - name: Install PostgreSQL 17 client and encryption tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo systemctl stop postgresql || true
+          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
+          curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends age jq postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
         run: |
@@ -46,5 +64,8 @@ jobs:
       - name: 4. Docker isolation negative security tests
         run: npm run test:disposable-pg17-negative
 
-      - name: 5. Supabase staging consistency QA
+      - name: 5. Disposable PG 17.6 Docker pristine template0 restore & negative QA
+        run: npm run qa:disposable-pg17-pristine-restore
+
+      - name: 6. Supabase staging consistency QA
         run: npm run qa:supabase-staging-consistency

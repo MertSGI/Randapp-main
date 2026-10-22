@@ -825,8 +825,8 @@ mustContain(runner, 'run_source_postgres_command pg_dump', 'Database capture mus
 assert.equal((runner.match(/run_source_postgres_command psql/g) || []).length, 2, 'Both source catalog queries must use the approved source identity');
 mustContain(runner, '--roles-only', 'Only global role definitions are captured by pg_dumpall');
 mustContain(runner, '--no-role-passwords', 'Role password hashes must not be included');
-assert.match(runner, /pg_dump \\\n  --format=custom/, 'Database must use a restorable custom-format dump');
-assert.match(runner, /pg_restore \\\n    --exit-on-error/, 'Restore verification must fail closed');
+assert.match(runner, /pg_dump \\\n\s+--format=custom/, 'Database must use a restorable custom-format dump');
+assert.match(runner, /pg_restore \\\n\s+--exit-on-error/, 'Restore verification must fail closed');
 mustContain(runner, '--lock-wait-timeout=30000', 'Source lock waiting must be bounded');
 mustContain(runner, '--single-transaction', 'Restore verification must be atomic');
 assert.match(runner, /age \\\n  --recipient/, 'Encryption must use the public recipient');
@@ -838,11 +838,18 @@ mustContain(runner, 'rm -rf -- "$ARTIFACT_DIR"', 'Failed restore artifacts must 
 mustContain(runner, 'prepare_disposable_role_restore', 'Disposable role restore preparation must be present');
 mustContain(runner, 'DO $lari_role_grant_bootstrap$', 'Bootstrap delegation DO block must be configured');
 mustContain(runner, 'TEST_DISPOSABLE_ROLE_RESTORE_ONLY="--test-disposable-role-restore"', 'Runner must support disposable role restore test mode');
+mustContain(runner, 'TEST_DISPOSABLE_PRISTINE_RESTORE_ONLY="--test-disposable-pristine-restore"', 'Runner must support disposable pristine restore test mode');
+mustContain(runner, 'RESTORE_DATABASE_NAME="restore_verification"', 'Bootstrap control DB must remain restore_verification');
+mustContain(runner, 'RESTORE_TARGET_DATABASE_NAME="lari_restore_verification"', 'Pristine restore target DB must be lari_restore_verification');
+mustContain(runner, 'CREATE DATABASE \\"${RESTORE_TARGET_DATABASE_NAME}\\" WITH TEMPLATE template0 OWNER \\"${create_owner}\\";', 'Pristine target database must be created from TEMPLATE template0 outside a transaction');
+mustContain(runner, '--dbname="$RESTORE_TARGET_DATABASE_NAME"', 'pg_restore must target the verified pristine database');
+assert.ok(!runner.includes('--dbname="$RESTORE_DATABASE_NAME"'), 'pg_restore must never target the bootstrap control database');
+mustContain(runner, 'pristine-target-receipt.json', 'Runner must emit a non-secret pristine target receipt');
 mustContain(runner, 'prepare_disposable_role_restore "$PRIVATE_DIR/roles.sql" "$PRIVATE_DIR/restore-roles.sql"', 'Runner must prepare restore-roles.sql from roles.sql');
 mustContain(runner, '--file="$PRIVATE_DIR/restore-roles.sql"', 'Disposable restore must execute restore-roles.sql');
 
-const dumpIndex = runner.search(/pg_dump \\\n  --format=custom/);
-const restoreIndex = runner.search(/pg_restore \\\n    --exit-on-error/);
+const dumpIndex = runner.search(/pg_dump \\\n\s+--format=custom/);
+const restoreIndex = runner.search(/pg_restore \\\n\s+--exit-on-error/);
 const encryptionIndex = runner.search(/age \\\n  --recipient/);
 const manifestIndex = runner.indexOf('>"$ARTIFACT_DIR/manifest.json"');
 assert.ok(dumpIndex >= 0 && dumpIndex < restoreIndex, 'The exact dump must precede restore verification');
@@ -874,14 +881,20 @@ mustContain(runbook, 'Disposable PostgreSQL 17 role restoration and grantor dele
 mustContain(runbook, 'The grantor must have the ADMIN option on role', 'Runbook must document grantor error detail');
 mustContain(runbook, 'restore-roles.sql', 'Runbook must document restore-roles.sql preparation');
 mustContain(runbook, 'qa:disposable-pg17-role-restore', 'Runbook must document dedicated qualification command');
+mustContain(runbook, 'qa:disposable-pg17-pristine-restore', 'Runbook must document pristine restore qualification command');
+mustContain(runbook, 'lari_restore_verification', 'Runbook must document the pristine restore target database');
+mustContain(runbook, 'TEMPLATE template0', 'Runbook must document TEMPLATE template0 target creation');
+mustContain(runbook, 'pristine-target-receipt.json', 'Runbook must document the pristine target receipt');
 mustContain(runbook, 'synthetic fixture equivalence', 'Runbook must document synthetic fixture equivalence');
 assert.ok(!runbook.includes('sslmode=require'), 'Runbook must not document sslmode=require');
 mustContain(runbook, 'REMOTE_BACKUP_EXECUTED=NO', 'Current no-execution state must be explicit');
 
 const packageJson = fs.readFileSync('package.json', 'utf8');
 mustContain(packageJson, '"qa:disposable-pg17-role-restore"', 'package.json must configure dedicated qualification script');
+mustContain(packageJson, '"qa:disposable-pg17-pristine-restore"', 'package.json must configure pristine restore qualification script');
 mustContain(packageJson, '"test:disposable-pg17-negative"', 'package.json must configure negative qualification test script');
 assert.ok(fs.existsSync('scripts/verify-disposable-pg17-role-restore.mjs'), 'Dedicated qualification script must exist');
+assert.ok(fs.existsSync('scripts/verify-disposable-pg17-pristine-restore.mjs'), 'Pristine restore qualification script must exist');
 assert.ok(fs.existsSync('scripts/test-disposable-pg17-negative.mjs'), 'Negative qualification test script must exist');
 
 const qualificationWorkflowPath = '.github/workflows/lari-pg17-role-qualification.yml';
@@ -891,7 +904,51 @@ mustContain(qualWorkflow, 'pull_request:', 'Qualification workflow must trigger 
 mustContain(qualWorkflow, 'staging/supabase-staging-consistency', 'Qualification workflow must target default base branch');
 mustContain(qualWorkflow, 'ubuntu-24.04', 'Qualification workflow must run on ubuntu-24.04');
 mustContain(qualWorkflow, 'npm run qa:disposable-pg17-role-restore', 'Qualification workflow must run disposable role restore QA');
+mustContain(qualWorkflow, 'npm run qa:disposable-pg17-pristine-restore', 'Qualification workflow must run disposable pristine restore QA');
 mustContain(qualWorkflow, 'npm run qa:supabase-staging-consistency', 'Qualification workflow must run staging consistency QA');
+
+// Offline CLI endpoint & target name HOLD checks for --test-disposable-pristine-restore
+const pristineCliRoot = fs.mkdtempSync(path.join(os.tmpdir(), `lari-pristine-cli-${process.pid}-`));
+const pristineFixtureStub = path.join(pristineCliRoot, 'fixture');
+fs.mkdirSync(pristineFixtureStub, { mode: 0o700 });
+for (const [label, overrides, expectedHoldPattern] of [
+  ['wrong target restore_verification', { LARI_RESTORE_TARGET_DB: 'restore_verification' }, 'HOLD: Wrong restore target selected (restore_verification)'],
+  ['wrong target postgres', { LARI_RESTORE_TARGET_DB: 'postgres' }, 'HOLD: Wrong restore target selected (postgres)'],
+  ['wrong target template0', { LARI_RESTORE_TARGET_DB: 'template0' }, 'HOLD: Wrong restore target selected (template0)'],
+  ['non-disposable host', { LARI_TEST_RESTORE_HOST: 'aws-0-eu-central-1.pooler.supabase.com' }, 'HOLD: Non-disposable restore endpoint rejected'],
+  ['non-disposable port', { LARI_TEST_RESTORE_PORT: '6543' }, 'HOLD: Non-disposable restore port rejected'],
+  ['wrong restore user', { LARI_TEST_RESTORE_USER: 'postgres' }, 'HOLD: Wrong disposable restore user rejected'],
+]) {
+  const caseTemp = path.join(pristineCliRoot, label.replaceAll(' ', '_'));
+  const rTemp = path.join(caseTemp, 'runner');
+  const wTemp = path.join(caseTemp, 'workspace');
+  fs.mkdirSync(rTemp, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(wTemp, { recursive: true, mode: 0o700 });
+  const res = spawnSync(
+    bashExecutable,
+    [runnerPath, '--test-disposable-pristine-restore', toBashPath(pristineFixtureStub)],
+    {
+      cwd: process.cwd(),
+      env: sanitizedEnvironment({
+        RUNNER_TEMP: toBashPath(rTemp),
+        GITHUB_WORKSPACE: toBashPath(wTemp),
+        GITHUB_RUN_ID: '10001',
+        GITHUB_RUN_ATTEMPT: '1',
+        GITHUB_SHA: '6d3c52402d1472a69705b6e41594258f5829e90c',
+        SOURCE_PROJECT_REF: 'rwedeejhjazwjthdjzrt',
+        BACKUP_AGE_RECIPIENT: 'age1offlinepublicrecipientonly',
+        LARI_DISPOSABLE_DB: '1',
+        LARI_OFFLINE_TEST_MODE: '1',
+        ...overrides,
+      }),
+      encoding: 'utf8',
+    }
+  );
+  assert.notEqual(res.status, 0, `Pristine CLI check [${label}] must fail closed`);
+  mustContain(res.stderr, expectedHoldPattern, `Pristine CLI check [${label}] must emit ${expectedHoldPattern}`);
+  assert.ok(!fs.existsSync(path.join(wTemp, 'backup-artifacts')), `Pristine CLI check [${label}] must produce zero artifacts`);
+}
+fs.rmSync(pristineCliRoot, { recursive: true, force: true });
 
 const supabaseCaPath = 'scripts/backup/supabase-prod-ca-2021.crt';
 assert.ok(fs.existsSync(supabaseCaPath), 'Authentic Supabase Root CA certificate file must exist');
