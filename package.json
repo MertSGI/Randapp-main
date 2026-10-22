@@ -164,7 +164,9 @@
     "qa:dev247-windows-supervisor": "node --test scripts/test-lari-dev-windows-supervisor.test.mjs",
     "qa:legal-ui-failclosed": "node --import tsx --test scripts/test-legal-ui-failclosed.test.mjs",
     "qa:legal-callsites": "node --import tsx --test scripts/test-legal-callsites.test.mjs",
-    "qa:dev247-agent-preflight": "node --test scripts/test-lari-dev-agent-preflight.test.mjs"
+    "qa:dev247-agent-preflight": "node --test scripts/test-lari-dev-agent-preflight.test.mjs",
+    "qa:lari-restored-clone-verifier": "node --test scripts/test-lari-restored-clone.test.mjs",
+    "qa:lari-p0-postconditions": "node --test scripts/test-lari-p0-cutover.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",

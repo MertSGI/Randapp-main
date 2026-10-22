@@ -84,6 +84,12 @@ jobs:
           else
             echo 'BATCH04_NOT_YET_COMMITTED (expected for baseline checkpoint)' >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Batch05 restore-aware migration and P0 acceptance verifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run qa:lari-restored-clone-verifier
+          npm run qa:lari-p0-postconditions
       - name: Lint, build, local browser journeys
         shell: bash
         run: |
@@ -134,3 +140,7 @@ jobs:
           } else {
             Write-Host 'BATCH04_EVIDENCE_NOT_YET_COMMITTED'
           }
+      - name: Batch05 restore-aware verifiers
+        run: |
+          npm run qa:lari-restored-clone-verifier
+          npm run qa:lari-p0-postconditions
