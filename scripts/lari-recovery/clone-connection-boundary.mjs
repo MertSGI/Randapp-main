@@ -6,8 +6,47 @@ const { Client } = pg;
 export const ALLOWED_LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
 /**
+ * Safely sanitizes error messages by redacting raw and decoded credentials using
+ * string splitting/joining, without compiling credentials into regular expressions.
+ * Handles empty credentials as a no-op and never leaks percent-encoded values.
+ */
+export function sanitizeErrorMessage(message, rawPassword, decodedPassword, rawUsername, decodedUsername) {
+  if (!message || typeof message !== 'string') {
+    return 'Database connection failed';
+  }
+
+  let sanitized = message;
+
+  // Collect non-empty secrets to redact
+  const secretsToRedact = new Set();
+  if (rawPassword && typeof rawPassword === 'string' && rawPassword.trim().length > 0) {
+    secretsToRedact.add(rawPassword);
+  }
+  if (decodedPassword && typeof decodedPassword === 'string' && decodedPassword.trim().length > 0) {
+    secretsToRedact.add(decodedPassword);
+  }
+  if (rawUsername && typeof rawUsername === 'string' && rawUsername.trim().length > 0 && rawUsername !== 'postgres') {
+    secretsToRedact.add(rawUsername);
+  }
+  if (decodedUsername && typeof decodedUsername === 'string' && decodedUsername.trim().length > 0 && decodedUsername !== 'postgres') {
+    secretsToRedact.add(decodedUsername);
+  }
+
+  // Pure string-based replacement (no RegExp compilation)
+  for (const secret of secretsToRedact) {
+    sanitized = sanitized.split(secret).join('***');
+  }
+
+  // Also strip any accidentally leaked connection URI strings
+  sanitized = sanitized.replace(/postgres(?:ql)?:\/\/[^\s"'<>]+/gi, 'postgresql://***:***@.../...');
+
+  return sanitized;
+}
+
+/**
  * Validates that a database URL points strictly to an authorized local restored clone.
  * Rejects any remote endpoints, live Supabase, default database names, or unconfirmed executions.
+ * Decodes percent-encoded credentials safely with malformed-encoding rejection.
  */
 export function validateAndParseCloneDatabaseUrl(rawUrl, cloneConfirmed) {
   if (!rawUrl || typeof rawUrl !== 'string' || rawUrl.trim() === '') {
@@ -99,14 +138,41 @@ export function validateAndParseCloneDatabaseUrl(rawUrl, cloneConfirmed) {
     throw err;
   }
 
+  // Safely decode percent-encoded username and password exactly once with guarded error handling
+  const rawUsername = parsed.username || '';
+  const rawPassword = parsed.password || '';
+  let decodedUsername = 'postgres';
+  let decodedPassword = '';
+
+  if (rawUsername) {
+    try {
+      decodedUsername = decodeURIComponent(rawUsername);
+    } catch {
+      const err = new Error('MALFORMED_CREDENTIALS: Malformed percent-encoding in database username');
+      err.code = 'MALFORMED_CREDENTIALS';
+      throw err;
+    }
+  }
+
+  if (rawPassword) {
+    try {
+      decodedPassword = decodeURIComponent(rawPassword);
+    } catch {
+      const err = new Error('MALFORMED_CREDENTIALS: Malformed percent-encoding in database password');
+      err.code = 'MALFORMED_CREDENTIALS';
+      throw err;
+    }
+  }
+
   return {
-    rawUrl: trimmed,
     redactedUrl: redactDatabaseUrl(trimmed),
     hostname,
     port,
     dbName,
-    username: parsed.username || 'postgres',
-    password: parsed.password || '',
+    username: decodedUsername,
+    password: decodedPassword,
+    _rawUsername: rawUsername,
+    _rawPassword: rawPassword,
   };
 }
 
@@ -117,7 +183,16 @@ export function redactDatabaseUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== 'string') return '';
   try {
     const parsed = new URL(rawUrl);
-    const authPart = parsed.username ? `${parsed.username}:***@` : '';
+    let authPart = '';
+    if (parsed.username) {
+      let safeUser = '***';
+      try {
+        safeUser = decodeURIComponent(parsed.username);
+      } catch {
+        safeUser = '***';
+      }
+      authPart = `${safeUser}:***@`;
+    }
     return `${parsed.protocol}//${authPart}${parsed.host}${parsed.pathname}`;
   } catch {
     return 'postgresql://***:***@invalid-url';
@@ -144,7 +219,13 @@ export async function withReadOnlyCloneClient(rawUrl, cloneConfirmed, queryFn) {
   try {
     await client.connect();
   } catch (connectErr) {
-    const sanitizedMsg = (connectErr.message || '').replace(new RegExp(parsedConfig.password, 'g'), '***');
+    const sanitizedMsg = sanitizeErrorMessage(
+      connectErr.message,
+      parsedConfig._rawPassword,
+      parsedConfig.password,
+      parsedConfig._rawUsername,
+      parsedConfig.username
+    );
     const err = new Error(`CLONE_CONNECTION_FAILED: ${sanitizedMsg}`);
     err.code = 'RESTORED_CLONE_REQUIRED';
     throw err;
