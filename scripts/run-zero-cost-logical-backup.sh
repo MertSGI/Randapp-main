@@ -16,6 +16,7 @@ TEST_SOURCE_CREDENTIALS_ONLY="--test-source-credential-handling"
 TEST_RESTORE_VERDICT_ONLY="--test-restore-verdict-handling"
 TEST_PG17_CLIENT_SELECTION_ONLY="--test-pg17-client-selection"
 TEST_DISPOSABLE_ROLE_RESTORE_ONLY="--test-disposable-role-restore"
+TEST_DISPOSABLE_PRISTINE_RESTORE_ONLY="--test-disposable-pristine-restore"
 
 SOURCE_DATABASE_PASSWORD_VALUE="${SOURCE_DATABASE_PASSWORD:-}"
 unset SOURCE_DATABASE_PASSWORD
@@ -423,6 +424,29 @@ write_pgpass_file() {
   chmod 0600 "$output_path"
 }
 
+append_pgpass_file() {
+  local output_path="$1"
+  local host="$2"
+  local port="$3"
+  local database="$4"
+  local username="$5"
+  local password="$6"
+
+  if [[ "$password" == *$'\n'* || "$password" == *$'\r'* ]]; then
+    printf 'Database credential contains an unsupported control character.\n' >&2
+    exit 1
+  fi
+
+  printf '%s:%s:%s:%s:%s\n' \
+    "$(escape_pgpass_field "$host")" \
+    "$(escape_pgpass_field "$port")" \
+    "$(escape_pgpass_field "$database")" \
+    "$(escape_pgpass_field "$username")" \
+    "$(escape_pgpass_field "$password")" \
+    >>"$output_path"
+  chmod 0600 "$output_path"
+}
+
 prepare_private_credentials() {
   local credentials_dir="$PRIVATE_DIR/database-credentials"
   mkdir -m 0700 -- "$credentials_dir"
@@ -443,7 +467,39 @@ prepare_private_credentials() {
     "$RESTORE_DATABASE_NAME" \
     "$RESTORE_DATABASE_USER" \
     "$RESTORE_DATABASE_PASSWORD"
+  if [[ -n "${RESTORE_TARGET_DATABASE_NAME:-}" && "${RESTORE_TARGET_DATABASE_NAME}" != "${RESTORE_DATABASE_NAME}" ]]; then
+    append_pgpass_file \
+      "$RESTORE_PGPASSFILE" \
+      "$RESTORE_DATABASE_HOST" \
+      "$RESTORE_DATABASE_PORT" \
+      "$RESTORE_TARGET_DATABASE_NAME" \
+      "$RESTORE_DATABASE_USER" \
+      "$RESTORE_DATABASE_PASSWORD"
+  fi
   unset SOURCE_DATABASE_PASSWORD_VALUE
+}
+
+prepare_restore_only_credentials() {
+  local credentials_dir="$PRIVATE_DIR/database-credentials"
+  mkdir -m 0700 -- "$credentials_dir"
+  RESTORE_PGPASSFILE="$credentials_dir/restore.pgpass"
+
+  write_pgpass_file \
+    "$RESTORE_PGPASSFILE" \
+    "$RESTORE_DATABASE_HOST" \
+    "$RESTORE_DATABASE_PORT" \
+    "$RESTORE_DATABASE_NAME" \
+    "$RESTORE_DATABASE_USER" \
+    "$RESTORE_DATABASE_PASSWORD"
+  if [[ -n "${RESTORE_TARGET_DATABASE_NAME:-}" && "${RESTORE_TARGET_DATABASE_NAME}" != "${RESTORE_DATABASE_NAME}" ]]; then
+    append_pgpass_file \
+      "$RESTORE_PGPASSFILE" \
+      "$RESTORE_DATABASE_HOST" \
+      "$RESTORE_DATABASE_PORT" \
+      "$RESTORE_TARGET_DATABASE_NAME" \
+      "$RESTORE_DATABASE_USER" \
+      "$RESTORE_DATABASE_PASSWORD"
+  fi
 }
 
 assert_private_source_credentials() {
@@ -500,6 +556,256 @@ run_restore_postgres_command() {
     "$@"
 }
 
+run_restore_target_postgres_command() {
+  env -i \
+    HOME="$PRIVATE_DIR" \
+    PATH="$PATH" \
+    LC_ALL=C.UTF-8 \
+    PGHOST="$RESTORE_DATABASE_HOST" \
+    PGPORT="$RESTORE_DATABASE_PORT" \
+    PGDATABASE="$RESTORE_TARGET_DATABASE_NAME" \
+    PGUSER="$RESTORE_DATABASE_USER" \
+    PGSSLMODE=disable \
+    PGPASSFILE="$RESTORE_PGPASSFILE" \
+    PGCONNECT_TIMEOUT=15 \
+    "$@"
+}
+
+reject_pristine_target() {
+  local reason="$1"
+  if [[ -n "${PRIVATE_DIR:-}" && -d "$PRIVATE_DIR" ]]; then
+    printf 'HOLD: %s\n' "$reason" | tee -a "$PRIVATE_DIR/restore-pristine-target.stderr" >&2
+  else
+    printf 'HOLD: %s\n' "$reason" >&2
+  fi
+  return 1
+}
+
+validate_disposable_restore_endpoint() {
+  if [[ "${LARI_DISPOSABLE_DB:-}" != "1" ]]; then
+    reject_pristine_target "Disposable restore guard LARI_DISPOSABLE_DB=1 is not enabled."
+    return 1
+  fi
+  if [[ "${RESTORE_DATABASE_HOST:-}" != "127.0.0.1" ]]; then
+    reject_pristine_target "Non-disposable restore endpoint rejected (host must be 127.0.0.1, got: ${RESTORE_DATABASE_HOST:-})."
+    return 1
+  fi
+  if [[ "${RESTORE_DATABASE_PORT:-}" != "5432" ]]; then
+    reject_pristine_target "Non-disposable restore port rejected (port must be 5432, got: ${RESTORE_DATABASE_PORT:-})."
+    return 1
+  fi
+  if [[ "${RESTORE_DATABASE_USER:-}" != "supabase_admin" ]]; then
+    reject_pristine_target "Wrong disposable restore user rejected (must be supabase_admin, got: ${RESTORE_DATABASE_USER:-})."
+    return 1
+  fi
+  if [[ "${RESTORE_DATABASE_NAME:-}" != "restore_verification" ]]; then
+    reject_pristine_target "Bootstrap control database name must be restore_verification (got: ${RESTORE_DATABASE_NAME:-})."
+    return 1
+  fi
+  if [[ ! "${RESTORE_TARGET_DATABASE_NAME:-}" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]; then
+    reject_pristine_target "Invalid restore target database identifier: ${RESTORE_TARGET_DATABASE_NAME:-}."
+    return 1
+  fi
+  case "$RESTORE_TARGET_DATABASE_NAME" in
+    restore_verification|postgres|template0|template1)
+      reject_pristine_target "Wrong restore target selected (${RESTORE_TARGET_DATABASE_NAME}); refusing to restore into bootstrap control or system database."
+      return 1
+      ;;
+  esac
+}
+
+write_failed_pristine_target_receipt() {
+  local reason="${1:-pristine_target_verification_failed}"
+  jq -n \
+    --arg bootstrap_control_db "${RESTORE_DATABASE_NAME:-restore_verification}" \
+    --arg target_db_name "${RESTORE_TARGET_DATABASE_NAME:-lari_restore_verification}" \
+    --arg template_source "template0" \
+    --arg failure_reason "$reason" \
+    '{
+      bootstrap_control_database: $bootstrap_control_db,
+      target_database_name: $target_db_name,
+      target_database_oid: null,
+      template_source: $template_source,
+      template0_oid: null,
+      datistemplate: null,
+      database_owner: null,
+      bootstrap_superuser_oid10: null,
+      server_version_num: null,
+      pre_restore_application_schemas: null,
+      pre_restore_user_tables_count: null,
+      pristine_verified: false,
+      failure_reason: $failure_reason
+    }' >"$PRIVATE_DIR/pristine-target-receipt.json"
+}
+
+create_and_verify_pristine_restore_database() {
+  validate_disposable_restore_endpoint || {
+    write_failed_pristine_target_receipt "endpoint_or_target_name_rejected"
+    return 1
+  }
+
+  local expected_owner="supabase_admin"
+  if [[ "${LARI_OFFLINE_TEST_MODE:-}" == "1" && -n "${LARI_EXPECTED_RESTORE_OWNER:-}" ]]; then
+    expected_owner="$LARI_EXPECTED_RESTORE_OWNER"
+  fi
+
+  local server_ver
+  server_ver="$(run_restore_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command='SHOW server_version_num' 2>>"$PRIVATE_DIR/restore-pristine-target.stderr")" || {
+    write_failed_pristine_target_receipt "control_db_version_query_failed"
+    return 1
+  }
+  if [[ "$server_ver" != "170006" ]]; then
+    write_failed_pristine_target_receipt "server_version_mismatch"
+    reject_pristine_target "Disposable restore server_version_num must be 170006, got: ${server_ver}."
+    return 1
+  fi
+
+  local bootstrap_super
+  bootstrap_super="$(run_restore_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command='SELECT rolname FROM pg_roles WHERE oid = 10' 2>>"$PRIVATE_DIR/restore-pristine-target.stderr")" || {
+    write_failed_pristine_target_receipt "bootstrap_superuser_query_failed"
+    return 1
+  }
+  if [[ "$bootstrap_super" != "$expected_owner" ]]; then
+    write_failed_pristine_target_receipt "wrong_bootstrap_superuser"
+    reject_pristine_target "Wrong disposable server bootstrap superuser (OID 10): expected ${expected_owner}, got ${bootstrap_super}."
+    return 1
+  fi
+
+  local template0_info
+  template0_info="$(run_restore_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command="SELECT oid || '|' || datistemplate FROM pg_database WHERE datname = 'template0'" 2>>"$PRIVATE_DIR/restore-pristine-target.stderr")" || {
+    write_failed_pristine_target_receipt "template0_lookup_failed"
+    return 1
+  }
+  local template0_oid="${template0_info%%|*}"
+  local template0_flag="${template0_info##*|}"
+  if [[ -z "$template0_oid" || "$template0_flag" != "t" ]]; then
+    write_failed_pristine_target_receipt "template0_invalid"
+    reject_pristine_target "Canonical template0 database is missing or not marked as template."
+    return 1
+  fi
+
+  local existing_count
+  existing_count="$(run_restore_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command="SELECT count(*) FROM pg_database WHERE datname = '${RESTORE_TARGET_DATABASE_NAME}'" 2>>"$PRIVATE_DIR/restore-pristine-target.stderr")" || {
+    write_failed_pristine_target_receipt "target_existence_check_failed"
+    return 1
+  }
+  if [[ "$existing_count" != "0" ]]; then
+    write_failed_pristine_target_receipt "target_database_already_exists"
+    reject_pristine_target "Pristine restore target database \"${RESTORE_TARGET_DATABASE_NAME}\" already exists; refusing blind drop or overwrite."
+    return 1
+  fi
+
+  local create_owner="$RESTORE_DATABASE_USER"
+  if [[ "${LARI_OFFLINE_TEST_MODE:-}" == "1" && -n "${LARI_TEST_TARGET_DB_OWNER:-}" ]]; then
+    if [[ ! "$LARI_TEST_TARGET_DB_OWNER" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]; then
+      write_failed_pristine_target_receipt "invalid_test_target_owner_identifier"
+      reject_pristine_target "Invalid test target database owner identifier."
+      return 1
+    fi
+    create_owner="$LARI_TEST_TARGET_DB_OWNER"
+  fi
+
+  run_restore_postgres_command psql \
+    -X -q --set=ON_ERROR_STOP=1 \
+    --command="CREATE DATABASE \"${RESTORE_TARGET_DATABASE_NAME}\" WITH TEMPLATE template0 OWNER \"${create_owner}\";" \
+    >>"$PRIVATE_DIR/restore-pristine-target.stdout" \
+    2>>"$PRIVATE_DIR/restore-pristine-target.stderr" || {
+    write_failed_pristine_target_receipt "create_database_failed"
+    reject_pristine_target "Failed to create pristine restore target database \"${RESTORE_TARGET_DATABASE_NAME}\" from template0."
+    return 1
+  }
+
+  local target_meta
+  target_meta="$(run_restore_target_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command="SELECT d.oid || '|' || d.datname || '|' || d.datistemplate || '|' || pg_get_userbyid(d.datdba) || '|' || current_setting('server_version_num') FROM pg_database d WHERE d.datname = current_database()" 2>>"$PRIVATE_DIR/restore-pristine-target.stderr")" || {
+    write_failed_pristine_target_receipt "target_metadata_verification_failed"
+    return 1
+  }
+
+  local target_oid target_name target_istemplate target_owner target_ver
+  IFS='|' read -r target_oid target_name target_istemplate target_owner target_ver <<<"$target_meta"
+
+  if [[ "$target_name" != "$RESTORE_TARGET_DATABASE_NAME" || "$target_name" == "$RESTORE_DATABASE_NAME" ]]; then
+    write_failed_pristine_target_receipt "target_database_identity_mismatch"
+    reject_pristine_target "Pristine target connection verification failed: connected to \"${target_name}\" instead of \"${RESTORE_TARGET_DATABASE_NAME}\"."
+    return 1
+  fi
+  if [[ "$target_istemplate" != "f" ]]; then
+    write_failed_pristine_target_receipt "target_datistemplate_invalid"
+    reject_pristine_target "Pristine target database datistemplate must be false, got: ${target_istemplate}."
+    return 1
+  fi
+  if [[ "$target_owner" != "$expected_owner" ]]; then
+    write_failed_pristine_target_receipt "wrong_target_database_owner"
+    reject_pristine_target "Wrong target database owner: expected ${expected_owner}, got ${target_owner}."
+    return 1
+  fi
+  if [[ "$target_ver" != "170006" ]]; then
+    write_failed_pristine_target_receipt "target_server_version_mismatch"
+    reject_pristine_target "Pristine target database server_version_num must be 170006, got: ${target_ver}."
+    return 1
+  fi
+
+  local unexpected_schemas
+  unexpected_schemas="$(run_restore_target_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command="SELECT coalesce(string_agg(nspname, ',' ORDER BY nspname), '') FROM pg_namespace WHERE nspname <> 'information_schema' AND nspname !~ '^pg_' AND nspname <> 'public'" 2>>"$PRIVATE_DIR/restore-pristine-target.stderr")" || {
+    write_failed_pristine_target_receipt "target_schema_inspection_failed"
+    return 1
+  }
+  if [[ -n "$unexpected_schemas" ]]; then
+    write_failed_pristine_target_receipt "pre_existing_application_schemas_present"
+    reject_pristine_target "Pristine target database \"${RESTORE_TARGET_DATABASE_NAME}\" contains pre-existing non-template0 schemas before restore: ${unexpected_schemas}."
+    return 1
+  fi
+
+  local supabase_app_schemas_count
+  supabase_app_schemas_count="$(run_restore_target_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command="SELECT count(*) FROM pg_namespace WHERE nspname IN ('auth', 'vault', 'extensions', 'graphql_public', 'storage', 'realtime', 'graphql', 'pgsodium', 'supabase_functions', 'supabase_migrations')" 2>>"$PRIVATE_DIR/restore-pristine-target.stderr")" || {
+    write_failed_pristine_target_receipt "supabase_schema_inspection_failed"
+    return 1
+  }
+  if [[ "$supabase_app_schemas_count" != "0" ]]; then
+    write_failed_pristine_target_receipt "supabase_schemas_present_before_restore"
+    reject_pristine_target "Pristine target database \"${RESTORE_TARGET_DATABASE_NAME}\" is not clean; Supabase application schemas exist before restore."
+    return 1
+  fi
+
+  local pre_restore_tables_count
+  pre_restore_tables_count="$(run_restore_target_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command="SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'p') AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'" 2>>"$PRIVATE_DIR/restore-pristine-target.stderr")" || {
+    write_failed_pristine_target_receipt "pre_restore_tables_inspection_failed"
+    return 1
+  }
+  if [[ "$pre_restore_tables_count" != "0" ]]; then
+    write_failed_pristine_target_receipt "unexpected_tables_before_restore"
+    reject_pristine_target "Pristine target database \"${RESTORE_TARGET_DATABASE_NAME}\" contains ${pre_restore_tables_count} unexpected tables before restore."
+    return 1
+  fi
+
+  jq -n \
+    --arg bootstrap_control_db "$RESTORE_DATABASE_NAME" \
+    --arg target_db_name "$target_name" \
+    --argjson target_db_oid "$target_oid" \
+    --arg template_source "template0" \
+    --argjson template0_oid "$template0_oid" \
+    --argjson datistemplate false \
+    --arg database_owner "$target_owner" \
+    --arg bootstrap_superuser_oid10 "$bootstrap_super" \
+    --arg server_version_num "$target_ver" \
+    --argjson pre_restore_user_tables_count 0 \
+    --argjson pristine_verified true \
+    '{
+      bootstrap_control_database: $bootstrap_control_db,
+      target_database_name: $target_db_name,
+      target_database_oid: $target_db_oid,
+      template_source: $template_source,
+      template0_oid: $template0_oid,
+      datistemplate: $datistemplate,
+      database_owner: $database_owner,
+      bootstrap_superuser_oid10: $bootstrap_superuser_oid10,
+      server_version_num: $server_version_num,
+      pre_restore_application_schemas: [],
+      pre_restore_user_tables_count: $pre_restore_user_tables_count,
+      pristine_verified: $pristine_verified
+    }' >"$PRIVATE_DIR/pristine-target-receipt.json"
+}
+
 if [[ "${1:-}" == "$VALIDATE_SOURCE_URL_ONLY" ]]; then
   [[ "$#" -eq 1 ]] || {
     printf 'Source database URL validation mode accepts no additional arguments.\n' >&2
@@ -532,6 +838,7 @@ if [[ "${1:-}" == "$TEST_SOURCE_CREDENTIALS_ONLY" ]]; then
   RESTORE_DATABASE_HOST="127.0.0.1"
   RESTORE_DATABASE_PORT="5432"
   RESTORE_DATABASE_NAME="restore_verification"
+  RESTORE_TARGET_DATABASE_NAME="lari_restore_verification"
   RESTORE_DATABASE_USER="supabase_admin"
   RESTORE_DATABASE_PASSWORD="disposable-only"
   require_value SOURCE_POOLER_HOST
@@ -644,33 +951,48 @@ if [[ "${1:-}" == "$TEST_DISPOSABLE_ROLE_RESTORE_ONLY" ]]; then
   exit 0
 fi
 
-[[ "$#" -eq 0 ]] || {
+OFFLINE_PRISTINE_FIXTURE_DIR=""
+if [[ "${1:-}" == "$TEST_DISPOSABLE_PRISTINE_RESTORE_ONLY" ]]; then
+  [[ "$#" -eq 2 ]] || {
+    printf 'Disposable pristine restore test mode requires a fixture directory path.\n' >&2
+    exit 1
+  }
+  [[ "${LARI_OFFLINE_TEST_MODE:-}" == "1" ]] || {
+    printf 'Offline test guard is not enabled.\n' >&2
+    exit 1
+  }
+  OFFLINE_PRISTINE_FIXTURE_DIR="$2"
+  [[ -d "$OFFLINE_PRISTINE_FIXTURE_DIR" ]] || {
+    printf 'Disposable pristine restore fixture directory not found: %s\n' "$OFFLINE_PRISTINE_FIXTURE_DIR" >&2
+    exit 1
+  }
+elif [[ "$#" -ne 0 ]]; then
   printf 'Unexpected command argument.\n' >&2
   exit 1
-}
+fi
 
 ARTIFACT_DIR="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}/backup-artifacts"
 PRIVATE_DIR="$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP is required}/lari-logical-backup.XXXXXX")"
 RESTORE_DATABASE_HOST="127.0.0.1"
 RESTORE_DATABASE_PORT="5432"
 RESTORE_DATABASE_NAME="restore_verification"
+RESTORE_TARGET_DATABASE_NAME="lari_restore_verification"
 RESTORE_DATABASE_USER="supabase_admin"
 RESTORE_DATABASE_PASSWORD="disposable-only"
+if [[ "${LARI_OFFLINE_TEST_MODE:-}" == "1" && -n "$OFFLINE_PRISTINE_FIXTURE_DIR" ]]; then
+  RESTORE_DATABASE_HOST="${LARI_TEST_RESTORE_HOST:-127.0.0.1}"
+  RESTORE_DATABASE_PORT="${LARI_TEST_RESTORE_PORT:-5432}"
+  RESTORE_DATABASE_NAME="${LARI_TEST_RESTORE_CONTROL_DB:-restore_verification}"
+  RESTORE_TARGET_DATABASE_NAME="${LARI_RESTORE_TARGET_DB:-lari_restore_verification}"
+  RESTORE_DATABASE_USER="${LARI_TEST_RESTORE_USER:-supabase_admin}"
+fi
 CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 BACKUP_ID="lari-${EXPECTED_PROJECT_REF}-${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}-${GITHUB_RUN_ATTEMPT:?GITHUB_RUN_ATTEMPT is required}"
 ENCRYPTED_NAME="${BACKUP_ID}.tar.gz.age"
 
-configure_postgresql17_path
-for command_name in age jq pg_dump pg_dumpall pg_restore psql sha256sum tar python3; do
-  command -v "$command_name" >/dev/null 2>&1 || {
-    printf 'Required command is unavailable: %s\n' "$command_name" >&2
-    exit 1
-  }
-done
+rm -rf -- "$ARTIFACT_DIR"
 
 require_value SOURCE_PROJECT_REF
-require_value SOURCE_POOLER_HOST
-require_source_database_password
 require_value BACKUP_AGE_RECIPIENT
 
 [[ "$SOURCE_PROJECT_REF" == "$EXPECTED_PROJECT_REF" ]] || {
@@ -686,17 +1008,28 @@ require_value BACKUP_AGE_RECIPIENT
   exit 1
 }
 
+: >"$PRIVATE_DIR/restore-pristine-target.stdout"
+: >"$PRIVATE_DIR/restore-pristine-target.stderr"
+validate_disposable_restore_endpoint || {
+  VERDICT="NOT_RESTORABLE_IN_DISPOSABLE_POSTGRES_17"
+  enforce_verified_restore
+  exit 1
+}
+
+configure_postgresql17_path
+for command_name in age jq pg_dump pg_dumpall pg_restore psql sha256sum tar python3; do
+  command -v "$command_name" >/dev/null 2>&1 || {
+    printf 'Required command is unavailable: %s\n' "$command_name" >&2
+    exit 1
+  }
+done
+
 unset \
   PGAPPNAME PGCHANNELBINDING PGCLIENTENCODING PGCONNECT_TIMEOUT PGDATABASE \
   PGHOST PGHOSTADDR PGOPTIONS PGPASSFILE PGPASSWORD PGPORT PGREQUIRESSL \
   PGSERVICE PGSERVICEFILE PGSSLCERT PGSSLCRL PGSSLCRLDIR PGSSLKEY \
   PGSSLMODE PGSSLROOTCERT PGSSLSNI PGTARGETSESSIONATTRS PGUSER \
   SOURCE_DATABASE_URL
-
-validate_ca_root_certificate python3
-build_and_validate_source_database_url python3
-prepare_private_credentials
-assert_private_source_credentials
 
 verify_postgres17_client_binaries
 PG_DUMP_MAJOR="$(pg_dump --version | awk '{print $3}' | cut -d. -f1)"
@@ -706,39 +1039,62 @@ PG_RESTORE_MAJOR="$(pg_restore --version | awk '{print $3}' | cut -d. -f1)"
   exit 1
 }
 
-rm -rf -- "$ARTIFACT_DIR"
-mkdir -p -- "$ARTIFACT_DIR"
+if [[ -n "$OFFLINE_PRISTINE_FIXTURE_DIR" ]]; then
+  prepare_restore_only_credentials
+  for req_file in roles.sql database.dump source-catalog-fingerprint.json source-dependencies.json; do
+    [[ -f "$OFFLINE_PRISTINE_FIXTURE_DIR/$req_file" ]] || {
+      printf 'Required offline fixture file is missing: %s\n' "$req_file" >&2
+      exit 1
+    }
+    cp -- "$OFFLINE_PRISTINE_FIXTURE_DIR/$req_file" "$PRIVATE_DIR/$req_file"
+  done
+  : >"$PRIVATE_DIR/source-roles.stderr"
+  : >"$PRIVATE_DIR/source-dump.stdout"
+  : >"$PRIVATE_DIR/source-dump.stderr"
+  : >"$PRIVATE_DIR/source-catalog-fingerprint.stderr"
+  : >"$PRIVATE_DIR/source-dependencies.stderr"
+  mkdir -p -- "$ARTIFACT_DIR"
+else
+  require_value SOURCE_POOLER_HOST
+  require_source_database_password
+  validate_ca_root_certificate python3
+  build_and_validate_source_database_url python3
+  prepare_private_credentials
+  assert_private_source_credentials
 
-printf 'Creating the bounded logical dump without emitting database output.\n'
-run_source_postgres_command pg_dumpall \
-  --roles-only \
-  --no-role-passwords \
-  >"$PRIVATE_DIR/roles.sql" \
-  2>"$PRIVATE_DIR/source-roles.stderr"
+  mkdir -p -- "$ARTIFACT_DIR"
 
-run_source_postgres_command pg_dump \
-  --format=custom \
-  --compress=9 \
-  --lock-wait-timeout=30000 \
-  --file="$PRIVATE_DIR/database.dump" \
-  >"$PRIVATE_DIR/source-dump.stdout" \
-  2>"$PRIVATE_DIR/source-dump.stderr"
+  printf 'Creating the bounded logical dump without emitting database output.\n'
+  run_source_postgres_command pg_dumpall \
+    --roles-only \
+    --no-role-passwords \
+    >"$PRIVATE_DIR/roles.sql" \
+    2>"$PRIVATE_DIR/source-roles.stderr"
+
+  run_source_postgres_command pg_dump \
+    --format=custom \
+    --compress=9 \
+    --lock-wait-timeout=30000 \
+    --file="$PRIVATE_DIR/database.dump" \
+    >"$PRIVATE_DIR/source-dump.stdout" \
+    2>"$PRIVATE_DIR/source-dump.stderr"
+
+  run_source_postgres_command psql \
+    -X -qAt --set=ON_ERROR_STOP=1 \
+    --file=scripts/backup/catalog-fingerprint.sql \
+    >"$PRIVATE_DIR/source-catalog-fingerprint.json" \
+    2>"$PRIVATE_DIR/source-catalog-fingerprint.stderr"
+
+  run_source_postgres_command psql \
+    -X -qAt --set=ON_ERROR_STOP=1 \
+    --file=scripts/backup/dependency-inventory.sql \
+    >"$PRIVATE_DIR/source-dependencies.json" \
+    2>"$PRIVATE_DIR/source-dependencies.stderr"
+fi
 
 pg_restore --list "$PRIVATE_DIR/database.dump" \
   >"$PRIVATE_DIR/archive.list" \
   2>"$PRIVATE_DIR/archive-list.stderr"
-
-run_source_postgres_command psql \
-  -X -qAt --set=ON_ERROR_STOP=1 \
-  --file=scripts/backup/catalog-fingerprint.sql \
-  >"$PRIVATE_DIR/source-catalog-fingerprint.json" \
-  2>"$PRIVATE_DIR/source-catalog-fingerprint.stderr"
-
-run_source_postgres_command psql \
-  -X -qAt --set=ON_ERROR_STOP=1 \
-  --file=scripts/backup/dependency-inventory.sql \
-  >"$PRIVATE_DIR/source-dependencies.json" \
-  2>"$PRIVATE_DIR/source-dependencies.stderr"
 
 run_restore_postgres_command psql \
   -X -qAt --set=ON_ERROR_STOP=1 \
@@ -757,6 +1113,8 @@ jq -n \
       | $extension
     ]
   }' >"$PRIVATE_DIR/dependency-report.json"
+
+UNAVAILABLE_EXT_COUNT="$(jq -r '.unavailable_on_disposable_postgres17 | length' "$PRIVATE_DIR/dependency-report.json")"
 
 SERVER_VERSION_NUM="$(run_restore_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command='SHOW server_version_num' 2>"$PRIVATE_DIR/restore-version.stderr")"
 [[ "$SERVER_VERSION_NUM" == 17* ]] || {
@@ -777,31 +1135,49 @@ else
   ROLES_RESTORE_STATUS=$?
 fi
 
-DATABASE_RESTORE_STATUS=1
+PRISTINE_TARGET_STATUS=1
 if [[ "$ROLES_RESTORE_STATUS" -eq 0 ]]; then
-  run_restore_postgres_command pg_restore \
+  create_and_verify_pristine_restore_database
+  PRISTINE_TARGET_STATUS=$?
+else
+  write_failed_pristine_target_receipt "skipped_due_to_role_restore_failure"
+fi
+
+DATABASE_RESTORE_STATUS=1
+if [[ "$ROLES_RESTORE_STATUS" -eq 0 && "$PRISTINE_TARGET_STATUS" -eq 0 ]]; then
+  run_restore_target_postgres_command pg_restore \
     --exit-on-error \
     --single-transaction \
-    --dbname="$RESTORE_DATABASE_NAME" \
+    --dbname="$RESTORE_TARGET_DATABASE_NAME" \
     "$PRIVATE_DIR/database.dump" \
     >"$PRIVATE_DIR/restore-database.stdout" \
     2>"$PRIVATE_DIR/restore-database.stderr"
   DATABASE_RESTORE_STATUS=$?
 else
   : >"$PRIVATE_DIR/restore-database.stdout"
-  printf 'Database restore was not attempted because the role restore failed.\n' >"$PRIVATE_DIR/restore-database.stderr"
+  if [[ "$ROLES_RESTORE_STATUS" -ne 0 ]]; then
+    printf 'Database restore was not attempted because the role restore failed.\n' >"$PRIVATE_DIR/restore-database.stderr"
+  else
+    printf 'Database restore was not attempted because pristine target database verification failed.\n' >"$PRIVATE_DIR/restore-database.stderr"
+  fi
 fi
 set -e
 
 CATALOG_MATCH=false
-if [[ "$ROLES_RESTORE_STATUS" -eq 0 && "$DATABASE_RESTORE_STATUS" -eq 0 ]]; then
-  run_restore_postgres_command psql \
-    -X -qAt --set=ON_ERROR_STOP=1 \
-    --file=scripts/backup/catalog-fingerprint.sql \
-    >"$PRIVATE_DIR/restore-catalog-fingerprint.json" \
-    2>"$PRIVATE_DIR/restore-catalog-fingerprint.stderr"
-  if cmp -s "$PRIVATE_DIR/source-catalog-fingerprint.json" "$PRIVATE_DIR/restore-catalog-fingerprint.json"; then
-    CATALOG_MATCH=true
+if [[ "$ROLES_RESTORE_STATUS" -eq 0 && "$PRISTINE_TARGET_STATUS" -eq 0 && "$DATABASE_RESTORE_STATUS" -eq 0 ]]; then
+  VERIFIED_CATALOG_DB="$(run_restore_target_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command='SELECT current_database()' 2>>"$PRIVATE_DIR/restore-catalog-fingerprint.stderr")"
+  if [[ "$VERIFIED_CATALOG_DB" == "$RESTORE_TARGET_DATABASE_NAME" && "$VERIFIED_CATALOG_DB" != "$RESTORE_DATABASE_NAME" ]]; then
+    run_restore_target_postgres_command psql \
+      -X -qAt --set=ON_ERROR_STOP=1 \
+      --file=scripts/backup/catalog-fingerprint.sql \
+      >"$PRIVATE_DIR/restore-catalog-fingerprint.json" \
+      2>>"$PRIVATE_DIR/restore-catalog-fingerprint.stderr"
+    if cmp -s "$PRIVATE_DIR/source-catalog-fingerprint.json" "$PRIVATE_DIR/restore-catalog-fingerprint.json"; then
+      CATALOG_MATCH=true
+    fi
+  else
+    printf '{}\n' >"$PRIVATE_DIR/restore-catalog-fingerprint.json"
+    printf 'Catalog fingerprint verification failed: wrong target database connection (%s).\n' "$VERIFIED_CATALOG_DB" >>"$PRIVATE_DIR/restore-catalog-fingerprint.stderr"
   fi
 else
   printf '{}\n' >"$PRIVATE_DIR/restore-catalog-fingerprint.json"
@@ -809,26 +1185,31 @@ else
 fi
 
 VERDICT="NOT_RESTORABLE_IN_DISPOSABLE_POSTGRES_17"
-if [[ "$ROLES_RESTORE_STATUS" -eq 0 && "$DATABASE_RESTORE_STATUS" -eq 0 && "$CATALOG_MATCH" == "true" ]]; then
+if [[ "$PRISTINE_TARGET_STATUS" -eq 0 && "$ROLES_RESTORE_STATUS" -eq 0 && "$DATABASE_RESTORE_STATUS" -eq 0 && "$CATALOG_MATCH" == "true" && "$UNAVAILABLE_EXT_COUNT" -eq 0 ]]; then
   VERDICT="VERIFIED_LOGICAL_RESTORE"
 fi
 
 jq -n \
   --arg verdict "$VERDICT" \
+  --argjson pristine_target_status "$PRISTINE_TARGET_STATUS" \
   --argjson roles_restore_status "$ROLES_RESTORE_STATUS" \
   --argjson database_restore_status "$DATABASE_RESTORE_STATUS" \
   --argjson catalog_match "$CATALOG_MATCH" \
+  --slurpfile pristine_receipt "$PRIVATE_DIR/pristine-target-receipt.json" \
   --slurpfile dependency_report "$PRIVATE_DIR/dependency-report.json" \
   '{
     verdict: $verdict,
+    pristine_target_exit_code: $pristine_target_status,
     roles_restore_exit_code: $roles_restore_status,
     database_restore_exit_code: $database_restore_status,
     catalog_fingerprint_match: $catalog_match,
     data_restore_basis: "pg_restore --exit-on-error --single-transaction",
+    pristine_target_receipt: $pristine_receipt[0],
     dependency_report: $dependency_report[0],
     diagnostic_files: [
       "source-roles.stderr",
       "source-dump.stderr",
+      "restore-pristine-target.stderr",
       "restore-roles.stderr",
       "restore-database.stderr",
       "restore-catalog-fingerprint.stderr"
@@ -844,6 +1225,7 @@ tar -C "$PRIVATE_DIR" -czf "$PRIVATE_DIR/backup-bundle.tar.gz" \
   source-dependencies.json \
   restore-available-extensions.json \
   dependency-report.json \
+  pristine-target-receipt.json \
   restore-report.json \
   source-roles.stderr \
   source-dump.stdout \
@@ -853,6 +1235,8 @@ tar -C "$PRIVATE_DIR" -czf "$PRIVATE_DIR/backup-bundle.tar.gz" \
   archive-list.stderr \
   restore-version.stderr \
   restore-available-extensions.stderr \
+  restore-pristine-target.stdout \
+  restore-pristine-target.stderr \
   restore-roles.stdout \
   restore-roles.stderr \
   restore-database.stdout \
@@ -877,10 +1261,14 @@ jq -n \
   --arg source_revision "${GITHUB_SHA:?GITHUB_SHA is required}" \
   --arg pg_dump_major "$PG_DUMP_MAJOR" \
   --arg restore_server_version_num "$SERVER_VERSION_NUM" \
+  --arg bootstrap_control_db "$RESTORE_DATABASE_NAME" \
+  --arg target_db_name "$RESTORE_TARGET_DATABASE_NAME" \
+  --arg template_source "template0" \
   --arg encrypted_file "$ENCRYPTED_NAME" \
   --arg encrypted_sha256 "$ENCRYPTED_SHA256" \
   --argjson encrypted_size "$ENCRYPTED_SIZE" \
   --arg verdict "$VERDICT" \
+  --argjson pristine_target_status "$PRISTINE_TARGET_STATUS" \
   --argjson roles_restore_status "$ROLES_RESTORE_STATUS" \
   --argjson database_restore_status "$DATABASE_RESTORE_STATUS" \
   --argjson catalog_match "$CATALOG_MATCH" \
@@ -900,6 +1288,10 @@ jq -n \
     restore_test: {
       postgresql_client_major: $pg_dump_major,
       postgresql_server_version_num: $restore_server_version_num,
+      bootstrap_control_database: $bootstrap_control_db,
+      target_database_name: $target_db_name,
+      template_source: $template_source,
+      pristine_target_exit_code: $pristine_target_status,
       roles_restore_exit_code: $roles_restore_status,
       database_restore_exit_code: $database_restore_status,
       catalog_fingerprint_match: $catalog_match,
@@ -918,6 +1310,8 @@ test "$(jq -r '.encrypted_backup.sha256' "$ARTIFACT_DIR/manifest.json")" = \
   "$(sha256sum "$ARTIFACT_DIR/$ENCRYPTED_NAME" | awk '{print $1}')"
 test "$(jq -r '.source_project_ref' "$ARTIFACT_DIR/manifest.json")" = "$EXPECTED_PROJECT_REF"
 test "$(jq -r '.restore_test.verdict' "$ARTIFACT_DIR/manifest.json")" = "$VERDICT"
+test "$(jq -r '.restore_test.target_database_name' "$ARTIFACT_DIR/manifest.json")" = "$RESTORE_TARGET_DATABASE_NAME"
+test "$(jq -r '.restore_test.template_source' "$ARTIFACT_DIR/manifest.json")" = "template0"
 
 mapfile -t ARTIFACT_FILES < <(find "$ARTIFACT_DIR" -maxdepth 1 -type f -printf '%f\n' | sort)
 [[ "${#ARTIFACT_FILES[@]}" -eq 2 ]]
