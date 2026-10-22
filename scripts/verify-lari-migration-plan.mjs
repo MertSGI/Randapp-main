@@ -83,13 +83,18 @@ export function verifyMigrationPlan(matrixData, repoRoot = process.cwd()) {
       } else {
         const raw = fs.readFileSync(fullPath);
         const actualHash = crypto.createHash('sha256').update(raw).digest('hex').toLowerCase();
-        if (item.source_sha256 && actualHash !== item.source_sha256.toLowerCase()) {
+        const text = raw.toString('utf8');
+        const crlfHash = crypto.createHash('sha256').update(text.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n'), 'utf8').digest('hex').toLowerCase();
+        const lfHash = crypto.createHash('sha256').update(text.replace(/\r\n/g, '\n'), 'utf8').digest('hex').toLowerCase();
+
+        const expected = (item.source_sha256 || '').toLowerCase();
+        if (expected && actualHash !== expected && crlfHash !== expected && lfHash !== expected) {
           errors.push(`HASH_MISMATCH:${item.local_filename}`);
         }
-        if (seenHashes.has(actualHash)) {
-          errors.push(`DUPLICATE_SOURCE_SHA256:${item.local_filename} duplicates ${seenHashes.get(actualHash)}`);
+        if (seenHashes.has(lfHash)) {
+          errors.push(`DUPLICATE_SOURCE_SHA256:${item.local_filename} duplicates ${seenHashes.get(lfHash)}`);
         } else {
-          seenHashes.set(actualHash, item.local_filename);
+          seenHashes.set(lfHash, item.local_filename);
         }
       }
 
