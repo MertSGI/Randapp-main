@@ -424,8 +424,12 @@ try {
     'ALTER ROLE "authenticated" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;',
     'CREATE ROLE "authenticator";',
     'ALTER ROLE "authenticator" WITH NOSUPERUSER NOINHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
+    'CREATE ROLE "cli_login_postgres";',
+    'ALTER ROLE "cli_login_postgres" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
     'CREATE ROLE "dashboard_user";',
     'ALTER ROLE "dashboard_user" WITH NOSUPERUSER INHERIT CREATEROLE CREATEDB NOLOGIN REPLICATION NOBYPASSRLS;',
+    'CREATE ROLE "pgbouncer";',
+    'ALTER ROLE "pgbouncer" WITH NOSUPERUSER NOINHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
     'CREATE ROLE "postgres";',
     'ALTER ROLE "postgres" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN REPLICATION BYPASSRLS;',
     'CREATE ROLE "service_role";',
@@ -434,34 +438,30 @@ try {
     'ALTER ROLE "supabase_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN REPLICATION BYPASSRLS;',
     'CREATE ROLE "supabase_auth_admin";',
     'ALTER ROLE "supabase_auth_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN NOREPLICATION BYPASSRLS;',
-    'CREATE ROLE "supabase_storage_admin";',
-    'ALTER ROLE "supabase_storage_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN NOREPLICATION BYPASSRLS;',
-    'CREATE ROLE "supabase_replication_admin";',
-    'ALTER ROLE "supabase_replication_admin" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN REPLICATION NOBYPASSRLS;',
-    'CREATE ROLE "supabase_read_only_user";',
-    'ALTER ROLE "supabase_read_only_user" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
-    'CREATE ROLE "supabase_functions_admin";',
-    'ALTER ROLE "supabase_functions_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN NOREPLICATION BYPASSRLS;',
-    'CREATE ROLE "pgbouncer";',
-    'ALTER ROLE "pgbouncer" WITH NOSUPERUSER NOINHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
-    'CREATE ROLE "cli_login_postgres";',
-    'ALTER ROLE "cli_login_postgres" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
+    'CREATE ROLE "supabase_etl_admin";',
+    'ALTER ROLE "supabase_etl_admin" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
     'CREATE ROLE "supabase_privileged_role";',
     'ALTER ROLE "supabase_privileged_role" WITH NOSUPERUSER NOINHERIT CREATEROLE CREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;',
-    'CREATE ROLE "app_tenant_admin";',
-    'ALTER ROLE "app_tenant_admin" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;',
+    'CREATE ROLE "supabase_read_only_user";',
+    'ALTER ROLE "supabase_read_only_user" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
+    'CREATE ROLE "supabase_realtime_admin";',
+    'ALTER ROLE "supabase_realtime_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN NOREPLICATION BYPASSRLS;',
+    'CREATE ROLE "supabase_replication_admin";',
+    'ALTER ROLE "supabase_replication_admin" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN REPLICATION NOBYPASSRLS;',
+    'CREATE ROLE "supabase_storage_admin";',
+    'ALTER ROLE "supabase_storage_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN NOREPLICATION BYPASSRLS;',
     '-- Role memberships',
-    'GRANT "anon" TO "authenticator" WITH INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
-    'GRANT "authenticated" TO "authenticator" WITH INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
-    'GRANT "service_role" TO "authenticator" WITH INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
-    'GRANT "supabase_admin" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
-    'GRANT "anon" TO "supabase_storage_admin" WITH INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
-    'GRANT "authenticated" TO "supabase_storage_admin" WITH INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
-    'GRANT "service_role" TO "supabase_storage_admin" WITH INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
-    'GRANT "postgres" TO "cli_login_postgres" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
-    'GRANT "postgres" TO "supabase_privileged_role" WITH INHERIT TRUE, SET FALSE GRANTED BY "supabase_admin";',
-    'GRANT "authenticated" TO "app_tenant_admin" WITH INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
-    'GRANT "anon" TO "supabase_auth_admin" WITH INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "anon" TO "authenticator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "anon" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "authenticated" TO "authenticator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "authenticated" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "authenticator" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "authenticator" TO "supabase_storage_admin" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "postgres" TO "cli_login_postgres" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "service_role" TO "authenticator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "service_role" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "supabase_privileged_role" TO "postgres" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "supabase_privileged_role" TO "supabase_etl_admin" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
   ].join('\n');
 
   const testTempDir = fs.mkdtempSync(path.join(os.tmpdir(), `lari-role-prep-${process.pid}-`));
@@ -492,7 +492,7 @@ try {
   fs.rmSync(testTempDir, { recursive: true, force: true });
 
   assert.ok(preparedRestoreContent.includes('DO $lari_role_grant_bootstrap$'), 'Prepared restore must contain cycle-checked delegation block');
-  assert.ok(preparedRestoreContent.includes('GRANT "anon" TO "authenticator" WITH INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";'), 'Must preserve exact grant statement');
+  assert.ok(preparedRestoreContent.includes('GRANT "anon" TO "authenticator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";'), 'Must preserve exact grant statement');
 
   // Reset non-system role memberships prior to replay inside container
   execPsql(
@@ -562,17 +562,17 @@ try {
   const actualRows = [firstRow, ...lines.slice(headerIdx + 1)].filter(Boolean);
 
   const expectedMemberships = [
-    'anon|authenticator|supabase_admin|f|t|t',
-    'anon|supabase_auth_admin|supabase_admin|f|t|t',
-    'anon|supabase_storage_admin|supabase_admin|f|f|t',
-    'authenticated|app_tenant_admin|supabase_admin|f|t|t',
-    'authenticated|authenticator|supabase_admin|f|t|t',
-    'authenticated|supabase_storage_admin|supabase_admin|f|f|t',
-    'postgres|cli_login_postgres|supabase_admin|f|t|t',
-    'postgres|supabase_privileged_role|supabase_admin|f|t|f',
-    'service_role|authenticator|supabase_admin|f|t|t',
-    'service_role|supabase_storage_admin|supabase_admin|f|f|t',
-    'supabase_admin|postgres|supabase_admin|t|t|t',
+    'anon|authenticator|supabase_admin|f|f|t',
+    'anon|postgres|supabase_admin|t|t|t',
+    'authenticated|authenticator|supabase_admin|f|f|t',
+    'authenticated|postgres|supabase_admin|t|t|t',
+    'authenticator|postgres|supabase_admin|t|t|t',
+    'authenticator|supabase_storage_admin|supabase_admin|f|f|t',
+    'postgres|cli_login_postgres|supabase_admin|f|f|t',
+    'service_role|authenticator|supabase_admin|f|f|t',
+    'service_role|postgres|supabase_admin|t|t|t',
+    'supabase_privileged_role|postgres|supabase_admin|f|t|t',
+    'supabase_privileged_role|supabase_etl_admin|supabase_admin|f|t|t',
   ];
   expectedMemberships.sort();
 

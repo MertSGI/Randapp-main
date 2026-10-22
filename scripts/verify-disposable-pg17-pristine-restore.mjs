@@ -297,23 +297,23 @@ try {
       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_storage_admin') THEN CREATE ROLE supabase_storage_admin SUPERUSER CREATEDB CREATEROLE LOGIN NOREPLICATION BYPASSRLS; END IF;
       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_replication_admin') THEN CREATE ROLE supabase_replication_admin LOGIN REPLICATION; END IF;
       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_read_only_user') THEN CREATE ROLE supabase_read_only_user LOGIN; END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_functions_admin') THEN CREATE ROLE supabase_functions_admin SUPERUSER CREATEDB CREATEROLE LOGIN NOREPLICATION BYPASSRLS; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_etl_admin') THEN CREATE ROLE supabase_etl_admin LOGIN; END IF;
       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'pgbouncer') THEN CREATE ROLE pgbouncer NOINHERIT LOGIN; END IF;
       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cli_login_postgres') THEN CREATE ROLE cli_login_postgres LOGIN; END IF;
       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_privileged_role') THEN CREATE ROLE supabase_privileged_role NOINHERIT CREATEROLE CREATEDB NOLOGIN; END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_tenant_admin') THEN CREATE ROLE app_tenant_admin NOLOGIN; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_realtime_admin') THEN CREATE ROLE supabase_realtime_admin SUPERUSER CREATEDB CREATEROLE LOGIN NOREPLICATION BYPASSRLS; END IF;
 
-      GRANT anon TO authenticator WITH INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
-      GRANT authenticated TO authenticator WITH INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
-      GRANT service_role TO authenticator WITH INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
-      GRANT supabase_admin TO postgres WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
-      GRANT anon TO supabase_storage_admin WITH INHERIT FALSE, SET TRUE GRANTED BY supabase_admin;
-      GRANT authenticated TO supabase_storage_admin WITH INHERIT FALSE, SET TRUE GRANTED BY supabase_admin;
-      GRANT service_role TO supabase_storage_admin WITH INHERIT FALSE, SET TRUE GRANTED BY supabase_admin;
-      GRANT postgres TO cli_login_postgres WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
-      GRANT postgres TO supabase_privileged_role WITH INHERIT TRUE, SET FALSE GRANTED BY supabase_admin;
-      GRANT authenticated TO app_tenant_admin WITH INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
-      GRANT anon TO supabase_auth_admin WITH INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT anon TO authenticator WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY supabase_admin;
+      GRANT anon TO postgres WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT authenticated TO authenticator WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY supabase_admin;
+      GRANT authenticated TO postgres WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT authenticator TO postgres WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT authenticator TO supabase_storage_admin WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY supabase_admin;
+      GRANT postgres TO cli_login_postgres WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY supabase_admin;
+      GRANT service_role TO authenticator WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY supabase_admin;
+      GRANT service_role TO postgres WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT supabase_privileged_role TO postgres WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT supabase_privileged_role TO supabase_etl_admin WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
     END $lari_setup_roles$;`,
     { db: 'restore_verification', description: 'Configure canonical synthetic roles and memberships' }
   );

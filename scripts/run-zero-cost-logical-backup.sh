@@ -70,6 +70,10 @@ emit_restore_failure_telemetry() {
       ;;
     ROLE_REPLAY_FAILED)
       printf 'Detail: Replay of prepared restore-roles.sql failed in disposable PostgreSQL 17 (exit code %s).\n' "${ROLES_RESTORE_STATUS:-1}" >&2
+      if [[ -n "${PRIVATE_DIR:-}" && -f "$PRIVATE_DIR/restore-roles.stderr" ]]; then
+        "${LARI_SOURCE_VALIDATOR_PYTHON:-python3}" scripts/backup/safe_restore_error.py \
+          "$PRIVATE_DIR/restore-roles.stderr" >&2 || true
+      fi
       ;;
     PRISTINE_TARGET_FAILED)
       local reason="unknown"
@@ -80,6 +84,10 @@ emit_restore_failure_telemetry() {
       ;;
     DATABASE_RESTORE_FAILED)
       printf 'Detail: pg_restore failed into pristine database (exit code %s).\n' "${DATABASE_RESTORE_STATUS:-1}" >&2
+      if [[ -n "${PRIVATE_DIR:-}" && -f "$PRIVATE_DIR/restore-database.stderr" ]]; then
+        "${LARI_SOURCE_VALIDATOR_PYTHON:-python3}" scripts/backup/safe_restore_error.py \
+          "$PRIVATE_DIR/restore-database.stderr" >&2 || true
+      fi
       ;;
     EXTENSION_COMPATIBILITY_FAILED)
       local missing_exts="none"
@@ -361,201 +369,12 @@ prepare_disposable_role_restore() {
   local input_roles_sql="$1"
   local output_restore_sql="$2"
   local python_command="${3:-python3}"
-
   [[ -f "$input_roles_sql" ]] || {
-    printf 'Input roles dump file not found: %s\n' "$input_roles_sql" >&2
+    printf 'ROLE_PREPARATION_FAILED: INPUT_NOT_FOUND\n' >&2
     return 1
   }
-
-  "$python_command" - "$input_roles_sql" "$output_restore_sql" <<'PY'
-import re
-import sys
-
-input_path = sys.argv[1]
-output_path = sys.argv[2]
-
-with open(input_path, 'r', encoding='utf-8') as f:
-    lines = f.readlines()
-
-create_role_pattern = re.compile(
-    r'^CREATE\s+ROLE\s+("?[A-Za-z0-9_]+"?)\s*;',
-    re.IGNORECASE
-)
-
-# Strict anchored PostgreSQL 17 role-membership statement parser:
-# Syntax: GRANT <targets> TO <members> [WITH <options>] [GRANTED BY <grantor>];
-# where <targets> and <members> are comma-separated identifiers,
-# <options> is a comma-separated list of { ADMIN { TRUE | FALSE } | ADMIN OPTION | INHERIT { TRUE | FALSE } | SET { TRUE | FALSE } },
-# and <grantor> is a single identifier.
-grant_full_pattern = re.compile(
-    r'^GRANT\s+(?P<targets>.+?)\s+TO\s+(?P<members>.+?)'
-    r'(?:\s+WITH\s+(?P<options>.+?))?'
-    r'(?:\s+GRANTED\s+BY\s+(?P<grantor>.+?))?\s*;$',
-    re.IGNORECASE
-)
-
-ident_pattern = re.compile(r'^"?[A-Za-z0-9_]+"?$')
-opt_pattern = re.compile(
-    r'^(?:ADMIN\s+(?:TRUE|FALSE)|ADMIN\s+OPTION|INHERIT\s+(?:TRUE|FALSE)|SET\s+(?:TRUE|FALSE))$',
-    re.IGNORECASE
-)
-
-def parse_ident_list(s, label):
-    items = []
-    for raw in s.split(','):
-        token = raw.strip()
-        if not token or not ident_pattern.match(token):
-            raise ValueError(f"Malformed {label} identifier: '{token}' in statement: {s}")
-        items.append(token.strip('"'))
-    if not items:
-        raise ValueError(f"Empty {label} list in statement: {s}")
-    return items
-
-def parse_options(opts_str):
-    if not opts_str:
-        return
-    for raw in opts_str.split(','):
-        token = raw.strip()
-        if not token or not opt_pattern.match(token):
-            raise ValueError(f"Malformed or unsupported WITH option: '{token}' in options: {opts_str}")
-
-grants = []
-for line_idx, line in enumerate(lines, 1):
-    stripped = line.strip()
-    if re.match(r'^GRANT\b', stripped, re.IGNORECASE):
-        m = grant_full_pattern.match(stripped)
-        if not m:
-            raise ValueError(f"Malformed or unsupported GRANT statement on line {line_idx}: {stripped}")
-
-        targets = parse_ident_list(m.group('targets'), 'target')
-        members = parse_ident_list(m.group('members'), 'member')
-
-        opts_raw = m.group('options')
-        if opts_raw is not None:
-            parse_options(opts_raw)
-
-        grantor_raw = m.group('grantor')
-        grantor = None
-        if grantor_raw is not None:
-            grantor_token = grantor_raw.strip()
-            if not ident_pattern.match(grantor_token):
-                raise ValueError(f"Malformed GRANTED BY identifier: '{grantor_token}' on line {line_idx}: {stripped}")
-            grantor = grantor_token.strip('"')
-
-        for t in targets:
-            for mb in members:
-                grants.append({'target': t, 'member': mb, 'grantor': grantor})
-
-# Build membership graph and detect cycles in role dump:
-graph = {}
-def is_ancestor(start, target):
-    # Returns True if start is a member of target (directly or transitively)
-    visited = set()
-    queue = [start]
-    while queue:
-        curr = queue.pop(0)
-        if curr == target:
-            return True
-        if curr not in visited:
-            visited.add(curr)
-            for parent in graph.get(curr, []):
-                if parent not in visited:
-                    queue.append(parent)
-    return False
-
-for g in grants:
-    target = g['target']
-    member = g['member']
-    if target == member or is_ancestor(target, member):
-        raise ValueError(f"Cycle detected in role dump: granting {target} to {member} creates a circular role membership")
-    graph.setdefault(member, set()).add(target)
-
-delegations = []
-seen_pairs = set()
-for g in grants:
-    target = g['target']
-    grantor = g['grantor']
-    if not grantor:
-        continue
-    # In PostgreSQL, a role cannot be granted to itself.
-    # The cluster bootstrap superuser has inherent authority; non-bootstrap roles cannot self-grant.
-    if target == grantor:
-        continue
-
-    pair = (target, grantor)
-    if pair in seen_pairs:
-        continue
-    seen_pairs.add(pair)
-
-    # If target is already an ancestor of grantor (i.e. target is a member of grantor),
-    # granting target to grantor would create a circular membership. Since grantor is already a parent/ancestor
-    # of target, no delegation is permitted or needed.
-    if is_ancestor(target, grantor):
-        continue
-
-    delegations.append(pair)
-    graph.setdefault(grantor, set()).add(target)
-
-# Transform content:
-# 1. Make CREATE ROLE idempotent so pre-existing bootstrap role does not fail
-# 2. Insert minimal cycle-checked bootstrap delegation DO block before first GRANT
-out_lines = []
-first_grant_idx = None
-for line in lines:
-    stripped = line.strip()
-    if first_grant_idx is None and re.match(r'^GRANT\s+', stripped, re.IGNORECASE):
-        first_grant_idx = len(out_lines)
-
-    m_create = create_role_pattern.match(stripped)
-    if m_create:
-        rolname = m_create.group(1).strip('"')
-        idempotent_block = (
-            f"DO $lari_role_init$\n"
-            f"BEGIN\n"
-            f"  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{rolname}') THEN\n"
-            f"    CREATE ROLE \"{rolname}\";\n"
-            f"  END IF;\n"
-            f"END $lari_role_init$;\n"
-        )
-        out_lines.append(idempotent_block)
-    else:
-        out_lines.append(line)
-
-bootstrap_statements = []
-for target, grantor in delegations:
-    bootstrap_statements.append(
-        f"  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{grantor}') "
-        f"AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{target}') "
-        f"AND current_user <> '{grantor}' THEN\n"
-        f"    EXECUTE format('GRANT %I TO %I WITH ADMIN OPTION GRANTED BY %I', '{target}', '{grantor}', current_user);\n"
-        f"  END IF;\n"
-    )
-
-if bootstrap_statements:
-    bootstrap_block = (
-        "\n-- LARİ Disposable Restore: Minimal cycle-checked ADMIN OPTION delegations\n"
-        "DO $lari_role_grant_bootstrap$\n"
-        "BEGIN\n"
-        + "".join(bootstrap_statements) +
-        "END $lari_role_grant_bootstrap$;\n\n"
-    )
-else:
-    bootstrap_block = (
-        "\n-- LARİ Disposable Restore: Bootstrap superuser matches dump grantor; no intermediate delegations required\n"
-        "DO $lari_role_grant_bootstrap$\n"
-        "BEGIN\n"
-        "  NULL;\n"
-        "END $lari_role_grant_bootstrap$;\n\n"
-    )
-
-if first_grant_idx is not None:
-    final_lines = out_lines[:first_grant_idx] + [bootstrap_block] + out_lines[first_grant_idx:]
-else:
-    final_lines = out_lines + [bootstrap_block]
-
-with open(output_path, 'w', encoding='utf-8') as f:
-    f.writelines(final_lines)
-PY
+  "$python_command" scripts/backup/prepare_roles_pg17.py \
+    "$input_roles_sql" "$output_restore_sql"
 }
 
 escape_pgpass_field() {
