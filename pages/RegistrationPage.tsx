@@ -5,6 +5,9 @@ import { launchModeService } from '../services/launchModeService';
 import { useLanguage } from '../contexts/LanguageContext';
 import { translations } from '../utils/translations';
 import { tenantRegistrationService, RegistrationData, RegistrationStatus } from '../services/tenantRegistrationService';
+import { policyAcceptanceService } from '../services/policyAcceptanceService';
+import { consentLedgerService } from '../services/consentLedgerService';
+import { getDataSourceMode } from '../services/dataSourceConfig';
 
 export default function RegistrationPage() {
   const { language } = useLanguage();
@@ -21,6 +24,7 @@ export default function RegistrationPage() {
   const [validatedPlanId, setValidatedPlanId] = useState<string>(rawPlanId);
   const [plan, setPlan] = useState<PricingPlan | null>(null);
   const [planLoading, setPlanLoading] = useState(true);
+  const isPersistentMode = getDataSourceMode() === 'supabase';
 
   useEffect(() => {
     let cancelled = false;
@@ -109,31 +113,44 @@ export default function RegistrationPage() {
       if (result.success) {
         setSubmissionState('PROVISIONED');
 
-        // Record legal acceptance asynchronously
-        import('../services/consentService').then(({ consentService }) => {
-           consentService.recordBusinessOwnerTermsAcceptance(result.tenantId || 'unknown_tenant', formData.ownerEmail);
-        }).catch(e => console.error(e));
-
-        import('../services/policyAcceptanceService').then(({ policyAcceptanceService }) => {
-           policyAcceptanceService.recordPolicyAcceptance({
-             tenantId: result.tenantId || 'unknown_tenant',
-             actorType: 'tenant_owner',
-             actorId: formData.ownerEmail,
-             actorDisplayName: `${formData.ownerName} ${formData.ownerSurname}`,
-             actorContact: formData.ownerPhone,
-             documentType: 'terms_of_service',
-             acceptanceSource: 'registration'
-           });
-           policyAcceptanceService.recordPolicyAcceptance({
-             tenantId: result.tenantId || 'unknown_tenant',
-             actorType: 'tenant_owner',
-             actorId: formData.ownerEmail,
-             actorDisplayName: `${formData.ownerName} ${formData.ownerSurname}`,
-             actorContact: formData.ownerPhone,
-             documentType: 'privacy_policy',
-             acceptanceSource: 'registration'
-           });
-        }).catch(e => console.error(e));
+        // Retain idempotent tenant provisioning without rolling back tenant on legal record omission
+        if (isPersistentMode) {
+          console.info('[RegistrationPage] LEGAL_ACCEPTANCE_RECORD_PENDING: SERVER_LEGAL_WRITE_NOT_READY - Client table write bypassed in persistent mode');
+        } else {
+          try {
+            policyAcceptanceService.recordPolicyAcceptance({
+              tenantId: result.tenantId || 'unknown_tenant',
+              actorType: 'tenant_owner',
+              actorId: formData.ownerEmail,
+              actorDisplayName: `${formData.ownerName} ${formData.ownerSurname}`,
+              actorContact: formData.ownerPhone,
+              documentType: 'terms_of_service',
+              acceptanceSource: 'registration'
+            });
+            policyAcceptanceService.recordPolicyAcceptance({
+              tenantId: result.tenantId || 'unknown_tenant',
+              actorType: 'tenant_owner',
+              actorId: formData.ownerEmail,
+              actorDisplayName: `${formData.ownerName} ${formData.ownerSurname}`,
+              actorContact: formData.ownerPhone,
+              documentType: 'privacy_policy',
+              acceptanceSource: 'registration'
+            });
+            consentLedgerService.recordConsent({
+              tenantId: result.tenantId || 'unknown_tenant',
+              actorType: 'tenant_owner',
+              actorId: formData.ownerEmail,
+              contact: formData.ownerPhone || formData.ownerEmail,
+              consentType: 'booking_transactional',
+              status: 'granted',
+              source: 'registration',
+              legalDocumentType: 'terms_of_service',
+              metadata: { actorDisplayName: `${formData.ownerName} ${formData.ownerSurname}` }
+            });
+          } catch (legalErr: any) {
+            console.warn('[RegistrationPage] Non-blocking local legal acceptance note:', legalErr?.message);
+          }
+        }
 
         // Route to canonical onboarding entry point (resumable onboarding entry)
         if (result.status === 'USER_ALREADY_HAS_TENANT') {
@@ -253,6 +270,12 @@ export default function RegistrationPage() {
                  </div>
               </div>
             </div>
+
+            {isPersistentMode && (
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 rounded-xl text-xs border border-amber-200 dark:border-amber-800/50">
+                ⚠️ [LEGAL_ACCEPTANCE_RECORD_PENDING / SERVER_LEGAL_WRITE_NOT_READY] Hukuki politika kabul kaydı sunucu doğrulaması bekliyor. İstemci taraflı kalıcı kayıt iddiasında bulunulmaz.
+              </div>
+            )}
 
             <div className="space-y-4">
               <label className="flex items-start gap-3 cursor-pointer p-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-700/50">

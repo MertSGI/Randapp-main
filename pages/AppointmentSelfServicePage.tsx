@@ -6,6 +6,8 @@ import {
 } from '../services/appointmentSelfServiceService';
 import { availabilityService, TimeSlot } from '../services/availabilityService';
 import { Appointment, AppointmentAccessToken, Service, Staff, BusinessBranch } from '../types';
+import { dataRightsRequestService } from '../services/dataRightsRequestService';
+import { getDataSourceMode } from '../services/dataSourceConfig';
 
 export function getStatusDisplayLabel(status?: string): string {
   switch (status) {
@@ -97,9 +99,46 @@ const AppointmentSelfServicePage: React.FC = () => {
 
   // KVKK / Data Rights Form state
   const [showKvkkForm, setShowKvkkForm] = useState(false);
-  const [kvkkType, setKvkkType] = useState<'access' | 'export' | 'deletion' | 'consent_withdrawal'>('export');
+  const [kvkkType, setKvkkType] = useState<'deletion' | 'export' | 'correction' | 'consent_withdrawal'>('export');
   const [kvkkDesc, setKvkkDesc] = useState('');
   const [kvkkSuccess, setKvkkSuccess] = useState<string | null>(null);
+  const [kvkkError, setKvkkError] = useState<string | null>(null);
+  const [kvkkSubmitting, setKvkkSubmitting] = useState(false);
+
+  const handleKvkkSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (kvkkSubmitting) return;
+    setKvkkSubmitting(true);
+    setKvkkError(null);
+    setKvkkSuccess(null);
+
+    try {
+      dataRightsRequestService.createDataRightsRequest({
+        tenantId: appointment?.tenantId || 'unknown_tenant',
+        requesterType: 'customer',
+        requesterName: appointment?.user_name || 'Müşteri',
+        requesterContact: appointment?.phone || appointment?.user_email || '',
+        type: kvkkType,
+        description: kvkkDesc,
+        relatedAppointmentId: appointment?.id
+      });
+      setKvkkSuccess('KVKK talebiniz başarıyla kaydedildi. İnceleme sürecimiz başlatılmıştır.');
+      setKvkkDesc('');
+    } catch (err: any) {
+      console.warn('[AppointmentSelfServicePage] KVKK request error:', err?.message);
+      const isPersistentGate = err?.message?.includes('LEGAL_PERSISTENCE_REQUIRED') || getDataSourceMode() === 'supabase';
+      if (isPersistentGate) {
+        setKvkkError(
+          'Kişisel veri hakları talebiniz için sunucu doğrulaması gerekmektedir (LEGAL_PERSISTENCE_REQUIRED). Kalıcı sunucu makbuzu olmadan talep onaylanamaz. Lütfen doğrudan işletmeyle iletişime geçin.'
+        );
+      } else {
+        setKvkkError(err?.message || 'Talebiniz kaydedilemedi. Lütfen tekrar deneyin.');
+      }
+      // Note: kvkkDesc is NOT cleared, retaining user input!
+    } finally {
+      setKvkkSubmitting(false);
+    }
+  };
 
   // Deduplication ref to prevent duplicate RPC calls on re-renders / StrictMode
   const loadedTokenRef = useRef<string>('');
@@ -647,6 +686,83 @@ const AppointmentSelfServicePage: React.FC = () => {
                   </form>
                 )}
               </div>
+            )}
+          </div>
+
+          {/* KVKK / Data Rights Section */}
+          <div className="pt-4 border-t border-gray-100 dark:border-slate-700/60">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <span>🛡️</span>
+                <span>Kişisel Verilerin Korunması</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowKvkkForm(!showKvkkForm);
+                  setKvkkError(null);
+                  setKvkkSuccess(null);
+                }}
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium min-h-[36px] px-2 flex items-center"
+              >
+                {showKvkkForm ? 'Formu Gizle' : 'KVKK Talebi Oluştur'}
+              </button>
+            </div>
+
+            {showKvkkForm && (
+              <form onSubmit={handleKvkkSubmit} className="p-4 bg-gray-50 dark:bg-slate-900/60 rounded-xl space-y-3 border border-gray-200 dark:border-slate-700">
+                {kvkkSuccess && (
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 text-xs rounded-lg border border-emerald-200 dark:border-emerald-800">
+                    {kvkkSuccess}
+                  </div>
+                )}
+                {kvkkError && (
+                  <div role="alert" className="p-3 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-xs rounded-lg border border-red-200 dark:border-red-800">
+                    {kvkkError}
+                  </div>
+                )}
+                <div>
+                  <label htmlFor="kvkk-type-select" className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    Talep Türü
+                  </label>
+                  <select
+                    id="kvkk-type-select"
+                    value={kvkkType}
+                    onChange={(e) => setKvkkType(e.target.value as any)}
+                    disabled={kvkkSubmitting}
+                    className="w-full p-2 text-xs rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                  >
+                    <option value="export">Veri Kopyası Talebi (export)</option>
+                    <option value="deletion">Veri Silme Talebi (deletion)</option>
+                    <option value="correction">Veri Düzeltme Talebi (correction)</option>
+                    <option value="consent_withdrawal">Açık Rıza Geri Çekme (consent_withdrawal)</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="kvkk-desc-input" className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    Açıklama / Talep Detayı *
+                  </label>
+                  <textarea
+                    id="kvkk-desc-input"
+                    rows={2}
+                    required
+                    value={kvkkDesc}
+                    onChange={(e) => setKvkkDesc(e.target.value)}
+                    placeholder="Veri hakları talebinizin detaylarını belirtin..."
+                    disabled={kvkkSubmitting}
+                    className="w-full p-2 text-xs rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="submit"
+                    disabled={kvkkSubmitting || !kvkkDesc.trim()}
+                    className="py-2 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg transition min-h-[36px]"
+                  >
+                    {kvkkSubmitting ? 'İletiliyor...' : 'Talebi İlet'}
+                  </button>
+                </div>
+              </form>
             )}
           </div>
 
