@@ -163,7 +163,8 @@
     "qa:legal-schema-security-plan": "node --test scripts/test-legal-schema-security-plan.test.mjs",
     "qa:dev247-windows-supervisor": "node --test scripts/test-lari-dev-windows-supervisor.test.mjs",
     "qa:legal-ui-failclosed": "node --import tsx --test scripts/test-legal-ui-failclosed.test.mjs",
-    "qa:legal-callsites": "node --import tsx --test scripts/test-legal-callsites.test.mjs"
+    "qa:legal-callsites": "node --import tsx --test scripts/test-legal-callsites.test.mjs",
+    "qa:dev247-agent-preflight": "node --test scripts/test-lari-dev-agent-preflight.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",
