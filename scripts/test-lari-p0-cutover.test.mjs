@@ -285,3 +285,47 @@ test('10. Positive Catalog Evaluation: Hardened clone passes with P0_CLONE_POSTC
   assert.equal(res.table_checks.columns_verified, 7);
   assert.equal(res.rpc_checks.rpcs_verified_count, 5);
 });
+
+test('11. Receipt Target Classification: Distinguishes DISPOSABLE_FIXTURE from RESTORED_CLONE, and strictly enforces live_p0_accepted=false', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lari-p0-receipt-'));
+  const receiptPath = path.join(tempDir, 'p0-receipt.json');
+
+  try {
+    // When called with DISPOSABLE_FIXTURE target classification without live clone
+    const res = await verifyP0Cutover({
+      dbUrl: undefined,
+      cloneConfirmed: false,
+      evaluationTarget: 'DISPOSABLE_FIXTURE',
+      receiptOutputPath: receiptPath,
+    });
+
+    assert.equal(res.status, 'RESTORED_CLONE_REQUIRED');
+    assert.equal(res.evaluation_target, 'DISPOSABLE_FIXTURE');
+    assert.equal(res.live_p0_accepted, false);
+    assert.equal(res.live_status, 'LIVE_P0_NOT_APPLIED');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('12. Safety Policy: Prohibits live staging attestation in clone verifier', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lari-p0-live-'));
+  const receiptPath = path.join(tempDir, 'p0-live-receipt.json');
+
+  try {
+    // Attempting to evaluate with LIVE_STAGING must never result in live_p0_accepted: true
+    const res = await verifyP0Cutover({
+      dbUrl: undefined,
+      cloneConfirmed: false,
+      evaluationTarget: 'LIVE_STAGING',
+      receiptOutputPath: receiptPath,
+    });
+
+    assert.equal(res.status, 'RESTORED_CLONE_REQUIRED');
+    assert.equal(res.live_p0_accepted, false);
+    assert.equal(res.live_status, 'LIVE_P0_NOT_APPLIED');
+    assert.notEqual(res.status, 'LIVE_P0_ACCEPTED');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});

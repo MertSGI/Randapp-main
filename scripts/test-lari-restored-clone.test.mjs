@@ -8,11 +8,15 @@ import { spawnSync } from 'node:child_process';
 import {
   validateAndParseCloneDatabaseUrl,
   redactDatabaseUrl,
+  sanitizeErrorMessage,
   ALLOWED_LOOPBACK_HOSTS,
 } from './lari-recovery/clone-connection-boundary.mjs';
 import {
   verifyRestoredClone,
   validateLocalMigrationMatrix,
+  resolveGitHeadSha,
+  queryCloneCatalog,
+  reconcileCatalogWithMatrix,
   EXPECTED_COUNTS,
   EXPECTED_COLLISION_GROUPS,
   REMOTE_ONLY_VERSIONS,
@@ -360,4 +364,141 @@ test('12. Disposable PostgreSQL 17 Docker Clone Integration (if Docker available
   } finally {
     dockerCmd(['rm', '-f', containerId]);
   }
+});
+
+test('13. Credentials Boundary: Handles regex metacharacters, percent-encoding, and empty credentials safely without leak', () => {
+  // Test password with metacharacters: +, [, *, (, \, etc.
+  const rawPw = 'p%2Ba%5Bs%5D*w(o)rd%5C123';
+  const decodedPw = 'p+a[s]*w(o)rd\\123';
+  const url = `postgresql://my%40user:${rawPw}@127.0.0.1:5432/lari_restore_meta_test`;
+
+  const parsed = validateAndParseCloneDatabaseUrl(url, true);
+  assert.equal(parsed.username, 'my@user', 'Username must be percent-decoded safely');
+  assert.equal(parsed.password, decodedPw, 'Password must be percent-decoded safely');
+  assert.equal(parsed.redactedUrl, 'postgresql://my@user:***@127.0.0.1:5432/lari_restore_meta_test');
+  assert.ok(!parsed.redactedUrl.includes(decodedPw));
+  assert.ok(!parsed.redactedUrl.includes(rawPw));
+
+  // Test sanitizeErrorMessage: Must NOT throw SyntaxError on metacharacters
+  const msgWithSecret = `Failed to connect to database: user postgres password "${decodedPw}" rejected by host`;
+  const sanitized = sanitizeErrorMessage(msgWithSecret, rawPw, decodedPw, 'my%40user', 'my@user');
+  assert.ok(!sanitized.includes(decodedPw), 'Sanitized message must not contain decoded password');
+  assert.ok(!sanitized.includes(rawPw), 'Sanitized message must not contain raw password');
+  assert.ok(sanitized.includes('***'), 'Sanitized message must replace password with ***');
+
+  // Test empty password: must be a no-op without string corruption
+  const normalMsg = 'Role "postgres" does not exist';
+  const emptySanitized = sanitizeErrorMessage(normalMsg, '', '', 'postgres', 'postgres');
+  assert.equal(emptySanitized, normalMsg, 'Empty password must not corrupt or alter normal error message');
+
+  // Test leakage of connection URI in error message:
+  const leakMsg = `Connection error at postgresql://my@user:${rawPw}@127.0.0.1:5432/lari_restore_meta_test`;
+  const uriSanitized = sanitizeErrorMessage(leakMsg, rawPw, decodedPw, 'my%40user', 'my@user');
+  assert.ok(!uriSanitized.includes('127.0.0.1:5432/lari_restore_meta_test'), 'Full URI must be redacted from error');
+});
+
+test('14. Credentials Boundary: Rejects malformed percent-encoding with MALFORMED_CREDENTIALS', () => {
+  const malformedPwUrl = 'postgresql://postgres:bad%ZZpassword@127.0.0.1:5432/lari_restore_bad_enc';
+  assert.throws(
+    () => validateAndParseCloneDatabaseUrl(malformedPwUrl, true),
+    (err) => {
+      assert.equal(err.code, 'MALFORMED_CREDENTIALS');
+      return true;
+    }
+  );
+
+  const malformedUserUrl = 'postgresql://bad%ZZuser:secret@127.0.0.1:5432/lari_restore_bad_enc';
+  assert.throws(
+    () => validateAndParseCloneDatabaseUrl(malformedUserUrl, true),
+    (err) => {
+      assert.equal(err.code, 'MALFORMED_CREDENTIALS');
+      return true;
+    }
+  );
+});
+
+test('15. Linked Worktree Git Resolution: Correctly resolves 40-char SHA and detects unverified head', () => {
+  // Current repo / worktree resolution
+  const currentHead = resolveGitHeadSha();
+  assert.match(currentHead, /^[0-9a-f]{40}$/i, 'Current repo or worktree HEAD must resolve to 40-char SHA');
+
+  // Synthetic linked worktree simulation
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lari-worktree-test-'));
+  try {
+    const gitDirMock = path.join(tempDir, 'actual-gitdir');
+    fs.mkdirSync(path.join(gitDirMock, 'refs', 'heads'), { recursive: true });
+
+    const mockSha = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    fs.writeFileSync(path.join(gitDirMock, 'HEAD'), 'ref: refs/heads/feature-test\n');
+    fs.writeFileSync(path.join(gitDirMock, 'refs', 'heads', 'feature-test'), `${mockSha}\n`);
+
+    // Create .git file as in a linked worktree
+    fs.writeFileSync(path.join(tempDir, '.git'), `gitdir: ${gitDirMock}\n`);
+
+    const resolved = resolveGitHeadSha(tempDir);
+    assert.equal(resolved, mockSha, 'resolveGitHeadSha must resolve HEAD from linked worktree gitdir pointer');
+
+    // Empty directory without git must return UNKNOWN
+    const emptyTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lari-empty-test-'));
+    try {
+      const unknownSha = resolveGitHeadSha(emptyTempDir);
+      assert.equal(unknownSha, 'UNKNOWN', 'resolveGitHeadSha must return UNKNOWN when git is absent');
+    } finally {
+      fs.rmSync(emptyTempDir, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('16. Migration Ledger Absence: Distinguishes missing schema_migrations table from empty ledger', async () => {
+  const matrixResult = validateLocalMigrationMatrix();
+
+  // Mock catalog with missing schema_migrations table
+  const mockCatalogMissingLedger = {
+    migration_ledger_status: 'MIGRATION_LEDGER_ABSENT',
+    applied_migrations: null,
+    applied_migrations_count: 0,
+    tables_count: 5,
+    columns_count: 20,
+    views_count: 0,
+    functions_count: 0,
+    policies_count: 0,
+    privileges_count: 0,
+    fingerprints: {},
+    tables: [],
+    views: [],
+    policies: [],
+  };
+
+  const reconciliation = reconcileCatalogWithMatrix(matrixResult, mockCatalogMissingLedger);
+  assert.equal(reconciliation.reconciliation_verdict, 'MIGRATION_LEDGER_ABSENT');
+  assert.equal(reconciliation.migration_ledger_status, 'MIGRATION_LEDGER_ABSENT');
+  assert.equal(reconciliation.unapplied_local_count, 21);
+  assert.equal(reconciliation.remote_applied_count, 0);
+  assert.equal(reconciliation.p0_applied, false);
+  assert.ok(reconciliation.unresolved_items.every((it) => it.status === 'MIGRATION_LEDGER_ABSENT'));
+  assert.ok(reconciliation.unresolved_items.every((it) => it.reconciliation_action === 'HOLD_AWAITING_RESTORE_DIFF'));
+
+  // In contrast, when ledger is present but has zero applied migrations:
+  const mockCatalogEmptyLedger = {
+    migration_ledger_status: 'MIGRATION_LEDGER_PRESENT',
+    applied_migrations: [],
+    applied_migrations_count: 0,
+    tables_count: 5,
+    columns_count: 20,
+    views_count: 0,
+    functions_count: 0,
+    policies_count: 0,
+    privileges_count: 0,
+    fingerprints: {},
+    tables: [],
+    views: [],
+    policies: [],
+  };
+
+  const emptyReconciliation = reconcileCatalogWithMatrix(matrixResult, mockCatalogEmptyLedger);
+  assert.equal(emptyReconciliation.reconciliation_verdict, 'NEEDS_CLONE_DIFF');
+  assert.equal(emptyReconciliation.remote_applied_count, 0);
+  assert.equal(emptyReconciliation.unapplied_local_count, 21);
 });
