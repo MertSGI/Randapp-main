@@ -458,36 +458,23 @@ try {
   assert.ok(preparedRestoreContent.includes('DO $lari_role_grant_bootstrap$'), 'Prepared restore must contain cycle-checked delegation block');
   assert.ok(preparedRestoreContent.includes('GRANT "anon" TO "authenticator" GRANTED BY "supabase_admin";'), 'Must preserve exact grant statement');
 
-  // Clean target roles prior to replay inside container
+  // Reset non-system role memberships prior to replay inside container
   execPsql(
     `DO $lari_clean$
+    DECLARE
+      rec RECORD;
     BEGIN
-      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN
-        EXECUTE 'REVOKE ALL ON ALL TABLES IN SCHEMA public FROM authenticator';
-        EXECUTE 'DROP ROLE authenticator';
-      END IF;
-      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-        EXECUTE 'DROP ROLE anon';
-      END IF;
-      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-        EXECUTE 'DROP ROLE authenticated';
-      END IF;
-      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
-        EXECUTE 'DROP ROLE service_role';
-      END IF;
-      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dashboard_user') THEN
-        EXECUTE 'DROP ROLE dashboard_user';
-      END IF;
-      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN
-        BEGIN
-          EXECUTE 'DROP ROLE postgres';
-        EXCEPTION WHEN dependent_objects_still_exist THEN
-          EXECUTE 'REVOKE ALL FROM postgres CASCADE';
-          EXECUTE 'ALTER ROLE postgres WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN REPLICATION BYPASSRLS';
-        END;
-      END IF;
+      FOR rec IN (
+        SELECT role.rolname AS role_name, member.rolname AS member_name
+        FROM pg_auth_members m
+        JOIN pg_roles role ON role.oid = m.roleid
+        JOIN pg_roles member ON member.oid = m.member
+        WHERE role.rolname !~ '^pg_' AND member.rolname !~ '^pg_'
+      ) LOOP
+        EXECUTE format('REVOKE %I FROM %I CASCADE', rec.role_name, rec.member_name);
+      END LOOP;
     END $lari_clean$;`,
-    { description: 'Clean target managed roles prior to replay' }
+    { description: 'Reset non-system role memberships prior to replay' }
   );
 
   // Send content strictly via stdin to psql -f - inside container
