@@ -298,14 +298,38 @@ test('12. Disposable PostgreSQL 17.6 Schema & Behavioral Qualification (create_p
   };
 
   try {
-    // Wait for readiness
+    // Wait for final PostgreSQL server readiness (TCP 127.0.0.1:5432 is only open after docker_temp_server_start stops)
     let ready = false;
     const start = Date.now();
     while (Date.now() - start < 45000) {
-      const r = dockerCmd(['exec', '-i', '--user', 'postgres', containerId, 'pg_isready', '-h', '/var/run/postgresql', '-U', 'supabase_admin', '-d', 'postgres']);
-      if (r.status === 0) {
-        ready = true;
-        break;
+      const logsProbe = dockerCmd(['logs', containerId]);
+      const initDone = `${logsProbe.stdout || ''}\n${logsProbe.stderr || ''}`.includes(
+        'PostgreSQL init process complete'
+      );
+      if (initDone) {
+        const r = dockerCmd([
+          'exec',
+          '-i',
+          '--user',
+          'postgres',
+          containerId,
+          'pg_isready',
+          '-h',
+          '127.0.0.1',
+          '-p',
+          '5432',
+          '-U',
+          'supabase_admin',
+          '-d',
+          'postgres'
+        ]);
+        if (r.status === 0) {
+          const ping = execPsqlRaw('SELECT 1;');
+          if (ping.status === 0) {
+            ready = true;
+            break;
+          }
+        }
       }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
     }

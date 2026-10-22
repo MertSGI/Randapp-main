@@ -130,6 +130,11 @@ All 21 prior commits (`cc608da2c6066bd533d085156eb2f8398e0f105d` .. `8a2fdc81b43
    - `scripts/test-legal-callsites.test.mjs`
    - `scripts/test-legal-schema-security-plan.test.mjs`
    - `.github/workflows/lari-dev247-source-review.yml`
+4. **`cd46e40d5bdd4a4b308c8596ec142c6d6d8ce9e9`** — `docs(lari): compile Batch04 controller correction evidence (C05)`
+   - `docs/lari-program/BATCH_04_CONTROLLER_CORRECTION_EVIDENCE.md`
+5. **Follow-up deterministic PG17 container init-complete readiness guard** (`test(behavioral): wait for postgres init completion and TCP readiness in PG17 qualification`):
+   - `scripts/test-legal-schema-security-plan.test.mjs` (waits for `PostgreSQL init process complete` in container logs + TCP `127.0.0.1:5432` readiness so `psql` never connects to `docker-entrypoint.sh`'s temporary unix-socket init server before `pg_ctl -m fast stop`)
+   - `docs/lari-program/BATCH_04_CONTROLLER_CORRECTION_EVIDENCE.md`
 
 ### 4.2 Mandatory 16 Local QA Suites (Observed Exit Codes)
 | # | Command | Observed Exit Code | Result Summary |
