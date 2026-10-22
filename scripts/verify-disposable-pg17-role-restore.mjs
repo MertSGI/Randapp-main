@@ -432,11 +432,36 @@ try {
     'ALTER ROLE "service_role" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION BYPASSRLS;',
     'CREATE ROLE "supabase_admin";',
     'ALTER ROLE "supabase_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN REPLICATION BYPASSRLS;',
+    'CREATE ROLE "supabase_auth_admin";',
+    'ALTER ROLE "supabase_auth_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN NOREPLICATION BYPASSRLS;',
+    'CREATE ROLE "supabase_storage_admin";',
+    'ALTER ROLE "supabase_storage_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN NOREPLICATION BYPASSRLS;',
+    'CREATE ROLE "supabase_replication_admin";',
+    'ALTER ROLE "supabase_replication_admin" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN REPLICATION NOBYPASSRLS;',
+    'CREATE ROLE "supabase_read_only_user";',
+    'ALTER ROLE "supabase_read_only_user" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
+    'CREATE ROLE "supabase_functions_admin";',
+    'ALTER ROLE "supabase_functions_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN NOREPLICATION BYPASSRLS;',
+    'CREATE ROLE "pgbouncer";',
+    'ALTER ROLE "pgbouncer" WITH NOSUPERUSER NOINHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
+    'CREATE ROLE "cli_login_postgres";',
+    'ALTER ROLE "cli_login_postgres" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
+    'CREATE ROLE "supabase_privileged_role";',
+    'ALTER ROLE "supabase_privileged_role" WITH NOSUPERUSER NOINHERIT CREATEROLE CREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;',
+    'CREATE ROLE "app_tenant_admin";',
+    'ALTER ROLE "app_tenant_admin" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;',
     '-- Role memberships',
-    'GRANT "anon" TO "authenticator" GRANTED BY "supabase_admin";',
-    'GRANT "authenticated" TO "authenticator" GRANTED BY "supabase_admin";',
-    'GRANT "service_role" TO "authenticator" GRANTED BY "supabase_admin";',
-    'GRANT "supabase_admin" TO "postgres" WITH ADMIN OPTION GRANTED BY "supabase_admin";',
+    'GRANT "anon" TO "authenticator" WITH INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "authenticated" TO "authenticator" WITH INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "service_role" TO "authenticator" WITH INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "supabase_admin" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "anon" TO "supabase_storage_admin" WITH INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "authenticated" TO "supabase_storage_admin" WITH INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "service_role" TO "supabase_storage_admin" WITH INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "postgres" TO "cli_login_postgres" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "postgres" TO "supabase_privileged_role" WITH INHERIT TRUE, SET FALSE GRANTED BY "supabase_admin";',
+    'GRANT "authenticated" TO "app_tenant_admin" WITH INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "anon" TO "supabase_auth_admin" WITH INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
   ].join('\n');
 
   const testTempDir = fs.mkdtempSync(path.join(os.tmpdir(), `lari-role-prep-${process.pid}-`));
@@ -505,11 +530,11 @@ try {
   SELECT
     count(*) AS object_count,
     md5(coalesce(string_agg(
-      format('%I|%I|%I|%s', role.rolname, member.rolname, grantor.rolname, m.admin_option),
+      format('%I|%I|%I|%s|%s|%s', role.rolname, member.rolname, grantor.rolname, m.admin_option, m.inherit_option, m.set_option),
       E'\\n' ORDER BY role.rolname, member.rolname, grantor.rolname
     ), '')) AS fingerprint,
     coalesce(string_agg(
-      format('%I|%I|%I|%s', role.rolname, member.rolname, grantor.rolname, m.admin_option),
+      format('%I|%I|%I|%s|%s|%s', role.rolname, member.rolname, grantor.rolname, m.admin_option, m.inherit_option, m.set_option),
       E'\\n' ORDER BY role.rolname, member.rolname, grantor.rolname
     ), '') AS rows
   FROM pg_auth_members AS m
@@ -537,17 +562,24 @@ try {
   const actualRows = [firstRow, ...lines.slice(headerIdx + 1)].filter(Boolean);
 
   const expectedMemberships = [
-    'anon|authenticator|supabase_admin|f',
-    'authenticated|authenticator|supabase_admin|f',
-    'service_role|authenticator|supabase_admin|f',
-    'supabase_admin|postgres|supabase_admin|t',
+    'anon|authenticator|supabase_admin|f|t|t',
+    'anon|supabase_auth_admin|supabase_admin|f|t|t',
+    'anon|supabase_storage_admin|supabase_admin|f|f|t',
+    'authenticated|app_tenant_admin|supabase_admin|f|t|t',
+    'authenticated|authenticator|supabase_admin|f|t|t',
+    'authenticated|supabase_storage_admin|supabase_admin|f|f|t',
+    'postgres|cli_login_postgres|supabase_admin|f|t|t',
+    'postgres|supabase_privileged_role|supabase_admin|f|t|f',
+    'service_role|authenticator|supabase_admin|f|t|t',
+    'service_role|supabase_storage_admin|supabase_admin|f|f|t',
+    'supabase_admin|postgres|supabase_admin|t|t|t',
   ];
   expectedMemberships.sort();
 
   const expectedAggregated = expectedMemberships.join('\n');
   const expectedFingerprint = createHash('md5').update(expectedAggregated).digest('hex');
 
-  console.log(`Catalog Memberships Count: ${objCountStr} (expected: 4)`);
+  console.log(`Catalog Memberships Count: ${objCountStr} (expected: 11)`);
   console.log(`Catalog MD5 Fingerprint:   ${actualFingerprint}`);
   console.log(`Expected MD5 Fingerprint:  ${expectedFingerprint}`);
   console.log('Catalog Membership Rows:');
@@ -557,7 +589,7 @@ try {
     throw new Error('Catalog mismatch: simulated fingerprint or role membership mismatch');
   }
 
-  assert.equal(objCountStr, '4', 'Catalog mismatch: must contain exactly 4 non-system role memberships');
+  assert.equal(objCountStr, '11', 'Catalog mismatch: must contain exactly 11 non-system role memberships');
   assert.equal(actualFingerprint, expectedFingerprint, 'Catalog mismatch: MD5 catalog fingerprint must match synthetic fixture');
   assert.deepEqual(actualRows, expectedMemberships, 'Catalog mismatch: role membership rows must match expected synthetic fixture rows');
 
@@ -610,7 +642,7 @@ try {
   console.log('STATUS: PASS');
   console.log(`QUALIFIED IMAGE: ${qualifiedImage}`);
   console.log(`SUPABASE_VAULT VERSION: ${vaultVersion}`);
-  console.log('EVALUATION LEVEL: SYNTHETIC FIXTURE EQUIVALENCE (4/4 roles) + REAL EXTENSION QUALIFICATION');
+  console.log('EVALUATION LEVEL: SYNTHETIC FIXTURE EQUIVALENCE (16 roles, 11 memberships) + REAL EXTENSION QUALIFICATION');
   console.log('NOTE: Full source-to-restored catalog matching against live Supabase remains a later live acceptance requirement.');
   console.log('All 6 tests PASS on official Supabase PG 17.6 container\n');
 

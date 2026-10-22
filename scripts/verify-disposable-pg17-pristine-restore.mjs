@@ -293,11 +293,27 @@ try {
       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticator') THEN CREATE ROLE authenticator NOINHERIT LOGIN; END IF;
       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dashboard_user') THEN CREATE ROLE dashboard_user CREATEDB CREATEROLE REPLICATION NOLOGIN; END IF;
       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN CREATE ROLE postgres SUPERUSER CREATEDB CREATEROLE LOGIN REPLICATION BYPASSRLS; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_auth_admin') THEN CREATE ROLE supabase_auth_admin SUPERUSER CREATEDB CREATEROLE LOGIN NOREPLICATION BYPASSRLS; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_storage_admin') THEN CREATE ROLE supabase_storage_admin SUPERUSER CREATEDB CREATEROLE LOGIN NOREPLICATION BYPASSRLS; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_replication_admin') THEN CREATE ROLE supabase_replication_admin LOGIN REPLICATION; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_read_only_user') THEN CREATE ROLE supabase_read_only_user LOGIN; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_functions_admin') THEN CREATE ROLE supabase_functions_admin SUPERUSER CREATEDB CREATEROLE LOGIN NOREPLICATION BYPASSRLS; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'pgbouncer') THEN CREATE ROLE pgbouncer NOINHERIT LOGIN; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cli_login_postgres') THEN CREATE ROLE cli_login_postgres LOGIN; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_privileged_role') THEN CREATE ROLE supabase_privileged_role NOINHERIT CREATEROLE CREATEDB NOLOGIN; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_tenant_admin') THEN CREATE ROLE app_tenant_admin NOLOGIN; END IF;
 
-      GRANT anon TO authenticator GRANTED BY supabase_admin;
-      GRANT authenticated TO authenticator GRANTED BY supabase_admin;
-      GRANT service_role TO authenticator GRANTED BY supabase_admin;
-      GRANT supabase_admin TO postgres WITH ADMIN OPTION GRANTED BY supabase_admin;
+      GRANT anon TO authenticator WITH INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT authenticated TO authenticator WITH INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT service_role TO authenticator WITH INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT supabase_admin TO postgres WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT anon TO supabase_storage_admin WITH INHERIT FALSE, SET TRUE GRANTED BY supabase_admin;
+      GRANT authenticated TO supabase_storage_admin WITH INHERIT FALSE, SET TRUE GRANTED BY supabase_admin;
+      GRANT service_role TO supabase_storage_admin WITH INHERIT FALSE, SET TRUE GRANTED BY supabase_admin;
+      GRANT postgres TO cli_login_postgres WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT postgres TO supabase_privileged_role WITH INHERIT TRUE, SET FALSE GRANTED BY supabase_admin;
+      GRANT authenticated TO app_tenant_admin WITH INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT anon TO supabase_auth_admin WITH INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
     END $lari_setup_roles$;`,
     { db: 'restore_verification', description: 'Configure canonical synthetic roles and memberships' }
   );
@@ -727,6 +743,14 @@ try {
     LARI_RESTORE_TARGET_DB: 'lari_restore_mismatch_cat_test',
   });
   assert.notEqual(mismatchCatalogRun.result.status, 0, 'Catalog fingerprint mismatch must fail closed');
+  assert.ok(
+    mismatchCatalogRun.result.stderr.includes('Restore Stage: CATALOG_MISMATCH'),
+    'Expected CATALOG_MISMATCH stage in telemetry'
+  );
+  assert.ok(
+    mismatchCatalogRun.result.stderr.includes('tables: match=false'),
+    'Expected tables: match=false in telemetry'
+  );
   assert.equal(mismatchCatalogRun.artifactFiles.length, 0, 'Zero artifacts allowed on catalog fingerprint mismatch');
   execContainerPsql('DROP DATABASE IF EXISTS "lari_restore_mismatch_cat_test";', {
     db: 'restore_verification',
@@ -767,6 +791,10 @@ try {
   assert.ok(
     positiveRun.result.stdout.includes('Encrypted logical backup prepared; restore verdict: VERIFIED_LOGICAL_RESTORE.'),
     `Expected VERIFIED_LOGICAL_RESTORE in stdout, got:\n${positiveRun.result.stdout}`
+  );
+  assert.ok(
+    positiveRun.result.stderr.includes('Restore Stage: VERIFIED_LOGICAL_RESTORE'),
+    'Expected VERIFIED_LOGICAL_RESTORE stage in telemetry'
   );
   assert.equal(positiveRun.runnerTempRemaining.length, 0, 'Private temp dir must be cleaned after positive restore');
 

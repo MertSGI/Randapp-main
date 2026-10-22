@@ -105,7 +105,7 @@ WITH schemas AS (
   SELECT
     count(*) AS object_count,
     md5(coalesce(string_agg(
-      format('%I|%I|%I|%s', role.rolname, member.rolname, grantor.rolname, m.admin_option),
+      format('%I|%I|%I|%s|%s|%s', role.rolname, member.rolname, grantor.rolname, m.admin_option, m.inherit_option, m.set_option),
       E'\n' ORDER BY role.rolname, member.rolname, grantor.rolname
     ), '')) AS fingerprint
   FROM pg_auth_members AS m

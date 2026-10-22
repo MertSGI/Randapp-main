@@ -25,7 +25,110 @@ PRIVATE_DIR=""
 SOURCE_PGPASSFILE=""
 RESTORE_PGPASSFILE=""
 
+RESTORE_STAGE="NOT_REACHED"
+TELEMETRY_EMITTED=0
+ROLE_PREP_STATUS=0
+ROLES_RESTORE_STATUS=0
+PRISTINE_TARGET_STATUS=0
+DATABASE_RESTORE_STATUS=0
+UNAVAILABLE_EXT_COUNT=0
+CATALOG_MATCH="false"
+
+emit_restore_failure_telemetry() {
+  if [[ "$TELEMETRY_EMITTED" -eq 1 ]]; then
+    return 0
+  fi
+  TELEMETRY_EMITTED=1
+
+  local stage="${RESTORE_STAGE:-}"
+  if [[ -z "$stage" || "$stage" == "NOT_REACHED" ]]; then
+    if [[ "${ROLE_PREP_STATUS:-0}" -ne 0 ]]; then
+      stage="ROLE_PREPARATION_FAILED"
+    elif [[ "${ROLES_RESTORE_STATUS:-0}" -ne 0 ]]; then
+      stage="ROLE_REPLAY_FAILED"
+    elif [[ "${PRISTINE_TARGET_STATUS:-1}" -ne 0 ]]; then
+      stage="PRISTINE_TARGET_FAILED"
+    elif [[ "${DATABASE_RESTORE_STATUS:-1}" -ne 0 ]]; then
+      stage="DATABASE_RESTORE_FAILED"
+    elif [[ "${UNAVAILABLE_EXT_COUNT:-0}" -gt 0 ]]; then
+      stage="EXTENSION_COMPATIBILITY_FAILED"
+    elif [[ "${CATALOG_MATCH:-false}" != "true" ]]; then
+      stage="CATALOG_MISMATCH"
+    elif [[ "${VERDICT:-}" == "VERIFIED_LOGICAL_RESTORE" ]]; then
+      stage="VERIFIED_LOGICAL_RESTORE"
+    else
+      stage="UNKNOWN_RESTORE_FAILURE"
+    fi
+  fi
+
+  printf '%s\n' "" "--- LARI RESTORE TELEMETRY ---" >&2
+  printf 'Restore Stage: %s\n' "$stage" >&2
+
+  case "$stage" in
+    ROLE_PREPARATION_FAILED)
+      printf 'Detail: Role preparation failed; check dump statement syntax or circular memberships.\n' >&2
+      ;;
+    ROLE_REPLAY_FAILED)
+      printf 'Detail: Replay of prepared restore-roles.sql failed in disposable PostgreSQL 17 (exit code %s).\n' "${ROLES_RESTORE_STATUS:-1}" >&2
+      ;;
+    PRISTINE_TARGET_FAILED)
+      local reason="unknown"
+      if [[ -n "${PRIVATE_DIR:-}" && -f "$PRIVATE_DIR/pristine-target-receipt.json" ]]; then
+        reason="$(jq -r '.failure_reason // "pristine_target_verification_failed"' "$PRIVATE_DIR/pristine-target-receipt.json" 2>/dev/null || printf 'unknown')"
+      fi
+      printf 'Detail: Pristine target creation/verification failed (reason: %s).\n' "$reason" >&2
+      ;;
+    DATABASE_RESTORE_FAILED)
+      printf 'Detail: pg_restore failed into pristine database (exit code %s).\n' "${DATABASE_RESTORE_STATUS:-1}" >&2
+      ;;
+    EXTENSION_COMPATIBILITY_FAILED)
+      local missing_exts="none"
+      if [[ -n "${PRIVATE_DIR:-}" && -f "$PRIVATE_DIR/dependency-report.json" ]]; then
+        missing_exts="$(jq -r '[.unavailable_on_disposable_postgres17[].name] | join(", ")' "$PRIVATE_DIR/dependency-report.json" 2>/dev/null || printf 'parse_error')"
+      fi
+      printf 'Detail: Required extensions unavailable on disposable PostgreSQL 17: [%s].\n' "$missing_exts" >&2
+      ;;
+    CATALOG_MISMATCH)
+      printf 'Detail: Catalog fingerprint mismatch between source and restored database.\n' >&2
+      printf 'Catalog category comparisons:\n' >&2
+      if [[ -n "${PRIVATE_DIR:-}" && -f "$PRIVATE_DIR/source-catalog-fingerprint.json" && -f "$PRIVATE_DIR/restore-catalog-fingerprint.json" ]]; then
+        local cat_py="${LARI_SOURCE_VALIDATOR_PYTHON:-python3}"
+        "$cat_py" - "$PRIVATE_DIR/source-catalog-fingerprint.json" "$PRIVATE_DIR/restore-catalog-fingerprint.json" <<'PY' >&2
+import json, sys
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        src = json.load(f)
+    with open(sys.argv[2], 'r', encoding='utf-8') as f:
+        rst = json.load(f)
+    categories = ['schemas', 'tables', 'policies', 'routines', 'roles', 'role_memberships', 'extensions']
+    for cat in categories:
+        src_cat = src.get(cat, {})
+        rst_cat = rst.get(cat, {})
+        src_cnt = src_cat.get('object_count', 0)
+        rst_cnt = rst_cat.get('object_count', 0)
+        src_fp = src_cat.get('fingerprint', '')
+        rst_fp = rst_cat.get('fingerprint', '')
+        matches = (src_fp == rst_fp and src_cnt == rst_cnt and bool(src_fp))
+        print(f"  {cat}: match={str(matches).lower()}, source_count={src_cnt}, restore_count={rst_cnt}")
+except Exception as e:
+    print(f"  Failed to parse catalog comparisons: {e}")
+PY
+      fi
+      ;;
+    VERIFIED_LOGICAL_RESTORE)
+      printf 'Detail: All restore gates passed. Full catalog equivalence verified.\n' >&2
+      ;;
+    *)
+      printf 'Detail: Verification failed before restore execution.\n' >&2
+      ;;
+  esac
+  printf '%s\n\n' "------------------------------" >&2
+}
+
 cleanup() {
+  if [[ "${VERDICT:-}" != "VERIFIED_LOGICAL_RESTORE" ]]; then
+    emit_restore_failure_telemetry || true
+  fi
   if [[ -n "$PRIVATE_DIR" && -d "$PRIVATE_DIR" ]]; then
     rm -rf -- "$PRIVATE_DIR"
   fi
@@ -60,11 +163,15 @@ require_source_database_password() {
 
 enforce_verified_restore() {
   if [[ "${VERDICT:-}" != "VERIFIED_LOGICAL_RESTORE" ]]; then
+    emit_restore_failure_telemetry
     if [[ -n "${ARTIFACT_DIR:-}" && -d "$ARTIFACT_DIR" ]]; then
       rm -rf -- "$ARTIFACT_DIR"
     fi
     printf 'Logical restore verification failed; no backup artifact is eligible for upload.\n' >&2
     return 1
+  else
+    RESTORE_STAGE="VERIFIED_LOGICAL_RESTORE"
+    emit_restore_failure_telemetry
   fi
 }
 
@@ -270,30 +377,77 @@ output_path = sys.argv[2]
 with open(input_path, 'r', encoding='utf-8') as f:
     lines = f.readlines()
 
-grant_pattern = re.compile(
-    r'^GRANT\s+("?[A-Za-z0-9_]+"?)\s+TO\s+("?[A-Za-z0-9_]+"?)(?:\s+WITH\s+ADMIN\s+OPTION)?(?:\s+GRANTED\s+BY\s+("?[A-Za-z0-9_]+"?))?\s*;?',
-    re.IGNORECASE
-)
 create_role_pattern = re.compile(
     r'^CREATE\s+ROLE\s+("?[A-Za-z0-9_]+"?)\s*;',
     re.IGNORECASE
 )
 
+# Strict anchored PostgreSQL 17 role-membership statement parser:
+# Syntax: GRANT <targets> TO <members> [WITH <options>] [GRANTED BY <grantor>];
+# where <targets> and <members> are comma-separated identifiers,
+# <options> is a comma-separated list of { ADMIN { TRUE | FALSE } | ADMIN OPTION | INHERIT { TRUE | FALSE } | SET { TRUE | FALSE } },
+# and <grantor> is a single identifier.
+grant_full_pattern = re.compile(
+    r'^GRANT\s+(?P<targets>.+?)\s+TO\s+(?P<members>.+?)'
+    r'(?:\s+WITH\s+(?P<options>.+?))?'
+    r'(?:\s+GRANTED\s+BY\s+(?P<grantor>.+?))?\s*;$',
+    re.IGNORECASE
+)
+
+ident_pattern = re.compile(r'^"?[A-Za-z0-9_]+"?$')
+opt_pattern = re.compile(
+    r'^(?:ADMIN\s+(?:TRUE|FALSE)|ADMIN\s+OPTION|INHERIT\s+(?:TRUE|FALSE)|SET\s+(?:TRUE|FALSE))$',
+    re.IGNORECASE
+)
+
+def parse_ident_list(s, label):
+    items = []
+    for raw in s.split(','):
+        token = raw.strip()
+        if not token or not ident_pattern.match(token):
+            raise ValueError(f"Malformed {label} identifier: '{token}' in statement: {s}")
+        items.append(token.strip('"'))
+    if not items:
+        raise ValueError(f"Empty {label} list in statement: {s}")
+    return items
+
+def parse_options(opts_str):
+    if not opts_str:
+        return
+    for raw in opts_str.split(','):
+        token = raw.strip()
+        if not token or not opt_pattern.match(token):
+            raise ValueError(f"Malformed or unsupported WITH option: '{token}' in options: {opts_str}")
+
 grants = []
-for line in lines:
+for line_idx, line in enumerate(lines, 1):
     stripped = line.strip()
-    m = grant_pattern.match(stripped)
-    if m:
-        target = m.group(1).strip('"')
-        member = m.group(2).strip('"')
-        grantor = m.group(3).strip('"') if m.group(3) else None
-        grants.append({'target': target, 'member': member, 'grantor': grantor})
+    if re.match(r'^GRANT\b', stripped, re.IGNORECASE):
+        m = grant_full_pattern.match(stripped)
+        if not m:
+            raise ValueError(f"Malformed or unsupported GRANT statement on line {line_idx}: {stripped}")
 
-# Build membership graph: member -> set of targets granted to member
+        targets = parse_ident_list(m.group('targets'), 'target')
+        members = parse_ident_list(m.group('members'), 'member')
+
+        opts_raw = m.group('options')
+        if opts_raw is not None:
+            parse_options(opts_raw)
+
+        grantor_raw = m.group('grantor')
+        grantor = None
+        if grantor_raw is not None:
+            grantor_token = grantor_raw.strip()
+            if not ident_pattern.match(grantor_token):
+                raise ValueError(f"Malformed GRANTED BY identifier: '{grantor_token}' on line {line_idx}: {stripped}")
+            grantor = grantor_token.strip('"')
+
+        for t in targets:
+            for mb in members:
+                grants.append({'target': t, 'member': mb, 'grantor': grantor})
+
+# Build membership graph and detect cycles in role dump:
 graph = {}
-for g in grants:
-    graph.setdefault(g['member'], set()).add(g['target'])
-
 def is_ancestor(start, target):
     # Returns True if start is a member of target (directly or transitively)
     visited = set()
@@ -308,6 +462,13 @@ def is_ancestor(start, target):
                 if parent not in visited:
                     queue.append(parent)
     return False
+
+for g in grants:
+    target = g['target']
+    member = g['member']
+    if target == member or is_ancestor(target, member):
+        raise ValueError(f"Cycle detected in role dump: granting {target} to {member} creates a circular role membership")
+    graph.setdefault(member, set()).add(target)
 
 delegations = []
 seen_pairs = set()
@@ -326,10 +487,11 @@ for g in grants:
         continue
     seen_pairs.add(pair)
 
-    # Adding target to grantor creates edge grantor -> target.
-    # Cycle occurs if target is already an ancestor of grantor (i.e. target is a member of grantor).
+    # If target is already an ancestor of grantor (i.e. target is a member of grantor),
+    # granting target to grantor would create a circular membership. Since grantor is already a parent/ancestor
+    # of target, no delegation is permitted or needed.
     if is_ancestor(target, grantor):
-        raise ValueError(f"Cycle detected in role dump: granting {target} to {grantor} creates a circular role membership")
+        continue
 
     delegations.append(pair)
     graph.setdefault(grantor, set()).add(target)
@@ -1126,8 +1288,11 @@ SERVER_VERSION_NUM="$(run_restore_postgres_command psql -X -qAt --set=ON_ERROR_S
 
 printf 'Restoring the exact dump into disposable PostgreSQL 17.\n'
 set +e
+ROLE_PREP_STATUS=0
 if ! prepare_disposable_role_restore "$PRIVATE_DIR/roles.sql" "$PRIVATE_DIR/restore-roles.sql" python3 2>>"$PRIVATE_DIR/restore-roles.stderr"; then
+  ROLE_PREP_STATUS=1
   ROLES_RESTORE_STATUS=1
+  RESTORE_STAGE="ROLE_PREPARATION_FAILED"
 else
   run_restore_postgres_command psql \
     -X -q --set=ON_ERROR_STOP=1 \
@@ -1135,12 +1300,18 @@ else
     >"$PRIVATE_DIR/restore-roles.stdout" \
     2>>"$PRIVATE_DIR/restore-roles.stderr"
   ROLES_RESTORE_STATUS=$?
+  if [[ "$ROLES_RESTORE_STATUS" -ne 0 ]]; then
+    RESTORE_STAGE="ROLE_REPLAY_FAILED"
+  fi
 fi
 
 PRISTINE_TARGET_STATUS=1
 if [[ "$ROLES_RESTORE_STATUS" -eq 0 ]]; then
   create_and_verify_pristine_restore_database
   PRISTINE_TARGET_STATUS=$?
+  if [[ "$PRISTINE_TARGET_STATUS" -ne 0 ]]; then
+    RESTORE_STAGE="PRISTINE_TARGET_FAILED"
+  fi
 else
   write_failed_pristine_target_receipt "skipped_due_to_role_restore_failure"
 fi
@@ -1155,6 +1326,9 @@ if [[ "$ROLES_RESTORE_STATUS" -eq 0 && "$PRISTINE_TARGET_STATUS" -eq 0 ]]; then
     >"$PRIVATE_DIR/restore-database.stdout" \
     2>"$PRIVATE_DIR/restore-database.stderr"
   DATABASE_RESTORE_STATUS=$?
+  if [[ "$DATABASE_RESTORE_STATUS" -ne 0 ]]; then
+    RESTORE_STAGE="DATABASE_RESTORE_FAILED"
+  fi
 else
   : >"$PRIVATE_DIR/restore-database.stdout"
   if [[ "$ROLES_RESTORE_STATUS" -ne 0 ]]; then
@@ -1186,9 +1360,16 @@ else
   : >"$PRIVATE_DIR/restore-catalog-fingerprint.stderr"
 fi
 
+if [[ "$UNAVAILABLE_EXT_COUNT" -gt 0 ]]; then
+  RESTORE_STAGE="EXTENSION_COMPATIBILITY_FAILED"
+elif [[ "$CATALOG_MATCH" != "true" && "$DATABASE_RESTORE_STATUS" -eq 0 && "$ROLES_RESTORE_STATUS" -eq 0 && "$PRISTINE_TARGET_STATUS" -eq 0 ]]; then
+  RESTORE_STAGE="CATALOG_MISMATCH"
+fi
+
 VERDICT="NOT_RESTORABLE_IN_DISPOSABLE_POSTGRES_17"
 if [[ "$PRISTINE_TARGET_STATUS" -eq 0 && "$ROLES_RESTORE_STATUS" -eq 0 && "$DATABASE_RESTORE_STATUS" -eq 0 && "$CATALOG_MATCH" == "true" && "$UNAVAILABLE_EXT_COUNT" -eq 0 ]]; then
   VERDICT="VERIFIED_LOGICAL_RESTORE"
+  RESTORE_STAGE="VERIFIED_LOGICAL_RESTORE"
 fi
 
 jq -n \
