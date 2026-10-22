@@ -266,6 +266,33 @@ try {
   console.log(`OID 10 role:        ${oidRole} (required: supabase_admin)`);
   assert.equal(oidRole, 'supabase_admin', `pg_roles OID 10 must be supabase_admin, got: ${oidRole}`);
 
+  // 4.6 Ensure local container domain socket allows trust authentication for ephemeral test users
+  const hbaPathRes = execPsql('\\set QUIET 1\n\\pset tuples_only on\n\\pset format unaligned\nSHOW hba_file;\n', {
+    user: 'supabase_admin',
+    description: 'Query hba_file path',
+    isPreflight: true,
+  });
+  const hbaFile = hbaPathRes.stdout.trim().split(/\r?\n/)[0].trim();
+  console.log(`hba_file path: ${hbaFile}`);
+  if (hbaFile) {
+    const patchHbaRes = dockerCmd([
+      'exec',
+      '-i',
+      '--user', 'postgres',
+      verifiedContainerId,
+      'sh',
+      '-c',
+      `printf 'local all all trust\\nhost all all 127.0.0.1/32 trust\\nhost all all ::1/128 trust\\n' | cat - "${hbaFile}" > "${hbaFile}.tmp" && mv "${hbaFile}.tmp" "${hbaFile}"`,
+    ]);
+    assert.equal(patchHbaRes.status, 0, `Failed to update pg_hba.conf: ${patchHbaRes.stderr}`);
+    execPsql('SELECT pg_reload_conf();', {
+      user: 'supabase_admin',
+      description: 'Reload PostgreSQL configuration after pg_hba update',
+      isPreflight: true,
+    });
+    console.log('Local container trust authentication configured and reloaded.');
+  }
+
   preflightPassed = true;
   console.log('Pre-flight container & database verification: PASS\n');
 
