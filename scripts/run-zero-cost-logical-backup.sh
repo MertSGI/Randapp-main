@@ -108,9 +108,11 @@ except Exception:
 }
 
 configure_postgresql17_path() {
-  if [[ -n "${LARI_PG17_BIN_DIR:-}" && -d "$LARI_PG17_BIN_DIR" ]]; then
-    if [[ ":$PATH:" != *":$LARI_PG17_BIN_DIR:"* ]]; then
-      PATH="$LARI_PG17_BIN_DIR:$PATH"
+  if [[ -n "${LARI_PG17_BIN_DIR+x}" ]]; then
+    if [[ -n "$LARI_PG17_BIN_DIR" && -d "$LARI_PG17_BIN_DIR" ]]; then
+      if [[ ":$PATH:" != *":$LARI_PG17_BIN_DIR:"* ]]; then
+        PATH="$LARI_PG17_BIN_DIR:$PATH"
+      fi
     fi
   elif [[ -d "/usr/lib/postgresql/17/bin" ]]; then
     if [[ ":$PATH:" != *":/usr/lib/postgresql/17/bin:"* ]]; then
