@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   validateAndParseCloneDatabaseUrl,
@@ -35,6 +36,80 @@ export const REMOTE_ONLY_VERSIONS = [
   '20261008063031',
   '20261008063041',
 ];
+
+/**
+ * Safely and deterministically resolves the full 40-character git HEAD commit SHA.
+ * Supports standard git repositories, bare repos, and linked worktrees (.git file pointing to gitdir).
+ * Uses read-only git rev-parse with timeout, falling back to direct filesystem resolution.
+ */
+export function resolveGitHeadSha(repoRoot = DEFAULT_REPO_ROOT) {
+  // 1. Try read-only git CLI command
+  try {
+    const res = spawnSync('git', ['rev-parse', '--verify', 'HEAD'], {
+      cwd: repoRoot,
+      shell: false,
+      timeout: 5000,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    if (res.status === 0 && res.stdout) {
+      const sha = res.stdout.trim();
+      if (/^[0-9a-f]{40}$/i.test(sha)) {
+        return sha;
+      }
+    }
+  } catch {
+    // Proceed to filesystem fallback
+  }
+
+  // 2. Direct filesystem resolution (handles linked worktree gitdir pointers)
+  try {
+    const gitPath = path.join(repoRoot, '.git');
+    if (!fs.existsSync(gitPath)) {
+      return 'UNKNOWN';
+    }
+
+    let gitDir = gitPath;
+    const stat = fs.statSync(gitPath);
+    if (stat.isFile()) {
+      const gitFileContent = fs.readFileSync(gitPath, 'utf8').trim();
+      const match = gitFileContent.match(/^gitdir:\s*(.+)$/i);
+      if (match) {
+        gitDir = path.resolve(repoRoot, match[1].trim());
+      }
+    }
+
+    const headPath = path.join(gitDir, 'HEAD');
+    if (fs.existsSync(headPath)) {
+      const headContent = fs.readFileSync(headPath, 'utf8').trim();
+      if (headContent.startsWith('ref: ')) {
+        const refName = headContent.slice(5).trim();
+        // Check in gitDir first
+        let refFile = path.join(gitDir, refName);
+        if (!fs.existsSync(refFile)) {
+          // If in worktree, check common directory
+          const commondirFile = path.join(gitDir, 'commondir');
+          if (fs.existsSync(commondirFile)) {
+            const commonDir = path.resolve(gitDir, fs.readFileSync(commondirFile, 'utf8').trim());
+            refFile = path.join(commonDir, refName);
+          }
+        }
+        if (fs.existsSync(refFile)) {
+          const sha = fs.readFileSync(refFile, 'utf8').trim();
+          if (/^[0-9a-f]{40}$/i.test(sha)) {
+            return sha;
+          }
+        }
+      } else if (/^[0-9a-f]{40}$/i.test(headContent)) {
+        return headContent;
+      }
+    }
+  } catch {
+    // Return UNKNOWN
+  }
+
+  return 'UNKNOWN';
+}
 
 /**
  * Validates the local repository's migration reconciliation matrix and source files.
@@ -119,7 +194,8 @@ export function validateLocalMigrationMatrix(repoRoot = DEFAULT_REPO_ROOT) {
  */
 export async function queryCloneCatalog(client) {
   // 1. Applied migrations in clone
-  let appliedMigrations = [];
+  let appliedMigrations = null;
+  let migrationLedgerStatus = 'MIGRATION_LEDGER_ABSENT';
   const migrationsTableCheck = await client.query(`
     SELECT EXISTS (
       SELECT 1 FROM information_schema.tables 
@@ -129,6 +205,7 @@ export async function queryCloneCatalog(client) {
   `);
 
   if (migrationsTableCheck.rows[0]?.exists) {
+    migrationLedgerStatus = 'MIGRATION_LEDGER_PRESENT';
     const res = await client.query(`
       SELECT version FROM supabase_migrations.schema_migrations 
       ORDER BY version ASC;
@@ -202,8 +279,9 @@ export async function queryCloneCatalog(client) {
     crypto.createHash('sha256').update(JSON.stringify(obj)).digest('hex');
 
   const catalogSummary = {
+    migration_ledger_status: migrationLedgerStatus,
     applied_migrations: appliedMigrations,
-    applied_migrations_count: appliedMigrations.length,
+    applied_migrations_count: appliedMigrations ? appliedMigrations.length : 0,
     tables_count: tablesRes.rows.length,
     columns_count: columnsRes.rows.length,
     views_count: viewsRes.rows.length,
@@ -216,7 +294,7 @@ export async function queryCloneCatalog(client) {
       functions: serializeAndHash(functionsRes.rows),
       policies: serializeAndHash(rlsRes.rows),
       privileges: serializeAndHash(privsRes.rows),
-      migrations: serializeAndHash(appliedMigrations),
+      migrations: serializeAndHash(appliedMigrations || []),
     },
     tables: tablesRes.rows,
     views: viewsRes.rows,
@@ -230,6 +308,27 @@ export async function queryCloneCatalog(client) {
  * Reconciles clone catalog state with local migration matrix and unproven semantic matches.
  */
 export function reconcileCatalogWithMatrix(matrixResult, catalogSummary) {
+  if (catalogSummary.migration_ledger_status === 'MIGRATION_LEDGER_ABSENT' || !catalogSummary.applied_migrations) {
+    const unresolvedItems = matrixResult.items.map((item) => ({
+      item_id: item.item_id,
+      version: item.version,
+      side: item.side,
+      collision_group: item.collision_group || null,
+      local_filename: item.local_filename || null,
+      status: 'MIGRATION_LEDGER_ABSENT',
+      reconciliation_action: 'HOLD_AWAITING_RESTORE_DIFF',
+    }));
+
+    return {
+      reconciliation_verdict: 'MIGRATION_LEDGER_ABSENT',
+      migration_ledger_status: 'MIGRATION_LEDGER_ABSENT',
+      unresolved_items: unresolvedItems,
+      unapplied_local_count: matrixResult.local_count,
+      remote_applied_count: 0,
+      p0_applied: false,
+    };
+  }
+
   const appliedSet = new Set(catalogSummary.applied_migrations);
 
   const unresolvedItems = [];
@@ -298,8 +397,10 @@ export async function verifyRestoredClone(options = {}) {
     options.receiptOutputPath ||
     path.join(repoRoot, 'test-results', 'lari-recovery', 'reconciliation-clone-receipt.json');
 
-  // 1. Static validation of local matrix
+  // 1. Static validation of local matrix and git source HEAD
   const matrixResult = validateLocalMigrationMatrix(repoRoot);
+  const currentHeadSha = resolveGitHeadSha(repoRoot);
+  const sourceHeadVerified = currentHeadSha !== 'UNKNOWN' && /^[0-9a-f]{40}$/i.test(currentHeadSha);
 
   // 2. Validate URL and connect to clone in read-only transaction
   let parsedDbConfig;
@@ -310,6 +411,8 @@ export async function verifyRestoredClone(options = {}) {
       status: 'RESTORED_CLONE_REQUIRED',
       error: validationErr.message,
       code: validationErr.code || 'RESTORED_CLONE_REQUIRED',
+      source_head: currentHeadSha,
+      source_head_verified: sourceHeadVerified,
       matrix_valid: true,
       matrix_summary: {
         local_count: matrixResult.local_count,
@@ -330,6 +433,8 @@ export async function verifyRestoredClone(options = {}) {
       status: 'RESTORED_CLONE_REQUIRED',
       error: connErr.message,
       code: connErr.code || 'RESTORED_CLONE_REQUIRED',
+      source_head: currentHeadSha,
+      source_head_verified: sourceHeadVerified,
       database_name: parsedDbConfig.dbName,
       staging_restore_status: 'STAGING_RESTORE_NOT_ATTESTED',
     };
@@ -356,31 +461,20 @@ export async function verifyRestoredClone(options = {}) {
     }
   }
 
-  // Fetch current git commit SHA if possible
-  let currentHeadSha = 'UNKNOWN';
-  try {
-    const headPath = path.join(repoRoot, '.git', 'HEAD');
-    if (fs.existsSync(headPath)) {
-      const headRef = fs.readFileSync(headPath, 'utf8').trim();
-      if (headRef.startsWith('ref: ')) {
-        const refFile = path.join(repoRoot, '.git', headRef.slice(5));
-        if (fs.existsSync(refFile)) {
-          currentHeadSha = fs.readFileSync(refFile, 'utf8').trim();
-        }
-      } else {
-        currentHeadSha = headRef;
-      }
-    }
-  } catch {
-    // Keep UNKNOWN
+  // 5. Emit sanitized JSON acceptance receipt
+  let receiptStatus = 'CLONE_INSPECTED_NEEDS_DIFF';
+  if (!sourceHeadVerified) {
+    receiptStatus = 'SOURCE_HEAD_UNVERIFIED';
+  } else if (reconciliation.reconciliation_verdict === 'MIGRATION_LEDGER_ABSENT') {
+    receiptStatus = 'MIGRATION_LEDGER_ABSENT';
   }
 
-  // 5. Emit sanitized JSON acceptance receipt
   const receipt = {
     schema_version: 1,
     tool_version: TOOL_VERSION,
-    status: 'CLONE_INSPECTED_NEEDS_DIFF',
+    status: receiptStatus,
     source_head: currentHeadSha,
+    source_head_verified: sourceHeadVerified,
     database_name: parsedDbConfig.dbName,
     clone_confirmed: true,
     snapshot_time: new Date().toISOString(),
@@ -391,6 +485,7 @@ export async function verifyRestoredClone(options = {}) {
       p0_cutover: EXPECTED_COUNTS.p0_cutover,
     },
     catalog_summary: {
+      migration_ledger_status: catalogSummary.migration_ledger_status,
       applied_migrations_count: catalogSummary.applied_migrations_count,
       tables_count: catalogSummary.tables_count,
       views_count: catalogSummary.views_count,
@@ -402,6 +497,7 @@ export async function verifyRestoredClone(options = {}) {
     catalog_comparison: baselineComparison,
     reconciliation: {
       verdict: reconciliation.reconciliation_verdict,
+      migration_ledger_status: reconciliation.migration_ledger_status || catalogSummary.migration_ledger_status,
       unapplied_local_count: reconciliation.unapplied_local_count,
       remote_applied_count: reconciliation.remote_applied_count,
       p0_applied: reconciliation.p0_applied,

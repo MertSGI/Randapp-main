@@ -265,7 +265,9 @@ export async function verifyP0Cutover(options = {}) {
       status: 'RESTORED_CLONE_REQUIRED',
       error: err.message,
       code: err.code || 'RESTORED_CLONE_REQUIRED',
+      evaluation_target: options.evaluationTarget || 'RESTORED_CLONE',
       live_p0_accepted: false,
+      live_status: 'LIVE_P0_NOT_APPLIED',
     };
   }
 
@@ -280,18 +282,28 @@ export async function verifyP0Cutover(options = {}) {
       error: connErr.message,
       code: connErr.code || 'RESTORED_CLONE_REQUIRED',
       database_name: parsedDbConfig.dbName,
+      evaluation_target: options.evaluationTarget || 'RESTORED_CLONE',
       live_p0_accepted: false,
+      live_status: 'LIVE_P0_NOT_APPLIED',
     };
   }
+
+  const targetClassification = options.evaluationTarget === 'DISPOSABLE_FIXTURE'
+    ? 'DISPOSABLE_SYNTHETIC_FIXTURE'
+    : (options.evaluationTarget === 'LIVE_STAGING' ? 'LIVE_STAGING_NOT_SUPPORTED_IN_CLONE_VERIFIER' : 'RESTORED_STAGING_CLONE');
 
   const receipt = {
     schema_version: 1,
     tool: 'verify-p0-cutover',
     database_name: parsedDbConfig.dbName,
     checked_at: new Date().toISOString(),
-    evaluation_target: 'RESTORED_CLONE',
-    live_p0_accepted: false,
+    evaluation_target: options.evaluationTarget || 'RESTORED_CLONE',
+    target_classification: targetClassification,
+    disposable_fixture_pass: options.evaluationTarget === 'DISPOSABLE_FIXTURE' && catalogResult.status === 'P0_CLONE_POSTCONDITION_PASS',
+    restored_clone_verified: (options.evaluationTarget !== 'DISPOSABLE_FIXTURE' && options.evaluationTarget !== 'LIVE_STAGING') && catalogResult.status === 'P0_CLONE_POSTCONDITION_PASS',
     ...catalogResult,
+    live_p0_accepted: false,
+    live_status: 'LIVE_P0_NOT_APPLIED',
   };
 
   try {
