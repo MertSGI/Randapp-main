@@ -4,6 +4,7 @@ import { legalDocumentService } from '../../services/legalDocumentService';
 import { policyAcceptanceService } from '../../services/policyAcceptanceService';
 import { consentLedgerService, ConsentLedgerRecord } from '../../services/consentLedgerService';
 import { dataRightsRequestService } from '../../services/dataRightsRequestService';
+import { getDataSourceMode } from '../../services/dataSourceConfig';
 import { 
   LegalDocumentVersion, 
   LegalDocumentType, 
@@ -70,13 +71,18 @@ const SuperAdminLegalPage: React.FC = () => {
   const [newContent, setNewContent] = useState('');
   const [newRequiresAcceptance, setNewRequiresAcceptance] = useState(true);
 
-  // Toast / Status Message
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const isPersistentMode = getDataSourceMode() === 'supabase';
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const triggerToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 4000);
+  // Toast / Status Message (with type support)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const triggerToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message: msg, type });
+    setTimeout(() => setToast(null), 4000);
   };
+
+
 
   const loadData = () => {
     // Summaries
@@ -104,50 +110,95 @@ const SuperAdminLegalPage: React.FC = () => {
   }, [docTypeFilter, docStatusFilter, ledgerTypeFilter, rightsTypeFilter]);
 
   // Actions
-  const handleCreateDocument = (e: React.FormEvent) => {
+  const handleCreateDocument = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isPersistentMode) {
+      triggerToast('Kayıt/işlem geçici olarak kullanılamıyor; sunucu doğrulaması gerekli', 'error');
+      return;
+    }
+    if (isSubmitting) return;
+
     if (!newVersion || !newTitle || !newContent) {
       alert('Lütfen sürüm, başlık ve içerik alanlarını doldurunuz.');
       return;
     }
 
-    legalDocumentService.createLegalDocumentVersion({
-      type: newType,
-      version: newVersion,
-      locale: 'tr',
-      title: newTitle,
-      summary: newSummary,
-      content: newContent,
-      requiresAcceptance: newRequiresAcceptance
-    });
+    setIsSubmitting(true);
+    try {
+      legalDocumentService.createLegalDocumentVersion({
+        type: newType,
+        version: newVersion,
+        locale: 'tr',
+        title: newTitle,
+        summary: newSummary,
+        content: newContent,
+        requiresAcceptance: newRequiresAcceptance
+      });
 
-    triggerToast('Yeni döküman taslağı başarıyla oluşturuldu.');
-    setShowCreateModal(false);
-    
-    // Clear inputs
-    setNewVersion('');
-    setNewTitle('');
-    setNewSummary('');
-    setNewContent('');
-    
-    loadData();
-  };
-
-  const handleArchiveDocument = (id: string) => {
-    if (confirm('Bu döküman versiyonunu arşivlemek istediğinize emin misiniz?')) {
-      legalDocumentService.archiveLegalDocumentVersion(id);
-      triggerToast('Döküman başarıyla arşivlendi.');
+      triggerToast('Yeni döküman taslağı başarıyla oluşturuldu.', 'success');
+      setShowCreateModal(false);
+      
+      // Clear inputs
+      setNewVersion('');
+      setNewTitle('');
+      setNewSummary('');
+      setNewContent('');
+      
       loadData();
+    } catch (err: any) {
+      triggerToast(err.message || 'Hata oluştu', 'error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleMarkReviewRequired = (id: string) => {
-    legalDocumentService.markLegalDocumentReviewRequired(id);
-    triggerToast('Döküman hukuk danışmanı incelemesi gerektiriyor olarak işaretlendi.');
-    loadData();
+  const handleArchiveDocument = async (id: string) => {
+    if (isPersistentMode) {
+      triggerToast('Kayıt/işlem geçici olarak kullanılamıyor; sunucu doğrulaması gerekli', 'error');
+      return;
+    }
+    if (isSubmitting) return;
+
+    if (confirm('Bu döküman versiyonunu arşivlemek istediğinize emin misiniz?')) {
+      setIsSubmitting(true);
+      try {
+        legalDocumentService.archiveLegalDocumentVersion(id);
+        triggerToast('Döküman başarıyla arşivlendi.', 'success');
+        loadData();
+      } catch (err: any) {
+        triggerToast(err.message || 'Hata oluştu', 'error');
+      } finally {
+        setIsSubmitting(false);
+      }
+    }
   };
 
-  const handlePublishDocument = (id: string) => {
+  const handleMarkReviewRequired = async (id: string) => {
+    if (isPersistentMode) {
+      triggerToast('Kayıt/işlem geçici olarak kullanılamıyor; sunucu doğrulaması gerekli', 'error');
+      return;
+    }
+    if (isSubmitting) return;
+
+    setIsSubmitting(true);
+    try {
+      legalDocumentService.markLegalDocumentReviewRequired(id);
+      triggerToast('Döküman hukuk danışmanı incelemesi gerektiriyor olarak işaretlendi.', 'success');
+      loadData();
+    } catch (err: any) {
+      triggerToast(err.message || 'Hata oluştu', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePublishDocument = async (id: string) => {
+    if (isPersistentMode) {
+      triggerToast('Kayıt/işlem geçici olarak kullanılamıyor; sunucu doğrulaması gerekli', 'error');
+      return;
+    }
+    if (isSubmitting) return;
+
     const reviewer = prompt(
       'LARI PRE-LIVE İNCELEME NOTU:\nBu işlem resmi bir avukat dijital imzası değildir ve dökümanın hukuki uyumluluğunu taahhüt etmez. Sadece yerel pre-live hazırlık ve taslak takibi içindir.\n\nLütfen yerel gözden geçirme yapan kişinin adını/unvanını giriniz:',
       'Hukuk Danışmanı İncelemesi Bekliyor'
@@ -157,45 +208,110 @@ const SuperAdminLegalPage: React.FC = () => {
         'Lütfen varsa yerel inceleme notunu ekleyiniz (Canlı kullanım öncesi profesyonel hukuk incelemesi gerekir):',
         'Taslak metin pre-live hazırlık aşamasındadır.'
       );
-      legalDocumentService.publishLegalDocumentVersion(id, reviewer, reviewNote || undefined);
-      triggerToast('Döküman pre-live hazırlık olarak yayına alındı.');
-      loadData();
+      setIsSubmitting(true);
+      try {
+        legalDocumentService.publishLegalDocumentVersion(id, reviewer, reviewNote || undefined);
+        triggerToast('Döküman pre-live hazırlık olarak yayına alındı.', 'success');
+        loadData();
+      } catch (err: any) {
+        triggerToast(err.message || 'Hata oluştu', 'error');
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
-  const handleRevokeAcceptance = (id: string) => {
+  const handleRevokeAcceptance = async (id: string) => {
+    if (isPersistentMode) {
+      triggerToast('Kayıt/işlem geçici olarak kullanılamıyor; sunucu doğrulaması gerekli', 'error');
+      return;
+    }
+    if (isSubmitting) return;
+
     const reason = prompt('Geri çekme / iptal gerekçesini yazınız:', 'Kullanıcı talebi doğrultusunda');
     if (reason !== null) {
-      policyAcceptanceService.revokePolicyAcceptance(id, reason);
-      triggerToast('Kabul kaydı başarıyla iptal edildi.');
-      loadData();
+      setIsSubmitting(true);
+      try {
+        policyAcceptanceService.revokePolicyAcceptance(id, reason);
+        triggerToast('Kabul kaydı başarıyla iptal edildi.', 'success');
+        loadData();
+      } catch (err: any) {
+        triggerToast(err.message || 'Hata oluştu', 'error');
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
-  const handleWithdrawConsent = (actorId: string, type: string) => {
+  const handleWithdrawConsent = async (actorId: string, type: string) => {
+    if (isPersistentMode) {
+      triggerToast('Kayıt/işlem geçici olarak kullanılamıyor; sunucu doğrulaması gerekli', 'error');
+      return;
+    }
+    if (isSubmitting) return;
+
     if (confirm(`Bu kullanıcının '${type}' rızasını geri çekmek istediğinize emin misiniz?`)) {
-      consentLedgerService.withdrawConsent(actorId, type, 'Yönetici Panelinden Manuel Geri Çekme');
-      triggerToast('Rıza başarıyla geri çekildi.');
-      loadData();
+      setIsSubmitting(true);
+      try {
+        consentLedgerService.withdrawConsent(actorId, type, 'Yönetici Panelinden Manuel Geri Çekme');
+        triggerToast('Rıza başarıyla geri çekildi.', 'success');
+        loadData();
+      } catch (err: any) {
+        triggerToast(err.message || 'Hata oluştu', 'error');
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
-  const handleUpdateRequestStatus = (id: string, status: DataRightsRequestStatus) => {
+  const handleUpdateRequestStatus = async (id: string, status: DataRightsRequestStatus) => {
+    if (isPersistentMode) {
+      triggerToast('Kayıt/işlem geçici olarak kullanılamıyor; sunucu doğrulaması gerekli', 'error');
+      return;
+    }
+    if (isSubmitting) return;
+
     const notes = prompt('Talep işlem notlarını giriniz (KVKK Defterine işlenecektir):', 'Talep doğrulanarak el ile işlendi.');
     if (notes !== null) {
-      dataRightsRequestService.updateDataRightsRequestStatus(id, status, notes);
-      triggerToast(`Veri hakkı talebi '${status}' olarak güncellendi.`);
-      loadData();
+      setIsSubmitting(true);
+      try {
+        dataRightsRequestService.updateDataRightsRequestStatus(id, status, notes);
+        triggerToast(`Veri hakkı talebi '${status}' olarak güncellendi.`, 'success');
+        loadData();
+      } catch (err: any) {
+        triggerToast(err.message || 'Hata oluştu', 'error');
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       {/* Toast Alert */}
-      {toastMessage && (
-        <div className="fixed bottom-5 right-5 bg-slate-900 border border-emerald-500/30 text-emerald-400 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 z-50 animate-bounce">
-          <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
-          <span className="text-sm font-semibold">{toastMessage}</span>
+      {toast && (
+        <div className={`fixed bottom-5 right-5 bg-slate-900 border px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 z-50 animate-bounce ${
+          toast.type === 'error' ? 'border-rose-500/50 text-rose-400' : 'border-emerald-500/30 text-emerald-400'
+        }`}>
+          {toast.type === 'error' ? (
+            <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+          ) : (
+            <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+          )}
+          <span className="text-sm font-semibold">{toast.message}</span>
+        </div>
+      )}
+
+      {/* Persistent Mode Block Warning Banner */}
+      {isPersistentMode && (
+        <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-5 rounded-2xl flex items-center gap-3">
+          <AlertTriangle className="w-6 h-6 text-rose-500 shrink-0" />
+          <div>
+            <span className="font-bold text-sm block">Kayıt/işlem geçici olarak kullanılamıyor; sunucu doğrulaması gerekli</span>
+            <p className="text-xs text-rose-300/80 mt-1">
+              Kalıcı Supabase veritabanı modunda güvenilir sunucu API/RPC kimlik bağlama kontratı henüz yapılandırılmamıştır. Tarayıcıdan doğrudan tablo yazma ve yerel sahte kabul kayıtları güvenlik gerekçesiyle engellenmiştir.
+            </p>
+          </div>
         </div>
       )}
 
@@ -221,7 +337,8 @@ const SuperAdminLegalPage: React.FC = () => {
           </button>
           <button 
             onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 bg-accent hover:bg-accent/90 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md transition-colors"
+            disabled={isPersistentMode || isSubmitting}
+            className="flex items-center gap-2 bg-accent hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md transition-colors"
           >
             <Plus className="w-4 h-4" /> Yeni Taslak
           </button>
@@ -396,7 +513,8 @@ const SuperAdminLegalPage: React.FC = () => {
                           {doc.status === 'draft' && (
                             <button 
                               onClick={() => handleMarkReviewRequired(doc.id)}
-                              className="p-1 text-amber-600 hover:text-amber-800 font-semibold text-[10px]"
+                              disabled={isPersistentMode || isSubmitting}
+                              className="p-1 text-amber-600 hover:text-amber-800 disabled:opacity-40 disabled:cursor-not-allowed font-semibold text-[10px]"
                             >
                               İncelemeye Gönder
                             </button>
@@ -404,7 +522,8 @@ const SuperAdminLegalPage: React.FC = () => {
                           {doc.status === 'review_required' && (
                             <button 
                               onClick={() => handlePublishDocument(doc.id)}
-                              className="p-1 text-emerald-600 hover:text-emerald-800 font-semibold text-[10px]"
+                              disabled={isPersistentMode || isSubmitting}
+                              className="p-1 text-emerald-600 hover:text-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed font-semibold text-[10px]"
                             >
                               Onayla & Yayınla
                             </button>
@@ -412,7 +531,8 @@ const SuperAdminLegalPage: React.FC = () => {
                           {doc.status !== 'archived' && (
                             <button 
                               onClick={() => handleArchiveDocument(doc.id)}
-                              className="p-1 text-red-500 hover:text-red-700"
+                              disabled={isPersistentMode || isSubmitting}
+                              className="p-1 text-red-500 hover:text-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
                               title="Arşivle"
                             >
                               <Trash2 className="w-4 h-4 inline" />
@@ -473,7 +593,8 @@ const SuperAdminLegalPage: React.FC = () => {
                           {!acpt.revokedAt && (
                             <button 
                               onClick={() => handleRevokeAcceptance(acpt.id)}
-                              className="text-xs text-red-500 hover:text-red-700 ml-2 font-semibold"
+                              disabled={isPersistentMode || isSubmitting}
+                              className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40 disabled:cursor-not-allowed ml-2 font-semibold"
                             >
                               Geri Çek
                             </button>
@@ -553,7 +674,8 @@ const SuperAdminLegalPage: React.FC = () => {
                           {rec.status === 'granted' ? (
                             <button 
                               onClick={() => handleWithdrawConsent(rec.actorId!, rec.consentType)}
-                              className="text-xs text-red-500 hover:text-red-700 font-semibold"
+                              disabled={isPersistentMode || isSubmitting}
+                              className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40 disabled:cursor-not-allowed font-semibold"
                             >
                               Geri Çek
                             </button>
@@ -623,7 +745,8 @@ const SuperAdminLegalPage: React.FC = () => {
                           {req.status === 'submitted' && (
                             <button 
                               onClick={() => handleUpdateRequestStatus(req.id, 'in_review')}
-                              className="text-xs text-amber-600 hover:text-amber-800 font-semibold"
+                              disabled={isPersistentMode || isSubmitting}
+                              className="text-xs text-amber-600 hover:text-amber-800 disabled:opacity-40 disabled:cursor-not-allowed font-semibold"
                             >
                               İncele
                             </button>
@@ -631,7 +754,8 @@ const SuperAdminLegalPage: React.FC = () => {
                           {req.status === 'in_review' && (
                             <button 
                               onClick={() => handleUpdateRequestStatus(req.id, 'completed')}
-                              className="text-xs text-emerald-600 hover:text-emerald-800 font-semibold"
+                              disabled={isPersistentMode || isSubmitting}
+                              className="text-xs text-emerald-600 hover:text-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed font-semibold"
                             >
                               Tamamla
                             </button>
@@ -639,7 +763,8 @@ const SuperAdminLegalPage: React.FC = () => {
                           {(req.status === 'submitted' || req.status === 'in_review') && (
                             <button 
                               onClick={() => handleUpdateRequestStatus(req.id, 'rejected')}
-                              className="text-xs text-red-500 hover:text-red-700 font-semibold ml-1"
+                              disabled={isPersistentMode || isSubmitting}
+                              className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40 disabled:cursor-not-allowed font-semibold ml-1"
                             >
                               Reddet
                             </button>

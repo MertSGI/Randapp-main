@@ -1,5 +1,6 @@
 import { LegalDocumentVersion, LegalDocumentType, LegalDocumentStatus } from '../types';
 import { auditLogService } from './auditLogService';
+import { getDataSourceMode } from './dataSourceConfig';
 
 const LEGAL_STORAGE_KEY = 'lari_legal_documents_v1';
 
@@ -63,6 +64,9 @@ export const legalDocumentService = {
    * Creates a new legal document version draft.
    */
   createLegalDocumentVersion(input: CreateLegalDocumentInput): LegalDocumentVersion {
+    if (getDataSourceMode() === 'supabase') {
+      throw new Error('LEGAL_SERVER_WRITE_NOT_CONFIGURED: Direct client creation of legal document versions is prohibited in persistent mode. Server attestation required.');
+    }
     const docs = this._getDocumentsFromStore();
     const id = `doc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
@@ -100,6 +104,9 @@ export const legalDocumentService = {
    * Archives a specific legal document version.
    */
   archiveLegalDocumentVersion(id: string): LegalDocumentVersion | null {
+    if (getDataSourceMode() === 'supabase') {
+      throw new Error('LEGAL_SERVER_WRITE_NOT_CONFIGURED: Direct client archiving of legal document versions is prohibited in persistent mode. Server attestation required.');
+    }
     const docs = this._getDocumentsFromStore();
     const doc = docs.find(d => d.id === id);
     if (doc) {
@@ -125,6 +132,9 @@ export const legalDocumentService = {
    * Marks a document version as review required (ready for legal counsel review).
    */
   markLegalDocumentReviewRequired(id: string): LegalDocumentVersion | null {
+    if (getDataSourceMode() === 'supabase') {
+      throw new Error('LEGAL_SERVER_WRITE_NOT_CONFIGURED: Marking document review is prohibited in persistent mode without server attestation.');
+    }
     const docs = this._getDocumentsFromStore();
     const doc = docs.find(d => d.id === id);
     if (doc) {
@@ -149,6 +159,9 @@ export const legalDocumentService = {
    * Publishes a document version, transitioning it to active. It archives previous active versions of the same type and locale.
    */
   publishLegalDocumentVersion(id: string, reviewedBy?: string, reviewNote?: string): LegalDocumentVersion | null {
+    if (getDataSourceMode() === 'supabase') {
+      throw new Error('LEGAL_SERVER_WRITE_NOT_CONFIGURED: Direct client publishing of legal documents is prohibited in persistent mode. Server attestation required.');
+    }
     const docs = this._getDocumentsFromStore();
     const docIndex = docs.findIndex(d => d.id === id);
     if (docIndex !== -1) {
@@ -197,6 +210,26 @@ export const legalDocumentService = {
    * Returns a legal document audit readiness summary.
    */
   getLegalReadinessSummary() {
+    if (getDataSourceMode() === 'supabase') {
+      return {
+        totalCount: 0,
+        byStatus: { draft: 0, review_required: 0, active: 0, archived: 0 },
+        hasActiveTerms: false,
+        hasActivePrivacy: false,
+        hasActiveKVKK: false,
+        allRequiredCategoriesDrafted: false,
+        missingCategories: ['terms_of_service', 'privacy_policy', 'kvkk_clarification_text'],
+        lawyerReviewApproved: false,
+        legalReviewStatus: 'pending_review',
+        externalLegalReviewRequired: true,
+        complianceFinalized: false,
+        integrityVerified: false,
+        readinessStatus: 'UNAVAILABLE_PENDING_SERVER_API',
+        serverVerificationRequired: true,
+        legalApprovalClaim: 'Kayıt/işlem geçici olarak kullanılamıyor; sunucu doğrulaması gerekli',
+        localMode: false
+      };
+    }
     const docs = this._getDocumentsFromStore();
     const totalCount = docs.length;
     const draftCount = docs.filter(d => d.status === 'draft').length;

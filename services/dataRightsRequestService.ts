@@ -192,6 +192,9 @@ export const dataRightsRequestService = {
    * Links a request manually to an existing support ticket.
    */
   linkToSupportTicket(requestId: string, ticketId: string): DataRightsRequest | null {
+    if (getDataSourceMode() === 'supabase') {
+      throw new Error('LEGAL_PERSISTENCE_REQUIRED: Direct client support ticket linking is prohibited in persistent mode. Trusted server capability required.');
+    }
     const list = this._getRequestsFromStore();
     const request = list.find(r => r.id === requestId);
     if (request) {
@@ -209,6 +212,22 @@ export const dataRightsRequestService = {
    */
   getDataRightsReadinessSummary() {
     const isSupabase = getDataSourceMode() === 'supabase';
+    if (isSupabase) {
+      return {
+        totalRequests: 0,
+        submitted: 0,
+        inReview: 0,
+        completed: 0,
+        rejected: 0,
+        byType: { access: 0, export: 0, deletion: 0, correction: 0, consent_withdrawal: 0 },
+        requiresManualApproval: true,
+        hasLinkedSupportTickets: false,
+        serverProofVerified: false,
+        readinessStatus: 'UNAVAILABLE_PENDING_SERVER_API',
+        serverVerificationRequired: true,
+        persistenceMode: 'unconfigured_server'
+      };
+    }
     const list = this._getRequestsFromStore();
     return {
       totalRequests: list.length,
