@@ -1,0 +1,146 @@
+name: LARI DEV247 Isolated Source QA
+
+on:
+  push:
+    branches:
+      - work/lari-dev247-batch-20261021
+  pull_request:
+    branches:
+      - main
+      - master
+      - production
+      - staging/ci-lari-release-gate-c1-c4-20261017
+      - work/lari-dev247-batch-20261021
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: lari-dev247-source-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-source-qa:
+    name: Exact SHA V1 source regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VITE_DATA_MODE: local
+      VITE_LAUNCH_MODE: local_pre_live
+      VITE_PAYMENT_MODE: disabled
+      VITE_PAYMENT_RUN_MODE: local_dry_run
+      VITE_PAYMENT_PROVIDER: disabled
+      CI: 'true'
+    steps:
+      - name: Checkout exact triggering commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Assert source SHA
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "CI_HEAD_SHA=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: Install Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Chromium for local browser E2E
+        run: npx playwright install --with-deps chromium
+      - name: Mandatory existing Batch01-03 behavioral QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run qa:dev247-runner
+          npm run qa:payment-client-failclosed
+          npm run qa:communication-failclosed
+          npm run qa:legal-persistence-failclosed
+          npm run qa:legal-schema-security-plan
+          npm run qa:lari-migration-plan
+          npm run qa:migration-reconciliation-evidence
+          npm run qa:zero-cost-backup-workflow
+          npm run qa:auth-isolation
+          npm run qa:subscription-lifecycle
+      - name: Bounded PostgreSQL 17 disposable SQL proposal validation
+        shell: bash
+        timeout-minutes: 5
+        env:
+          LARI_REQUIRE_PG17_DOCKER: '1'
+        run: |
+          set -euo pipefail
+          npm run qa:legal-schema-security-plan
+          npm run qa:disposable-pg17-role-restore
+      - name: Batch04 behavioral QA when source is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -f docs/lari-program/BATCH_04_EVIDENCE.md; then
+            npm run qa:legal-ui-failclosed
+            npm run qa:legal-callsites
+          else
+            echo 'BATCH04_NOT_YET_COMMITTED (expected for baseline checkpoint)' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Batch05 restore-aware migration and P0 acceptance verifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run qa:lari-restored-clone-verifier
+          npm run qa:lari-p0-postconditions
+      - name: Lint, build, local browser journeys
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run build
+          npm run qa:ui-v2-booking-e2e
+          npm run qa:ui-v2-booking-integrity
+      - name: Upload sanitized browser test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lari-dev247-source-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            test-results/ui-v2-booking-e2e
+            test-results/ui-v2-booking-integrity
+          if-no-files-found: ignore
+          retention-days: 7
+  windows-runner-qa:
+    name: Windows runner and agent preflight contracts
+    runs-on: windows-latest
+    timeout-minutes: 12
+    env:
+      VITE_DATA_MODE: local
+      VITE_LAUNCH_MODE: local_pre_live
+      VITE_PAYMENT_MODE: disabled
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Assert exact SHA
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw 'SHA mismatch' }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Windows supervisor (offline dry-run tests)
+        run: npm run qa:dev247-windows-supervisor
+      - name: Agent preflight if Batch04 completed
+        shell: pwsh
+        run: |
+          if (Test-Path 'docs/lari-program/BATCH_04_EVIDENCE.md') {
+            npm run qa:dev247-agent-preflight
+          } else {
+            Write-Host 'BATCH04_EVIDENCE_NOT_YET_COMMITTED'
+          }
+      - name: Batch05 restore-aware verifiers
+        run: |
+          npm run qa:lari-restored-clone-verifier
+          npm run qa:lari-p0-postconditions

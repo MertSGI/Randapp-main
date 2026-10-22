@@ -278,8 +278,40 @@ export const subscriptionService = {
   },
 
   async startCheckout(tenantId: string, planId: string, customer?: any): Promise<string> {
+    let isSupabase = false;
+    try {
+      isSupabase = getDataSourceMode() === 'supabase';
+    } catch {
+      const env =
+        (typeof import.meta !== 'undefined' && (import.meta as any)?.env) ||
+        (typeof globalThis !== 'undefined' && (globalThis as any)?.import?.meta?.env) ||
+        (typeof process !== 'undefined' ? process?.env : {}) ||
+        {};
+      const dm = env.VITE_DATA_MODE || env.VITE_LARI_DATA_SOURCE;
+      isSupabase = dm === 'supabase' || dm === 'supabase_staging' || dm === 'supabase_production';
+    }
+
+    if (isSupabase) {
+      throw {
+        isSafeStructure: true,
+        errorCode: 'PAYMENT_SERVER_ACTIVATION_REQUIRED',
+        message: 'Canlı ödeme geçidi henüz aktif edilmemiştir. Sunucu doğrulaması ve kurumsal onay gereklidir.',
+        reason: 'PAYMENT_SERVER_ACTIVATION_REQUIRED'
+      };
+    }
+
     const { paymentRunModeService } = await import('./paymentRunModeService');
     const runModeStatus = paymentRunModeService.getStatus();
+
+    if (!runModeStatus.canRunCheckout) {
+      throw {
+        isSafeStructure: true,
+        errorCode: 'PAYMENT_SERVER_ACTIVATION_REQUIRED',
+        message: 'Ödeme oturumu başlatılamaz: Sunucu ödeme aktivasyonu gereklidir.',
+        reason: 'PAYMENT_SERVER_ACTIVATION_REQUIRED',
+        raw: { blockers: runModeStatus.missingBlockers }
+      };
+    }
 
     if (runModeStatus.mode === 'local_dry_run') {
       const simUrl = paymentRunModeService.simulateCheckoutHandoff(tenantId, planId, '');
@@ -305,89 +337,12 @@ export const subscriptionService = {
       return simUrl;
     }
 
-    if (runModeStatus.mode === 'sandbox_live' || runModeStatus.mode === 'production_live') {
-      if (runModeStatus.mode === 'sandbox_live' && !runModeStatus.canRunCheckout) {
-        throw {
-          isSafeStructure: true,
-          message: 'Sistem sandbox testine hazır değil (eksik yapılandırmalar var). Lütfen Super Admin panelini kontrol edin.',
-          errorCode: 'SANDBOX_NOT_CONFIGURED',
-          raw: { blockers: runModeStatus.missingBlockers }
-        };
-      }
-
-      try {
-        console.log(`[${runModeStatus.mode}] Calling POST /functions/v1/create-checkout-session`);
-        const { data, error } = await supabase.functions.invoke('create-checkout-session', {
-          body: {
-            tenantId,
-            planId,
-            billingCycle: customer?.billingPeriod || 'monthly', // default
-            successUrl: `${window.location.origin}/#/admin?tab=kurulum&checkout=success`,
-            cancelUrl: `${window.location.origin}/#/admin?tab=abonelik&checkout=cancelled`,
-            customer
-          }
-        });
-
-        if (error) {
-          let parsedError = error;
-          try {
-            if (error.context && typeof error.context.json === 'function') {
-              const body = await error.context.json();
-              parsedError = body;
-            }
-          } catch (e) { }
-
-          throw {
-            isSafeStructure: true,
-            message: parsedError?.message || error.message || '�deme oturumu olu�turulamad�. L�tfen sistem y�neticisiyle ileti�ime ge�in.',
-            errorCode: parsedError?.errorCode || 'UNKNOWN_CHECKOUT_ERROR',
-            raw: parsedError
-          };
-        }
-
-        if (data?.error) {
-          throw {
-            isSafeStructure: true,
-            message: data.message || data.error || '�deme oturumu olu�turulamad�. L�tfen sistem y�neticisiyle ileti�ime ge�in.',
-            errorCode: data.errorCode || 'UNKNOWN_CHECKOUT_ERROR',
-            raw: data
-          };
-        }
-
-        if (data?.mode === 'sandbox_not_configured') {
-          throw {
-            isSafeStructure: true,
-            message: data.message || 'Payment provider sandbox is not configured.',
-            errorCode: 'SANDBOX_NOT_CONFIGURED',
-            raw: data
-          };
-        }
-
-        if (data?.checkoutUrl) {
-          return data.checkoutUrl;
-        } else {
-          throw {
-            isSafeStructure: true,
-            message: '�deme oturumu URL d�nd�rmedi. L�tfen sistem y�neticisiyle ileti�ime ge�in.',
-            errorCode: 'MISSING_CHECKOUT_URL',
-            raw: data
-          };
-        }
-      } catch (err: any) {
-        console.error("Checkout session error:", err);
-        if (err.isSafeStructure) {
-          throw err;
-        }
-        throw {
-          isSafeStructure: true,
-          message: 'Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.',
-          errorCode: 'UNEXPECTED_ERROR',
-          raw: err
-        };
-      }
-    }
-
-    return '';
+    throw {
+      isSafeStructure: true,
+      errorCode: 'PAYMENT_SERVER_ACTIVATION_REQUIRED',
+      message: 'Canlı ödeme ağ çağrısı istemci üzerinden yapılamaz. Sunucu doğrulaması gereklidir.',
+      reason: 'PAYMENT_SERVER_ACTIVATION_REQUIRED'
+    };
   },
 
   async openBillingPortal(tenantId: string): Promise<void> {

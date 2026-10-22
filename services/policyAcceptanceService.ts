@@ -6,6 +6,7 @@ import {
 } from '../types';
 import { legalDocumentService } from './legalDocumentService';
 import { auditLogService } from './auditLogService';
+import { getDataSourceMode } from './dataSourceConfig';
 
 const ACCEPTANCE_STORAGE_KEY = 'lari_policy_acceptances_v1';
 
@@ -26,8 +27,15 @@ export interface RecordPolicyAcceptanceInput {
 export const policyAcceptanceService = {
   /**
    * Records a user's explicit policy acceptance with an immutable snapshot of the text version.
+   * In persistent (supabase) mode, client-side persistence is rejected fail-closed.
    */
   recordPolicyAcceptance(input: RecordPolicyAcceptanceInput): PolicyAcceptanceRecord {
+    if (getDataSourceMode() === 'supabase') {
+      throw new Error(
+        'LEGAL_PERSISTENCE_REQUIRED: Direct client policy acceptance cannot be persisted in persistent mode. Trusted server capability required.'
+      );
+    }
+
     const acceptances = this._getAcceptancesFromStore();
     const id = `acpt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const locale = input.locale || 'tr';
@@ -133,6 +141,12 @@ export const policyAcceptanceService = {
    * Revokes or withdraws a previous policy acceptance record.
    */
   revokePolicyAcceptance(recordId: string, reason: string): PolicyAcceptanceRecord | null {
+    if (getDataSourceMode() === 'supabase') {
+      throw new Error(
+        'LEGAL_PERSISTENCE_REQUIRED: Direct client policy revocation cannot be performed in persistent mode. Trusted server capability required.'
+      );
+    }
+
     const acceptances = this._getAcceptancesFromStore();
     const idx = acceptances.findIndex(r => r.id === recordId);
     if (idx !== -1) {
@@ -196,8 +210,10 @@ export const policyAcceptanceService = {
 
   /**
    * Summarizes the status of acceptances for system diagnostics.
+   * In persistent mode, integrityVerified cannot be true without real server attestation.
    */
   getPolicyAcceptanceReadinessSummary() {
+    const isSupabase = getDataSourceMode() === 'supabase';
     const list = this._getAcceptancesFromStore();
     return {
       totalAcceptancesRecorded: list.length,
@@ -210,7 +226,9 @@ export const policyAcceptanceService = {
         self_service: list.filter(r => r.acceptanceSource === 'self_service').length,
         admin_panel: list.filter(r => r.acceptanceSource === 'admin_panel').length
       },
-      integrityVerified: true
+      integrityVerified: !isSupabase,
+      serverProofVerified: false,
+      persistenceMode: isSupabase ? 'unconfigured_server' : 'local_preview_simulation'
     };
   },
 
@@ -227,7 +245,7 @@ export const policyAcceptanceService = {
 
   _saveAcceptancesToStore(list: PolicyAcceptanceRecord[]): void {
     try {
-      if (typeof window !== 'undefined') {
+      if (typeof window !== 'undefined' && getDataSourceMode() !== 'supabase') {
         localStorage.setItem(ACCEPTANCE_STORAGE_KEY, JSON.stringify(list));
       }
     } catch (e) {

@@ -29,83 +29,35 @@ export class SupabaseCommunicationOutboxRepository implements CommunicationOutbo
   }
 
   async enqueueEvent(tenantId: string, event: any): Promise<any> {
-    try {
-      // Map 'in_app' or other channels to valid database channels if needed
-      let dbChannel = event.channel;
-      if (dbChannel !== 'sms' && dbChannel !== 'whatsapp' && dbChannel !== 'email') {
-        dbChannel = 'sms'; // Default fallback
-      }
-
-      // Map queued/rendered etc to database statuses ('queued', 'sent', 'failed')
-      let dbStatus = event.status;
-      if (dbStatus === 'rendered' || dbStatus === 'queued' || dbStatus === 'skipped') {
-        dbStatus = 'queued';
-      } else if (dbStatus === 'sent') {
-        dbStatus = 'sent';
-      } else if (dbStatus === 'failed') {
-        dbStatus = 'failed';
-      } else {
-        dbStatus = 'queued';
-      }
-
-      const res = await fetchSupabase('/rest/v1/communication_outbox', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-        body: JSON.stringify({
-          id: event.id,
-          tenant_id: tenantId,
-          recipient: event.recipient || event.customerId || 'unknown_recipient',
-          channel: dbChannel,
-          message: event.body || event.message || '',
-          status: dbStatus,
-          metadata: event.metadata || {},
-          created_at: event.createdAt || new Date().toISOString(),
-          updated_at: event.updatedAt || new Date().toISOString()
-        })
-      });
-
-      if (!res.ok) {
-        throw new Error('Failed to insert into communication_outbox');
-      }
-
-      const data = await res.json();
-      const e = data[0];
-      return {
-        id: e.id,
-        tenantId: e.tenant_id,
-        recipient: e.recipient,
-        channel: e.channel,
-        body: e.message,
-        status: e.status,
-        metadata: e.metadata,
-        createdAt: e.created_at,
-        updatedAt: e.updated_at
+    // Fail closed: in_app channel cannot be silently converted to sms
+    if (event?.channel === 'in_app') {
+      throw {
+        errorCode: 'UNSUPPORTED_COMMUNICATION_CHANNEL',
+        message: 'The in_app channel is not supported for outbox queueing and cannot be converted to sms.'
       };
-    } catch (err) {
-      console.error(err);
-      throw err;
     }
+
+    if (!event?.recipient || event.recipient === 'unknown_recipient') {
+      throw {
+        errorCode: 'INVALID_COMMUNICATION_RECIPIENT',
+        message: 'Communication event recipient must be explicitly specified and cannot be unknown_recipient.'
+      };
+    }
+
+    // Fail closed: Direct client POST to communication_outbox is REVOKED by database security model (20260918_phase3).
+    // Outbox queueing requires server-side authority or server trigger.
+    throw {
+      errorCode: 'COMMUNICATION_SERVER_ENQUEUE_REQUIRED',
+      message: 'Direct client insertion into communication_outbox is revoked. Server-side outbox enqueueing is required.'
+    };
   }
 
   async updateDeliveryStatus(tenantId: string, eventId: string, status: string, notes?: string): Promise<void> {
-    try {
-      let dbStatus = status;
-      if (dbStatus !== 'queued' && dbStatus !== 'sent' && dbStatus !== 'failed') {
-        dbStatus = 'queued';
-      }
-
-      const res = await fetchSupabase(`/rest/v1/communication_outbox?id=eq.${eventId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: dbStatus,
-          metadata: notes ? { failureReason: notes } : {},
-          updated_at: new Date().toISOString()
-        })
-      });
-      if (!res.ok) throw new Error('Failed to update communication_outbox');
-    } catch (err) {
-      console.error(err);
-    }
+    // Fail closed: Direct client PATCH to communication_outbox is REVOKED by database security model.
+    // Delivery status updates require verified provider callback or webhook.
+    throw {
+      errorCode: 'COMMUNICATION_PROVIDER_CALLBACK_REQUIRED',
+      message: 'Direct client modification of communication_outbox is revoked. Provider webhook callback is required.'
+    };
   }
 }

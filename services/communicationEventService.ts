@@ -7,9 +7,45 @@ import {
 } from '../types';
 import { messageTemplateService } from './messageTemplateService';
 import { consentService } from './consentService';
-import { communicationProviderConfigService } from './communicationProviderConfigService';
+import { getDataSourceMode } from './dataSourceConfig';
 
 const STORAGE_KEY = 'lari_communication_events';
+
+function resolveEnv(): Record<string, any> {
+  try {
+    if (typeof import.meta !== 'undefined' && (import.meta as any)?.env) {
+      return (import.meta as any).env;
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    if (typeof globalThis !== 'undefined' && (globalThis as any)?.import?.meta?.env) {
+      return (globalThis as any).import.meta.env;
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    if (typeof process !== 'undefined' && process?.env) {
+      return process.env;
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function isPersistentMode(): boolean {
+  try {
+    if (getDataSourceMode() === 'supabase') return true;
+  } catch {
+    // fallback
+  }
+  const env = resolveEnv();
+  const mode = env.VITE_DATA_MODE || env.VITE_LARI_DATA_SOURCE;
+  return mode === 'supabase' || mode === 'supabase_staging' || mode === 'supabase_production';
+}
 
 export interface CreateEventInput {
   tenantId: string;
@@ -29,7 +65,7 @@ export interface CreateEventInput {
 export const communicationEventService = {
   // Enforce local storage state list
   getAllEvents(): CommunicationEvent[] {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && window.localStorage) {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         try {
@@ -43,7 +79,7 @@ export const communicationEventService = {
   },
 
   saveAllEvents(events: CommunicationEvent[]) {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && window.localStorage) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
     }
   },
@@ -65,14 +101,11 @@ export const communicationEventService = {
       const consent = consentService.getCustomerConsent(input.tenantId, input.customerId);
 
       if (isTransactional) {
-        // Must verify contact/reminder consent
-        const hasConsent = consent ? (consent.bookingContactConsent || consent.appointmentReminderConsent) : true; // default to true for booking confirmations if consent wasn't recorded yet, but enforce if recorded
         if (consent && !consent.bookingContactConsent && !consent.appointmentReminderConsent) {
           initialStatus = 'skipped';
           failureReason = 'Müşteri işlem onay/iletişim izni vermemiştir.';
         }
       } else {
-        // Marketing or referrals/other campaign related
         const hasMarketing = consentService.canSendMarketing(input.tenantId, input.customerId);
         if (!hasMarketing) {
           initialStatus = 'skipped';
@@ -89,7 +122,9 @@ export const communicationEventService = {
       language
     );
 
-    // Update status to 'rendered' if successfully formatted and not skipped
+    // Fail closed: Client event creation produces a local draft ('rendered') or 'skipped'.
+    // Under no circumstances can client config or browser localStorage automatically declare 'sent'
+    // or manufacture a synthetic provider message receipt.
     const finalStatus = initialStatus === 'skipped' ? 'skipped' : 'rendered';
 
     const newEvent: CommunicationEvent = {
@@ -113,21 +148,10 @@ export const communicationEventService = {
       internalOnly: !!input.internalOnly
     };
 
-    // 3. Provider Mode Check (If provider configuration specifies active mock/gateway, we mark as sent for our local run modes)
-    if (newEvent.status === 'rendered') {
-      const config = communicationProviderConfigService.getConfig();
-      if (config.mode !== 'local_outbox_only') {
-        // If some live provider is set, we could mark 'sent' or 'failed'.
-        // In local mock preview, we can simulate sending if config isn't strict local outbox only.
-        newEvent.status = 'sent';
-        newEvent.providerMessageId = `prov_${Math.random().toString(36).substring(2, 9)}`;
-      }
-    }
-
     events.unshift(newEvent);
     this.saveAllEvents(events);
 
-    // Safe logging mimicking delivery simulation
+    // Safe logging
     console.group(`🔔 [COMMUNICATION EVENT - ${newEvent.channel.toUpperCase()}]`);
     console.log(`ID: ${newEvent.id}`);
     console.log(`Type: ${newEvent.type}`);
@@ -162,11 +186,24 @@ export const communicationEventService = {
   },
 
   markCommunicationSent(id: string, providerMessageId?: string): CommunicationEvent | null {
+    if (isPersistentMode()) {
+      const err = new Error('COMMUNICATION_SERVER_DELIVERY_REQUIRED: Client cannot mark communication events as sent in persistent mode. Server delivery webhook receipt required.');
+      (err as any).errorCode = 'COMMUNICATION_SERVER_DELIVERY_REQUIRED';
+      throw err;
+    }
+
+    // Fail closed against unverified or fake auto-generated provider receipts
+    if (!providerMessageId || !providerMessageId.trim() || providerMessageId.startsWith('prov_')) {
+      const err = new Error('INVALID_PROVIDER_RECEIPT: Cannot mark communication event as sent without verified external provider receipt.');
+      (err as any).errorCode = 'INVALID_PROVIDER_RECEIPT';
+      throw err;
+    }
+
     const events = this.getAllEvents();
     const event = events.find(e => e.id === id);
     if (event) {
       event.status = 'sent';
-      event.providerMessageId = providerMessageId || `prov_${Math.random().toString(36).substring(2, 9)}`;
+      event.providerMessageId = providerMessageId;
       event.updatedAt = new Date().toISOString();
       this.saveAllEvents(events);
       return event;
@@ -175,6 +212,13 @@ export const communicationEventService = {
   },
 
   markCommunicationFailed(id: string, reason: string): CommunicationEvent | null {
+    if (isPersistentMode()) {
+      throw {
+        errorCode: 'COMMUNICATION_SERVER_DELIVERY_REQUIRED',
+        message: 'Client cannot mark communication events as failed in persistent mode. Server callback required.'
+      };
+    }
+
     const events = this.getAllEvents();
     const event = events.find(e => e.id === id);
     if (event) {
@@ -188,6 +232,13 @@ export const communicationEventService = {
   },
 
   cancelCommunicationEvent(id: string): CommunicationEvent | null {
+    if (isPersistentMode()) {
+      throw {
+        errorCode: 'COMMUNICATION_SERVER_DELIVERY_REQUIRED',
+        message: 'Client cannot cancel communication events directly in persistent mode.'
+      };
+    }
+
     const events = this.getAllEvents();
     const event = events.find(e => e.id === id);
     if (event) {

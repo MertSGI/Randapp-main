@@ -1,6 +1,7 @@
 import { LegalDocumentType } from '../types';
 import { auditLogService } from './auditLogService';
 import { legalDocumentService } from './legalDocumentService';
+import { getDataSourceMode } from './dataSourceConfig';
 
 const LEDGER_STORAGE_KEY = 'lari_consent_ledger_v1';
 
@@ -26,6 +27,7 @@ export interface ConsentLedgerRecord {
 export const consentLedgerService = {
   /**
    * Records a consent transaction to the ledger.
+   * In persistent (supabase) mode, client-side persistence is rejected fail-closed.
    */
   recordConsent(input: {
     tenantId?: string;
@@ -38,6 +40,12 @@ export const consentLedgerService = {
     legalDocumentType?: LegalDocumentType;
     metadata?: any;
   }): ConsentLedgerRecord {
+    if (getDataSourceMode() === 'supabase') {
+      throw new Error(
+        'LEGAL_PERSISTENCE_REQUIRED: Direct client consent cannot be recorded in persistent mode. Trusted server capability required.'
+      );
+    }
+
     const ledger = this._getLedgerFromStore();
     const id = `cld_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
@@ -129,8 +137,15 @@ export const consentLedgerService = {
 
   /**
    * Withdraws (revokes) a consent by updating its status and logging the withdrawal timestamp.
+   * In persistent mode, client-side mutation is rejected fail-closed.
    */
   withdrawConsent(actorId: string, consentType: string, reason: string = 'Kullanıcı talebi'): boolean {
+    if (getDataSourceMode() === 'supabase') {
+      throw new Error(
+        'LEGAL_PERSISTENCE_REQUIRED: Direct client consent withdrawal cannot be performed in persistent mode. Trusted server capability required.'
+      );
+    }
+
     const ledger = this._getLedgerFromStore();
     // Find latest active 'granted' consent for this actor and type
     const activeIndex = ledger.findIndex(r => r.actorId === actorId && r.consentType === consentType && r.status === 'granted');
@@ -195,6 +210,7 @@ export const consentLedgerService = {
    * Returns a ledger count summary.
    */
   getConsentLedgerSummary() {
+    const isSupabase = getDataSourceMode() === 'supabase';
     const list = this._getLedgerFromStore();
     return {
       totalRecords: list.length,
@@ -209,7 +225,9 @@ export const consentLedgerService = {
         media_staff_photo: list.filter(r => r.consentType === 'media_staff_photo').length,
         cookie_analytics: list.filter(r => r.consentType === 'cookie_analytics').length
       },
-      immutableStorageMocked: true,
+      immutableStorageMocked: !isSupabase,
+      serverProofVerified: false,
+      persistenceMode: isSupabase ? 'unconfigured_server' : 'local_preview_simulation',
       futureIysSyncNeeded: true
     };
   },
@@ -227,7 +245,7 @@ export const consentLedgerService = {
 
   _saveLedgerToStore(list: ConsentLedgerRecord[]): void {
     try {
-      if (typeof window !== 'undefined') {
+      if (typeof window !== 'undefined' && getDataSourceMode() !== 'supabase') {
         localStorage.setItem(LEDGER_STORAGE_KEY, JSON.stringify(list));
       }
     } catch (e) {

@@ -6,8 +6,9 @@ import { getDataSourceMode } from '../dataSourceConfig';
 // Actual operations should only run if VITE_LARI_DATA_SOURCE=supabase.
 
 export const getSupabaseClientConfig = () => {
-  const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL || '';
-  const supabaseKey = import.meta.env?.VITE_SUPABASE_ANON_KEY || '';
+  const env = (import.meta as any).env || (globalThis as any).import?.meta?.env || (typeof process !== 'undefined' ? process.env : {}) || {};
+  const supabaseUrl = env.VITE_SUPABASE_URL || '';
+  const supabaseKey = env.VITE_SUPABASE_ANON_KEY || '';
   
   if (getDataSourceMode() === 'supabase' && (!supabaseUrl || !supabaseKey)) {
     console.warn('Supabase mode active but credentials missing. Will fallback to local/mock operations where possible.');
@@ -44,9 +45,12 @@ export const fetchSupabase = async (path: string, options: RequestInit = {}) => 
         headers['Authorization'] = `Bearer ${accessToken}`;
       }
     }
-  } catch (_) {
-    // Ignore session read failures; proceed with anon key
+  } catch (e) {
+    console.warn('Could not read auth token from storage:', e);
   }
 
-  return fetch(url, { ...options, headers });
+  return fetch(url, {
+    ...options,
+    headers,
+  });
 };
