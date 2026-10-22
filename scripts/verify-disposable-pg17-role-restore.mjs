@@ -492,7 +492,7 @@ try {
   fs.rmSync(testTempDir, { recursive: true, force: true });
 
   assert.ok(preparedRestoreContent.includes('DO $lari_role_grant_bootstrap$'), 'Prepared restore must contain cycle-checked delegation block');
-  assert.ok(preparedRestoreContent.includes('GRANT "anon" TO "authenticator" GRANTED BY "supabase_admin";'), 'Must preserve exact grant statement');
+  assert.ok(preparedRestoreContent.includes('GRANT "anon" TO "authenticator" WITH INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";'), 'Must preserve exact grant statement');
 
   // Reset non-system role memberships prior to replay inside container
   execPsql(
