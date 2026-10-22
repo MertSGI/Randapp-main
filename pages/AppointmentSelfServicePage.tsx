@@ -97,31 +97,36 @@ const AppointmentSelfServicePage: React.FC = () => {
   const [fastRebookLoading, setFastRebookLoading] = useState(false);
   const [fastRebookError, setFastRebookError] = useState<string | null>(null);
 
-  // KVKK / Data Rights Form state
+  // KVKK / Data Rights Form state (Sole consolidated form)
   const [showKvkkForm, setShowKvkkForm] = useState(false);
   const [kvkkType, setKvkkType] = useState<'deletion' | 'export' | 'correction' | 'consent_withdrawal'>('export');
   const [kvkkDesc, setKvkkDesc] = useState('');
   const [kvkkSuccess, setKvkkSuccess] = useState<string | null>(null);
   const [kvkkError, setKvkkError] = useState<string | null>(null);
   const [kvkkSubmitting, setKvkkSubmitting] = useState(false);
+  const kvkkSubmittingRef = useRef<boolean>(false);
 
   const handleKvkkSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (kvkkSubmitting) return;
+    if (kvkkSubmitting || kvkkSubmittingRef.current || !kvkkDesc.trim()) return;
+    kvkkSubmittingRef.current = true;
     setKvkkSubmitting(true);
     setKvkkError(null);
     setKvkkSuccess(null);
 
     try {
-      dataRightsRequestService.createDataRightsRequest({
-        tenantId: appointment?.tenantId || 'unknown_tenant',
-        requesterType: 'customer',
-        requesterName: appointment?.user_name || 'Müşteri',
-        requesterContact: appointment?.phone || appointment?.user_email || '',
-        type: kvkkType,
-        description: kvkkDesc,
-        relatedAppointmentId: appointment?.id
-      });
+      await Promise.resolve(
+        dataRightsRequestService.createDataRightsRequest({
+          tenantId: appointment?.tenantId || tokenObj?.tenantId || 'unknown_tenant',
+          requesterType: 'customer',
+          requesterName: appointment?.user_name || 'Müşteri',
+          requesterContact: appointment?.phone || appointment?.user_email || '',
+          type: kvkkType,
+          description: kvkkDesc.trim(),
+          relatedCustomerId: appointment?.customerId,
+          relatedAppointmentId: appointment?.id
+        })
+      );
       setKvkkSuccess('KVKK talebiniz başarıyla kaydedildi. İnceleme sürecimiz başlatılmıştır.');
       setKvkkDesc('');
     } catch (err: any) {
@@ -136,6 +141,7 @@ const AppointmentSelfServicePage: React.FC = () => {
       }
       // Note: kvkkDesc is NOT cleared, retaining user input!
     } finally {
+      kvkkSubmittingRef.current = false;
       setKvkkSubmitting(false);
     }
   };
@@ -449,7 +455,7 @@ const AppointmentSelfServicePage: React.FC = () => {
               </p>
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Randevu Detayı</h1>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                Randevu bilgilerinizi aşağıdan görüntüleyebilirsiniz.
+                Randevu bilgilerinizi aşağıdan görüntüleyebilirsiniz. Bu sayfa şu anda randevu bilgilerinizi görüntülemek içindir.
               </p>
             </div>
             
@@ -599,125 +605,56 @@ const AppointmentSelfServicePage: React.FC = () => {
             </div>
           )}
 
-          {/* KVKK / Data Rights Option */}
-          <div className="pt-2 border-t border-gray-100 dark:border-slate-700/60">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-500 dark:text-gray-400">KVKK Veri Hakkı Başvurusu</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowKvkkForm(!showKvkkForm);
-                  setKvkkSuccess(null);
-                }}
-                className="text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 transition"
-              >
-                {showKvkkForm ? 'Kapat' : 'Talep Oluştur'}
-              </button>
-            </div>
-
-            {showKvkkForm && (
-              <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-gray-100 dark:border-slate-800 space-y-3">
-                {kvkkSuccess ? (
-                  <div className="text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 p-3 rounded-lg border border-emerald-100 dark:border-emerald-900/40">
-                    {kvkkSuccess}
-                  </div>
-                ) : (
-                  <form onSubmit={(e) => {
-                    e.preventDefault();
-                    if (!kvkkDesc.trim()) return;
-                    import('../services/dataRightsRequestService').then(({ dataRightsRequestService }) => {
-                      dataRightsRequestService.createDataRightsRequest({
-                        tenantId: tokenObj?.tenantId || '',
-                        requesterType: 'customer',
-                        requesterName: appointment?.user_name || 'Ziyaretçi Müşteri',
-                        requesterContact: appointment?.phone || appointment?.user_email || '',
-                        type: kvkkType as any,
-                        description: kvkkDesc,
-                        relatedCustomerId: appointment?.customerId,
-                        relatedAppointmentId: appointment?.id
-                      });
-                      setKvkkSuccess('KVKK Veri Hakkı Başvurunuz kaydedilmiştir. Kimlik doğrulaması sonrasında yasal süre (30 gün) içerisinde talebiniz sonuçlandırılıp tarafınıza bilgi verilecektir.');
-                      setKvkkDesc('');
-                    }).catch(err => {
-                      console.error('Data rights submit failed:', err);
-                    });
-                  }} className="space-y-3">
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Talep Türü</label>
-                      <select
-                        value={kvkkType}
-                        onChange={(e) => setKvkkType(e.target.value as any)}
-                        className="w-full text-xs rounded-lg border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2 text-gray-800 dark:text-white focus:ring-1 focus:ring-blue-500"
-                      >
-                        <option value="export">Verilerimin Kopyasını Almak (Erişim/Taşınabilirlik)</option>
-                        <option value="deletion">Hesabımı ve Tüm Randevularımı Silmek (Unutulma Hakkı)</option>
-                        <option value="correction">Verilerimi Güncellemek/Düzeltmek</option>
-                        <option value="consent_withdrawal">İletişim/Pazarlama İznimi İptal Etmek (Rıza Geri Çekme)</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Açıklama & Doğrulama Bilgisi</label>
-                      <textarea
-                        required
-                        rows={3}
-                        value={kvkkDesc}
-                        onChange={(e) => setKvkkDesc(e.target.value)}
-                        placeholder="Örn: Bu telefon numarasına ait tüm randevu kayıtlarımın ve kişisel bilgilerimin kalıcı olarak silinmesini istiyorum."
-                        className="w-full text-xs rounded-lg border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2 text-gray-800 dark:text-white focus:ring-1 focus:ring-blue-500"
-                      />
-                    </div>
-
-                    <div className="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowKvkkForm(false)}
-                        className="text-xs font-semibold text-gray-500 hover:bg-gray-100 px-3 py-1.5 rounded-lg dark:hover:bg-slate-800 min-h-[36px]"
-                      >
-                        Vazgeç
-                      </button>
-                      <button
-                        type="submit"
-                        className="text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-colors min-h-[36px]"
-                      >
-                        Talebi Gönder
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* KVKK / Data Rights Section */}
+          {/* Sole Consolidated KVKK / Data Rights Section */}
           <div className="pt-4 border-t border-gray-100 dark:border-slate-700/60">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <span>🛡️</span>
-                <span>Kişisel Verilerin Korunması</span>
-              </h3>
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h3 id="kvkk-section-heading" className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <span aria-hidden="true">🛡️</span>
+                  <span>Kişisel Verilerin Korunması</span>
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  6698 sayılı KVKK kapsamındaki veri erişim, düzeltme, silme ve açık rıza geri çekme taleplerinizi iletebilirsiniz.
+                </p>
+              </div>
               <button
                 type="button"
+                aria-expanded={showKvkkForm}
+                aria-controls="kvkk-data-rights-form"
                 onClick={() => {
                   setShowKvkkForm(!showKvkkForm);
                   setKvkkError(null);
                   setKvkkSuccess(null);
                 }}
-                className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium min-h-[36px] px-2 flex items-center"
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-semibold min-h-[36px] px-2 flex items-center shrink-0"
               >
                 {showKvkkForm ? 'Formu Gizle' : 'KVKK Talebi Oluştur'}
               </button>
             </div>
 
             {showKvkkForm && (
-              <form onSubmit={handleKvkkSubmit} className="p-4 bg-gray-50 dark:bg-slate-900/60 rounded-xl space-y-3 border border-gray-200 dark:border-slate-700">
+              <form
+                id="kvkk-data-rights-form"
+                data-testid="kvkk-data-rights-form"
+                aria-labelledby="kvkk-section-heading"
+                onSubmit={handleKvkkSubmit}
+                className="mt-3 p-4 bg-gray-50 dark:bg-slate-900/60 rounded-xl space-y-3 border border-gray-200 dark:border-slate-700"
+              >
                 {kvkkSuccess && (
-                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 text-xs rounded-lg border border-emerald-200 dark:border-emerald-800">
+                  <div
+                    role="status"
+                    data-testid="kvkk-success-banner"
+                    className="p-3 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 text-xs rounded-lg border border-emerald-200 dark:border-emerald-800"
+                  >
                     {kvkkSuccess}
                   </div>
                 )}
                 {kvkkError && (
-                  <div role="alert" className="p-3 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-xs rounded-lg border border-red-200 dark:border-red-800">
+                  <div
+                    role="alert"
+                    data-testid="kvkk-error-alert"
+                    className="p-3 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-xs rounded-lg border border-red-200 dark:border-red-800"
+                  >
                     {kvkkError}
                   </div>
                 )}
@@ -732,8 +669,8 @@ const AppointmentSelfServicePage: React.FC = () => {
                     disabled={kvkkSubmitting}
                     className="w-full p-2 text-xs rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                   >
-                    <option value="export">Veri Kopyası Talebi (export)</option>
-                    <option value="deletion">Veri Silme Talebi (deletion)</option>
+                    <option value="export">Verilerimin Kopyasını Almak (Erişim / export)</option>
+                    <option value="deletion">Veri Silme Talebi (Unutulma Hakkı / deletion)</option>
                     <option value="correction">Veri Düzeltme Talebi (correction)</option>
                     <option value="consent_withdrawal">Açık Rıza Geri Çekme (consent_withdrawal)</option>
                   </select>
@@ -744,7 +681,7 @@ const AppointmentSelfServicePage: React.FC = () => {
                   </label>
                   <textarea
                     id="kvkk-desc-input"
-                    rows={2}
+                    rows={3}
                     required
                     value={kvkkDesc}
                     onChange={(e) => setKvkkDesc(e.target.value)}
@@ -754,6 +691,14 @@ const AppointmentSelfServicePage: React.FC = () => {
                   />
                 </div>
                 <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={kvkkSubmitting}
+                    onClick={() => setShowKvkkForm(false)}
+                    className="py-2 px-3 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-800 rounded-lg transition min-h-[36px]"
+                  >
+                    Vazgeç
+                  </button>
                   <button
                     type="submit"
                     disabled={kvkkSubmitting || !kvkkDesc.trim()}

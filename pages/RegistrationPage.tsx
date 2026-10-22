@@ -9,6 +9,11 @@ import { policyAcceptanceService } from '../services/policyAcceptanceService';
 import { consentLedgerService } from '../services/consentLedgerService';
 import { getDataSourceMode } from '../services/dataSourceConfig';
 
+export type RegistrationLegalReceiptStatus =
+  | 'LEGAL_ACCEPTANCE_UNRECORDED'
+  | 'LEGAL_ACCEPTANCE_PENDING_SERVER_RECEIPT'
+  | 'LEGAL_ACCEPTANCE_RECORDED_LOCAL_DEMO';
+
 export default function RegistrationPage() {
   const { language } = useLanguage();
   const t = translations[language];
@@ -55,6 +60,9 @@ export default function RegistrationPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [submissionState, setSubmissionState] = useState<RegistrationStatus>('AUTH_SIGNUP_PENDING');
+  const [legalReceiptState, setLegalReceiptState] = useState<RegistrationLegalReceiptStatus>(
+    isPersistentMode ? 'LEGAL_ACCEPTANCE_PENDING_SERVER_RECEIPT' : 'LEGAL_ACCEPTANCE_UNRECORDED'
+  );
   
   const [formData, setFormData] = useState<RegistrationData>({
     ownerName: '',
@@ -114,8 +122,13 @@ export default function RegistrationPage() {
         setSubmissionState('PROVISIONED');
 
         // Retain idempotent tenant provisioning without rolling back tenant on legal record omission
+        let effectiveLegalReceiptState: RegistrationLegalReceiptStatus = 'LEGAL_ACCEPTANCE_UNRECORDED';
         if (isPersistentMode) {
-          console.info('[RegistrationPage] LEGAL_ACCEPTANCE_RECORD_PENDING: SERVER_LEGAL_WRITE_NOT_READY - Client table write bypassed in persistent mode');
+          effectiveLegalReceiptState = 'LEGAL_ACCEPTANCE_PENDING_SERVER_RECEIPT';
+          setLegalReceiptState(effectiveLegalReceiptState);
+          console.info(
+            '[RegistrationPage] LEGAL_ACCEPTANCE_RECORD_PENDING: SERVER_LEGAL_WRITE_NOT_READY - Client table write bypassed in persistent mode (TENANT_PROVISIONED / LEGAL_ACCEPTANCE_PENDING_SERVER_RECEIPT)'
+          );
         } else {
           try {
             policyAcceptanceService.recordPolicyAcceptance({
@@ -147,16 +160,33 @@ export default function RegistrationPage() {
               legalDocumentType: 'terms_of_service',
               metadata: { actorDisplayName: `${formData.ownerName} ${formData.ownerSurname}` }
             });
+            effectiveLegalReceiptState = 'LEGAL_ACCEPTANCE_RECORDED_LOCAL_DEMO';
+            setLegalReceiptState(effectiveLegalReceiptState);
           } catch (legalErr: any) {
+            effectiveLegalReceiptState = 'LEGAL_ACCEPTANCE_PENDING_SERVER_RECEIPT';
+            setLegalReceiptState(effectiveLegalReceiptState);
             console.warn('[RegistrationPage] Non-blocking local legal acceptance note:', legalErr?.message);
           }
         }
 
+        const navigationState = {
+          provisioningState: 'TENANT_PROVISIONED' as const,
+          legalReceiptState: effectiveLegalReceiptState,
+          legalComplianceSatisfied: false,
+          tenantId: result.tenantId
+        };
+
         // Route to canonical onboarding entry point (resumable onboarding entry)
         if (result.status === 'USER_ALREADY_HAS_TENANT') {
-          navigate('/admin?tab=kurulum&notice=existing_account');
+          const targetRoute = isPersistentMode
+            ? `/admin?tab=kurulum&notice=existing_account&provisioningState=TENANT_PROVISIONED&legalReceipt=${effectiveLegalReceiptState}`
+            : '/admin?tab=kurulum&notice=existing_account';
+          navigate(targetRoute, { state: navigationState });
         } else {
-          navigate('/admin?tab=kurulum&registration=success');
+          const targetRoute = isPersistentMode
+            ? `/admin?tab=kurulum&registration=success&provisioningState=TENANT_PROVISIONED&legalReceipt=${effectiveLegalReceiptState}`
+            : '/admin?tab=kurulum&registration=success';
+          navigate(targetRoute, { state: navigationState });
         }
       } else {
         setSubmissionState(result.status || 'PROVISIONING_FAILED_TERMINAL');
@@ -272,8 +302,14 @@ export default function RegistrationPage() {
             </div>
 
             {isPersistentMode && (
-              <div className="p-3 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 rounded-xl text-xs border border-amber-200 dark:border-amber-800/50">
-                ⚠️ [LEGAL_ACCEPTANCE_RECORD_PENDING / SERVER_LEGAL_WRITE_NOT_READY] Hukuki politika kabul kaydı sunucu doğrulaması bekliyor. İstemci taraflı kalıcı kayıt iddiasında bulunulmaz.
+              <div
+                data-testid="registration-legal-receipt-banner"
+                data-provisioning-state={submissionState === 'PROVISIONED' ? 'TENANT_PROVISIONED' : submissionState}
+                data-legal-receipt-state={legalReceiptState}
+                data-legal-compliance-satisfied="false"
+                className="p-3 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 rounded-xl text-xs border border-amber-200 dark:border-amber-800/50"
+              >
+                ⚠️ [TENANT_PROVISIONED / LEGAL_ACCEPTANCE_PENDING_SERVER_RECEIPT | LEGAL_ACCEPTANCE_RECORD_PENDING / SERVER_LEGAL_WRITE_NOT_READY] İşletme hesabınız (TENANT_PROVISIONED) oluşturulsa dahi hukuki politika kabul kaydı sunucu doğrulaması (LEGAL_ACCEPTANCE_PENDING_SERVER_RECEIPT) beklemektedir. İstemci taraflı kalıcı kayıt iddiasında bulunulmaz.
               </div>
             )}
 
