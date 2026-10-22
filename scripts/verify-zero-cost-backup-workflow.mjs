@@ -776,7 +776,7 @@ mustContain(workflow, '${{ secrets.STAGING_DB_PASSWORD }}', 'Existing repository
 mustContain(workflow, '${{ vars.LARI_STAGING_POOLER_HOST }}', 'Session Pooler host must come from the protected environment variable');
 mustContain(workflow, '${{ secrets.LARI_BACKUP_AGE_RECIPIENT }}', 'Age recipient must come from operator configuration');
 assert.ok(!workflow.includes('LARI_STAGING_DATABASE_URL'), 'The missing database URL secret must no longer be referenced');
-mustContain(workflow, 'postgres:17.6-alpine', 'Restore service must be PostgreSQL 17.6');
+mustContain(workflow, 'supabase/postgres:17.6.1.141@sha256:ba10e934f0a59990379f78ab9ed93926f1c291dd61a12fe4026f4202f1b89770', 'Restore service must be pinned official Supabase PostgreSQL 17');
 mustContain(workflow, 'POSTGRES_USER: supabase_admin', 'Disposable bootstrap role must match the source cluster bootstrap superuser');
 mustContain(runner, 'RESTORE_DATABASE_USER="supabase_admin"', 'Disposable restore user must match supabase_admin');
 mustContain(workflow, 'postgresql-client-17', 'PostgreSQL 17 client must be installed');
