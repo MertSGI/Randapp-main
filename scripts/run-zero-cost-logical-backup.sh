@@ -15,6 +15,7 @@ VALIDATE_SOURCE_URL_ONLY="--validate-source-url-only"
 TEST_SOURCE_CREDENTIALS_ONLY="--test-source-credential-handling"
 TEST_RESTORE_VERDICT_ONLY="--test-restore-verdict-handling"
 TEST_PG17_CLIENT_SELECTION_ONLY="--test-pg17-client-selection"
+TEST_DISPOSABLE_ROLE_RESTORE_ONLY="--test-disposable-role-restore"
 
 SOURCE_DATABASE_PASSWORD_VALUE="${SOURCE_DATABASE_PASSWORD:-}"
 unset SOURCE_DATABASE_PASSWORD
@@ -246,6 +247,152 @@ build_and_validate_source_database_url() {
   unset SOURCE_DATABASE_URL
 }
 
+prepare_disposable_role_restore() {
+  local input_roles_sql="$1"
+  local output_restore_sql="$2"
+  local python_command="${3:-python3}"
+
+  [[ -f "$input_roles_sql" ]] || {
+    printf 'Input roles dump file not found: %s\n' "$input_roles_sql" >&2
+    return 1
+  }
+
+  "$python_command" - "$input_roles_sql" "$output_restore_sql" <<'PY'
+import re
+import sys
+
+input_path = sys.argv[1]
+output_path = sys.argv[2]
+
+with open(input_path, 'r', encoding='utf-8') as f:
+    lines = f.readlines()
+
+grant_pattern = re.compile(
+    r'^GRANT\s+("?[A-Za-z0-9_]+"?)\s+TO\s+("?[A-Za-z0-9_]+"?)(?:\s+WITH\s+ADMIN\s+OPTION)?(?:\s+GRANTED\s+BY\s+("?[A-Za-z0-9_]+"?))?\s*;?',
+    re.IGNORECASE
+)
+create_role_pattern = re.compile(
+    r'^CREATE\s+ROLE\s+("?[A-Za-z0-9_]+"?)\s*;',
+    re.IGNORECASE
+)
+
+grants = []
+for line in lines:
+    stripped = line.strip()
+    m = grant_pattern.match(stripped)
+    if m:
+        target = m.group(1).strip('"')
+        member = m.group(2).strip('"')
+        grantor = m.group(3).strip('"') if m.group(3) else None
+        grants.append({'target': target, 'member': member, 'grantor': grantor})
+
+# Build membership graph: member -> set of targets granted to member
+graph = {}
+for g in grants:
+    graph.setdefault(g['member'], set()).add(g['target'])
+
+def is_ancestor(start, target):
+    # Returns True if start is a member of target (directly or transitively)
+    visited = set()
+    queue = [start]
+    while queue:
+        curr = queue.pop(0)
+        if curr == target:
+            return True
+        if curr not in visited:
+            visited.add(curr)
+            for parent in graph.get(curr, []):
+                if parent not in visited:
+                    queue.append(parent)
+    return False
+
+delegations = []
+seen_pairs = set()
+for g in grants:
+    target = g['target']
+    grantor = g['grantor']
+    if not grantor:
+        continue
+    # In PostgreSQL, a role cannot be granted to itself.
+    # The cluster bootstrap superuser has inherent authority; non-bootstrap roles cannot self-grant.
+    if target == grantor:
+        continue
+
+    pair = (target, grantor)
+    if pair in seen_pairs:
+        continue
+    seen_pairs.add(pair)
+
+    # Adding target to grantor creates edge grantor -> target.
+    # Cycle occurs if target is already an ancestor of grantor (i.e. target is a member of grantor).
+    if is_ancestor(target, grantor):
+        raise ValueError(f"Cycle detected in role dump: granting {target} to {grantor} creates a circular role membership")
+
+    delegations.append(pair)
+    graph.setdefault(grantor, set()).add(target)
+
+# Transform content:
+# 1. Make CREATE ROLE idempotent so pre-existing bootstrap role does not fail
+# 2. Insert minimal cycle-checked bootstrap delegation DO block before first GRANT
+out_lines = []
+first_grant_idx = None
+for line in lines:
+    stripped = line.strip()
+    if first_grant_idx is None and re.match(r'^GRANT\s+', stripped, re.IGNORECASE):
+        first_grant_idx = len(out_lines)
+
+    m_create = create_role_pattern.match(stripped)
+    if m_create:
+        rolname = m_create.group(1).strip('"')
+        idempotent_block = (
+            f"DO $lari_role_init$\n"
+            f"BEGIN\n"
+            f"  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{rolname}') THEN\n"
+            f"    CREATE ROLE \"{rolname}\";\n"
+            f"  END IF;\n"
+            f"END $lari_role_init$;\n"
+        )
+        out_lines.append(idempotent_block)
+    else:
+        out_lines.append(line)
+
+bootstrap_statements = []
+for target, grantor in delegations:
+    bootstrap_statements.append(
+        f"  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{grantor}') "
+        f"AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{target}') "
+        f"AND current_user <> '{grantor}' THEN\n"
+        f"    EXECUTE format('GRANT %I TO %I WITH ADMIN OPTION GRANTED BY %I', '{target}', '{grantor}', current_user);\n"
+        f"  END IF;\n"
+    )
+
+if bootstrap_statements:
+    bootstrap_block = (
+        "\n-- LARİ Disposable Restore: Minimal cycle-checked ADMIN OPTION delegations\n"
+        "DO $lari_role_grant_bootstrap$\n"
+        "BEGIN\n"
+        + "".join(bootstrap_statements) +
+        "END $lari_role_grant_bootstrap$;\n\n"
+    )
+else:
+    bootstrap_block = (
+        "\n-- LARİ Disposable Restore: Bootstrap superuser matches dump grantor; no intermediate delegations required\n"
+        "DO $lari_role_grant_bootstrap$\n"
+        "BEGIN\n"
+        "  NULL;\n"
+        "END $lari_role_grant_bootstrap$;\n\n"
+    )
+
+if first_grant_idx is not None:
+    final_lines = out_lines[:first_grant_idx] + [bootstrap_block] + out_lines[first_grant_idx:]
+else:
+    final_lines = out_lines + [bootstrap_block]
+
+with open(output_path, 'w', encoding='utf-8') as f:
+    f.writelines(final_lines)
+PY
+}
+
 escape_pgpass_field() {
   local value="$1"
   value="${value//\\/\\\\}"
@@ -385,7 +532,7 @@ if [[ "${1:-}" == "$TEST_SOURCE_CREDENTIALS_ONLY" ]]; then
   RESTORE_DATABASE_HOST="127.0.0.1"
   RESTORE_DATABASE_PORT="5432"
   RESTORE_DATABASE_NAME="restore_verification"
-  RESTORE_DATABASE_USER="lari_restore_admin"
+  RESTORE_DATABASE_USER="supabase_admin"
   RESTORE_DATABASE_PASSWORD="disposable-only"
   require_value SOURCE_POOLER_HOST
   require_source_database_password
@@ -468,6 +615,35 @@ if [[ "${1:-}" == "$TEST_PG17_CLIENT_SELECTION_ONLY" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "$TEST_DISPOSABLE_ROLE_RESTORE_ONLY" ]]; then
+  [[ "$#" -eq 3 ]] || {
+    printf 'Disposable role restore test mode requires input and output file paths.\n' >&2
+    exit 1
+  }
+  [[ "${LARI_OFFLINE_TEST_MODE:-}" == "1" ]] || {
+    printf 'Offline test guard is not enabled.\n' >&2
+    exit 1
+  }
+  input_roles="$2"
+  output_roles="$3"
+  VALIDATOR_PYTHON="${LARI_SOURCE_VALIDATOR_PYTHON:-python3}"
+  command -v "$VALIDATOR_PYTHON" >/dev/null 2>&1 || {
+    printf 'Required validator runtime is unavailable.\n' >&2
+    exit 1
+  }
+  prepare_disposable_role_restore "$input_roles" "$output_roles" "$VALIDATOR_PYTHON"
+  [[ -f "$output_roles" ]] || {
+    printf 'Prepared restore roles file was not created.\n' >&2
+    exit 1
+  }
+  grep -q 'DO \$lari_role_grant_bootstrap\$' "$output_roles" || {
+    printf 'Prepared restore roles file is missing the bootstrap delegation block.\n' >&2
+    exit 1
+  }
+  printf 'Disposable role restore preparation: PASS\n'
+  exit 0
+fi
+
 [[ "$#" -eq 0 ]] || {
   printf 'Unexpected command argument.\n' >&2
   exit 1
@@ -478,7 +654,7 @@ PRIVATE_DIR="$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP is required}/lari-logical-b
 RESTORE_DATABASE_HOST="127.0.0.1"
 RESTORE_DATABASE_PORT="5432"
 RESTORE_DATABASE_NAME="restore_verification"
-RESTORE_DATABASE_USER="lari_restore_admin"
+RESTORE_DATABASE_USER="supabase_admin"
 RESTORE_DATABASE_PASSWORD="disposable-only"
 CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 BACKUP_ID="lari-${EXPECTED_PROJECT_REF}-${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}-${GITHUB_RUN_ATTEMPT:?GITHUB_RUN_ATTEMPT is required}"
@@ -590,12 +766,16 @@ SERVER_VERSION_NUM="$(run_restore_postgres_command psql -X -qAt --set=ON_ERROR_S
 
 printf 'Restoring the exact dump into disposable PostgreSQL 17.\n'
 set +e
-run_restore_postgres_command psql \
-  -X -q --set=ON_ERROR_STOP=1 \
-  --file="$PRIVATE_DIR/roles.sql" \
-  >"$PRIVATE_DIR/restore-roles.stdout" \
-  2>"$PRIVATE_DIR/restore-roles.stderr"
-ROLES_RESTORE_STATUS=$?
+if ! prepare_disposable_role_restore "$PRIVATE_DIR/roles.sql" "$PRIVATE_DIR/restore-roles.sql" python3 2>>"$PRIVATE_DIR/restore-roles.stderr"; then
+  ROLES_RESTORE_STATUS=1
+else
+  run_restore_postgres_command psql \
+    -X -q --set=ON_ERROR_STOP=1 \
+    --file="$PRIVATE_DIR/restore-roles.sql" \
+    >"$PRIVATE_DIR/restore-roles.stdout" \
+    2>>"$PRIVATE_DIR/restore-roles.stderr"
+  ROLES_RESTORE_STATUS=$?
+fi
 
 DATABASE_RESTORE_STATUS=1
 if [[ "$ROLES_RESTORE_STATUS" -eq 0 ]]; then
