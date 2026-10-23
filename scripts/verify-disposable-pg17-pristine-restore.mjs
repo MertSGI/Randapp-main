@@ -282,6 +282,7 @@ try {
         FROM pg_auth_members m
         JOIN pg_roles role ON role.oid = m.roleid
         JOIN pg_roles member ON member.oid = m.member
+        WHERE member.rolname !~ '^pg_'
       ) LOOP
         EXECUTE format('REVOKE %I FROM %I CASCADE', rec.role_name, rec.member_name);
       END LOOP;
@@ -784,6 +785,7 @@ try {
         FROM pg_auth_members m
         JOIN pg_roles role ON role.oid = m.roleid
         JOIN pg_roles member ON member.oid = m.member
+        WHERE member.rolname !~ '^pg_'
       ) LOOP
         EXECUTE format('REVOKE %I FROM %I CASCADE', rec.role_name, rec.member_name);
       END LOOP;
