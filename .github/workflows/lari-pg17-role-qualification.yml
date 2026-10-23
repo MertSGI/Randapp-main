@@ -8,6 +8,7 @@ on:
     branches:
       - 'review/lari-backup-pristine-restore-*'
       - 'review/lari-b13-*'
+      - 'review/lari-b15-*'
 
 permissions:
   contents: read
@@ -57,7 +58,9 @@ jobs:
         run: PYTHONPATH=. python3 -m unittest discover -v -s tests -p 'test_*.py'
 
       - name: 1. Verify runner script syntax
-        run: bash -n scripts/run-zero-cost-logical-backup.sh
+        run: |
+          bash -n scripts/run-zero-cost-logical-backup.sh
+          bash -n scripts/run-zero-cost-quarantine-capture.sh
 
       - name: 2. Zero-cost backup workflow static & security QA
         run: npm run qa:zero-cost-backup-workflow
@@ -73,3 +76,6 @@ jobs:
 
       - name: 6. Supabase staging consistency QA
         run: npm run qa:supabase-staging-consistency
+
+      - name: 7. Zero-cost quarantine capture static & security QA
+        run: npm run qa:zero-cost-quarantine-capture

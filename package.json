@@ -26,6 +26,7 @@
     "qa:disposable-pg17-role-restore": "node scripts/verify-disposable-pg17-role-restore.mjs",
     "qa:disposable-pg17-pristine-restore": "node scripts/verify-disposable-pg17-pristine-restore.mjs",
     "test:disposable-pg17-negative": "node scripts/test-disposable-pg17-negative.mjs",
+    "qa:zero-cost-quarantine-capture": "node scripts/verify-zero-cost-quarantine-capture.mjs",
     "qa:pilot-launch": "node scripts/verify-pilot-launch-readiness.mjs",
     "qa:first-sandbox-run": "node scripts/verify-first-sandbox-run-readiness.mjs",
     "qa:sandbox-evidence": "node scripts/verify-sandbox-run-evidence.mjs",

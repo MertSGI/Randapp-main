@@ -1,0 +1,123 @@
+name: LARI Zero-Cost Quarantine Capture (Unverified Proposal)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_project_ref:
+        description: Supabase project reference to capture
+        required: true
+        type: string
+        default: rwedeejhjazwjthdjzrt
+      expected_staging_sha:
+        description: Exact 40-character lowercase hex commit SHA of staging branch
+        required: true
+        type: string
+      confirmation:
+        description: Type QUARANTINE CAPTURE rwedeejhjazwjthdjzrt to authorize this one run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lari-staging-quarantine-capture
+  cancel-in-progress: false
+
+jobs:
+  quarantine-capture:
+    name: Encrypted quarantine capture (unverified logical snapshot)
+    if: ${{ github.ref == 'refs/heads/staging/supabase-staging-consistency' && inputs.source_project_ref == 'rwedeejhjazwjthdjzrt' && inputs.expected_staging_sha == github.sha && inputs.confirmation == 'QUARANTINE CAPTURE rwedeejhjazwjthdjzrt' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: lari-staging-backup
+
+    steps:
+      - name: Checkout the operator-selected source revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Pre-flight security guard verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "${{ github.ref }}" = "refs/heads/staging/supabase-staging-consistency"
+          test "${{ inputs.source_project_ref }}" = "rwedeejhjazwjthdjzrt"
+          test "${{ inputs.expected_staging_sha }}" = "${{ github.sha }}"
+          test "${{ inputs.confirmation }}" = "QUARANTINE CAPTURE rwedeejhjazwjthdjzrt"
+          printf '%s' "${{ inputs.expected_staging_sha }}" | grep -Eq '^[0-9a-f]{40}$'
+
+      - name: Install PostgreSQL 17 client and encryption tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
+          curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends age jq postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          export PATH="/usr/lib/postgresql/17/bin:$PATH"
+          printf 'PostgreSQL 17 client binary diagnostics:\n'
+          for tool in pg_dump pg_restore psql pg_dumpall; do
+            tool_path="$(command -v "$tool" 2>/dev/null || true)"
+            if [[ -z "$tool_path" ]]; then
+              printf 'Required PostgreSQL client tool %s not found in PATH.\n' "$tool" >&2
+              exit 1
+            fi
+            tool_version="$("$tool" --version 2>&1 || true)"
+            printf '  %s: %s (%s)\n' "$tool" "$tool_path" "$tool_version"
+            tool_major="$(printf '%s' "$tool_version" | awk '{print $3}' | cut -d. -f1)"
+            if [[ "$tool_major" != "17" ]]; then
+              printf 'Tool %s version mismatch: expected major version 17, got %s\n' "$tool" "$tool_major" >&2
+              exit 1
+            fi
+          done
+
+      - name: Verify authentic Supabase Root CA certificate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          EXPECTED_FINGERPRINT="807025ad50d4ed219d2c9c7d299c004f824eb00cf7f65afef607d07b72e6cafa"
+          CA_FILE="scripts/backup/supabase-prod-ca-2021.crt"
+          test -f "$CA_FILE"
+          ACTUAL_FINGERPRINT="$(openssl x509 -in "$CA_FILE" -outform DER | sha256sum | awk '{print $1}')"
+          test "$ACTUAL_FINGERPRINT" = "$EXPECTED_FINGERPRINT"
+          test "$(openssl x509 -in "$CA_FILE" -noout -subject -nameopt RFC2253)" = "subject=CN=Supabase Root 2021 CA,O=Supabase Inc,L=New Castle,ST=Delware,C=US"
+
+      - name: Create unverified encrypted quarantine capture
+        id: capture
+        shell: bash
+        env:
+          SOURCE_PROJECT_REF: ${{ inputs.source_project_ref }}
+          EXPECTED_STAGING_SHA: ${{ inputs.expected_staging_sha }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          SOURCE_POOLER_HOST: ${{ vars.LARI_STAGING_POOLER_HOST }}
+          SOURCE_DATABASE_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+          BACKUP_AGE_RECIPIENT: ${{ secrets.LARI_BACKUP_AGE_RECIPIENT }}
+          SOURCE_DATABASE_SSLROOTCERT: scripts/backup/supabase-prod-ca-2021.crt
+        run: bash scripts/run-zero-cost-quarantine-capture.sh
+
+      - name: Upload unverified encrypted quarantine capture artifact only
+        if: ${{ always() && steps.capture.outcome == 'success' && steps.capture.outputs.classification == 'UNVERIFIED_ENCRYPTED_CAPTURE' && steps.capture.outputs.publish_quarantine == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: lari-UNVERIFIED-ENCRYPTED-CAPTURE-${{ github.run_id }}-${{ github.run_attempt }}
+          path: backup-artifacts
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+      - name: Enforce quarantine capture manifest integrity
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -f backup-artifacts/manifest.json
+          test "$(jq -r '.classification' backup-artifacts/manifest.json)" = "UNVERIFIED_ENCRYPTED_CAPTURE"
+          test "$(jq -r '.restore_verified' backup-artifacts/manifest.json)" = "false"
+          test "$(jq -r '.p0_eligible' backup-artifacts/manifest.json)" = "false"
