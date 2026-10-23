@@ -631,6 +631,14 @@ fs.rmSync(suite5Temp, { recursive: true, force: true });
 
 console.log(`Suite 5 PASS: Synthetic capture + local decryption roundtrip and ${negativeRunnerCases.length} negative CLI execution checks OK.`);
 
+// Controller security acceptance: no raw private stderr may reach hosted logs.
+const b15Runner = fs.readFileSync(runnerPath, 'utf8');
+assert.ok(b15Runner.includes('scripts/backup/safe_capture_diagnostics.py'),
+  'Capture failure handler must invoke the safe diagnostic classifier');
+assert.ok(!b15Runner.includes('cat "$err_file"'),
+  'Raw private stderr publication is forbidden');
+console.log('Controller safe-capture diagnostic gate: PASS (raw stderr blocked)');
+
 // ===========================================================================
 // Summary
 // ===========================================================================

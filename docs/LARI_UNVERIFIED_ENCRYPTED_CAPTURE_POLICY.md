@@ -52,7 +52,7 @@ This document specifies the dual-lane capture policy governing database backups 
 2. **Zero Plaintext Credential Exposure:**
    - Both workflows use strict TLS (`sslmode=verify-full`), pinned Supabase Root CA DER fingerprint check (`807025ad50d4ed219d2c9c7d299c004f824eb00cf7f65afef607d07b72e6cafa`), session pooler host restrictions, and `PGPASSFILE` with `chmod 0600` inside an isolated temporary directory (`umask 077`).
    - Inherited libpq environments are wiped via `env -i`.
-   - Temporary plaintext bundles are securely shredded from disk immediately following age encryption.
+   - Temporary plaintext bundles are removed immediately after age encryption and runner-private temporary files are cleaned up. Ordinary unlink/removal is not a forensic secure erase guarantee; ephemeral runner disk lifetime and encrypted offsite handling remain separate controls.
 
 3. **Asymmetric Encryption with Off-Platform Private Key:**
    - Snapshots are encrypted with the owner-held public age recipient (`age1...`).

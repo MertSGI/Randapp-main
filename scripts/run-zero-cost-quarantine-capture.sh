@@ -29,12 +29,8 @@ CAPTURE_COMPLETED_SUCCESSFULLY=0
 cleanup() {
   if [[ "$CAPTURE_COMPLETED_SUCCESSFULLY" -ne 1 ]]; then
     if [[ -n "$PRIVATE_DIR" && -d "$PRIVATE_DIR" ]]; then
-      for err_file in "$PRIVATE_DIR"/*.stderr; do
-        if [[ -f "$err_file" && -s "$err_file" ]]; then
-          printf '=== %s ===\n' "$(basename "$err_file")" >&2
-          cat "$err_file" >&2
-        fi
-      done
+      python3 scripts/backup/safe_capture_diagnostics.py "$PRIVATE_DIR" >&2 || \
+        printf 'CAPTURE_FAILURE_STAGE=DIAGNOSTIC_UNAVAILABLE\n' >&2
     fi
     if [[ -n "${ARTIFACT_DIR:-}" && -d "$ARTIFACT_DIR" ]]; then
       rm -rf -- "$ARTIFACT_DIR"
