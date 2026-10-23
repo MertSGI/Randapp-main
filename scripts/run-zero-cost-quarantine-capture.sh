@@ -588,18 +588,19 @@ POLICY_OUTPUT="$("$VALIDATOR_PYTHON" scripts/backup/capture_release_policy.py "$
   exit 1
 }
 
-POLICY_CLASSIFICATION="$(jq -r '.classification // empty' <<<"$POLICY_OUTPUT")"
-POLICY_PUBLISH_QUARANTINE="$(jq -r '.publish_quarantine // empty' <<<"$POLICY_OUTPUT")"
-POLICY_PUBLISH_VERIFIED="$(jq -r '.publish_verified // empty' <<<"$POLICY_OUTPUT")"
-POLICY_P0_ELIGIBLE="$(jq -r '.p0_eligible // empty' <<<"$POLICY_OUTPUT")"
-POLICY_ENCRYPTED_SHA256="$(jq -r '.encrypted_sha256 // empty' <<<"$POLICY_OUTPUT")"
+POLICY_CLASSIFICATION="$(jq -r '.classification' <<<"$POLICY_OUTPUT")"
+POLICY_PUBLISH_QUARANTINE="$(jq -r '.publish_quarantine' <<<"$POLICY_OUTPUT")"
+POLICY_PUBLISH_VERIFIED="$(jq -r '.publish_verified' <<<"$POLICY_OUTPUT")"
+POLICY_P0_ELIGIBLE="$(jq -r '.p0_eligible' <<<"$POLICY_OUTPUT")"
+POLICY_ENCRYPTED_SHA256="$(jq -r '.encrypted_sha256' <<<"$POLICY_OUTPUT")"
 
 if [[ "$POLICY_CLASSIFICATION" != "UNVERIFIED_ENCRYPTED_CAPTURE" || \
       "$POLICY_PUBLISH_QUARANTINE" != "true" || \
       "$POLICY_PUBLISH_VERIFIED" != "false" || \
       "$POLICY_P0_ELIGIBLE" != "false" || \
       "$POLICY_ENCRYPTED_SHA256" != "$ENCRYPTED_SHA256" ]]; then
-  printf 'Policy classification gate failed: expected UNVERIFIED_ENCRYPTED_CAPTURE, got %s\n' "$POLICY_CLASSIFICATION" >&2
+  printf 'Policy classification gate failed: expected UNVERIFIED_ENCRYPTED_CAPTURE (quarantine=true, verified=false, p0=false), got %s (quarantine=%s, verified=%s, p0=%s)\n' \
+    "$POLICY_CLASSIFICATION" "$POLICY_PUBLISH_QUARANTINE" "$POLICY_PUBLISH_VERIFIED" "$POLICY_P0_ELIGIBLE" >&2
   rm -rf -- "$ARTIFACT_DIR"
   exit 1
 fi
