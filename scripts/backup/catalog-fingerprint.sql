@@ -105,15 +105,13 @@ WITH schemas AS (
   SELECT
     count(*) AS object_count,
     md5(coalesce(string_agg(
-      format('%I|%I|%I|%s', role.rolname, member.rolname, grantor.rolname, m.admin_option),
+      format('%I|%I|%I|%s|%s|%s', role.rolname, member.rolname, grantor.rolname, m.admin_option, m.inherit_option, m.set_option),
       E'\n' ORDER BY role.rolname, member.rolname, grantor.rolname
     ), '')) AS fingerprint
   FROM pg_auth_members AS m
   JOIN pg_roles AS role ON role.oid = m.roleid
   JOIN pg_roles AS member ON member.oid = m.member
   JOIN pg_roles AS grantor ON grantor.oid = m.grantor
-  WHERE role.rolname !~ '^pg_'
-    AND member.rolname !~ '^pg_'
 ), extensions AS (
   SELECT
     count(*) AS object_count,

@@ -386,6 +386,37 @@ class Pg17Engine {
     this.roles = new Map();
     this.authMembers = [];
 
+    const builtinPgRoles = [
+      'pg_checkpoint',
+      'pg_create_subscription',
+      'pg_database_owner',
+      'pg_execute_server_program',
+      'pg_maintain',
+      'pg_monitor',
+      'pg_read_all_data',
+      'pg_read_all_settings',
+      'pg_read_all_stats',
+      'pg_read_server_files',
+      'pg_signal_backend',
+      'pg_stat_scan_tables',
+      'pg_use_reserved_connections',
+      'pg_write_all_data',
+      'pg_write_server_files',
+    ];
+    for (const r of builtinPgRoles) {
+      this.roles.set(r, {
+        rolname: r,
+        rolsuper: false,
+        rolinherit: true,
+        rolcreaterole: false,
+        rolcreatedb: false,
+        rolcanlogin: false,
+        rolreplication: false,
+        rolbypassrls: false,
+        rolconfig: null,
+      });
+    }
+
     this.roles.set(bootstrapSuperuser, {
       rolname: bootstrapSuperuser,
       rolsuper: true,
@@ -517,41 +548,67 @@ class Pg17Engine {
         continue;
       }
 
-      const grantMatch = line.match(/^GRANT\s+"?([A-Za-z0-9_]+)"?\s+TO\s+"?([A-Za-z0-9_]+)"?(?:\s+WITH\s+ADMIN\s+OPTION)?(?:\s+GRANTED\s+BY\s+"?([A-Za-z0-9_]+)"?)?;?$/i);
+      const grantMatch = line.match(
+        /^GRANT\s+([A-Za-z0-9_,\s"]+?)\s+TO\s+([A-Za-z0-9_,\s"]+?)(?:\s+WITH\s+([A-Za-z0-9_,\s]+?))?(?:\s+GRANTED\s+BY\s+"?([A-Za-z0-9_]+)"?)?\s*;?$/i
+      );
       if (grantMatch) {
-        const targetRole = grantMatch[1];
-        const memberRole = grantMatch[2];
-        const hasAdminOption = /WITH\s+ADMIN\s+OPTION/i.test(line);
-        const grantor = grantMatch[3] || this.currentUser;
+        const targets = grantMatch[1].split(',').map((t) => t.trim().replace(/^"|"$/g, ''));
+        const members = grantMatch[2].split(',').map((m) => m.trim().replace(/^"|"$/g, ''));
+        const optionsRaw = grantMatch[3] || '';
+        const grantor = (grantMatch[4] || this.currentUser).replace(/^"|"$/g, '');
 
-        if (!this.roles.has(targetRole)) throw new Error(`ERROR: role "${targetRole}" does not exist`);
-        if (!this.roles.has(memberRole)) throw new Error(`ERROR: role "${memberRole}" does not exist`);
-        if (!this.roles.has(grantor)) throw new Error(`ERROR: role "${grantor}" does not exist`);
+        let adminOption = false;
+        let inheritOption = true;
+        let setOption = true;
 
-        // Membership cycle check in PG17:
-        if (targetRole === memberRole || this.isAncestor(targetRole, memberRole)) {
-          throw new Error(`ERROR: role "${targetRole}" is a member of role "${memberRole}"`);
+        if (optionsRaw) {
+          for (const opt of optionsRaw.split(',')) {
+            const token = opt.trim().toUpperCase();
+            if (token === 'ADMIN TRUE' || token === 'ADMIN OPTION') adminOption = true;
+            else if (token === 'ADMIN FALSE') adminOption = false;
+            else if (token === 'INHERIT TRUE') inheritOption = true;
+            else if (token === 'INHERIT FALSE') inheritOption = false;
+            else if (token === 'SET TRUE') setOption = true;
+            else if (token === 'SET FALSE') setOption = false;
+          }
         }
 
-        // PostgreSQL 16/17 check_role_grantor validation:
-        if (!this.isAdminOfRole(grantor, targetRole)) {
-          throw new Error(
-            `ERROR: permission denied to grant privileges as role "${grantor}"\nDETAIL: The grantor must have the ADMIN option on role "${targetRole}".`
-          );
-        }
+        for (const targetRole of targets) {
+          for (const memberRole of members) {
+            if (!this.roles.has(targetRole)) throw new Error(`ERROR: role "${targetRole}" does not exist`);
+            if (!this.roles.has(memberRole)) throw new Error(`ERROR: role "${memberRole}" does not exist`);
+            if (!this.roles.has(grantor)) throw new Error(`ERROR: role "${grantor}" does not exist`);
 
-        const existing = this.authMembers.find(
-          (m) => m.role === targetRole && m.member === memberRole && m.grantor === grantor
-        );
-        if (existing) {
-          existing.admin_option = existing.admin_option || hasAdminOption;
-        } else {
-          this.authMembers.push({
-            role: targetRole,
-            member: memberRole,
-            grantor: grantor,
-            admin_option: hasAdminOption,
-          });
+            // Membership cycle check in PG17:
+            if (targetRole === memberRole || this.isAncestor(targetRole, memberRole)) {
+              throw new Error(`ERROR: role "${targetRole}" is a member of role "${memberRole}"`);
+            }
+
+            // PostgreSQL 16/17 check_role_grantor validation:
+            if (!this.isAdminOfRole(grantor, targetRole)) {
+              throw new Error(
+                `ERROR: permission denied to grant privileges as role "${grantor}"\nDETAIL: The grantor must have the ADMIN option on role "${targetRole}".`
+              );
+            }
+
+            const existing = this.authMembers.find(
+              (m) => m.role === targetRole && m.member === memberRole && m.grantor === grantor
+            );
+            if (existing) {
+              existing.admin_option = existing.admin_option || adminOption;
+              existing.inherit_option = inheritOption;
+              existing.set_option = setOption;
+            } else {
+              this.authMembers.push({
+                role: targetRole,
+                member: memberRole,
+                grantor: grantor,
+                admin_option: adminOption,
+                inherit_option: inheritOption,
+                set_option: setOption,
+              });
+            }
+          }
         }
         continue;
       }
@@ -579,6 +636,8 @@ class Pg17Engine {
             member: memberRole,
             grantor: this.currentUser,
             admin_option: true,
+            inherit_option: true,
+            set_option: true,
           });
         }
       }
@@ -586,11 +645,9 @@ class Pg17Engine {
   }
 
   computeRoleMembershipsFingerprint() {
-    const filtered = this.authMembers.filter((m) => {
-      return !m.role.startsWith('pg_') && !m.member.startsWith('pg_');
-    });
+    const list = [...this.authMembers];
 
-    filtered.sort((a, b) => {
+    list.sort((a, b) => {
       const cmpRole = a.role.localeCompare(b.role);
       if (cmpRole !== 0) return cmpRole;
       const cmpMember = a.member.localeCompare(b.member);
@@ -598,12 +655,14 @@ class Pg17Engine {
       return a.grantor.localeCompare(b.grantor);
     });
 
-    const lines = filtered.map((m) => `${m.role}|${m.member}|${m.grantor}|${m.admin_option ? 't' : 'f'}`);
+    const lines = list.map(
+      (m) => `${m.role}|${m.member}|${m.grantor}|${m.admin_option ? 't' : 'f'}|${m.inherit_option ? 't' : 'f'}|${m.set_option ? 't' : 'f'}`
+    );
     const aggregated = lines.join('\n');
     const hash = createHash('md5').update(aggregated).digest('hex');
 
     return {
-      object_count: filtered.length,
+      object_count: list.length,
       fingerprint: hash,
       rows: lines,
     };
@@ -617,26 +676,80 @@ const fixtureRolesSql = [
   'ALTER ROLE "authenticated" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;',
   'CREATE ROLE "authenticator";',
   'ALTER ROLE "authenticator" WITH NOSUPERUSER NOINHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
+  'CREATE ROLE "cli_login_postgres";',
+  'ALTER ROLE "cli_login_postgres" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
   'CREATE ROLE "dashboard_user";',
   'ALTER ROLE "dashboard_user" WITH NOSUPERUSER INHERIT CREATEROLE CREATEDB NOLOGIN REPLICATION NOBYPASSRLS;',
+  'CREATE ROLE "pgbouncer";',
+  'ALTER ROLE "pgbouncer" WITH NOSUPERUSER NOINHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
   'CREATE ROLE "postgres";',
   'ALTER ROLE "postgres" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN REPLICATION BYPASSRLS;',
   'CREATE ROLE "service_role";',
   'ALTER ROLE "service_role" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION BYPASSRLS;',
   'CREATE ROLE "supabase_admin";',
   'ALTER ROLE "supabase_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN REPLICATION BYPASSRLS;',
+  'CREATE ROLE "supabase_auth_admin";',
+  'ALTER ROLE "supabase_auth_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN NOREPLICATION BYPASSRLS;',
+  'CREATE ROLE "supabase_etl_admin";',
+  'ALTER ROLE "supabase_etl_admin" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
+  'CREATE ROLE "supabase_privileged_role";',
+  'ALTER ROLE "supabase_privileged_role" WITH NOSUPERUSER NOINHERIT CREATEROLE CREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;',
+  'CREATE ROLE "supabase_read_only_user";',
+  'ALTER ROLE "supabase_read_only_user" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS;',
+  'CREATE ROLE "supabase_realtime_admin";',
+  'ALTER ROLE "supabase_realtime_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN NOREPLICATION BYPASSRLS;',
+  'CREATE ROLE "supabase_replication_admin";',
+  'ALTER ROLE "supabase_replication_admin" WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN REPLICATION NOBYPASSRLS;',
+  'CREATE ROLE "supabase_storage_admin";',
+  'ALTER ROLE "supabase_storage_admin" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN NOREPLICATION BYPASSRLS;',
   '-- Role memberships',
-  'GRANT "anon" TO "authenticator" GRANTED BY "supabase_admin";',
-  'GRANT "authenticated" TO "authenticator" GRANTED BY "supabase_admin";',
-  'GRANT "service_role" TO "authenticator" GRANTED BY "supabase_admin";',
-  'GRANT "supabase_admin" TO "postgres" WITH ADMIN OPTION GRANTED BY "supabase_admin";',
+  'GRANT "anon" TO "authenticator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "anon" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "authenticated" TO "authenticator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "authenticated" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "authenticator" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "authenticator" TO "supabase_storage_admin" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "postgres" TO "cli_login_postgres" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "service_role" TO "authenticator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "service_role" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "supabase_privileged_role" TO "postgres" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "supabase_privileged_role" TO "supabase_etl_admin" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "pg_create_subscription" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "pg_monitor" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "pg_monitor" TO "supabase_etl_admin" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "pg_monitor" TO "supabase_read_only_user" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "pg_read_all_data" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "pg_read_all_data" TO "supabase_etl_admin" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "pg_read_all_data" TO "supabase_read_only_user" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "pg_read_all_settings" TO "pg_monitor" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "pg_read_all_stats" TO "pg_monitor" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "pg_signal_backend" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+  'GRANT "pg_stat_scan_tables" TO "pg_monitor" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
 ].join('\n');
 
 const expectedSourceMemberships = [
-  'anon|authenticator|supabase_admin|f',
-  'authenticated|authenticator|supabase_admin|f',
-  'service_role|authenticator|supabase_admin|f',
-  'supabase_admin|postgres|supabase_admin|t',
+  'anon|authenticator|supabase_admin|f|f|t',
+  'anon|postgres|supabase_admin|t|t|t',
+  'authenticated|authenticator|supabase_admin|f|f|t',
+  'authenticated|postgres|supabase_admin|t|t|t',
+  'authenticator|postgres|supabase_admin|t|t|t',
+  'authenticator|supabase_storage_admin|supabase_admin|f|f|t',
+  'pg_create_subscription|postgres|supabase_admin|t|t|t',
+  'pg_monitor|postgres|supabase_admin|t|t|t',
+  'pg_monitor|supabase_etl_admin|supabase_admin|f|t|t',
+  'pg_monitor|supabase_read_only_user|supabase_admin|f|t|t',
+  'pg_read_all_data|postgres|supabase_admin|t|t|t',
+  'pg_read_all_data|supabase_etl_admin|supabase_admin|f|t|t',
+  'pg_read_all_data|supabase_read_only_user|supabase_admin|f|t|t',
+  'pg_read_all_settings|pg_monitor|supabase_admin|f|t|t',
+  'pg_read_all_stats|pg_monitor|supabase_admin|f|t|t',
+  'pg_signal_backend|postgres|supabase_admin|t|t|t',
+  'pg_stat_scan_tables|pg_monitor|supabase_admin|f|t|t',
+  'postgres|cli_login_postgres|supabase_admin|f|f|t',
+  'service_role|authenticator|supabase_admin|f|f|t',
+  'service_role|postgres|supabase_admin|t|t|t',
+  'supabase_privileged_role|postgres|supabase_admin|f|t|t',
+  'supabase_privileged_role|supabase_etl_admin|supabase_admin|f|t|t',
 ];
 expectedSourceMemberships.sort();
 const expectedAggregatedSource = expectedSourceMemberships.join('\n');
@@ -699,10 +812,15 @@ assert.ok(fs.existsSync(preparedRestoreRolesFile), 'Prepared restore roles file 
 
 const preparedRestoreRolesContent = fs.readFileSync(preparedRestoreRolesFile, 'utf8');
 mustContain(preparedRestoreRolesContent, 'DO $lari_role_grant_bootstrap$');
-mustContain(preparedRestoreRolesContent, 'GRANT "anon" TO "authenticator" GRANTED BY "supabase_admin";');
-mustContain(preparedRestoreRolesContent, 'GRANT "authenticated" TO "authenticator" GRANTED BY "supabase_admin";');
-mustContain(preparedRestoreRolesContent, 'GRANT "service_role" TO "authenticator" GRANTED BY "supabase_admin";');
-mustContain(preparedRestoreRolesContent, 'GRANT "supabase_admin" TO "postgres" WITH ADMIN OPTION GRANTED BY "supabase_admin";');
+mustContain(preparedRestoreRolesContent, 'GRANT "anon" TO "authenticator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";');
+mustContain(preparedRestoreRolesContent, 'GRANT "anon" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";');
+mustContain(preparedRestoreRolesContent, 'GRANT "authenticated" TO "authenticator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";');
+mustContain(preparedRestoreRolesContent, 'GRANT "postgres" TO "cli_login_postgres" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";');
+mustContain(preparedRestoreRolesContent, 'GRANT "service_role" TO "authenticator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";');
+mustContain(preparedRestoreRolesContent, 'GRANT "supabase_privileged_role" TO "supabase_etl_admin" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";');
+mustContain(preparedRestoreRolesContent, 'GRANT "pg_create_subscription" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";');
+mustContain(preparedRestoreRolesContent, 'GRANT "pg_monitor" TO "supabase_etl_admin" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";');
+mustContain(preparedRestoreRolesContent, 'GRANT "pg_read_all_settings" TO "pg_monitor" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";');
 
 // Test 4: Positive replay of prepared restore-roles.sql in PG17 engine (aligned bootstrap superuser)
 const successEngine = new Pg17Engine('supabase_admin');
@@ -743,7 +861,7 @@ assert.notEqual(strippedCustomFp.fingerprint, customFpOriginal.fingerprint, 'Str
 
 // Test 6: Negative test - Omitted grant causes fingerprint mismatch
 const omittedGrantEngine = new Pg17Engine('supabase_admin');
-const omittedGrantSql = preparedRestoreRolesContent.replace(/GRANT\s+"service_role"\s+TO\s+"authenticator"\s+GRANTED\s+BY\s+"supabase_admin";\r?\n?/i, '');
+const omittedGrantSql = preparedRestoreRolesContent.replace(/GRANT\s+"service_role"\s+TO\s+"authenticator"[^;]*;\r?\n?/i, '');
 assert.notEqual(omittedGrantSql, preparedRestoreRolesContent, 'Regex must successfully omit the target grant statement');
 omittedGrantEngine.execute(omittedGrantSql);
 const omittedFingerprintResult = omittedGrantEngine.computeRoleMembershipsFingerprint();
@@ -836,7 +954,15 @@ mustContain(runner, 'mapfile -t ARTIFACT_FILES', 'Artifact allowlist must be enf
 mustContain(runner, 'enforce_verified_restore', 'A failed restore verdict must terminate before upload');
 mustContain(runner, 'rm -rf -- "$ARTIFACT_DIR"', 'Failed restore artifacts must be removed before upload');
 mustContain(runner, 'prepare_disposable_role_restore', 'Disposable role restore preparation must be present');
-mustContain(runner, 'DO $lari_role_grant_bootstrap$', 'Bootstrap delegation DO block must be configured');
+mustContain(runner, 'scripts/backup/prepare_roles_pg17.py', 'Runner must invoke standalone prepare_roles_pg17.py module');
+mustContain(runner, 'scripts/backup/safe_restore_error.py', 'Runner must invoke safe_restore_error.py diagnostic classifier');
+assert.ok(fs.existsSync('scripts/backup/prepare_roles_pg17.py'), 'prepare_roles_pg17.py module must exist');
+const prepareRolesModule = fs.readFileSync('scripts/backup/prepare_roles_pg17.py', 'utf8');
+mustContain(prepareRolesModule, 'DO $lari_role_grant_bootstrap$ BEGIN NULL; END $lari_role_grant_bootstrap$;', 'Bootstrap delegation DO block must be configured in prepare_roles_pg17.py');
+mustContain(prepareRolesModule, "'extra_grants': 0", 'prepare_roles_pg17.py must synthesize zero extra grants');
+assert.ok(fs.existsSync('scripts/backup/safe_restore_error.py'), 'safe_restore_error.py module must exist');
+const safeErrorModule = fs.readFileSync('scripts/backup/safe_restore_error.py', 'utf8');
+mustContain(safeErrorModule, 'RESTORE_ERROR_CLASS=', 'safe_restore_error.py must emit fixed diagnostic enum prefix');
 mustContain(runner, 'TEST_DISPOSABLE_ROLE_RESTORE_ONLY="--test-disposable-role-restore"', 'Runner must support disposable role restore test mode');
 mustContain(runner, 'TEST_DISPOSABLE_PRISTINE_RESTORE_ONLY="--test-disposable-pristine-restore"', 'Runner must support disposable pristine restore test mode');
 mustContain(runner, 'RESTORE_DATABASE_NAME="restore_verification"', 'Bootstrap control DB must remain restore_verification');
@@ -847,6 +973,9 @@ assert.ok(!runner.includes('--dbname="$RESTORE_DATABASE_NAME"'), 'pg_restore mus
 mustContain(runner, 'pristine-target-receipt.json', 'Runner must emit a non-secret pristine target receipt');
 mustContain(runner, 'prepare_disposable_role_restore "$PRIVATE_DIR/roles.sql" "$PRIVATE_DIR/restore-roles.sql"', 'Runner must prepare restore-roles.sql from roles.sql');
 mustContain(runner, '--file="$PRIVATE_DIR/restore-roles.sql"', 'Disposable restore must execute restore-roles.sql');
+mustContain(runner, 'emit_restore_failure_telemetry', 'Runner must emit safe failure telemetry');
+mustContain(runner, 'ROLE_PREPARATION_FAILED', 'Runner must identify role preparation failure stage');
+mustContain(runner, 'CATALOG_MISMATCH', 'Runner must identify catalog mismatch failure stage');
 
 const dumpIndex = runner.search(/pg_dump \\\n\s+--format=custom/);
 const restoreIndex = runner.search(/pg_restore \\\n\s+--exit-on-error/);
