@@ -462,6 +462,17 @@ try {
     'GRANT "service_role" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
     'GRANT "supabase_privileged_role" TO "postgres" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
     'GRANT "supabase_privileged_role" TO "supabase_etl_admin" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "pg_create_subscription" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "pg_monitor" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "pg_monitor" TO "supabase_etl_admin" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "pg_monitor" TO "supabase_read_only_user" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "pg_read_all_data" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "pg_read_all_data" TO "supabase_etl_admin" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "pg_read_all_data" TO "supabase_read_only_user" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "pg_read_all_settings" TO "pg_monitor" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "pg_read_all_stats" TO "pg_monitor" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "pg_signal_backend" TO "postgres" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
+    'GRANT "pg_stat_scan_tables" TO "pg_monitor" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY "supabase_admin";',
   ].join('\n');
 
   const testTempDir = fs.mkdtempSync(path.join(os.tmpdir(), `lari-role-prep-${process.pid}-`));
@@ -494,7 +505,7 @@ try {
   assert.ok(preparedRestoreContent.includes('DO $lari_role_grant_bootstrap$'), 'Prepared restore must contain cycle-checked delegation block');
   assert.ok(preparedRestoreContent.includes('GRANT "anon" TO "authenticator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";'), 'Must preserve exact grant statement');
 
-  // Reset non-system role memberships prior to replay inside container
+  // Reset role memberships prior to replay inside container
   execPsql(
     `DO $lari_clean$
     DECLARE
@@ -505,12 +516,11 @@ try {
         FROM pg_auth_members m
         JOIN pg_roles role ON role.oid = m.roleid
         JOIN pg_roles member ON member.oid = m.member
-        WHERE role.rolname !~ '^pg_' AND member.rolname !~ '^pg_'
       ) LOOP
         EXECUTE format('REVOKE %I FROM %I CASCADE', rec.role_name, rec.member_name);
       END LOOP;
     END $lari_clean$;`,
-    { description: 'Reset non-system role memberships prior to replay' }
+    { description: 'Reset role memberships prior to replay' }
   );
 
   // Send content strictly via stdin to psql -f - inside container
@@ -540,9 +550,7 @@ try {
   FROM pg_auth_members AS m
   JOIN pg_roles AS role ON role.oid = m.roleid
   JOIN pg_roles AS member ON member.oid = m.member
-  JOIN pg_roles AS grantor ON grantor.oid = m.grantor
-  WHERE role.rolname !~ '^pg_'
-    AND member.rolname !~ '^pg_';
+  JOIN pg_roles AS grantor ON grantor.oid = m.grantor;
   `;
 
   const catalogRes = execPsql('\\set QUIET 1\n\\pset tuples_only on\n\\pset format unaligned\n\\pset fieldsep \'|\'\n' + catalogQuery, {
@@ -568,6 +576,17 @@ try {
     'authenticated|postgres|supabase_admin|t|t|t',
     'authenticator|postgres|supabase_admin|t|t|t',
     'authenticator|supabase_storage_admin|supabase_admin|f|f|t',
+    'pg_create_subscription|postgres|supabase_admin|t|t|t',
+    'pg_monitor|postgres|supabase_admin|t|t|t',
+    'pg_monitor|supabase_etl_admin|supabase_admin|f|t|t',
+    'pg_monitor|supabase_read_only_user|supabase_admin|f|t|t',
+    'pg_read_all_data|postgres|supabase_admin|t|t|t',
+    'pg_read_all_data|supabase_etl_admin|supabase_admin|f|t|t',
+    'pg_read_all_data|supabase_read_only_user|supabase_admin|f|t|t',
+    'pg_read_all_settings|pg_monitor|supabase_admin|f|t|t',
+    'pg_read_all_stats|pg_monitor|supabase_admin|f|t|t',
+    'pg_signal_backend|postgres|supabase_admin|t|t|t',
+    'pg_stat_scan_tables|pg_monitor|supabase_admin|f|t|t',
     'postgres|cli_login_postgres|supabase_admin|f|f|t',
     'service_role|authenticator|supabase_admin|f|f|t',
     'service_role|postgres|supabase_admin|t|t|t',
@@ -579,7 +598,7 @@ try {
   const expectedAggregated = expectedMemberships.join('\n');
   const expectedFingerprint = createHash('md5').update(expectedAggregated).digest('hex');
 
-  console.log(`Catalog Memberships Count: ${objCountStr} (expected: 11)`);
+  console.log(`Catalog Memberships Count: ${objCountStr} (expected: 22)`);
   console.log(`Catalog MD5 Fingerprint:   ${actualFingerprint}`);
   console.log(`Expected MD5 Fingerprint:  ${expectedFingerprint}`);
   console.log('Catalog Membership Rows:');
@@ -589,7 +608,7 @@ try {
     throw new Error('Catalog mismatch: simulated fingerprint or role membership mismatch');
   }
 
-  assert.equal(objCountStr, '11', 'Catalog mismatch: must contain exactly 11 non-system role memberships');
+  assert.equal(objCountStr, '22', 'Catalog mismatch: must contain exactly 22 role memberships');
   assert.equal(actualFingerprint, expectedFingerprint, 'Catalog mismatch: MD5 catalog fingerprint must match synthetic fixture');
   assert.deepEqual(actualRows, expectedMemberships, 'Catalog mismatch: role membership rows must match expected synthetic fixture rows');
 
@@ -642,7 +661,7 @@ try {
   console.log('STATUS: PASS');
   console.log(`QUALIFIED IMAGE: ${qualifiedImage}`);
   console.log(`SUPABASE_VAULT VERSION: ${vaultVersion}`);
-  console.log('EVALUATION LEVEL: SYNTHETIC FIXTURE EQUIVALENCE (16 roles, 11 memberships) + REAL EXTENSION QUALIFICATION');
+  console.log('EVALUATION LEVEL: SYNTHETIC FIXTURE EQUIVALENCE (16 roles, 22 memberships) + REAL EXTENSION QUALIFICATION');
   console.log('NOTE: Full source-to-restored catalog matching against live Supabase remains a later live acceptance requirement.');
   console.log('All 6 tests PASS on official Supabase PG 17.6 container\n');
 

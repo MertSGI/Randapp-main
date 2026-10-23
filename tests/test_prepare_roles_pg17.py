@@ -24,13 +24,27 @@ ACTUAL_SOURCE_SHAPE = [
     ('supabase_privileged_role','postgres',False,True,True),
     ('supabase_privileged_role','supabase_etl_admin',False,True,True),
 ]
+# Additional 11 PostgreSQL built-in role memberships confirmed on live staging catalog
+BUILTIN_SOURCE_SHAPE = [
+    ('pg_create_subscription','postgres',True,True,True),
+    ('pg_monitor','postgres',True,True,True),
+    ('pg_monitor','supabase_etl_admin',False,True,True),
+    ('pg_monitor','supabase_read_only_user',False,True,True),
+    ('pg_read_all_data','postgres',True,True,True),
+    ('pg_read_all_data','supabase_etl_admin',False,True,True),
+    ('pg_read_all_data','supabase_read_only_user',False,True,True),
+    ('pg_read_all_settings','pg_monitor',False,True,True),
+    ('pg_read_all_stats','pg_monitor',False,True,True),
+    ('pg_signal_backend','postgres',True,True,True),
+    ('pg_stat_scan_tables','pg_monitor',False,True,True),
+]
 
 
 def build_fixture():
     lines = ['-- pg_dumpall --roles-only non-secret representative source shape\n']
     for role in REAL_ROLE_NAMES:
         lines.extend((f'CREATE ROLE "{role}";\n', f'ALTER ROLE "{role}" WITH LOGIN;\n'))
-    for target, member, admin, inherit, can_set in ACTUAL_SOURCE_SHAPE:
+    for target, member, admin, inherit, can_set in ACTUAL_SOURCE_SHAPE + BUILTIN_SOURCE_SHAPE:
         op = lambda b: 'TRUE' if b else 'FALSE'
         lines.append(
             f'GRANT "{target}" TO "{member}" WITH ADMIN {op(admin)}, '
@@ -41,15 +55,18 @@ def build_fixture():
 
 class RoleParserTest(unittest.TestCase):
     def test_exact_source_shaped_counts(self):
-        self.assertEqual(len(REAL_ROLE_NAMES),16)
-        self.assertEqual(len(ACTUAL_SOURCE_SHAPE),11)
-        self.assertEqual(sum(not inh or not set_option for _,_,_,inh,set_option in ACTUAL_SOURCE_SHAPE),5)
-        src=build_fixture(); dst, receipt=transform(src)
-        self.assertEqual(receipt, {'create_roles':16,'membership_edges':11,'extra_grants':0})
-        self.assertIn('DO $lari_role_grant_bootstrap$ BEGIN NULL;',dst)
-        self.assertEqual(dst.count('GRANT "'),11)
+        self.assertEqual(len(REAL_ROLE_NAMES), 16)
+        self.assertEqual(len(ACTUAL_SOURCE_SHAPE), 11)
+        self.assertEqual(len(BUILTIN_SOURCE_SHAPE), 11)
+        total_memberships = len(ACTUAL_SOURCE_SHAPE) + len(BUILTIN_SOURCE_SHAPE)
+        self.assertEqual(total_memberships, 22)
+        src = build_fixture()
+        dst, receipt = transform(src)
+        self.assertEqual(receipt, {'create_roles': 16, 'membership_edges': 22, 'extra_grants': 0})
+        self.assertIn('DO $lari_role_grant_bootstrap$ BEGIN NULL;', dst)
+        self.assertEqual(dst.count('GRANT "'), 22)
         self.assertTrue(all(line in dst for line in src.splitlines(keepends=True) if line.startswith('GRANT ')))
-        self.assertEqual(dst.count('CREATE ROLE "'),16)
+        self.assertEqual(dst.count('CREATE ROLE "'), 16)
 
     def test_grant_option_preserved(self):
         rec = parse_grant('GRANT "anon" TO "authenticator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE GRANTED BY "supabase_admin";')

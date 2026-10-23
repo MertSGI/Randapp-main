@@ -112,8 +112,6 @@ WITH schemas AS (
   JOIN pg_roles AS role ON role.oid = m.roleid
   JOIN pg_roles AS member ON member.oid = m.member
   JOIN pg_roles AS grantor ON grantor.oid = m.grantor
-  WHERE role.rolname !~ '^pg_'
-    AND member.rolname !~ '^pg_'
 ), extensions AS (
   SELECT
     count(*) AS object_count,

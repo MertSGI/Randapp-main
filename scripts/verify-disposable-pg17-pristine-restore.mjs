@@ -282,7 +282,6 @@ try {
         FROM pg_auth_members m
         JOIN pg_roles role ON role.oid = m.roleid
         JOIN pg_roles member ON member.oid = m.member
-        WHERE member.rolname !~ '^pg_'
       ) LOOP
         EXECUTE format('REVOKE %I FROM %I CASCADE', rec.role_name, rec.member_name);
       END LOOP;
@@ -314,6 +313,17 @@ try {
       GRANT service_role TO postgres WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
       GRANT supabase_privileged_role TO postgres WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
       GRANT supabase_privileged_role TO supabase_etl_admin WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT pg_create_subscription TO postgres WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT pg_monitor TO postgres WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT pg_monitor TO supabase_etl_admin WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT pg_monitor TO supabase_read_only_user WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT pg_read_all_data TO postgres WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT pg_read_all_data TO supabase_etl_admin WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT pg_read_all_data TO supabase_read_only_user WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT pg_read_all_settings TO pg_monitor WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT pg_read_all_stats TO pg_monitor WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT pg_signal_backend TO postgres WITH ADMIN TRUE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
+      GRANT pg_stat_scan_tables TO pg_monitor WITH ADMIN FALSE, INHERIT TRUE, SET TRUE GRANTED BY supabase_admin;
     END $lari_setup_roles$;`,
     { db: 'restore_verification', description: 'Configure canonical synthetic roles and memberships' }
   );
@@ -774,7 +784,6 @@ try {
         FROM pg_auth_members m
         JOIN pg_roles role ON role.oid = m.roleid
         JOIN pg_roles member ON member.oid = m.member
-        WHERE member.rolname !~ '^pg_'
       ) LOOP
         EXECUTE format('REVOKE %I FROM %I CASCADE', rec.role_name, rec.member_name);
       END LOOP;
