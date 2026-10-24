@@ -18,6 +18,21 @@
 
 import assert from 'node:assert/strict';
 
+// Setup headless WebSocket mock for Node.js < 22 runtime
+if (typeof globalThis.WebSocket === 'undefined') {
+  globalThis.WebSocket = class MockWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+    constructor() {}
+    addEventListener() {}
+    removeEventListener() {}
+    send() {}
+    close() {}
+  };
+}
+
 // Configure process and global environment for headless runner
 process.env.VITE_DATA_MODE = 'local';
 process.env.VITE_LAUNCH_MODE = 'local_pre_live';
