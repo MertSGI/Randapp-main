@@ -31,7 +31,7 @@ class NotificationTemplateService {
         audience: 'business_owner',
         title: 'Abonelik Denemesi Başladı (Trial Started)',
         subject: 'LARİ - 14 Günlük Deneme Süreniz Başladı 🚀',
-        body: '14 günlük ücretsiz denemeniz başladı. Deneme süresi boyunca ödeme alınmaz. 14 gün içinde iptal etmezseniz seçtiğiniz plan otomatik olarak başlar.',
+        body: '14 günlük ücretsiz denemeniz başladı. Deneme süresi boyunca ödeme alınmaz. Deneme koşulları ve abonelik durumu hesabınızda görüntülenir. Ödeme veya otomatik tahsilat yalnız sağlayıcı aktivasyonu ve ayrıca onaylanan koşullar altında uygulanır.',
         variables: ['business_name', 'plan_name'],
         enabled: true,
         providerRequired: true
@@ -53,7 +53,7 @@ class NotificationTemplateService {
         audience: 'business_owner',
         title: 'Deneme Süresi Sona Eriyor (Trial Ending)',
         subject: 'Deneme Sürenizin Sona Ermesine Az Kaldı ⏳',
-        body: 'Merhaba, 14 günlük deneme sürenizin sonuna gelmektesiniz. 14 gün boyunca ödeme alınmamıştır. İptal etmezseniz, seçtiğiniz üyelik planı otomatik olarak başlayacak.',
+        body: 'Merhaba, 14 günlük deneme sürenizin sonuna gelmektesiniz. Deneme süresi boyunca ödeme alınmamıştır. Deneme koşulları ve abonelik durumu hesabınızda görüntülenir. Ödeme veya otomatik tahsilat yalnız sağlayıcı aktivasyonu ve ayrıca onaylanan koşullar altında uygulanır.',
         variables: ['business_name', 'end_date'],
         enabled: true,
         providerRequired: true

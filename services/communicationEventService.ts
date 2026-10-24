@@ -66,7 +66,7 @@ export const communicationEventService = {
 
       if (isTransactional) {
         // Must verify contact/reminder consent
-        const hasConsent = consent ? (consent.bookingContactConsent || consent.appointmentReminderConsent) : true; // default to true for booking confirmations if consent wasn't recorded yet, but enforce if recorded
+        const hasConsent = consent ? (consent.bookingContactConsent || consent.appointmentReminderConsent) : true;
         if (consent && !consent.bookingContactConsent && !consent.appointmentReminderConsent) {
           initialStatus = 'skipped';
           failureReason = 'Müşteri işlem onay/iletişim izni vermemiştir.';
@@ -113,28 +113,19 @@ export const communicationEventService = {
       internalOnly: !!input.internalOnly
     };
 
-    // 3. Provider Mode Check (If provider configuration specifies active mock/gateway, we mark as sent for our local run modes)
-    if (newEvent.status === 'rendered') {
-      const config = communicationProviderConfigService.getConfig();
-      if (config.mode !== 'local_outbox_only') {
-        // If some live provider is set, we could mark 'sent' or 'failed'.
-        // In local mock preview, we can simulate sending if config isn't strict local outbox only.
-        newEvent.status = 'sent';
-        newEvent.providerMessageId = `prov_${Math.random().toString(36).substring(2, 9)}`;
-      }
-    }
+    // 3. Provider Mode Check:
+    // Newly created events remain 'rendered' (or 'skipped' on missing consent).
+    // Browser configuration cannot auto-mark events as 'sent' or fabricate provider message IDs.
 
     events.unshift(newEvent);
     this.saveAllEvents(events);
 
-    // Safe logging mimicking delivery simulation
+    // Safe diagnostics without customer PII (never log raw subject, body, customer name, or recipient)
     console.group(`🔔 [COMMUNICATION EVENT - ${newEvent.channel.toUpperCase()}]`);
     console.log(`ID: ${newEvent.id}`);
     console.log(`Type: ${newEvent.type}`);
     console.log(`Audience: ${newEvent.audience}`);
     console.log(`Status: ${newEvent.status}`);
-    if (newEvent.subject) console.log(`Subject: ${newEvent.subject}`);
-    console.log(`Body: ${newEvent.body}`);
     if (newEvent.failureReason) console.log(`Reason: ${newEvent.failureReason}`);
     console.groupEnd();
 
@@ -161,17 +152,23 @@ export const communicationEventService = {
     return this.getAllEvents().filter(e => e.internalOnly);
   },
 
-  markCommunicationSent(id: string, providerMessageId?: string): CommunicationEvent | null {
+  // Browser-only clients cannot attest provider delivery. Real delivery must be
+  // recorded through a separately verified server-side provider receipt path.
+  markCommunicationSent(_id: string, _providerMessageId?: string): CommunicationEvent | null {
+    return null;
+  },
+
+  // A demo acknowledgement is local UI metadata, NEVER evidence of delivery.
+  markCommunicationDemoAcknowledged(id: string): CommunicationEvent | null {
     const events = this.getAllEvents();
     const event = events.find(e => e.id === id);
-    if (event) {
-      event.status = 'sent';
-      event.providerMessageId = providerMessageId || `prov_${Math.random().toString(36).substring(2, 9)}`;
-      event.updatedAt = new Date().toISOString();
-      this.saveAllEvents(events);
-      return event;
-    }
-    return null;
+    if (!event || event.status !== 'rendered') return null;
+    const prior = (event.metadata && typeof event.metadata === 'object' && !Array.isArray(event.metadata))
+      ? event.metadata : {};
+    event.metadata = { ...prior, manualDemoAcknowledged: true };
+    event.updatedAt = new Date().toISOString();
+    this.saveAllEvents(events);
+    return event;
   },
 
   markCommunicationFailed(id: string, reason: string): CommunicationEvent | null {

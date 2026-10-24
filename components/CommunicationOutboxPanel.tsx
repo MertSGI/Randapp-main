@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { CommunicationEvent, CommunicationChannel, CommunicationDeliveryStatus, CommunicationEventType } from '../types';
 import { communicationEventService } from '../services/communicationEventService';
@@ -46,7 +46,7 @@ export const CommunicationOutboxPanel: React.FC<CommunicationOutboxPanelProps> =
   };
 
   const handleMarkSent = (id: string) => {
-    communicationEventService.markCommunicationSent(id);
+    communicationEventService.markCommunicationDemoAcknowledged(id);
     loadEvents();
     // Update selected view if applicable
     if (selectedEvent && selectedEvent.id === id) {
@@ -151,10 +151,7 @@ export const CommunicationOutboxPanel: React.FC<CommunicationOutboxPanelProps> =
       case 'rendered': return language === 'tr' ? 'Gönderime Hazır Kayıt' : 'Outbox Record (Ready)';
       case 'skipped': return language === 'tr' ? 'İzin Yok (Pas geçildi)' : 'Skipped (No Consent)';
       case 'sent': 
-        if (providerConfig.mode === 'local_outbox_only') {
-          return language === 'tr' ? 'Gönderim Simüle Edildi' : 'Sent (Simulated)';
-        }
-        return language === 'tr' ? 'Gönderildi / İletildi' : 'Delivered';
+        return language === 'tr' ? 'Eski Gönderildi Kaydı (Doğrulanmadı)' : 'Legacy Sent Flag (Unverified)';
       case 'failed': return language === 'tr' ? 'Hata Oluştu' : 'Failed';
       case 'cancelled': return language === 'tr' ? 'İptal Edildi' : 'Cancelled';
       default: return status;
@@ -185,7 +182,7 @@ export const CommunicationOutboxPanel: React.FC<CommunicationOutboxPanelProps> =
           </span>
           <span className="text-slate-400">|</span>
           <span className="text-slate-500 font-mono text-[10px] bg-slate-100 px-2 py-0.5 rounded">
-            {providerConfig.mode === 'local_outbox_only' ? 'Simüle (local_outbox_only)' : 'Provider Connected'}
+            {language === 'tr' ? 'Sağlayıcı: Yapılandırılmadı (NOT_CONFIGURED)' : 'Provider: Not Configured (NOT_CONFIGURED)'}
           </span>
         </div>
       </div>
@@ -250,7 +247,7 @@ export const CommunicationOutboxPanel: React.FC<CommunicationOutboxPanelProps> =
             <option value="queued">{language === 'tr' ? 'Sırada' : 'Queued'}</option>
             <option value="rendered">{language === 'tr' ? 'Gönderime Hazır (Outbox)' : 'Outbox (Ready)'}</option>
             <option value="skipped">{language === 'tr' ? 'Pas Geçildi (İzin Yok)' : 'Skipped (No Consent)'}</option>
-            <option value="sent">{language === 'tr' ? (providerConfig.mode === 'local_outbox_only' ? 'Simüle Gönderildi' : 'Gönderildi / İletildi') : 'Sent / Delivered'}</option>
+            <option value="sent">{language === 'tr' ? 'Eski Gönderildi Kaydı (Doğrulanmadı)' : 'Legacy Sent Flag (Unverified)'}</option>
             <option value="failed">{language === 'tr' ? 'Hatalı / Başarısız' : 'Failed'}</option>
             <option value="cancelled">{language === 'tr' ? 'İptal Edildi' : 'Cancelled'}</option>
           </select>
@@ -330,6 +327,11 @@ export const CommunicationOutboxPanel: React.FC<CommunicationOutboxPanelProps> =
                     <span className="text-[10px] bg-slate-100 text-slate-500 rounded px-1.5 py-0.5">
                       {event.audience.replace(/_/g, ' ')}
                     </span>
+                    {event.metadata?.manualDemoAcknowledged === true && (
+                      <span className="text-[9px] bg-slate-100 text-slate-600 rounded px-1.5">
+                        {language === 'tr' ? 'Manuel Demo (Gönderim Değil)' : 'Manual Demo (Not Sent)'}
+                      </span>
+                    )}
                     {event.internalOnly && (
                       <span className="text-[9px] bg-rose-100 text-rose-800 rounded px-1.5">
                         Dahili Not
@@ -436,12 +438,12 @@ export const CommunicationOutboxPanel: React.FC<CommunicationOutboxPanelProps> =
                     Super Admin Actions:
                   </span>
                   
-                  {selectedEvent.status !== 'sent' && (
+                  {selectedEvent.status === 'rendered' && !selectedEvent.metadata?.manualDemoAcknowledged && (
                     <button
                       onClick={() => handleMarkSent(selectedEvent.id)}
                       className="bg-emerald-600 hover:bg-emerald-700 transition text-white px-2.5 py-1 rounded text-xs"
                     >
-                      {language === 'tr' ? 'Gönderildi İşaretle' : 'Mark Sent'}
+                      {language === 'tr' ? 'Manuel Demo İşaretle (Göndermez)' : 'Mark Demo Reviewed (No Send)'}
                     </button>
                   )}
 

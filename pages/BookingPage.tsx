@@ -700,8 +700,8 @@ const BookingPage: React.FC = () => {
 
       let isWaDelivered = false;
       if (sideEffectPolicy.allowMockWhatsApp) {
-        await NotificationService.sendAutomatedWhatsApp(newAppointment, waText).catch(e => console.error("WhatsApp send fail", e));
-        isWaDelivered = true;
+        const waDelivered = await NotificationService.sendAutomatedWhatsApp(newAppointment, waText).catch(e => { console.error('WhatsApp send fail', e); return false; });
+isWaDelivered = waDelivered === true;
       }
       setWhatsappSent(isWaDelivered);
 
