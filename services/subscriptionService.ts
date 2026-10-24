@@ -222,6 +222,15 @@ export const subscriptionService = {
     }
 
     if (runModeStatus.mode === 'sandbox_live' || runModeStatus.mode === 'production_live') {
+      if (runModeStatus.mode === 'production_live') {
+        throw {
+          isSafeStructure: true,
+          message: 'Canlı ödeme tahsilatı tarayıcı üzerinden yetkilendirilemez. Sunucu tarafı doğrulama ve sürüm onayı gereklidir.',
+          errorCode: 'PRODUCTION_PAYMENT_UNAUTHORIZED',
+          raw: { blockers: runModeStatus.missingBlockers }
+        };
+      }
+
       if (runModeStatus.mode === 'sandbox_live' && !runModeStatus.canRunCheckout) {
         throw {
           isSafeStructure: true,

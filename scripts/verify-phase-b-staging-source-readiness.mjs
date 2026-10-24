@@ -212,32 +212,74 @@ console.log('✅ Property 3 PASS: Remote database errors fail closed with zero s
 // ----------------------------------------------------------------------------
 console.log('\n[Property 4] Anonymous browser code never accesses service-role credentials...');
 
-// Inspect scan-frontend-secrets patterns against codebase
-const srcDir = path.join(process.cwd(), 'src');
-const servicesDir = path.join(process.cwd(), 'services');
-const pagesDir = path.join(process.cwd(), 'pages');
+// Helper: Strip comments so documentation comments do not mask real code or create false passes
+const stripComments = (code) => {
+  return code
+    .replace(/\/\*[\s\S]*?\*\//g, '') // remove multi-line comments
+    .replace(/\/\/.*$/gm, '');          // remove single-line comments
+};
 
-const checkForbiddenSecretReferences = (dir) => {
-  if (!fs.existsSync(dir)) return;
-  const files = fs.readdirSync(dir, { recursive: true });
-  for (const f of files) {
-    if (typeof f !== 'string' || (!f.endsWith('.ts') && !f.endsWith('.tsx') && !f.endsWith('.js') && !f.endsWith('.jsx'))) continue;
-    const full = path.join(dir, f);
-    const code = fs.readFileSync(full, 'utf-8');
-    assert.ok(
-      !code.includes('VITE_SUPABASE_SERVICE_ROLE_KEY'),
-      `Forbidden secret reference VITE_SUPABASE_SERVICE_ROLE_KEY found in ${f}`
-    );
-    assert.ok(
-      !code.includes('service_role') || code.includes('//') || code.includes('SECURITY DEFINER') || code.includes('serviceRole') || code.includes('service_role_key'),
-      `Potential service role exposure in ${f}`
-    );
+const FORBIDDEN_SECRET_PATTERNS = [
+  /VITE_SUPABASE_SERVICE_ROLE_KEY/i,
+  /process\.env\.SUPABASE_SERVICE_ROLE_KEY/i,
+  /import\.meta\.env\.SUPABASE_SERVICE_ROLE_KEY/i,
+  /['"`]service_role['"`]/i,
+  /Bearer\s+[A-Za-z0-9_-]+\.service_role/i,
+  /apikey['":\s]+['"`][A-Za-z0-9_-]*service_role/i
+];
+
+const checkFileForForbiddenSecrets = (filePath, code) => {
+  const executableCode = stripComments(code);
+  for (const pattern of FORBIDDEN_SECRET_PATTERNS) {
+    if (pattern.test(executableCode)) {
+      throw new Error(`Forbidden service-role credential pattern ${pattern} matched in executable code of ${filePath}`);
+    }
   }
 };
 
-checkForbiddenSecretReferences(servicesDir);
-checkForbiddenSecretReferences(pagesDir);
-console.log('✅ Property 4 PASS: Zero service-role credential references in browser client codebase.');
+// Regression tests on the detector itself:
+// Regression Case 1: Permissive comment evasion attempt MUST FAIL
+const leakWithComment = "const key = 'service_role'; // this is a safe comment";
+assert.throws(
+  () => checkFileForForbiddenSecrets('fake_leak.ts', leakWithComment),
+  /Forbidden service-role credential pattern/,
+  'Detector must NOT permit service_role key assignment merely because a comment is present'
+);
+
+// Regression Case 2: VITE_SUPABASE_SERVICE_ROLE_KEY MUST FAIL
+const envLeak = "const k = (import.meta.env as any).VITE_SUPABASE_SERVICE_ROLE_KEY;";
+assert.throws(
+  () => checkFileForForbiddenSecrets('fake_env_leak.ts', envLeak),
+  /Forbidden service-role credential pattern/,
+  'Detector must reject VITE_SUPABASE_SERVICE_ROLE_KEY in executable code'
+);
+
+// Regression Case 3: Legitimate architectural documentation comment MUST PASS
+const safeDocComment = "// Note: service_role key must NEVER be included in browser bundle; only anon key is allowed.";
+assert.doesNotThrow(
+  () => checkFileForForbiddenSecrets('fake_doc.ts', safeDocComment),
+  'Detector must allow explanatory comments without executable leaks'
+);
+
+// Now run across all browser frontend code directories:
+const scanDirs = [
+  path.join(process.cwd(), 'src'),
+  path.join(process.cwd(), 'services'),
+  path.join(process.cwd(), 'pages'),
+  path.join(process.cwd(), 'components')
+];
+
+for (const dir of scanDirs) {
+  if (!fs.existsSync(dir)) continue;
+  const files = fs.readdirSync(dir, { recursive: true });
+  for (const f of files) {
+    if (typeof f !== 'string' || (!f.endsWith('.ts') && !f.endsWith('.tsx') && !f.endsWith('.js') && !f.endsWith('.jsx'))) continue;
+    const fullPath = path.join(dir, f);
+    const fileCode = fs.readFileSync(fullPath, 'utf-8');
+    checkFileForForbiddenSecrets(path.relative(process.cwd(), fullPath), fileCode);
+  }
+}
+console.log('✅ Property 4 PASS: Zero service-role credential references in browser client codebase (with negative leak regression verified).');
 
 // ----------------------------------------------------------------------------
 // Test 5: Tenant Isolation and Authenticated Session Headers in Remote Client

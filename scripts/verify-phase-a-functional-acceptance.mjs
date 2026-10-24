@@ -482,13 +482,23 @@ const PREV_REAL_SESSION = JSON.stringify({ userId: 'real_owner_1', email: 'owner
 storageMap.set('lari_active_tenant_id', PREV_REAL_TENANT);
 storageMap.set('lari_active_owner_session', PREV_REAL_SESSION);
 
-// Enter pilot demo
+// Track remote fetches to verify zero real Supabase writes
+let remoteFetchCount = 0;
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (...args) => {
+  remoteFetchCount++;
+  return originalFetch(...args);
+};
+
+// Enter pilot demo (fully awaited sequence)
 await pilotDemoService.enterDemoContext();
 
 assert.equal(storageMap.get('lari_active_tenant_id'), DEMO_PILOT_TENANT_ID, 'Active tenant must become demo pilot tenant');
 assert.equal(storageMap.get('lari_in_pilot_demo'), 'true', 'Pilot demo flag must be set');
 assert.equal(storageMap.get('lari_saved_real_tenant_id'), PREV_REAL_TENANT, 'Previous real tenant must be saved');
 assert.equal(storageMap.get('lari_saved_real_session'), PREV_REAL_SESSION, 'Previous real session must be saved');
+assert.equal(pilotDemoService.isDemoContextReady(), true, 'Demo context must be marked ready before consumption');
+assert.equal(remoteFetchCount, 0, 'Entering demo context must cause ZERO remote database writes/fetches');
 
 // Exit pilot demo
 await pilotDemoService.exitDemoContext();
@@ -498,7 +508,12 @@ assert.equal(localStorage.getItem('lari_active_owner_session'), PREV_REAL_SESSIO
 assert.equal(localStorage.getItem('lari_saved_real_tenant_id'), null, 'Saved tenant must be cleaned up');
 assert.equal(localStorage.getItem('lari_saved_real_session'), null, 'Saved session must be cleaned up');
 assert.equal(localStorage.getItem('lari_in_pilot_demo'), null, 'Pilot demo flag must be removed');
-console.log('✅ Scenario 10 PASS: Demo entry preserves and exit restores previous real tenant state.');
+assert.equal(pilotDemoService.isDemoContextReady(), false, 'Demo context must not be ready after exit');
+
+// Restore original fetch
+globalThis.fetch = originalFetch;
+
+console.log('✅ Scenario 10 PASS: Demo entry preserves and exit restores previous real tenant state (zero remote writes).');
 
 // ----------------------------------------------------------------------------
 // Final Summary

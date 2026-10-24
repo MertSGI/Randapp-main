@@ -54,3 +54,27 @@ Option A (Recommended MVP):
 
 Option B (Future):
 - Include the setup fee in the first payment cycle via API if the provider supports mixed billing.
+
+
+---
+
+## Phase C Security & Readiness Status (Controller Update 20261024)
+
+### Status Categorization
+- **Cryptographic Signature Verification (`verifyIyzicoSignatureV3`)**: `SOURCE_READY` / `MOCK_TESTED`
+  - Timing-safe HMAC-SHA256 implemented and validated against Node.js crypto primitives.
+  - `sandbox_bypass` no-signature backdoor is PERMANENTLY DELETED.
+  - Missing, empty, or mismatching `x-iyz-signature-v3` headers fail closed with 401 Unauthorized.
+  - Payload tampering and signature bit-flip attacks are rejected.
+- **Webhook Idempotency & State Transitions**: `SOURCE_READY` / `MOCK_TESTED`
+  - Unique `providerEventId` checked in audit logs; duplicates return idempotent 200 without reprocessing.
+  - Customer/tenant mismatch rejected with 403.
+  - Out-of-order state transitions rejected (e.g. cancelled subscriptions cannot be resurrected by delayed pings).
+- **Payment Run Mode Safety**: `SOURCE_READY` / `MOCK_TESTED`
+  - `localStorage.internal_run_mode` cannot activate `production_live`.
+  - Frontend checkout throws `PRODUCTION_PAYMENT_UNAUTHORIZED` unless verified backend release authorization exists.
+- **Live Sandbox Merchant Testing**: `PROVIDER_INTEGRATION_PENDING`
+  - Requires approved merchant credentials and active Subscription API key/secret from iyzico.
+  - Until live credentials are provided, provider interoperability status remains `EXTERNAL_PROVIDER_VERIFICATION_PENDING`.
+- **Live Production Credit Card Charges**: `NOT_TESTED`
+  - Strictly blocked by Production release blocker (GitHub Issue #10).

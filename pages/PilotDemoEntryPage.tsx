@@ -1,26 +1,56 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { pilotDemoService, DEMO_PILOT_TENANT_ID } from '../services/pilotDemoService';
+import { pilotDemoService } from '../services/pilotDemoService';
 
-const PilotDemoEntryPage: React.FC = () => {
+export const PilotDemoEntryPage: React.FC = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const initDemo = async () => {
-      await pilotDemoService.seedDemoDataOnly();
-      setLoading(false);
-    };
-    initDemo();
+    // Only seed data on mount. Do not auto-login to preserve guest isolation.
+    pilotDemoService.seedDemoDataOnly();
+    setLoading(false);
   }, []);
 
-  const handleStartOwnerDemo = async () => {
-     pilotDemoService.enterDemoContext();
-     openInNewTab('/pilot/admin');
+  const startDemoSession = async (path: string, openNewTab: boolean = true) => {
+    // Open blank window immediately within user gesture to prevent browser popup blocker
+    let targetWindow: Window | null = null;
+    if (openNewTab && typeof window !== 'undefined') {
+      try {
+        targetWindow = window.open('about:blank', '_blank');
+      } catch (e) {
+        console.warn('Popup window blocked, falling back to in-tab navigation', e);
+      }
+    }
+
+    try {
+      // Await complete context initialization before navigating
+      await pilotDemoService.enterDemoContext();
+
+      const isBrowser = (import.meta as any).env?.VITE_ROUTER_MODE === 'browser';
+      const targetUrl = isBrowser ? path : `/#${path}`;
+
+      if (targetWindow && !targetWindow.closed) {
+        targetWindow.location.href = targetUrl;
+      } else if (typeof window !== 'undefined') {
+        // Fallback for popup blocker or in-tab navigation
+        window.location.href = targetUrl;
+      } else {
+        navigate(path);
+      }
+    } catch (err) {
+      console.error('Failed to initialize demo context:', err);
+      if (targetWindow && !targetWindow.closed) {
+        targetWindow.close();
+      }
+    }
   };
 
+  const handleStartCustomerDemo = () => startDemoSession('/pilot/customer');
+  const handleStartOwnerDemo = () => startDemoSession('/pilot/admin');
+
   const openInNewTab = (path: string) => {
-    const isBrowser = (import.meta as any).env.VITE_ROUTER_MODE === 'browser';
+    const isBrowser = (import.meta as any).env?.VITE_ROUTER_MODE === 'browser';
     const url = isBrowser ? path : `/#${path}`;
     window.open(url, '_blank');
   };
@@ -39,15 +69,18 @@ const PilotDemoEntryPage: React.FC = () => {
 
   return (
     <div className="min-h-screen pt-24 pb-16 bg-slate-50 dark:bg-slate-900">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-        <h1 className="text-4xl md:text-5xl font-extrabold text-slate-900 dark:text-white mb-6 tracking-tight">LARİ Pilot Demo</h1>
-        <p className="text-lg text-slate-600 dark:text-slate-400 mb-12 max-w-2xl mx-auto">
-           LARİ platformunun salon sahipleri için nasıl çalıştığını inceleyebileceğiniz hazır demo ortamına hoş geldiniz.
-           Bu ortamda gerçek verileriniz etkilenmez.
+      <div className="max-w-4xl mx-auto px-4 text-center">
+        <span className="inline-block py-1 px-3 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-sm font-semibold mb-4">
+           Canlı Pilot Deneyimi
+        </span>
+        <h1 className="text-4xl md:text-5xl font-extrabold text-slate-900 dark:text-white mb-6">
+           LARİ'yi Gerçek Bir İşletme Olarak Deneyimleyin
+        </h1>
+        <p className="text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto mb-12">
+           Aşağıdaki panellerden birini seçerek sistemi hem müşteri hem de işletme sahibi gözüyle test edebilirsiniz.
         </p>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-           
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-3xl mx-auto">
            <div className="bg-white dark:bg-slate-800 rounded-2xl p-8 shadow-sm border border-slate-200 dark:border-slate-700 text-left flex flex-col h-full">
              <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 rounded-xl flex items-center justify-center mb-6">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -59,11 +92,7 @@ const PilotDemoEntryPage: React.FC = () => {
                 Müşterilerinizin sizden nasıl randevu alacağını, yapay zeka asistanını ve dijital vitrininizi bir müşteri gözüyle deneyimleyin. Randevu akışını test edin.
              </p>
              <button 
-                onClick={() => {
-                   // Ensure tenant applies in public mode
-                   pilotDemoService.enterDemoContext();
-                   openInNewTab('/pilot/customer');
-                }}
+                onClick={handleStartCustomerDemo}
                 className="w-full py-4 px-6 bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 text-white font-bold rounded-xl transition-colors text-center"
              >
                 Müşteri deneyimini incele
@@ -88,7 +117,7 @@ const PilotDemoEntryPage: React.FC = () => {
                 İşletme panelini incele
              </button>
            </div>
-           
+
            <div className="bg-white dark:bg-slate-800 rounded-2xl p-8 shadow-sm border border-slate-200 dark:border-slate-700 text-left flex flex-col h-full w-full">
              <div className="w-12 h-12 bg-pink-100 dark:bg-pink-900/30 text-pink-600 rounded-xl flex items-center justify-center mb-6">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -148,3 +177,4 @@ const PilotDemoEntryPage: React.FC = () => {
 };
 
 export default PilotDemoEntryPage;
+
