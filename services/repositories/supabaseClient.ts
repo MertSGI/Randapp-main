@@ -1,3 +1,4 @@
+export { getDataSourceMode } from '../dataSourceConfig';
 import { getDataSourceMode } from '../dataSourceConfig';
 
 // This is a stub for the Supabase client.
@@ -6,11 +7,12 @@ import { getDataSourceMode } from '../dataSourceConfig';
 // Actual operations should only run if VITE_LARI_DATA_SOURCE=supabase.
 
 export const getSupabaseClientConfig = () => {
-  const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL || '';
-  const supabaseKey = import.meta.env?.VITE_SUPABASE_ANON_KEY || '';
+  const env = (import.meta as any).env || (globalThis as any).import?.meta?.env || (typeof process !== 'undefined' ? process.env : {}) || {};
+  const supabaseUrl = env.VITE_SUPABASE_URL || '';
+  const supabaseKey = env.VITE_SUPABASE_ANON_KEY || '';
   
   if (getDataSourceMode() === 'supabase' && (!supabaseUrl || !supabaseKey)) {
-    console.warn('Supabase mode active but credentials missing. Will fallback to local/mock operations where possible.');
+    console.warn('Supabase mode active but credentials missing. Remote operations will fail closed.');
   }
 
   return { supabaseUrl, supabaseKey };

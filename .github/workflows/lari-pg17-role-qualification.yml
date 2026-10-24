@@ -4,11 +4,13 @@ on:
   pull_request:
     branches:
       - staging/supabase-staging-consistency
+      - 'review/lari-*'
   push:
     branches:
       - 'review/lari-backup-pristine-restore-*'
       - 'review/lari-b13-*'
       - 'review/lari-b15-*'
+      - 'review/lari-*'
 
 permissions:
   contents: read
@@ -95,5 +97,11 @@ jobs:
           npm run qa:auth-isolation
           npm run check:secrets
 
-      - name: 11. V1 build
+      - name: 11. Phase A functional acceptance QA
+        run: npm run qa:phase-a-functional-acceptance
+
+      - name: 12. Phase B staging source readiness QA
+        run: npm run qa:phase-b-staging-source-readiness
+
+      - name: 13. V1 build
         run: npm run build

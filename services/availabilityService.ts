@@ -90,6 +90,14 @@ export const availabilityService = {
        const catalogRepo = getAvailabilityRepository();
        const bookingRepo = getBookingRepository();
 
+       // Check staff eligibility for the requested service
+       if (serviceId) {
+         const eligibleStaff = await catalogRepo.listStaffForService(tenantId, serviceId);
+         if (eligibleStaff && eligibleStaff.length > 0 && !eligibleStaff.some(s => s.id === staffId)) {
+           return []; // Staff is not eligible for this service
+         }
+       }
+
        // 1. Fetch staff availability rules
        const rules = await catalogRepo.listAvailabilityRules(tenantId, staffId);
        
@@ -99,8 +107,11 @@ export const availabilityService = {
        let weekday = localDate.getDay(); // 0=Sunday, 1=Monday, ..., 6=Saturday
        if (weekday === 0) weekday = 7;
 
-       const rule = rules.find((r) => r.weekday === weekday && r.is_active);
-       if (!rule) return [];
+       // Prioritize staff-specific rule over tenant-wide rule
+       const staffRule = rules.find((r) => r.staffId === staffId && r.weekday === weekday);
+       const salonRule = rules.find((r) => (r.staffId == null || r.staffId === '') && r.weekday === weekday);
+       const rule = staffRule || salonRule;
+       if (!rule || !rule.is_active) return [];
 
        // 2. Fetch service duration
        const service = await getServiceCatalogRepository().getServiceById(serviceId);

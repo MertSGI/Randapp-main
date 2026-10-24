@@ -60,6 +60,8 @@ export class LocalCatalogRepository implements CatalogRepository {
           if (match) return match;
        }
     }
+    const fallback = DEMO_SERVICES.find((s: Service) => s.id === serviceId);
+    if (fallback) return fallback;
     return null;
   }
 

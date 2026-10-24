@@ -15,6 +15,7 @@ const PilotDemoEntryPage: React.FC = () => {
   }, []);
 
   const handleStartOwnerDemo = async () => {
+     pilotDemoService.enterDemoContext();
      openInNewTab('/pilot/admin');
   };
 
@@ -60,7 +61,7 @@ const PilotDemoEntryPage: React.FC = () => {
              <button 
                 onClick={() => {
                    // Ensure tenant applies in public mode
-                   localStorage.setItem('lari_active_tenant_id', DEMO_PILOT_TENANT_ID);
+                   pilotDemoService.enterDemoContext();
                    openInNewTab('/pilot/customer');
                 }}
                 className="w-full py-4 px-6 bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 text-white font-bold rounded-xl transition-colors text-center"

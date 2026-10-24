@@ -24,7 +24,7 @@ export const launchModeService = {
   getCurrentLaunchMode(): LaunchMode {
     // VITE_LAUNCH_MODE çevre değişkeni üzerinden dinamik ayar yapılabilir.
     // Varsayılan mod 'local_pre_live' olarak başlar.
-    const mode = ((import.meta as any).env.VITE_LAUNCH_MODE as LaunchMode) || 'local_pre_live';
+    const mode = ((import.meta as any).env?.VITE_LAUNCH_MODE as LaunchMode) || 'local_pre_live';
     return mode;
   },
 

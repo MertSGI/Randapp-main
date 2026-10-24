@@ -27,3 +27,7 @@ dist-ssr
 qa-screenshots/
 test-results/
 backup-artifacts/
+
+# Python cache
+__pycache__/
+*.pyc
