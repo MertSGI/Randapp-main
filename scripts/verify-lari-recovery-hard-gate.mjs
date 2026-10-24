@@ -80,13 +80,11 @@ export function evaluateP0RecoveryGate(params) {
     errors.push('GATE_VIOLATION_FORGED_FRONTEND_FLAG: Frontend flag cannot override missing recovery proofs.');
   }
 
-  const isEligible = errors.length === 0 && p0_eligible_flag === true;
-
-  return {
-    isEligible,
-    verdict: isEligible ? 'P0_RECOVERY_ACCEPTED' : 'P0_RECOVERY_HOLD',
-    errors
-  };
+  // This pure QA policy model has no authoritative, signed/verifiable
+  // owner-local restore receipt and no distinct Controller/owner SQL approval.
+  // Caller booleans and browser environment flags MUST NEVER grant P0 authority.
+  errors.push('GATE_VIOLATION_AUTHORITY_UNAVAILABLE: Signed recovery evidence and separate SQL GO not integrated.');
+  return { isEligible: false, verdict: 'P0_RECOVERY_HOLD', errors };
 }
 
 let checksPassed = 0;
@@ -212,6 +210,28 @@ assert.equal(currentRealState.verdict, 'P0_RECOVERY_HOLD', 'Current real verdict
 console.log(`✅ Case 7 PASS: Current real state confirmed strictly at ${currentRealState.verdict}.`);
 checksPassed++;
 
+// Case 8: all forged booleans are TRUE, but policy model has no authoritative
+// verified owner receipt and must NEVER produce an approval verdict.
+const forgedAllTrue = evaluateP0RecoveryGate({
+  classification: 'VERIFIED_BACKUP', restore_verified: true, p0_eligible_flag: true,
+  target_sha: PINNED_STAGING_SHA, source_project_ref: APPROVED_PROJECT_REF,
+  docker_engine_ready: true, age_identity_available: true,
+  catalog_equivalence_verified: true, frontend_flag_override: false
+});
+assert.equal(forgedAllTrue.isEligible, false);
+assert.equal(forgedAllTrue.verdict, 'P0_RECOVERY_HOLD');
+assert.ok(forgedAllTrue.errors.some(e => e.includes('AUTHORITY_UNAVAILABLE')));
+checksPassed++;
+
+// Verify the ACTUAL staging migration workflow rejects all dispatches
+// before Supabase CLI install, project link, or any remote migration command.
+const migrationYaml = fs.readFileSync(path.join(process.cwd(),
+  '.github/workflows/lari-staging-migrations.yml'), 'utf8');
+const mandatoryBlock = migrationYaml.indexOf('LARI_P0_RECOVERY_HOLD: OWNER_LOCAL_RESTORE_AND_SQL_GO_REQUIRED');
+const remoteLink = migrationYaml.indexOf('supabase link --project-ref');
+assert.ok(mandatoryBlock > 0 && remoteLink > mandatoryBlock,
+  'Active migration workflow must contain a fail-closed entry gate before remote activity');
+
 console.log('\n' + '='.repeat(76));
-console.log(`LARI MANDATORY P0 RECOVERY HARD GATE COMPLETE: ${checksPassed}/7 PASSED.`);
+console.log(`LARI MANDATORY P0 RECOVERY HARD GATE COMPLETE: ${checksPassed}/8 PASSED.`);
 console.log('='.repeat(76));

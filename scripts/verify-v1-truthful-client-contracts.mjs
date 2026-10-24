@@ -84,6 +84,13 @@ const standardEvent = communicationEventService.createCommunicationEvent({
 });
 assert.equal(standardEvent.status, 'rendered', 'Standard event must be rendered');
 assert.equal(standardEvent.providerMessageId, undefined, 'No provider message ID without server dispatch');
+const forgedClientDelivery = communicationEventService.markCommunicationSent(standardEvent.id, 'forged-provider-id');
+assert.equal(forgedClientDelivery, null, 'Browser must not attest live delivery even with fake provider ID');
+const manualDemo = communicationEventService.markCommunicationDemoAcknowledged(standardEvent.id);
+assert.ok(manualDemo, 'Owner must be able to mark a local demo review');
+assert.equal(manualDemo.status, 'rendered', 'Manual demo must never mutate delivery state to sent');
+assert.equal(manualDemo.metadata?.manualDemoAcknowledged, true, 'Manual demo flag must be separate metadata');
+assert.equal(manualDemo.providerMessageId, undefined, 'Manual demo must never invent provider receipt');
 console.log('âœ… Test 2 PASS: Event status lifecycle invariant verified.');
 passedSuites++;
 
@@ -236,9 +243,9 @@ for (const forbidden of forbiddenClaims) {
   assert.ok(!trialEnding.body.includes(forbidden), `trial_ending body must not claim "${forbidden}"`);
 }
 
-assert.ok(trialStarted.body.includes('Deneme koÅŸullarÄ± ve abonelik durumu hesabÄ±nÄ±zda gÃ¶rÃ¼ntÃ¼lenir'),
+assert.ok(trialStarted.body.includes('Deneme koşulları ve abonelik durumu hesabınızda görüntülenir'),
   'trial_started must contain safe conditional wording');
-assert.ok(trialEnding.body.includes('Deneme koÅŸullarÄ± ve abonelik durumu hesabÄ±nÄ±zda gÃ¶rÃ¼ntÃ¼lenir'),
+assert.ok(trialEnding.body.includes('Deneme koşulları ve abonelik durumu hesabınızda görüntülenir'),
   'trial_ending must contain safe conditional wording');
 
 // Check messageTemplateService rendered strings as well
@@ -249,7 +256,7 @@ const renderedTrialEndingTr = messageTemplateService.renderTemplate('trial_endin
   planName: 'Pro'
 }, 'tr');
 assert.ok(!renderedTrialEndingTr.body.includes('otomatik olarak sÃ¼reklilik kazanacaktÄ±r'), 'Rendered TR template must not promise auto-continuation');
-assert.ok(renderedTrialEndingTr.body.includes('Deneme koÅŸullarÄ± ve abonelik durumu hesabÄ±nÄ±zda gÃ¶rÃ¼ntÃ¼lenir'), 'Rendered TR template must include safe conditional wording');
+assert.ok(renderedTrialEndingTr.body.includes('Deneme koşulları ve abonelik durumu hesabınızda görüntülenir'), 'Rendered TR template must include safe conditional wording');
 
 const renderedTrialEndingEn = messageTemplateService.renderTemplate('trial_ending', 'business_owner', {
   ownerName: 'Ahmet',

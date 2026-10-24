@@ -152,19 +152,23 @@ export const communicationEventService = {
     return this.getAllEvents().filter(e => e.internalOnly);
   },
 
-  markCommunicationSent(id: string, providerMessageId?: string): CommunicationEvent | null {
+  // Browser-only clients cannot attest provider delivery. Real delivery must be
+  // recorded through a separately verified server-side provider receipt path.
+  markCommunicationSent(_id: string, _providerMessageId?: string): CommunicationEvent | null {
+    return null;
+  },
+
+  // A demo acknowledgement is local UI metadata, NEVER evidence of delivery.
+  markCommunicationDemoAcknowledged(id: string): CommunicationEvent | null {
     const events = this.getAllEvents();
     const event = events.find(e => e.id === id);
-    if (event) {
-      event.status = 'sent';
-      if (providerMessageId) {
-        event.providerMessageId = providerMessageId;
-      }
-      event.updatedAt = new Date().toISOString();
-      this.saveAllEvents(events);
-      return event;
-    }
-    return null;
+    if (!event || event.status !== 'rendered') return null;
+    const prior = (event.metadata && typeof event.metadata === 'object' && !Array.isArray(event.metadata))
+      ? event.metadata : {};
+    event.metadata = { ...prior, manualDemoAcknowledged: true };
+    event.updatedAt = new Date().toISOString();
+    this.saveAllEvents(events);
+    return event;
   },
 
   markCommunicationFailed(id: string, reason: string): CommunicationEvent | null {
