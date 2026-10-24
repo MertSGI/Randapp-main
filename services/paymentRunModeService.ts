@@ -5,83 +5,129 @@ export interface RunModeStatus {
     label: string;
     description: string;
     canRunCheckout: boolean;
+    isPaymentCollectionAuthorized: boolean;
+    isMockSimulation: boolean;
     missingBlockers: string[];
 }
 
 export class PaymentRunModeService {
+    /**
+     * Determines current operational run mode.
+     * BINDING SAFETY RULE: Browser localStorage, URL parameters, and client-side flags
+     * CANNOT grant payment collection authority.
+     */
     public getCurrentMode(): PaymentRunMode {
-        // In a real application, you would determine this based on an environment variable,
-        // config setting, or an authenticated Supabase RPC call that returns the active mode.
-        // VITE_PAYMENT_RUN_MODE might be defined locally, but generally, we want internal QA to switch it easily if needed (via local storage for now while keeping it strictly internal).
-        // Let's assume it defaults to local_dry_run if no other variables are passed.
-        
-        const envMode = (import.meta as any).env.VITE_PAYMENT_RUN_MODE as PaymentRunMode | undefined;
-        if (envMode === 'production_live' || envMode === 'sandbox_live') {
-            return envMode;
+        const env = (typeof process !== 'undefined' ? process.env : {}) as any;
+        const metaEnv = ((import.meta as any).env || {}) as any;
+        const configuredMode = metaEnv.VITE_PAYMENT_RUN_MODE || env.VITE_PAYMENT_RUN_MODE;
+
+        if (configuredMode === 'production_live') {
+            return 'production_live';
+        }
+        if (configuredMode === 'sandbox_live') {
+            return 'sandbox_live';
         }
 
-        const lsMode = localStorage.getItem('internal_run_mode') as PaymentRunMode | null;
-        if (lsMode === 'sandbox_live' || lsMode === 'production_live') {
-            return lsMode;
+        // Internal UI diagnostic preview in local storage is strictly constrained to local rehearsal:
+        // Attempting to set 'production_live' in localStorage is rejected and ignored.
+        const lsMode = (typeof localStorage !== 'undefined') ? localStorage.getItem('internal_run_mode') : null;
+        if (lsMode === 'sandbox_live') {
+            return 'sandbox_live';
         }
 
         return 'local_dry_run';
     }
 
     public setInternalDiagnosticsMode(mode: PaymentRunMode) {
-        // This should only be exposed via the Super Admin settings
+        if (typeof localStorage === 'undefined') return;
+        
+        // SECURITY GATE: Prevent localStorage tampering from claiming production_live
+        if (mode === 'production_live') {
+            console.warn('[SECURITY] Browser localStorage is prohibited from activating production_live payment mode. Falling back to local_dry_run.');
+            localStorage.removeItem('internal_run_mode');
+            return;
+        }
+
         if (mode === 'local_dry_run') {
             localStorage.removeItem('internal_run_mode');
-        } else {
-            localStorage.setItem('internal_run_mode', mode);
+        } else if (mode === 'sandbox_live') {
+            localStorage.setItem('internal_run_mode', 'sandbox_live');
         }
     }
 
-    public getStatus(blockersCount: number = 0): RunModeStatus {
+    /**
+     * Returns the authoritative status of the payment subsystem.
+     * Enforces fail-closed rules:
+     * - production_live: canRunCheckout is strictly FALSE in frontend (requires backend attestation and production release gate).
+     * - sandbox_live: canRunCheckout is strictly FALSE unless verified sandbox backend credentials are confirmed.
+     * - local_dry_run: canRunCheckout is FALSE for real money; allows safe simulated UI dry-run only.
+     */
+    public getStatus(options?: { hasVerifiedBackendConfig?: boolean; blockers?: string[] } | number): RunModeStatus {
         const mode = this.getCurrentMode();
+        let blockers: string[] = [];
+        let hasVerifiedBackend = false;
+        if (typeof options === 'number') {
+            if (options > 0) {
+                blockers = [`System reported ${options} unresolved blockers`];
+            }
+        } else if (options) {
+            blockers = options.blockers || [];
+            hasVerifiedBackend = !!options.hasVerifiedBackendConfig;
+        }
 
         switch (mode) {
             case 'production_live':
+                // Production live collection CANNOT be authorized from browser client state.
                 return {
                     mode: 'production_live',
-                    label: 'Production Live (Canlı)',
-                    description: 'Gerçek Iyzico PROD altyapısı devrede. İşlemler gerçek müşteriler için gerçekleşir.',
-                    canRunCheckout: true, // Assuming go-live triggers are passed before this is set
-                    missingBlockers: []
+                    label: 'Production Live (Kilitli / Backend Doğrulaması Gerekli)',
+                    description: 'Canlı ödeme tahsilatı tarayıcı üzerinden yetkilendirilemez. Sunucu tarafı doğrulama ve sürüm onayı gereklidir.',
+                    canRunCheckout: false,
+                    isPaymentCollectionAuthorized: false,
+                    isMockSimulation: false,
+                    missingBlockers: [
+                        'Sunucu tarafı doğrulanmış Iyzico PROD konfigürasyonu ve canlı onay belgesi mevcut değil.',
+                        'Issue #10 Prodüksiyon Yayın Engeli henüz çözülmedi.',
+                        ...blockers
+                    ]
                 };
+
             case 'sandbox_live':
+                const sandboxReady = hasVerifiedBackend && blockers.length === 0;
                 return {
                     mode: 'sandbox_live',
-                    label: 'Sandbox Live',
-                    description: 'Gerçek Supabase Edge Fonksiyonları kullanılarak Iyzico Sandbox ödeme testi ortamı. Gerçek para akışı olmaz.',
-                    canRunCheckout: blockersCount === 0,
-                    missingBlockers: blockersCount > 0 ? ['Sandbox kimlik bilgileri ve fonksiyon entegrasyonu tam değil.'] : []
+                    label: 'Sandbox Rehearsal (Test)',
+                    description: 'Iyzico Sandbox ortamı provası. Gerçek para tahsilatı yapılmaz.',
+                    canRunCheckout: sandboxReady,
+                    isPaymentCollectionAuthorized: false,
+                    isMockSimulation: false,
+                    missingBlockers: sandboxReady ? [] : [
+                        'Sandbox API anahtarları veya Edge Function entegrasyonu doğrulanmadı.',
+                        ...blockers
+                    ]
                 };
+
             case 'local_dry_run':
             default:
                 return {
                     mode: 'local_dry_run',
-                    label: 'Local Dry Run (QA Simülasyonu)',
-                    description: 'Sistem yerel QA test modunda çalışır. Dış bağlantı yapılmaz, ödeme ve abonelik senaryoları simüle edilir.',
-                    canRunCheckout: true, 
+                    label: 'Local Dry Run (Simülasyon)',
+                    description: 'Yerel UI akış provası. Harici ödeme altyapısına bağlanılmaz, hiçbir kart veya para işlemi yapılamaz.',
+                    canRunCheckout: false,
+                    isPaymentCollectionAuthorized: false,
+                    isMockSimulation: true,
                     missingBlockers: []
                 };
         }
     }
 
     /**
-     * Executes an internal mock simulation of checkout success/failure/cancel logic
-     * Useful for verifying UI paths without contacting any external service
+     * Simulates safe UI handoff for local rehearsal without contacting external services or manufacturing paid subscriptions.
      */
-    public simulateCheckoutHandoff(tenantId: string, planId: string, triggerUrl: string): string {
-        console.warn(`[PaymentRunMode: local_dry_run] Simulating checkout flow internally for tenant ${tenantId}`);
-        // Return a local URL that handles the simulation state or redirects immediately
-        // In real terms, we'd normally want to test the full lifecycle, so let's redirect them back to the Admin Dashboard
-        // appending a checkout=success or checkout=cancelled param
-        // This is safe because real validation requires Iyzico signature verification and backend validation.
-        
-        // This function intercepts startCheckout in local_dry_run
-        return `${window.location.origin}/#/admin?tab=abonelik&checkout_simulate=true`; // Specific internal route
+    public simulateCheckoutHandoff(tenantId: string, planId: string, _triggerUrl?: string): string {
+        console.warn(`[PaymentRunMode: local_dry_run] Simulating UI rehearsal internally for tenant ${tenantId}, plan: ${planId}`);
+        const origin = (typeof window !== 'undefined' && window.location) ? window.location.origin : 'https://lari.app';
+        return `${origin}/#/admin?tab=abonelik&checkout_simulate=true`;
     }
 }
 

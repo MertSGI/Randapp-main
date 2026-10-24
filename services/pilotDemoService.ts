@@ -296,5 +296,11 @@ export const pilotDemoService = {
   
   isPilotDemoActive() {
       return localStorage.getItem('lari_in_pilot_demo') === 'true';
+  },
+
+  isDemoContextReady(): boolean {
+      return localStorage.getItem('lari_in_pilot_demo') === 'true' &&
+             localStorage.getItem('lari_active_tenant_id') === DEMO_PILOT_TENANT_ID &&
+             localStorage.getItem('lari_demo_context') === 'true';
   }
 };

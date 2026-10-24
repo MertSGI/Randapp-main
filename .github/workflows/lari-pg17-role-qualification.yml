@@ -103,5 +103,15 @@ jobs:
       - name: 12. Phase B staging source readiness QA
         run: npm run qa:phase-b-staging-source-readiness
 
-      - name: 13. V1 build
+      - name: 13. Phase C payment mode safety & cryptography QA
+        run: |
+          npm run qa:payment-mode-safety
+          npm run qa:payment-security
+          npm run qa:iyzico-webhook-cryptography
+          npm run qa:subscription-lifecycle-integrity
+
+      - name: 14. Phase D routing & subdomain rehearsal QA
+        run: npm run qa:phase-d-routing-rehearsal
+
+      - name: 15. V1 build
         run: npm run build

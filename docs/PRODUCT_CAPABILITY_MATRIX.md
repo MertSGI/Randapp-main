@@ -76,3 +76,28 @@ Authoritative qualification status across core Phase A booking, availability, an
 | **12. Real External Notification Dispatch** | Live WhatsApp / SMS Providers (Netgsm, Twilio) | `EXTERNAL_DEPENDENCY_PENDING` | Pre-live safely defaults to outbox rendering; external gateway credentials required for live dispatch. |
 | **13. Real Online Card Processing** | Iyzico / Payment Gateway | `EXTERNAL_DEPENDENCY_PENDING` | Client-side simulation active; server-side tokenization and merchant keys required for real collection. |
 | **14. Supabase Staging Database Cutover** | Remote PostgreSQL 17 Staging | `EXTERNAL_DEPENDENCY_PENDING` | Tracked in Issue #10. Production cutover strictly blocked pending recovery resolution. |
+
+
+## Phase C & Phase D Product Acceptance Matrix (Controller Directive 20261024)
+
+Authoritative qualification status for Phase C (Payments, Webhooks, Subscriptions) and Phase D (Domain, Subdomain & Branch Routing):
+
+| Capability / Flow | Implementation Status | Qualification Category | Verified In Suite | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **Payment Run Mode Safety** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:payment-mode-safety` | LocalStorage cannot force `production_live`. Fails closed if backend credentials/release authorization missing. |
+| **Client Payment Adapters** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:payment-mode-safety` | Return typed `PAYMENT_PROVIDER_NOT_CONFIGURED` without manufacturing fake checkout URLs or session tokens. |
+| **Cryptographic Webhook Signature Verification** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:payment-security`, `qa:iyzico-webhook-cryptography` | Timing-safe HMAC-SHA256 calculation. Permanent deletion of `sandbox_bypass` backdoor. Missing, malformed, tampered signatures rejected. |
+| **Strict Event Classification & Failsafe** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:iyzico-webhook-cryptography` | Only explicitly classified event types accepted. Unrecognized events fail closed without state mutation. |
+| **Sanitized Webhook Logging** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:iyzico-webhook-cryptography` | Zero raw secrets, signature strings, or customer PII enter logs or audit trails. |
+| **Webhook Idempotency Protection** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` | Unique `providerEventId` checked in audit store; duplicate webhooks are ignored idempotently. |
+| **Tenant / Customer Mismatch Rejection** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` | Webhooks referencing customer ID differing from subscription record are rejected with 403 Forbidden. |
+| **Non-Existent Subscription Rejection** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` | Webhooks referencing unknown `subscriptionReferenceCode` are rejected with 404 without synthesising records. |
+| **Out-of-Order Lifecycle Protection** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` | Terminal states (`cancelled`, `expired`) cannot be resurrected to `active` via delayed or out-of-order webhooks. |
+| **Diagnostic Endpoint Authorization** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` | Public unauthenticated `diagnostic: true` probes rejected with 401 `UNAUTHENTICATED_DIAGNOSTIC_REQUEST`. |
+| **Frontend Redirect Immunity** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` | URL params (`?checkout=success`) do not mutate persistent subscription state; state only transitions on verified backend events. |
+| **Domain & Subdomain Resolution** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:phase-d-routing-rehearsal` | Normalizes hostnames, parses tenant slugs, rejects malicious Host headers and path traversal strings. |
+| **Branch Routing Rehearsal** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:phase-d-routing-rehearsal` | Maps branch paths and query parameters to specific branch contexts with tenant containment. |
+| **Router Mode Fallback** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:phase-d-routing-rehearsal` | Hash routing fallback for static preview environments and browser routing for top-level domains verified. |
+| **Real External iyzico Sandbox Interoperability** | Pending Owner Action | `PROVIDER_INTEGRATION_PENDING` | Pending live test credentials | Requires merchant subscription contract approval from iyzico. |
+| **Wildcard DNS & TLS Public Routing** | Pending Hosting Setup | `PROVIDER_INTEGRATION_PENDING` | Pending DNS CNAME mapping | Requires `*.randevulari.com` CNAME and wildcard TLS cert on CDN ingress. |
+| **Production Live Financial Processing** | Deferred Release Blocker | `NOT_TESTED` | Blocked by Issue #10 | Real credit card processing strictly deferred until PostgreSQL recovery qualification is complete. |

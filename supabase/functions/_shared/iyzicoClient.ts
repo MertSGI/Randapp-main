@@ -1,16 +1,57 @@
-// Mock iyzico client wrapper for Edge Functions
-// In a real environment, you'd use 'iyzipay' Node.js library wrapper or fetch API directly.
+// iyzico client wrapper for Edge Functions and offline testing
+// Implements cryptographic HMAC-SHA256 signature verification and payload builders.
+// Zero external network calls or secrets logging permitted.
+
+declare const Deno: any;
+declare const process: any;
+
+export interface IyzicoConfig {
+  apiKey?: string;
+  secretKey?: string;
+  baseUrl: string;
+}
+
+export type SupportedEventType =
+  | 'subscription.created'
+  | 'subscription.active'
+  | 'subscription.renewed'
+  | 'subscription.cancelled'
+  | 'subscription.past_due'
+  | 'subscription.failed'
+  | 'subscription.expired'
+  | 'checkoutform.auth'
+  | 'payment.success'
+  | 'payment.failure';
+
+export const SUPPORTED_EVENT_TYPES: readonly SupportedEventType[] = [
+  'subscription.created',
+  'subscription.active',
+  'subscription.renewed',
+  'subscription.cancelled',
+  'subscription.past_due',
+  'subscription.failed',
+  'subscription.expired',
+  'checkoutform.auth',
+  'payment.success',
+  'payment.failure'
+] as const;
 
 export const iyzicoClient = {
-  getIyzicoConfig: () => {
-    return {
-      apiKey: Deno.env.get('IYZICO_API_KEY'),
-      secretKey: Deno.env.get('IYZICO_SECRET_KEY'),
-      baseUrl: Deno.env.get('IYZICO_BASE_URL') || 'https://sandbox-api.iyzipay.com'
-    };
+  getIyzicoConfig: (): IyzicoConfig => {
+    const apiKey = typeof Deno !== 'undefined'
+      ? Deno.env.get('IYZICO_API_KEY')
+      : (typeof process !== 'undefined' ? process.env?.IYZICO_API_KEY : undefined);
+    const secretKey = typeof Deno !== 'undefined'
+      ? Deno.env.get('IYZICO_SECRET_KEY')
+      : (typeof process !== 'undefined' ? process.env?.IYZICO_SECRET_KEY : undefined);
+    const baseUrl = (typeof Deno !== 'undefined'
+      ? Deno.env.get('IYZICO_BASE_URL')
+      : (typeof process !== 'undefined' ? process.env?.IYZICO_BASE_URL : undefined)) || 'https://sandbox-api.iyzipay.com';
+
+    return { apiKey, secretKey, baseUrl };
   },
 
-  assertIyzicoSandboxConfig: () => {
+  assertIyzicoSandboxConfig: (): IyzicoConfig => {
     const config = iyzicoClient.getIyzicoConfig();
     if (!config.apiKey || !config.secretKey) {
       throw new Error("iyzico sandbox configuration is missing (API Key or Secret Key)");
@@ -18,7 +59,12 @@ export const iyzicoClient = {
     return config;
   },
 
-  hmacSha256Hex: async (message: string, secret: string) => {
+  isSupportedEventType: (eventType: any): eventType is SupportedEventType => {
+    if (!eventType || typeof eventType !== 'string') return false;
+    return (SUPPORTED_EVENT_TYPES as readonly string[]).includes(eventType);
+  },
+
+  hmacSha256Hex: async (message: string, secret: string): Promise<string> => {
     const encoder = new TextEncoder();
     const keyData = encoder.encode(secret);
     const messageData = encoder.encode(message);
@@ -37,7 +83,8 @@ export const iyzicoClient = {
     return hashHex;
   },
 
-  safeTimingEqual: (a: string, b: string) => {
+  safeTimingEqual: (a: string, b: string): boolean => {
+    if (typeof a !== 'string' || typeof b !== 'string') return false;
     if (a.length !== b.length) return false;
     let result = 0;
     for (let i = 0; i < a.length; i++) {
@@ -46,7 +93,7 @@ export const iyzicoClient = {
     return result === 0;
   },
 
-  buildSubscriptionWebhookSignaturePayload: (payload: any, secretKey: string) => {
+  buildSubscriptionWebhookSignaturePayload: (payload: any, secretKey: string): string => {
     return [
       secretKey,
       payload.merchantId || '',
@@ -57,7 +104,7 @@ export const iyzicoClient = {
     ].join('');
   },
 
-  buildHppWebhookSignaturePayload: (payload: any, secretKey: string) => {
+  buildHppWebhookSignaturePayload: (payload: any, secretKey: string): string => {
     return [
       secretKey,
       payload.iyziEventType || '',
@@ -68,7 +115,6 @@ export const iyzicoClient = {
     ].join('');
   },
   
-  // Placeholder for real iyzico subscription checkout form initialization
   createSubscriptionCheckoutSession: async (params: {
     paymentPlanReferenceCode: string;
     customer: any;
@@ -76,100 +122,121 @@ export const iyzicoClient = {
     conversationId: string;
     locale?: string;
   }) => {
-    console.log("[iyzicoClient] Preparing real sandbox request for iyzico with params:", params);
-    
-    // In a real implementation we would:
-    // 1. Generate an authorization header (IYZWS PKI/HMAC token based on api_key, secret_key, random string, and payload)
-    // 2. Base64 encode the payload if necessary or just format as JSON
-    // 3. fetch(`https://sandbox-api.iyzipay.com/v2/subscription/checkoutform/initialize`)
-    
-    const config = iyzicoClient.assertIyzicoSandboxConfig();
+    // Assert credentials present without exposing them
+    iyzicoClient.assertIyzicoSandboxConfig();
 
-    const requestBody = {
-      locale: params.locale || "tr",
-      conversationId: params.conversationId,
-      pricingPlanReferenceCode: params.paymentPlanReferenceCode,
-      subscriptionInitialStatus: "ACTIVE",
-      callbackUrl: params.callbackUrl,
-      customer: params.customer
-    };
-
-    // We keep the final network call wrapped in this clearly marked try/catch block
-    try {
-      // Simulate real call. Since we don't have exact payload signing code for Deno here,
-      // we return a controlled error instead of silently faking success, as per instructions.
-      // E.g.
-      // const response = await fetch(`${config.baseUrl}/v2/subscription/checkoutform/initialize`, {
-      //   method: 'POST',
-      //   headers: {
-      //     'Accept': 'application/json',
-      //     'Content-Type': 'application/json',
-      //     'Authorization': 'IYZWS ... (Requires proper Crypto HMAC signature)'
-      //   },
-      //   body: JSON.stringify(requestBody)
-      // });
-      
-      throw new Error("IYZICO_CRYPTO_NOT_IMPLEMENTED");
-      
-    } catch (error: any) {
-      console.error("[iyzicoClient] Edge function fetch failed. Reason: ", error.message);
-      // Return a controlled error instead of exposing secrets or faking success
-      throw new Error("Could not create iyzico sandbox checkout session");
-    }
+    // In a real implementation:
+    // Requires authorized external merchant credentials and verified provider token.
+    // As per LARI security policy, external live/sandbox transactions are disabled without attestation.
+    throw new Error("IYZICO_CRYPTO_NOT_IMPLEMENTED: Live or sandbox external network requests are disabled in current qualification phase.");
   },
 
-  verifyIyzicoSignatureV3: async (reqHeaders: Headers, payload: any) => {
-    const signature = reqHeaders.get('x-iyz-signature-v3');
-    const verifyMode = Deno.env.get('IYZICO_WEBHOOK_VERIFY_MODE');
-    
-    // Explicit internal backdoor for sandbox tests where we can't spoof headers exactly yet
-    if (!signature && verifyMode === 'sandbox_bypass') {
-      console.warn("[SECURITY] iyzico signature verification BYPASSED due to sandbox_bypass flag. Do not use in production!");
-      return true;
+  verifyIyzicoSignatureV3: async (
+    reqHeaders: Headers | Record<string, string | undefined> | Map<string, string>,
+    payload: any,
+    secretKeyOverride?: string
+  ): Promise<{ isValid: boolean; reason?: string }> => {
+    // 1. Signature header extraction - Case insensitive check
+    let signature: string | null | undefined = null;
+    if (reqHeaders && typeof (reqHeaders as any).get === 'function') {
+      signature = (reqHeaders as Headers).get('x-iyz-signature-v3')
+        || (reqHeaders as Headers).get('X-Iyz-Signature-V3')
+        || (reqHeaders as Headers).get('X-IYZ-SIGNATURE-V3');
+    } else if (reqHeaders && typeof reqHeaders === 'object') {
+      signature = (reqHeaders as Record<string, string | undefined>)['x-iyz-signature-v3']
+        || (reqHeaders as Record<string, string | undefined>)['X-Iyz-Signature-V3']
+        || (reqHeaders as Record<string, string | undefined>)['X-IYZ-SIGNATURE-V3'];
     }
 
-    if (!signature) {
-      console.error("[SECURITY] Missing x-iyz-signature-v3 header.");
-      return false;
+    // 2. Reject missing, empty, or non-string signature
+    // SECURITY: sandbox_bypass backdoor is PERMANENTLY REMOVED.
+    if (!signature || typeof signature !== 'string' || signature.trim() === '') {
+      return { isValid: false, reason: 'MISSING_SIGNATURE_HEADER' };
     }
 
-    const secretKey = iyzicoClient.getIyzicoConfig().secretKey || '';
+    // 3. Secret key check
+    const secretKey = secretKeyOverride || iyzicoClient.getIyzicoConfig().secretKey || '';
     if (!secretKey) {
-      console.error("[SECURITY] Cannot verify signature: IYZICO_SECRET_KEY missing from environment.");
-      return false;
+      return { isValid: false, reason: 'SECRET_KEY_MISSING' };
     }
 
-    // Determine event format
+    // 4. Payload validation
+    if (!payload || typeof payload !== 'object') {
+      return { isValid: false, reason: 'INVALID_PAYLOAD' };
+    }
+
+    // 5. Strict supported event classification
+    const eventType = payload.eventType || payload.iyziEventType;
+    if (!eventType || !iyzicoClient.isSupportedEventType(eventType)) {
+      return { isValid: false, reason: 'UNSUPPORTED_EVENT_TYPE' };
+    }
+
+    // 6. Format-specific message assembly
     let message = '';
     if (payload.iyziEventType || payload.token) {
       message = iyzicoClient.buildHppWebhookSignaturePayload(payload, secretKey);
-    } else {
+    } else if (payload.eventType) {
       message = iyzicoClient.buildSubscriptionWebhookSignaturePayload(payload, secretKey);
+    } else {
+      return { isValid: false, reason: 'UNRECOGNIZED_PAYLOAD_STRUCTURE' };
     }
 
+    // 7. Deterministic HMAC-SHA256 calculation
     const expectedSignature = await iyzicoClient.hmacSha256Hex(message, secretKey);
     
-    const isValid = iyzicoClient.safeTimingEqual(expectedSignature, signature);
+    // 8. Constant-time equality comparison
+    const isValid = iyzicoClient.safeTimingEqual(expectedSignature, signature.trim());
     if (!isValid) {
-      console.error("[SECURITY] Webhook signature verification failed.");
+      // NOTE: Never log expected or received signatures, or secret keys!
+      return { isValid: false, reason: 'SIGNATURE_MISMATCH' };
     }
-    return isValid;
+
+    return { isValid: true };
   },
 
-  mapIyzicoWebhookToInternalStatus: (payload: any) => {
-    const iyzicoStatus = payload?.status || payload?.eventType; 
-    // Usually iyzico events have an eventType, like 'subscription.created', 'subscription.active'
-    
-    if (iyzicoStatus?.includes('created') || iyzicoStatus?.includes('active') || iyzicoStatus === 'ACTIVE') {
+  mapIyzicoWebhookToInternalStatus: (payload: any): string => {
+    const eventType = payload?.eventType || payload?.iyziEventType;
+    const status = payload?.status;
+
+    if (!eventType && !status) return 'unknown';
+
+    if (
+      eventType === 'subscription.created' ||
+      eventType === 'subscription.active' ||
+      eventType === 'subscription.renewed' ||
+      eventType === 'payment.success' ||
+      eventType === 'checkoutform.auth' ||
+      status === 'ACTIVE' ||
+      status === 'SUCCESS'
+    ) {
       return 'active';
     }
-    if (iyzicoStatus?.includes('failed') || iyzicoStatus === 'PAST_DUE' || iyzicoStatus === 'UNPAID') {
+
+    if (
+      eventType === 'subscription.past_due' ||
+      status === 'PAST_DUE' ||
+      status === 'UNPAID'
+    ) {
       return 'past_due';
     }
-    if (iyzicoStatus?.includes('canceled') || iyzicoStatus === 'CANCELED') {
-      return 'canceled';
+
+    if (
+      eventType === 'subscription.cancelled' ||
+      eventType === 'subscription.expired' ||
+      status === 'CANCELED' ||
+      status === 'EXPIRED'
+    ) {
+      return 'cancelled';
     }
-    
-    return 'suspended';
+
+    if (
+      eventType === 'subscription.failed' ||
+      eventType === 'payment.failure' ||
+      status === 'FAILURE'
+    ) {
+      return 'past_due';
+    }
+
+    return 'unknown';
   }
 };

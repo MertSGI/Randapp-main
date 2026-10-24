@@ -23,3 +23,23 @@ This document outlines the test cases and harnesses used to validate iyzico sand
 
 ## Executing the Test Harness
 Navigate to Super Admin -> Payment Test (`/super-admin/payment-test`) and click the diagnostic test buttons to run these scenarios against the configured Edge Function URLs.
+
+
+---
+
+## Phase C Qualification Status (Controller Update 20261024)
+
+| Test Item | Status | Verification Suite |
+| :--- | :--- | :--- |
+| Mock Mode Non-Paying Checkout | `SOURCE_READY` / `MOCK_TESTED` | `qa:payment-mode-safety` |
+| Sandbox Live Credential Guard | `SOURCE_READY` / `MOCK_TESTED` | `qa:payment-mode-safety` |
+| Production Live Tamper Rejection | `SOURCE_READY` / `MOCK_TESTED` | `qa:payment-mode-safety` |
+| Client Payment Adapters Disabled | `SOURCE_READY` / `MOCK_TESTED` | `qa:payment-mode-safety` |
+| HMAC-SHA256 Signature Verification | `SOURCE_READY` / `MOCK_TESTED` | `qa:payment-security`, `qa:iyzico-webhook-cryptography` |
+| Webhook Payload Tamper Rejection | `SOURCE_READY` / `MOCK_TESTED` | `qa:iyzico-webhook-cryptography` |
+| Webhook Idempotency Check | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` |
+| Out-of-Order Lifecycle Guard | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` |
+| Customer / Tenant Mismatch Guard | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` |
+| Diagnostic Auth Protection | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` |
+| Live External Merchant Interop | `PROVIDER_INTEGRATION_PENDING` | Pending iyzico Sandbox Account Provisioning |
+| Production Card Charges | `NOT_TESTED` | Blocked by Issue #10 |

@@ -2,7 +2,7 @@
 
 **Document ID:** `LARI-DOC-PHASE-B-STAGING-CUTOVER-PROPOSAL-20261024`  
 **Status:** `PROPOSAL_ONLY — EXECUTION_STRICTLY_PROHIBITED`  
-**Related Issue:** https://github.com/MertSGI/Randapp-main/issues/11  
+**Related Active Issues:** https://github.com/MertSGI/Randapp-main/issues/11 & https://github.com/MertSGI/Randapp-main/issues/13  
 **Production Blocker Gate:** https://github.com/MertSGI/Randapp-main/issues/10  
 
 ---
@@ -11,8 +11,12 @@
 
 This document outlines the operational and architectural plan for transitioning LARİ's data layer from client-side `localStorage` to the remote Supabase PostgreSQL 17 staging database (`rwedeejhjazwjthdjzrt`).
 
-> [!CAUTION]
-> **STRICT EXECUTION BOUNDARY**: This proposal is a source-level planning artifact only. No migrations, DDL, DML, environment secret injection, or remote database cutover may be executed under this instruction. The active development workstream is decoupled from recovery, but live cutover remains strictly gated on resolution of Issue #10.
+> [!IMPORTANT]
+> **BINDING GOVERNANCE PRINCIPLES**:
+> 1. **Production Recovery Separation**: GitHub Issue #10 is strictly a **Production Release Blocker**. It blocks live production deployment, public customer traffic, and production database migrations. It does **not** block source development, preview rehearsals, or staging cutover planning.
+> 2. **Explicit Staging Authorization Gate**: Live staging SQL execution, DDL migrations, or remote data-mode activation are governed by a separate, explicit Owner and Controller authorization gate.
+> 3. **No Automatic SQL Execution**: No migrations or schema writes are authorized under product roadmap issues.
+> 4. **No Unqualified Rollback Claims**: Reverting `VITE_DATA_MODE=local` alone does not prove there are zero orphaned or divergent records if transactions succeeded remotely prior to an abort. A formal Data Reconciliation Protocol is required.
 
 ---
 
@@ -20,17 +24,17 @@ This document outlines the operational and architectural plan for transitioning 
 
 Before any live staging cutover can be scheduled:
 
-1. **Production Recovery Blocker Resolution**:
-   - Issue #10 must achieve accepted resolution or formal owner dispensation.
-   - Verified exact-SHA quarantine capture must be backed by a verified recovery receipt.
-
-2. **Source Readiness Verification**:
+1. **Production Blocker Tracking**:
+   - Issue #10 must remain OPEN and tracked exclusively as the mandatory Production release blocker until independent physical restore qualification is verified.
+2. **Dedicated Staging Cutover Authorization**:
+   - Explicit written Owner and Controller GO instruction authorizing remote database access for project `rwedeejhjazwjthdjzrt`.
+3. **Source Readiness Verification**:
    - `npm run qa:phase-a-functional-acceptance` must PASS (10/10 scenarios).
    - `npm run qa:phase-b-staging-source-readiness` must PASS (7/7 properties).
    - `npm run qa:v1-truthful-client-contracts` must PASS (8/8 contracts).
    - `npm run qa:recovery-hard-gate` must PASS.
-
-3. **Staging Environment Access Verification**:
+   - `npm run check:secrets` must PASS (zero leaked credentials).
+4. **Staging Environment Access Verification**:
    - Authenticated owner access to GitHub repository `MertSGI/Randapp-main`.
    - Authorized GitHub Environment `lari-staging-backup`.
    - Verified project identifier: `rwedeejhjazwjthdjzrt`.
@@ -59,12 +63,13 @@ When authorized by a dedicated instruction, the cutover will execute as follows:
 ```mermaid
 flowchart TD
     A["1. Pre-Flight Verification"] --> B["2. Database Schema Smoke Check"]
-    B --> C["3. Set VITE_DATA_MODE=supabase_staging"]
-    C --> D["4. Inject Staging Anon Credentials"]
-    D --> E["5. Run Disposable Staging Smoke Tests"]
-    E --> F{"Smoke Gate Passed?"}
-    F -->|Yes| G["6. Staging Live - Monitored"]
-    F -->|No| H["7. Rollback to Local Storage Mode"]
+    B --> C["3. Explicit Owner Authorization Gate"]
+    C --> D["4. Set VITE_DATA_MODE=supabase_staging"]
+    D --> E["5. Inject Staging Anon Credentials"]
+    E --> F["6. Run Disposable Staging Smoke Tests"]
+    F --> G{"Smoke Gate Passed?"}
+    G -->|Yes| H["7. Staging Live - Monitored"]
+    G -->|No| I["8. Rollback & Data Reconciliation"]
 ```
 
 ### Configuration Variables
@@ -88,7 +93,7 @@ VITE_LAUNCH_MODE=unpaid_manual_pilot
 
 1. **Anonymous Browser Protection**:
    - `VITE_SUPABASE_SERVICE_ROLE_KEY` is strictly prohibited from frontend code and build outputs.
-   - Enforced by `npm run check:secrets`.
+   - Enforced by `npm run check:secrets` and Property 4 regression suite.
 2. **RPC Security Definer Gate**:
    - Public slot generation uses `get_public_available_slots(p_slug, p_staff_id, p_service_id, p_date)`.
    - Public booking uses `create_public_booking(...)`.
@@ -113,7 +118,7 @@ VITE_LAUNCH_MODE=unpaid_manual_pilot
 
 ---
 
-## 7. Rollback & Abort Protocol
+## 7. Rollback & Data Reconciliation Protocol
 
 If any remote failure occurs during staging activation (e.g. Supabase 500 error, network timeout, migration mismatch):
 
@@ -124,14 +129,19 @@ If any remote failure occurs during staging activation (e.g. Supabase 500 error,
    VITE_DATA_MODE=local
    ```
    Rebuilding or re-deploying with `VITE_DATA_MODE=local` immediately restores client-side isolated mock operations without downtime.
-3. **Zero Orphaned Data**:
-   - Because Supabase repositories fail closed without partial fallback, no split-brain state or orphaned data is created across local and remote stores.
+3. **Mandatory Post-Abort Data Reconciliation**:
+   - Reverting the environment variable alone does **not** prove zero divergent state if transactions succeeded remotely before an abort.
+   - The following reconciliation protocol must be executed:
+     1. **Remote Audit Scan**: Query staging database for any rows created during the abort window with `created_at >= abort_start_time`.
+     2. **Quarantine / Tombstone**: Mark divergent or unconfirmed staging appointments as `cancelled_cutover_abort`.
+     3. **Local Storage Audit**: Verify client `localStorage` state has not diverged from intended mock state.
+     4. **Reconciliation Sign-Off**: Formally document zero unhandled split-brain records before resuming local mode.
 
 ---
 
-## 8. Recommendation & Next Steps
+## 8. Governance & Next Steps
 
-1. Merge PR #9 and stacked Phase A/B review branch after hosted CI qualification.
+1. Review PRs (#9, #12, Phase C/D stacked PR) remain in **DRAFT** status until formal Controller acceptance.
 2. Complete Pilot Salon onboarding in manual local mode (`VITE_DATA_MODE=local`).
 3. Maintain Issue #10 as the strict Production release blocker.
-4. Schedule staging cutover only after explicit Owner and Controller authorization.
+4. Schedule staging cutover only after explicit, separate Owner and Controller authorization.

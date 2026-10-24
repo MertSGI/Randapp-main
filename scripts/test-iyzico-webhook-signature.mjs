@@ -1,11 +1,20 @@
-import { spawnSync } from 'child_process';
+import { execSync } from 'child_process';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const testSignature = () => {
-    console.log("Mock signature test...");
-    // Since we don't have Deno installed universally in this environment, this test is simplified.
-    // In CI/CD, we'd run 'deno test' on the edge function logic.
-    console.log("Signature helper handles concatenation + hmacsha256 in Deno edge correctly.");
-    console.log("Idempotency checks deployed.");
-};
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-testSignature();
+console.log('Running LARI iyzico webhook signature verification suite...');
+
+const rootDir = path.resolve(__dirname, '..');
+try {
+  execSync('npx tsx scripts/verify-iyzico-webhook-cryptography.mjs', {
+    stdio: 'inherit',
+    cwd: rootDir
+  });
+  console.log('[SUCCESS] All iyzico webhook security & cryptographic suites passed.');
+} catch (err) {
+  console.error('[FAIL] iyzico webhook cryptographic verification failed.');
+  process.exit(1);
+}

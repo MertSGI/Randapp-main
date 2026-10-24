@@ -134,7 +134,11 @@
     "qa:v1-truthful-client-contracts": "npx tsx scripts/verify-v1-truthful-client-contracts.mjs",
     "qa:recovery-hard-gate": "node scripts/verify-lari-recovery-hard-gate.mjs",
     "qa:phase-a-functional-acceptance": "npx tsx scripts/verify-phase-a-functional-acceptance.mjs",
-    "qa:phase-b-staging-source-readiness": "npx tsx scripts/verify-phase-b-staging-source-readiness.mjs"
+    "qa:phase-b-staging-source-readiness": "npx tsx scripts/verify-phase-b-staging-source-readiness.mjs",
+    "qa:payment-mode-safety": "npx tsx scripts/verify-payment-mode-safety.mjs",
+    "qa:iyzico-webhook-cryptography": "npx tsx scripts/verify-iyzico-webhook-cryptography.mjs",
+    "qa:subscription-lifecycle-integrity": "npx tsx scripts/verify-subscription-lifecycle-integrity.mjs",
+    "qa:phase-d-routing-rehearsal": "npx tsx scripts/verify-phase-d-routing-rehearsal.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",
