@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { CommunicationEvent, CommunicationChannel, CommunicationDeliveryStatus, CommunicationEventType } from '../types';
 import { communicationEventService } from '../services/communicationEventService';
@@ -151,10 +151,7 @@ export const CommunicationOutboxPanel: React.FC<CommunicationOutboxPanelProps> =
       case 'rendered': return language === 'tr' ? 'Gönderime Hazır Kayıt' : 'Outbox Record (Ready)';
       case 'skipped': return language === 'tr' ? 'İzin Yok (Pas geçildi)' : 'Skipped (No Consent)';
       case 'sent': 
-        if (providerConfig.mode === 'local_outbox_only') {
-          return language === 'tr' ? 'Gönderim Simüle Edildi' : 'Sent (Simulated)';
-        }
-        return language === 'tr' ? 'Gönderildi / İletildi' : 'Delivered';
+        return language === 'tr' ? 'Manuel / Demo İşaretlendi' : 'Manual / Demo Flag';
       case 'failed': return language === 'tr' ? 'Hata Oluştu' : 'Failed';
       case 'cancelled': return language === 'tr' ? 'İptal Edildi' : 'Cancelled';
       default: return status;
@@ -185,7 +182,7 @@ export const CommunicationOutboxPanel: React.FC<CommunicationOutboxPanelProps> =
           </span>
           <span className="text-slate-400">|</span>
           <span className="text-slate-500 font-mono text-[10px] bg-slate-100 px-2 py-0.5 rounded">
-            {providerConfig.mode === 'local_outbox_only' ? 'Simüle (local_outbox_only)' : 'Provider Connected'}
+            {language === 'tr' ? 'Sağlayıcı: Yapılandırılmadı (NOT_CONFIGURED)' : 'Provider: Not Configured (NOT_CONFIGURED)'}
           </span>
         </div>
       </div>

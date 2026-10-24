@@ -1,131 +1,89 @@
-import { Appointment, Service } from '../types';
+﻿import { Appointment } from '../types';
 
 /**
- * MOCK EMAIL SERVICE
- * In a real application, this would call your backend API (e.g., Python/FastAPI)
- * which would then use SMTP, SendGrid, or AWS SES.
+ * EMAIL NOTIFICATION SERVICE
+ * Real provider integration must be executed server-side via verified gateway.
+ * In client/no-provider mode, resolves false without fake success or PII leakage.
  */
-export const sendBookingEmail = async (appointment: Appointment, serviceName: string, confirmationDetails: { subject: string, body: string }): Promise<boolean> => {
-  console.group("📧 Sending Email...");
-  console.log(`To: ${appointment.user_email}`);
-  console.log(`Subject: ${confirmationDetails.subject}`);
-  console.log(`Body: ${confirmationDetails.body}`);
-  console.groupEnd();
-  
-  // Simulate API Network Delay
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      console.log("✅ Email sent successfully via 'MockSMTP'");
-      resolve(true);
-    }, 800);
-  });
+export const sendBookingEmail = async (
+  _appointment: Appointment,
+  _serviceName: string,
+  _confirmationDetails: { subject: string, body: string }
+): Promise<boolean> => {
+  console.warn("ğŸ”” [Notification] Email provider not configured: message not dispatched");
+  return Promise.resolve(false);
 };
 
 /**
- * MOCK SMS SERVICE
- * In a real application, this would call your backend API
- * which would then use Twilio, SNS, or another SMS gateway.
+ * SMS NOTIFICATION SERVICE
+ * Real provider integration must be executed server-side via verified gateway.
+ * In client/no-provider mode, resolves false without fake success or PII leakage.
  */
-export const sendBookingSms = async (appointment: Appointment, serviceName: string): Promise<boolean> => {
-  const message = `LARİ: Merhaba ${appointment.user_name}, ${serviceName} randevunuz ${appointment.date} tarihinde saat ${appointment.time}'de onaylandı.`;
-  
-  console.group("📱 Sending SMS...");
-  console.log(`To: ${appointment.phone || 'No phone provided'}`);
-  console.log(`Message: ${message}`);
-  console.groupEnd();
-
-  if (!appointment.phone) return Promise.resolve(false);
-
-  // Simulate API Network Delay
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      console.log("✅ SMS sent successfully via 'MockTwilio'");
-      resolve(true);
-    }, 800);
-  });
+export const sendBookingSms = async (
+  _appointment: Appointment,
+  _serviceName: string
+): Promise<boolean> => {
+  console.warn("ğŸ”” [Notification] SMS provider not configured: message not dispatched");
+  return Promise.resolve(false);
 };
 
 /**
- * MOCK AUTOMATED WHATSAPP BACKEND SERVICE
- * In a real application, this would call your backed API (e.g., Python/Node)
- * to send a WhatsApp message silently via the WhatsApp Business API.
+ * WHATSAPP NOTIFICATION SERVICE
+ * Real provider integration must be executed server-side via verified gateway.
+ * In client/no-provider mode, resolves false without fake success or PII leakage.
  */
 export const sendAutomatedWhatsApp = async (
-  appointment: Appointment,
-  messageText: string
+  _appointment: Appointment,
+  _messageText: string
 ): Promise<boolean> => {
-  console.group("📲 Sending Automated WhatsApp...");
-  console.log(`To: ${appointment.phone || 'No phone provided'}`);
-  console.log(`Message: \n${messageText}`);
-  console.groupEnd();
-  
-  if (!appointment.phone) return Promise.resolve(false);
-
-  // Simulate API Network Delay
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      console.log("✅ Auto WhatsApp sent successfully via 'MockWhatsAppAPI'");
-      resolve(true);
-    }, 1200);
-  });
+  console.warn("ğŸ”” [Notification] WhatsApp provider not configured: message not dispatched");
+  return Promise.resolve(false);
 };
-
 
 /**
- * NON-SENDING GUEST REFERRAL NOTIFICATIONS
- * Mock notification hooks for when a customer makes a referral, the friend books, and rewards are granted.
+ * GUEST REFERRAL NOTIFICATIONS
+ * Non-sending operational event diagnostics without customer PII leakage.
  */
-export const notifyReferralBooked = async (referrerName: string, refereeName: string, campaignName: string): Promise<void> => {
-  console.group("🔔 [Notification Event] Müşteri Referans Kaydı Oluştu");
-  console.log(`Öneren: ${referrerName}`);
-  console.log(`Davet Edilen Arkadaş: ${refereeName}`);
-  console.log(`Kampanya: ${campaignName}`);
-  console.log(`Durum: Randevu Alındı (Bekliyor)`);
-  console.log(`Eylem: Randevu tamamlandığında her iki tarafa ödül tanımlanacaktır.`);
-  console.groupEnd();
+export const notifyReferralBooked = async (
+  _referrerName: string,
+  _refereeName: string,
+  _campaignName: string
+): Promise<void> => {
+  console.log("ğŸ”” [Notification Event] Referral booking recorded (pending appointment completion)");
 };
 
-export const notifyReferralCompleted = async (referrerName: string, refereeName: string, rewardDesc: string): Promise<void> => {
-  console.group("🔔 [Notification Event] Müşteri Referansı Tamamlandı!");
-  console.log(`Öneren: ${referrerName}`);
-  console.log(`Davet Edilen Arkadaş: ${refereeName}`);
-  console.log(`Ödül Hak Edişi: ${rewardDesc}`);
-  console.log(`Eylem: İşletme sahibine hak edilen ödül bildirimi ve SMS taslağı hazırlandı.`);
-  console.groupEnd();
+export const notifyReferralCompleted = async (
+  _referrerName: string,
+  _refereeName: string,
+  _rewardDesc: string
+): Promise<void> => {
+  console.log("ğŸ”” [Notification Event] Referral completed (reward qualification recorded)");
 };
 
-export const notifyReferralRewarded = async (referrerName: string, rewardDesc: string): Promise<void> => {
-  console.group("🔔 [Notification Event] Referans Ödülü Teslim Edildi");
-  console.log(`Müşteri: ${referrerName}`);
-  console.log(`Teslim Edilen Ödül: ${rewardDesc}`);
-  console.log(`SMS Taslağı: "Sayın ${referrerName}, davet ettiğiniz arkadaşınız randevusunu tamamladı! Kazandığınız '${rewardDesc}' hesabınıza tanımlandı."`);
-  console.groupEnd();
+export const notifyReferralRewarded = async (
+  _referrerName: string,
+  _rewardDesc: string
+): Promise<void> => {
+  console.log("ğŸ”” [Notification Event] Referral reward granted");
 };
 
-export const notifyCustomerRewardAvailable = async (customerId: string, rewardDesc: string): Promise<void> => {
-  console.group("🔔 [Notification Event] Müşteri Kampanya Ödülü Tanımlandı");
-  console.log(`Müşteri: ${customerId}`);
-  console.log(`Kazanılan Ödül: ${rewardDesc}`);
-  console.log(`Durum: Kullanıma Hazır (Available)`);
-  console.log(`Eylem: Randevu sırasında hak edilen indirim uygulanabilir.`);
-  console.groupEnd();
+export const notifyCustomerRewardAvailable = async (
+  _customerId: string,
+  _rewardDesc: string
+): Promise<void> => {
+  console.log("ğŸ”” [Notification Event] Customer reward available");
 };
 
-export const notifyCustomerRewardUsed = async (customerId: string, rewardDesc: string): Promise<void> => {
-  console.group("🔔 [Notification Event] Müşteri Kampanya Ödülü Kullanıldı");
-  console.log(`Müşteri: ${customerId}`);
-  console.log(`Kullanılan Ödül: ${rewardDesc}`);
-  console.log(`Durum: Kullanıldı (Used)`);
-  console.log(`Eylem: Ödül başarıyla işlem tescili aldı.`);
-  console.groupEnd();
+export const notifyCustomerRewardUsed = async (
+  _customerId: string,
+  _rewardDesc: string
+): Promise<void> => {
+  console.log("ğŸ”” [Notification Event] Customer reward redeemed");
 };
 
-export const notifyCustomerRewardExpiring = async (customerId: string, rewardDesc: string): Promise<void> => {
-  console.group("🔔 [Notification Event] Müşteri Kampanya Ödülü Süresi Doluyor");
-  console.log(`Müşteri: ${customerId}`);
-  console.log(`Yaklaşan Kayıp: ${rewardDesc}`);
-  console.log(`Durum: Süresi Yakın (Expiring)`);
-  console.log(`Eylem: Müşteriye son kullanma tarihi hatırlatma SMS taslağı tetiklendi.`);
-  console.groupEnd();
+export const notifyCustomerRewardExpiring = async (
+  _customerId: string,
+  _rewardDesc: string
+): Promise<void> => {
+  console.log("ğŸ”” [Notification Event] Customer reward expiration reminder registered");
 };
-
