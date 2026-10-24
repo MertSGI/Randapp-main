@@ -1,7 +1,9 @@
 ﻿import { BookingRepository } from './types';
 import { Appointment, CustomerProfile, CustomerMemoryNote } from '../../types';
 import { dataProvider } from '../dataProvider';
-import { normalizeEmail, normalizePhone } from '../adminCustomerService';
+const normalizeEmail = (email?: string): string => email ? email.trim().toLowerCase() : '';
+const normalizePhone = (phone?: string): string => phone ? phone.replace(/[\s\-\(\)\+]/g, '') : '';
+import { LocalCatalogRepository } from './localCatalogRepository';
 
 export class LocalBookingRepository implements BookingRepository {
   private getAppointmentsKey(tenantId: string) { return `lari:${tenantId}:appointments`; }
@@ -64,10 +66,15 @@ export class LocalBookingRepository implements BookingRepository {
   async getAppointmentById(appointmentId: string): Promise<Appointment | null> {
     for (let i = 0; i < localStorage.length; i++) {
        const key = localStorage.key(i);
-       if (key && key.includes(':appointments')) {
-          const list = JSON.parse(localStorage.getItem(key) || '[]');
-          const match = list.find((a: Appointment) => a.id === appointmentId);
-          if (match) return match;
+       if (key && key.endsWith(':appointments')) {
+          const raw = localStorage.getItem(key);
+          try {
+            const list = raw ? JSON.parse(raw) : [];
+            if (Array.isArray(list)) {
+              const match = list.find((a: Appointment) => a && a.id === appointmentId);
+              if (match) return match;
+            }
+          } catch {}
        }
     }
     return null;
@@ -76,9 +83,57 @@ export class LocalBookingRepository implements BookingRepository {
   async createAppointment(tenantId: string, input: Omit<Appointment, 'id' | 'createdAt' | 'tenantId'>): Promise<Appointment> {
     const key = this.getAppointmentsKey(tenantId);
     const existing = await dataProvider.getList<Appointment>(key) || [];
+    const catalogRepo = new LocalCatalogRepository();
+
+    // 1. Staff eligibility check
+    if (input.staffId && input.serviceId) {
+      const eligibleStaff = await catalogRepo.listStaffForService(tenantId, input.serviceId);
+      if (eligibleStaff && eligibleStaff.length > 0 && !eligibleStaff.some(s => s.id === input.staffId)) {
+        throw new Error('Staff ineligible: Selected staff cannot perform this service.');
+      }
+    }
+
+    // 2. Conflicting slot check
+    if (input.staffId && input.date && input.time) {
+      let inputDuration = 30;
+      if (input.serviceId) {
+        const s = await catalogRepo.getServiceById(input.serviceId);
+        if (s?.duration) inputDuration = s.duration;
+      }
+      const [nh, nm] = input.time.split(':').map(Number);
+      const newStart = nh * 60 + nm;
+      const newEnd = newStart + inputDuration;
+
+      const activeAppointments = existing.filter(a => {
+        const st = a.status as string;
+        return a.date === input.date &&
+               a.staffId === input.staffId &&
+               st !== 'cancelled' &&
+               st !== 'cancelled_by_customer' &&
+               st !== 'cancelled_by_salon' &&
+               st !== 'cancelled_by_system' &&
+               st !== 'no_show';
+      });
+
+      for (const apt of activeAppointments) {
+        let aptDuration = 30;
+        if (apt.serviceId) {
+          const s = await catalogRepo.getServiceById(apt.serviceId);
+          if (s?.duration) aptDuration = s.duration;
+        }
+        const [ah, am] = apt.time.split(':').map(Number);
+        const aptStart = ah * 60 + am;
+        const aptEnd = aptStart + aptDuration;
+
+        if (newStart < aptEnd && newEnd > aptStart) {
+          throw new Error('Slot conflict: Selected staff is already booked for this time window.');
+        }
+      }
+    }
+
     const newApt: Appointment = {
       ...input,
-      id: `apt_${Date.now()}`,
+      id: `apt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       tenantId,
       createdAt: new Date().toISOString(),
     };

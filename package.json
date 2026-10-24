@@ -132,7 +132,9 @@
     "qa:slug-regression": "npx tsx scripts/test-slug-regression.mjs",
     "qa:superadmin-availability-regression": "npx tsx scripts/test-superadmin-and-availability-regression.ts",
     "qa:v1-truthful-client-contracts": "npx tsx scripts/verify-v1-truthful-client-contracts.mjs",
-    "qa:recovery-hard-gate": "node scripts/verify-lari-recovery-hard-gate.mjs"
+    "qa:recovery-hard-gate": "node scripts/verify-lari-recovery-hard-gate.mjs",
+    "qa:phase-a-functional-acceptance": "npx tsx scripts/verify-phase-a-functional-acceptance.mjs",
+    "qa:phase-b-staging-source-readiness": "npx tsx scripts/verify-phase-b-staging-source-readiness.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",

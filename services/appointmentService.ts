@@ -25,7 +25,10 @@ export const createAppointment = async (tenantId: string, appointment: Omit<Appo
     
     // Generate self service token and path
     const token = await appointmentSelfServiceService.createAppointmentAccessToken(tenantId, newApt.id, 'view');
-    const manageUrl = `${window.location.protocol}//${window.location.host}/#/appointment/manage/${token}`;
+    const baseUrl = (typeof window !== 'undefined' && window.location)
+      ? `${window.location.protocol}//${window.location.host}`
+      : 'https://lari.app';
+    const manageUrl = `${baseUrl}/#/appointment/manage/${token}`;
 
     // Create customer notification event
     communicationEventService.queueCommunicationEvent({

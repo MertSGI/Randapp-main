@@ -55,3 +55,24 @@ When a user requests `booking.myhairsalon.com`, they must point a CNAME to `cust
 * **Main corporate/general booking page**: `https://{tenant-slug}.randevulari.com` (maps to the tenant's primary hub).
 * **Specific branch booking page**: `https://{tenant-slug}.randevulari.com/{branch-slug}` (or with dynamic route query parameter fallbacks). This routes the user specifically to the selected location, pre-filtering services and staff calendar availability.
 
+
+## Phase A Acceptance Matrix (Controller Directive 20261024)
+
+Authoritative qualification status across core Phase A booking, availability, anti-abuse, and operational contracts:
+
+| Scope Item | Subsystem / Function | Status | Evidence / Verification |
+| :--- | :--- | :--- | :--- |
+| **1. Available Slot Booking** | `availabilityService.getAvailableSlotsForStaff` & `createAppointment` | `VERIFIED` | Verified by `qa:phase-a-functional-acceptance` (Scenario 1). Slots generated and booked accurately. |
+| **2. Conflicting Slot Rejection** | `LocalBookingRepository.createAppointment` | `DEFECT_FOUND_AND_FIXED` | Demonstrated defect: Local repo lacked overlap checks. Fixed: checks duration overlap against active appointments and throws `Slot conflict`. Verified in Scenario 2. |
+| **3. Staff Time-Off & Hours Overrides** | `availabilityService.getAvailableSlotsForStaff` | `DEFECT_FOUND_AND_FIXED` | Demonstrated defect: Rule resolution bypassed staff overrides when salon rule existed. Fixed: prioritizes staff-specific rule over tenant-wide fallback. Verified in Scenario 3. |
+| **4. Staff Eligibility & Service Durations** | `LocalCatalogRepository`, `availabilityService`, `LocalBookingRepository` | `DEFECT_FOUND_AND_FIXED` | Demonstrated defect: Missing staff-service eligibility checks allowed unassigned bookings; `getServiceById` lacked demo fallback. Fixed & verified in Scenario 4. |
+| **5. Cancellation Without Ghost Slots** | `updateAppointmentStatus` & `availabilityService` | `VERIFIED` | Verified by `qa:phase-a-functional-acceptance` (Scenario 5). Cancelled appointments immediately release reserved time window. |
+| **6. Self-Service Token Security** | `appointmentSelfServiceService` | `VERIFIED` | Verified by `qa:phase-a-functional-acceptance` (Scenario 6). Expired/invalid tokens reject change and cancel requests. |
+| **7. Cross-Tenant Booking Isolation** | `LocalBookingRepository` & partition keys | `VERIFIED` | Verified by `qa:phase-a-functional-acceptance` (Scenario 7). Tenant A data completely isolated from Tenant B. |
+| **8. Anti-Abuse Scoping & No-Show Protection** | `bookingAbuseProtectionService` | `VERIFIED` | Verified by `qa:phase-a-functional-acceptance` (Scenario 8). Repeat no-show phone blocking is tenant-scoped without blocking innocent clients. |
+| **9. Decoupled Truthful Notifications** | `communicationEventService` & `notificationService` | `VERIFIED` | Verified by `qa:phase-a-functional-acceptance` (Scenario 9). Booking success is strictly decoupled from delivery; no false sent status. |
+| **10. Pilot Demo State Restoration** | `pilotDemoService` & `PilotDemoEntryPage` | `DEFECT_FOUND_AND_FIXED` | Demonstrated defect: Demo entry did not save previous real tenant/session. Fixed: `enterDemoContext` preserves and `exitDemoContext` restores them. Verified in Scenario 10. |
+| **11. Wildcard DNS & SSL Routing** | Infrastructure / CDN | `EXTERNAL_DEPENDENCY_PENDING` | Requires production CDN/DNS mapping for `*.randevulari.com` and `*.lari.app`. |
+| **12. Real External Notification Dispatch** | Live WhatsApp / SMS Providers (Netgsm, Twilio) | `EXTERNAL_DEPENDENCY_PENDING` | Pre-live safely defaults to outbox rendering; external gateway credentials required for live dispatch. |
+| **13. Real Online Card Processing** | Iyzico / Payment Gateway | `EXTERNAL_DEPENDENCY_PENDING` | Client-side simulation active; server-side tokenization and merchant keys required for real collection. |
+| **14. Supabase Staging Database Cutover** | Remote PostgreSQL 17 Staging | `EXTERNAL_DEPENDENCY_PENDING` | Tracked in Issue #10. Production cutover strictly blocked pending recovery resolution. |

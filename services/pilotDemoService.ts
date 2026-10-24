@@ -226,6 +226,10 @@ export const pilotDemoService = {
     localStorage.setItem('lari_active_demo_tenant_id', DEMO_PILOT_TENANT_ID);
   },
 
+  async enterDemoContext() {
+    return this.seedAndEnterDemoContext();
+  },
+
   async seedAndEnterDemoContext() {
     // First ensure the demo data itself is fully seeded
     await this.seedDemoDataOnly();

@@ -11,5 +11,20 @@ try { env = (import.meta as any).env || (globalThis as any).import?.meta?.env ||
 const supabaseUrl = env.VITE_SUPABASE_URL || 'https://mock.supabase.co';
 const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || 'mock-anon-key';
 
+if (typeof globalThis !== 'undefined' && typeof (globalThis as any).WebSocket === 'undefined') {
+  (globalThis as any).WebSocket = class MockWebSocket {
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSING = 2;
+    static readonly CLOSED = 3;
+    constructor() {}
+    addEventListener() {}
+    removeEventListener() {}
+    send() {}
+    close() {}
+  };
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
 
