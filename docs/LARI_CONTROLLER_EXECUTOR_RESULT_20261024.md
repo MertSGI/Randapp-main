@@ -60,9 +60,14 @@
 - `git diff --check`: PASSED (0 whitespace/formatting issues).
 - `vite build`: PASSED in 7.21s.
 
-### `CP5_DRAFT_PR_AND_HOSTED_CI` â€” IN_PROGRESS
+### `CP5_DRAFT_PR_AND_HOSTED_CI` â€” PASS
 - Target Branch: `staging/supabase-staging-consistency`
 - Review Branch: `review/lari-v1-source-truthfulness-20261024`
+- Draft PR: https://github.com/MertSGI/Randapp-main/pull/9
+- Hosted CI Run: https://github.com/MertSGI/Randapp-main/actions/runs/40069185288
+- Hosted Job ID: `120798725101` (`PostgreSQL 17.6 Role & Pristine Restore Qualification`)
+- Hosted CI Conclusion: **SUCCESS** (1m45s execution)
+- Vercel Preview Deployment: https://vercel.com/lari11/lari-staging/qmtbweA56xQQ9MBPfBQxFFyHftmj
 
 ### `CP6_FINAL_LEDGER`
 - Two separate evidence-backed statuses:
