@@ -104,6 +104,10 @@ export const CommunicationOutboxPanel: React.FC<CommunicationOutboxPanelProps> =
         return 'bg-amber-50 text-amber-700 border border-amber-200';
       case 'rendered':
         return 'bg-blue-50 text-blue-700 border border-blue-200';
+      case 'accepted_by_provider':
+        return 'bg-indigo-50 text-indigo-700 border border-indigo-200';
+      case 'delivered':
+        return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
       case 'skipped':
         return 'bg-slate-100 text-slate-600 border border-slate-300';
       case 'sent':
@@ -147,13 +151,15 @@ export const CommunicationOutboxPanel: React.FC<CommunicationOutboxPanelProps> =
 
   const getStatusLabel = (status: CommunicationDeliveryStatus) => {
     switch (status) {
-      case 'queued': return language === 'tr' ? 'Sırada' : 'Queued';
-      case 'rendered': return language === 'tr' ? 'Gönderime Hazır Kayıt' : 'Outbox Record (Ready)';
-      case 'skipped': return language === 'tr' ? 'İzin Yok (Pas geçildi)' : 'Skipped (No Consent)';
+      case 'queued': return language === 'tr' ? 'Sırada (Queued)' : 'Queued';
+      case 'rendered': return language === 'tr' ? 'Taslak Hazırlandı (Rendered)' : 'Outbox Record (Ready)';
+      case 'accepted_by_provider': return language === 'tr' ? 'Sağlayıcı Kabul Etti (Accepted)' : 'Accepted by Provider';
+      case 'delivered': return language === 'tr' ? 'Teslim Edildi (Doğrulanmış)' : 'Delivered (Verified)';
+      case 'skipped': return language === 'tr' ? 'İzin Yok / Pas Geçildi (Skipped)' : 'Skipped (No Consent)';
       case 'sent': 
         return language === 'tr' ? 'Eski Gönderildi Kaydı (Doğrulanmadı)' : 'Legacy Sent Flag (Unverified)';
-      case 'failed': return language === 'tr' ? 'Hata Oluştu' : 'Failed';
-      case 'cancelled': return language === 'tr' ? 'İptal Edildi' : 'Cancelled';
+      case 'failed': return language === 'tr' ? 'Hata Oluştu (Failed)' : 'Failed';
+      case 'cancelled': return language === 'tr' ? 'İptal Edildi (Cancelled)' : 'Cancelled';
       default: return status;
     }
   };
@@ -244,8 +250,10 @@ export const CommunicationOutboxPanel: React.FC<CommunicationOutboxPanelProps> =
             onChange={(e) => setStatusFilter(e.target.value)}
           >
             <option value="all">{language === 'tr' ? 'Tüm Durumlar' : 'All Statuses'}</option>
-            <option value="queued">{language === 'tr' ? 'Sırada' : 'Queued'}</option>
-            <option value="rendered">{language === 'tr' ? 'Gönderime Hazır (Outbox)' : 'Outbox (Ready)'}</option>
+            <option value="queued">{language === 'tr' ? 'Sırada (Queued)' : 'Queued'}</option>
+            <option value="rendered">{language === 'tr' ? 'Taslak Hazırlandı (Rendered)' : 'Outbox (Ready)'}</option>
+            <option value="accepted_by_provider">{language === 'tr' ? 'Sağlayıcı Kabul Etti' : 'Accepted by Provider'}</option>
+            <option value="delivered">{language === 'tr' ? 'Teslim Edildi (Doğrulandı)' : 'Delivered (Verified)'}</option>
             <option value="skipped">{language === 'tr' ? 'Pas Geçildi (İzin Yok)' : 'Skipped (No Consent)'}</option>
             <option value="sent">{language === 'tr' ? 'Eski Gönderildi Kaydı (Doğrulanmadı)' : 'Legacy Sent Flag (Unverified)'}</option>
             <option value="failed">{language === 'tr' ? 'Hatalı / Başarısız' : 'Failed'}</option>

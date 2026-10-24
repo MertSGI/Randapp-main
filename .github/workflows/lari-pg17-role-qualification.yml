@@ -113,5 +113,13 @@ jobs:
       - name: 14. Phase D routing & subdomain rehearsal QA
         run: npm run qa:phase-d-routing-rehearsal
 
-      - name: 15. V1 build
+      - name: 15. Phase E communication delivery contracts & provider rehearsal QA
+        run: |
+          npm run qa:communication-delivery-contracts
+          npm run qa:communication-provider-rehearsal
+
+      - name: 16. Phase F synthetic first-salon onboarding rehearsal QA
+        run: npm run qa:synthetic-salon-onboarding
+
+      - name: 17. V1 build
         run: npm run build

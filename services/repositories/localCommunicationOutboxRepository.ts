@@ -2,12 +2,24 @@ import { CommunicationOutboxRepository } from './types';
 
 export class LocalCommunicationOutboxRepository implements CommunicationOutboxRepository {
   private getStoredEvents(): any[] {
-    const raw = localStorage.getItem('lari_communication_events');
-    return raw ? JSON.parse(raw) : [];
+    if (typeof localStorage === 'undefined') {
+      return [];
+    }
+    try {
+      const raw = localStorage.getItem('lari_communication_events');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
   }
 
   private saveStoredEvents(events: any[]) {
-    localStorage.setItem('lari_communication_events', JSON.stringify(events));
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+    try {
+      localStorage.setItem('lari_communication_events', JSON.stringify(events));
+    } catch {}
   }
 
   async listEvents(tenantId: string): Promise<any[]> {
@@ -18,7 +30,6 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
     const events = this.getStoredEvents();
     const newEvent = {
       id: event.id || `comm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      tenantId,
       branchId: event.branchId,
       customerId: event.customerId,
       appointmentId: event.appointmentId,
@@ -35,23 +46,43 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
       updatedAt: new Date().toISOString(),
       failureReason: event.failureReason,
       internalOnly: !!event.internalOnly,
-      ...event
+      ...event,
+      // Enforce tenantId belongs to the authorized tenant and cannot be spoofed
+      tenantId: tenantId
     };
     events.unshift(newEvent);
     this.saveStoredEvents(events);
     return newEvent;
   }
 
-  async updateDeliveryStatus(tenantId: string, eventId: string, status: string, notes?: string): Promise<void> {
+  async updateDeliveryStatus(
+    tenantId: string,
+    eventId: string,
+    status: string,
+    notes?: string,
+    options?: { verifiedProviderReceipt?: boolean }
+  ): Promise<void> {
     const events = this.getStoredEvents();
     const idx = events.findIndex(e => e.id === eventId);
-    if (idx !== -1) {
-      events[idx].status = status;
-      if (notes) {
-        events[idx].failureReason = notes;
-      }
-      events[idx].updatedAt = new Date().toISOString();
-      this.saveStoredEvents(events);
+    if (idx === -1) {
+      return;
     }
+
+    // Defect E-1: Cross-tenant update check
+    if (events[idx].tenantId !== tenantId) {
+      throw new Error(`Cross-tenant outbox violation: event ${eventId} belongs to tenant ${events[idx].tenantId}, not ${tenantId}`);
+    }
+
+    // Defect E-4: Browser cannot fabricate sent or delivered status
+    if ((status === 'sent' || status === 'delivered') && !options?.verifiedProviderReceipt) {
+      throw new Error(`Browser client cannot assert delivery status '${status}' without verified provider receipt`);
+    }
+
+    events[idx].status = status;
+    if (notes) {
+      events[idx].failureReason = notes;
+    }
+    events[idx].updatedAt = new Date().toISOString();
+    this.saveStoredEvents(events);
   }
 }

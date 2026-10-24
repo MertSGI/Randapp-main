@@ -197,21 +197,51 @@ export const superAdminService = {
     };
   },
 
-  async approveGoLive(tenantId: string): Promise<boolean> {
+  async approveGoLive(tenantId: string, options?: { isRehearsal?: boolean; demoOnly?: boolean }): Promise<boolean> {
+    const isSyntheticOrRehearsal =
+      options?.isRehearsal ||
+      options?.demoOnly ||
+      tenantId.startsWith('synthetic_') ||
+      tenantId.startsWith('demo_') ||
+      tenantId.startsWith('rehearsal_') ||
+      tenantId === 'mock_tenant_1' ||
+      tenantId === 'tenant_demo';
+
+    if (isSyntheticOrRehearsal) {
+      // Phase F Rehearsal Guard: Strictly avoid live Supabase publication RPC
+      const { dataProvider } = await import('./dataProvider');
+      await dataProvider.set(`lari:${tenantId}:go_live_status`, 'DEMO_REHEARSAL_APPROVED');
+      await dataProvider.set(`lari:${tenantId}:provisioning_status`, 'live');
+
+      if (typeof localStorage !== 'undefined') {
+        const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+        const index = registeredArr.findIndex((t: any) => t.id === tenantId);
+        if (index !== -1) {
+          registeredArr[index].publicSiteStatus = 'published';
+          registeredArr[index].verificationStatus = 'approved';
+          registeredArr[index].rehearsalApproved = true;
+          localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+        }
+      }
+      return true;
+    }
+
     const mode = getDataSourceMode();
     if (mode !== 'supabase') {
        const { dataProvider } = await import('./dataProvider');
        await dataProvider.set(`lari:${tenantId}:go_live_status`, 'live');
        await dataProvider.set(`lari:${tenantId}:provisioning_status`, 'live');
        
-       const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
-       const index = registeredArr.findIndex((t: any) => t.id === tenantId);
-       if (index !== -1) {
-          registeredArr[index].publicSiteStatus = 'published';
-          registeredArr[index].verificationStatus = 'approved';
-          localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+       if (typeof localStorage !== 'undefined') {
+         const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+         const index = registeredArr.findIndex((t: any) => t.id === tenantId);
+         if (index !== -1) {
+            registeredArr[index].publicSiteStatus = 'published';
+            registeredArr[index].verificationStatus = 'approved';
+            localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+         }
        }
-       return new Promise(resolve => setTimeout(() => resolve(true), 500));
+       return new Promise(resolve => setTimeout(() => resolve(true), 100));
     }
 
     const { data, error } = await supabase.rpc('approve_and_publish_tenant', {

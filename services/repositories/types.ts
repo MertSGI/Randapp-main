@@ -120,7 +120,13 @@ export interface SelfServiceRepository {
 export interface CommunicationOutboxRepository {
   listEvents(tenantId: string): Promise<any[]>;
   enqueueEvent(tenantId: string, event: any): Promise<any>;
-  updateDeliveryStatus(tenantId: string, eventId: string, status: string, notes?: string): Promise<void>;
+  updateDeliveryStatus(
+    tenantId: string,
+    eventId: string,
+    status: string,
+    notes?: string,
+    options?: { verifiedProviderReceipt?: boolean }
+  ): Promise<void>;
 }
 
 export interface AuditEventRepository {
@@ -160,4 +166,3 @@ export interface CampaignRepository {
   listCustomerRewards(tenantId: string): Promise<CustomerCampaignReward[]>;
   saveCustomerReward(tenantId: string, reward: CustomerCampaignReward): Promise<CustomerCampaignReward>;
 }
-
