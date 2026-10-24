@@ -1,5 +1,11 @@
 # Communication Event, Message Template & Notification Outbox Architecture
 
+> [!IMPORTANT]
+> **Implementation Qualification Status**: `MOCK_TESTED` & `SOURCE_READY`
+> **Live Carrier Gateway Status**: `PROVIDER_INTEGRATION_PENDING` (Zero live SMS, WhatsApp, or Email outbound dispatches)
+> **Live Network Outbound**: `NOT_TESTED` (Strictly offline simulation harness with zero network I/O)
+
+
 LARİ utilizes a provider-agnostic, localized, and consent-aware communications architecture. This system manages, persists, templates, and logs all transactional customer alerts (WhatsApp, SMS, Email, In-App) and owner-facing operational reminders.
 
 ## 1. System Components

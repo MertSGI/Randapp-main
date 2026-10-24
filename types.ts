@@ -546,7 +546,7 @@ export type CommunicationEventType =
   | 'reschedule_request_rejected'
   | 'appointment_confirmed_by_customer';
 
-export type CommunicationDeliveryStatus = 'queued' | 'rendered' | 'skipped' | 'sent' | 'failed' | 'cancelled';
+export type CommunicationDeliveryStatus = 'queued' | 'rendered' | 'accepted_by_provider' | 'delivered' | 'skipped' | 'sent' | 'failed' | 'cancelled';
 
 export interface CommunicationEvent {
   id: string;

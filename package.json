@@ -117,7 +117,7 @@
     "qa:rls-policy-pack": "node scripts/verify-rls-policy-pack.mjs",
     "qa:iyzico-sandbox": "node scripts/verify-iyzico-sandbox-readiness.mjs",
     "qa:dns-subdomain": "node scripts/verify-dns-subdomain-readiness.mjs",
-    "qa:communication-provider-rehearsal": "node scripts/verify-communication-provider-rehearsal.mjs",
+    "qa:communication-provider-rehearsal": "npx tsx scripts/verify-communication-provider-rehearsal.mjs",
     "qa:background-jobs": "node scripts/verify-background-jobs-readiness.mjs",
     "qa:media-storage": "node scripts/verify-media-storage-readiness.mjs",
     "qa:observability-support": "node scripts/verify-observability-support-readiness.mjs",
@@ -138,7 +138,9 @@
     "qa:payment-mode-safety": "npx tsx scripts/verify-payment-mode-safety.mjs",
     "qa:iyzico-webhook-cryptography": "npx tsx scripts/verify-iyzico-webhook-cryptography.mjs",
     "qa:subscription-lifecycle-integrity": "npx tsx scripts/verify-subscription-lifecycle-integrity.mjs",
-    "qa:phase-d-routing-rehearsal": "npx tsx scripts/verify-phase-d-routing-rehearsal.mjs"
+    "qa:phase-d-routing-rehearsal": "npx tsx scripts/verify-phase-d-routing-rehearsal.mjs",
+    "qa:communication-delivery-contracts": "npx tsx scripts/verify-communication-provider-rehearsal.mjs",
+    "qa:synthetic-salon-onboarding": "npx tsx scripts/verify-synthetic-salon-onboarding.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",
