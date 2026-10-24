@@ -79,3 +79,21 @@ jobs:
 
       - name: 7. Zero-cost quarantine capture static & security QA
         run: npm run qa:zero-cost-quarantine-capture
+
+      - name: 8. V1 truthful client behavioral acceptance
+        run: npm run qa:v1-truthful-client-contracts
+
+      - name: 9. Mandatory P0 recovery hard gate
+        run: npm run qa:recovery-hard-gate
+
+      - name: 10. V1 product, auth and secrets regressions
+        run: |
+          npm run qa:notifications
+          npm run qa:all-communication-notifications
+          npm run qa:payment-run-modes
+          npm run qa:booking-self-service
+          npm run qa:auth-isolation
+          npm run check:secrets
+
+      - name: 11. V1 build
+        run: npm run build

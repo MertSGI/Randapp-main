@@ -1,4 +1,4 @@
-﻿import { Appointment } from '../types';
+import { Appointment } from '../types';
 
 /**
  * EMAIL NOTIFICATION SERVICE
@@ -10,7 +10,7 @@ export const sendBookingEmail = async (
   _serviceName: string,
   _confirmationDetails: { subject: string, body: string }
 ): Promise<boolean> => {
-  console.warn("ğŸ”” [Notification] Email provider not configured: message not dispatched");
+  console.warn("[Notification] Email provider not configured: message not dispatched");
   return Promise.resolve(false);
 };
 
@@ -23,7 +23,7 @@ export const sendBookingSms = async (
   _appointment: Appointment,
   _serviceName: string
 ): Promise<boolean> => {
-  console.warn("ğŸ”” [Notification] SMS provider not configured: message not dispatched");
+  console.warn("[Notification] SMS provider not configured: message not dispatched");
   return Promise.resolve(false);
 };
 
@@ -36,7 +36,7 @@ export const sendAutomatedWhatsApp = async (
   _appointment: Appointment,
   _messageText: string
 ): Promise<boolean> => {
-  console.warn("ğŸ”” [Notification] WhatsApp provider not configured: message not dispatched");
+  console.warn("[Notification] WhatsApp provider not configured: message not dispatched");
   return Promise.resolve(false);
 };
 
@@ -49,7 +49,7 @@ export const notifyReferralBooked = async (
   _refereeName: string,
   _campaignName: string
 ): Promise<void> => {
-  console.log("ğŸ”” [Notification Event] Referral booking recorded (pending appointment completion)");
+  console.log("[Notification Event] Referral booking recorded (pending appointment completion)");
 };
 
 export const notifyReferralCompleted = async (
@@ -57,33 +57,33 @@ export const notifyReferralCompleted = async (
   _refereeName: string,
   _rewardDesc: string
 ): Promise<void> => {
-  console.log("ğŸ”” [Notification Event] Referral completed (reward qualification recorded)");
+  console.log("[Notification Event] Referral completed (reward qualification recorded)");
 };
 
 export const notifyReferralRewarded = async (
   _referrerName: string,
   _rewardDesc: string
 ): Promise<void> => {
-  console.log("ğŸ”” [Notification Event] Referral reward granted");
+  console.log("[Notification Event] Referral reward granted");
 };
 
 export const notifyCustomerRewardAvailable = async (
   _customerId: string,
   _rewardDesc: string
 ): Promise<void> => {
-  console.log("ğŸ”” [Notification Event] Customer reward available");
+  console.log("[Notification Event] Customer reward available");
 };
 
 export const notifyCustomerRewardUsed = async (
   _customerId: string,
   _rewardDesc: string
 ): Promise<void> => {
-  console.log("ğŸ”” [Notification Event] Customer reward redeemed");
+  console.log("[Notification Event] Customer reward redeemed");
 };
 
 export const notifyCustomerRewardExpiring = async (
   _customerId: string,
   _rewardDesc: string
 ): Promise<void> => {
-  console.log("ğŸ”” [Notification Event] Customer reward expiration reminder registered");
+  console.log("[Notification Event] Customer reward expiration reminder registered");
 };

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * LARI V1 Client Truthfulness & Privacy Contracts Verification Suite
  * ============================================================================
  * Mandatory verification for WP-3:
@@ -232,9 +232,9 @@ assert.ok(trialStarted, 'trial_started template must exist');
 assert.ok(trialEnding, 'trial_ending_reminder template must exist');
 
 const forbiddenClaims = [
-  'otomatik olarak baÅŸlar',
-  'otomatik olarak baÅŸlayacak',
-  'otomatik olarak sÃ¼reklilik kazanacaktÄ±r',
+  'otomatik olarak başlar',
+  'otomatik olarak başlayacak',
+  'otomatik olarak süreklilik kazanacaktır',
   'resume automatically'
 ];
 
@@ -255,7 +255,7 @@ const renderedTrialEndingTr = messageTemplateService.renderTemplate('trial_endin
   endDate: '2026-11-01',
   planName: 'Pro'
 }, 'tr');
-assert.ok(!renderedTrialEndingTr.body.includes('otomatik olarak sÃ¼reklilik kazanacaktÄ±r'), 'Rendered TR template must not promise auto-continuation');
+assert.ok(!renderedTrialEndingTr.body.includes('otomatik olarak süreklilik kazanacaktır'), 'Rendered TR template must not promise auto-continuation');
 assert.ok(renderedTrialEndingTr.body.includes('Deneme koşulları ve abonelik durumu hesabınızda görüntülenir'), 'Rendered TR template must include safe conditional wording');
 
 const renderedTrialEndingEn = messageTemplateService.renderTemplate('trial_ending', 'business_owner', {
