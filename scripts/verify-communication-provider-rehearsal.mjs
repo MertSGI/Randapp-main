@@ -495,6 +495,65 @@ const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
   assert(expiredCall.valid === false && expiredCall.statusCode === 400, 'Scenario 18b: Expired timestamp outside replay window rejected with HTTP 400');
 }
 
+
+
+// Scenario 19: Negative coverage for fabricated receipts, cross-tenant status updates
+{
+  global.localStorage = {
+    _data: {},
+    getItem(key) { return this._data[key] || null; },
+    setItem(key, value) { this._data[key] = value; },
+    removeItem(key) { delete this._data[key]; },
+    clear() { this._data = {}; }
+  };
+  const localOutbox = new (await import('../services/repositories/localCommunicationOutboxRepository.ts')).LocalCommunicationOutboxRepository();
+  await localOutbox.enqueueEvent('tenant_alpha', {
+    id: 'scen_19_fabricated',
+    channel: 'sms',
+    recipient: '+905550000000',
+    body: 'Fabricated test',
+    status: 'queued'
+  });
+
+  // Cross-tenant update check
+  let crossTenantFailed = false;
+  try {
+    await localOutbox.updateDeliveryStatus('tenant_bravo', 'scen_19_fabricated', 'sent');
+  } catch (e) {
+    if (e.message.includes('Cross-tenant outbox violation')) crossTenantFailed = true;
+  }
+  assert(crossTenantFailed, 'Scenario 19: Cross-tenant outbox status update rejected');
+
+  // Fabricated receipt check
+  let fabricatedReceiptFailed = false;
+  try {
+    await localOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'delivered', undefined, { verifiedProviderReceipt: false });
+  } catch (e) {
+    if (e.message.includes('verified provider receipt')) fabricatedReceiptFailed = true;
+  }
+  assert(fabricatedReceiptFailed, 'Scenario 19: Fabricated client delivery status rejected');
+}
+
+// Scenario 20: Negative coverage for consent-skipped terminal behavior
+{
+  const intent = deliveryService.createIntent({
+    intentId: 'scen_20_consent_skipped',
+    tenantId: 'tenant_alpha',
+    channel: 'sms',
+    recipient: '+905559990000',
+    templateId: 'marketing_promo',
+    templateArgs: {},
+    body: 'Promo message',
+    consentGranted: false,
+    consentDenialReason: 'Customer opted out'
+  });
+
+  // Verify that a skipped intent cannot be forcibly dispatched
+  const res = await simulator.simulateDispatch(intent.intentId, { forceDispatchSkipped: true });
+  assert(res.success === false, 'Scenario 20: Force dispatch on consent-skipped intent is rejected');
+  assert(res.attempts.length === 0, 'Scenario 20: Zero attempts made despite forced dispatch attempt');
+}
+
 // Final check
 if (failCount > 0) {
   console.error(`\n❌ QA Failed: ${failCount} errors were encountered during Communication Provider & Delivery Contracts verification.`);
