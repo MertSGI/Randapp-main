@@ -63,7 +63,8 @@ checkFileContains('components/BusinessProfileTab.tsx', 'localStorage.setItem', t
 // 5. Verify tenant_id filters in all Supabase Priority 1 repositories
 checkFileContains('services/repositories/supabaseBusinessProfileRepository.ts', 'tenant_id=eq.${tenantId}');
 checkFileContains('services/repositories/supabaseCatalogRepository.ts', 'tenant_id=eq.${tenantId}');
-checkFileContains('services/repositories/supabaseBookingRepository.ts', 'tenant_id=eq.${tenantId}');
+checkFileContains('services/repositories/supabaseBookingRepository.ts', 'tenant_id=eq.${encodeURIComponent(cleanTenantId)}');
+checkFileContains('services/repositories/supabaseBookingRepository.ts', 'tenant_id=eq.${encodeURIComponent(validTenantId)}');
 
 // 6. Verify customer-appointment relationship is persisted correctly in Supabase Booking Repository
 checkFileContains('services/repositories/supabaseBookingRepository.ts', 'customer_id');
@@ -99,6 +100,22 @@ if (fs.existsSync(pricingPath)) {
 // 11. Check that Turkey strategy and LARİ branding remain intact
 checkFileContains('services/marketConfigService.ts', "brandName: 'LARİ'");
 checkFileContains('services/marketConfigService.ts', "primaryDomain: 'randevulari.com'");
+
+// 12. Verify strict tenant isolation contracts in booking repositories
+checkFileContains('services/repositories/types.ts', 'getAppointmentById(appointmentId: string, tenantId?: string)');
+checkFileContains('services/repositories/types.ts', 'updateAppointment(appointmentId: string, patch: Partial<Appointment>, tenantId?: string)');
+checkFileContains('services/repositories/types.ts', 'cancelAppointment(appointmentId: string, reason?: string, cancelledBy?: \'customer\' | \'salon\' | \'system\', tenantId?: string)');
+checkFileContains('services/repositories/types.ts', 'getCustomerById(customerId: string, tenantId?: string)');
+checkFileContains('services/repositories/types.ts', 'getCustomerMemory(customerId: string, tenantId?: string)');
+
+checkFileContains('services/repositories/supabaseBookingRepository.ts', 'assertTenantId');
+checkFileContains('services/repositories/supabaseBookingRepository.ts', 'requireTenantId');
+checkFileContains('services/repositories/supabaseBookingRepository.ts', 'Tenant isolation violation: returned appointment does not match requested tenant');
+checkFileContains('services/repositories/supabaseBookingRepository.ts', 'Tenant isolation violation: returned customer does not match requested tenant');
+
+checkFileContains('services/repositories/localBookingRepository.ts', 'getAppointmentById(appointmentId: string, tenantId?: string)');
+checkFileContains('services/repositories/localBookingRepository.ts', 'updateAppointment(appointmentId: string, patch: Partial<Appointment>, tenantId?: string)');
+checkFileContains('services/repositories/localBookingRepository.ts', 'Tenant isolation violation: cannot update appointment of another tenant');
 
 console.log('\n=== PRIORITY 1 CORE FLOWS QA VERIFICATION COMPLETED SUCCESSFULLY! ===');
 console.log('[SUCCESS] All Priority 1 Supabase readiness assertions passed perfectly!\n');

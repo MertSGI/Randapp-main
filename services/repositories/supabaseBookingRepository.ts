@@ -10,9 +10,23 @@ export interface PublicBookingResult {
   reasonCode: string;
 }
 
+export function assertTenantId(tenantId?: string, operation: string = 'operation'): string {
+  if (tenantId !== undefined && (typeof tenantId !== 'string' || !tenantId.trim())) {
+    throw new Error(`[supabaseBookingRepository] Security error: invalid or empty tenantId provided for ${operation}`);
+  }
+  return tenantId?.trim() || '';
+}
+
+export function requireTenantId(tenantId: string, operation: string = 'operation'): string {
+  if (!tenantId || typeof tenantId !== 'string' || !tenantId.trim()) {
+    throw new Error(`[supabaseBookingRepository] Security error: non-empty tenantId is required for ${operation}`);
+  }
+  return tenantId.trim();
+}
 
 export class SupabaseBookingRepository implements BookingRepository {
   async listAppointments(tenantId: string, filter?: { date?: string, upcomingOnly?: boolean, branchId?: string }): Promise<Appointment[]> {
+    const validTenantId = requireTenantId(tenantId, 'listAppointments');
     const res = await fetchSupabase('/rest/v1/rpc/get_my_tenant_appointments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -80,14 +94,22 @@ export class SupabaseBookingRepository implements BookingRepository {
     };
   }
 
-  async getAppointmentById(appointmentId: string): Promise<Appointment | null> {
-    const res = await fetchSupabase(`/rest/v1/appointments?id=eq.${appointmentId}&select=*`);
+  async getAppointmentById(appointmentId: string, tenantId?: string): Promise<Appointment | null> {
+    const cleanTenantId = assertTenantId(tenantId, 'getAppointmentById');
+    let url = `/rest/v1/appointments?id=eq.${encodeURIComponent(appointmentId)}&select=*`;
+    if (cleanTenantId) {
+      url += `&tenant_id=eq.${encodeURIComponent(cleanTenantId)}`;
+    }
+    const res = await fetchSupabase(url);
     if (!res.ok) {
       throw new Error(`Repository error getAppointmentById: HTTP ${res.status}`);
     }
     const data = await res.json();
     const a = data[0];
     if (!a) return null;
+    if (cleanTenantId && a.tenant_id && a.tenant_id !== cleanTenantId) {
+      throw new Error('[supabaseBookingRepository] Tenant isolation violation: returned appointment does not match requested tenant');
+    }
     return {
       id: a.id,
       tenantId: a.tenant_id,
@@ -113,11 +135,12 @@ export class SupabaseBookingRepository implements BookingRepository {
   }
 
   async createAppointment(tenantId: string, input: Omit<Appointment, 'id' | 'createdAt' | 'tenantId'>): Promise<Appointment> {
+    const validTenantId = requireTenantId(tenantId, 'createAppointment');
     const res = await fetchSupabase('/rest/v1/appointments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
       body: JSON.stringify({
-        tenant_id: tenantId,
+        tenant_id: validTenantId,
         customer_id: input.customerId || null,
         user_name: input.user_name,
         user_email: input.user_email,
@@ -160,8 +183,13 @@ export class SupabaseBookingRepository implements BookingRepository {
     };
   }
 
-  async updateAppointment(appointmentId: string, patch: Partial<Appointment>): Promise<Appointment | null> {
-    const res = await fetchSupabase(`/rest/v1/appointments?id=eq.${appointmentId}`, {
+  async updateAppointment(appointmentId: string, patch: Partial<Appointment>, tenantId?: string): Promise<Appointment | null> {
+    const cleanTenantId = assertTenantId(tenantId, 'updateAppointment');
+    let url = `/rest/v1/appointments?id=eq.${encodeURIComponent(appointmentId)}`;
+    if (cleanTenantId) {
+      url += `&tenant_id=eq.${encodeURIComponent(cleanTenantId)}`;
+    }
+    const res = await fetchSupabase(url, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
       body: JSON.stringify({
@@ -171,20 +199,21 @@ export class SupabaseBookingRepository implements BookingRepository {
         cancelled_by: patch.cancelledBy,
         appointment_date: patch.date,
         appointment_time: patch.time,
-      }) // simplified
+      })
     });
     if (!res.ok) throw new Error('Supabase update failed');
     const data = await res.json();
-    return data[0];
+    return data[0] || null;
   }
 
-  async cancelAppointment(appointmentId: string, reason?: string, cancelledBy?: 'customer' | 'salon' | 'system'): Promise<boolean> {
+  async cancelAppointment(appointmentId: string, reason?: string, cancelledBy?: 'customer' | 'salon' | 'system', tenantId?: string): Promise<boolean> {
+    const cleanTenantId = assertTenantId(tenantId, 'cancelAppointment');
     const res = await this.updateAppointment(appointmentId, {
       status: `cancelled${cancelledBy ? '_by_' + cancelledBy : ''}` as any,
       cancelReason: reason,
       cancelledAt: new Date().toISOString(),
       cancelledBy
-    });
+    }, cleanTenantId || undefined);
     return !!res;
   }
 
@@ -238,7 +267,6 @@ export class SupabaseBookingRepository implements BookingRepository {
     }
 
     const data = await res.json();
-    // Supabase wraps RPC results as the returned value directly
     const result = Array.isArray(data) ? data[0] : data;
 
     return {
@@ -251,7 +279,8 @@ export class SupabaseBookingRepository implements BookingRepository {
   }
 
   async listCustomers(tenantId: string): Promise<any[]> {
-    const res = await fetchSupabase(`/rest/v1/customers?tenant_id=eq.${tenantId}&select=*`);
+    const validTenantId = requireTenantId(tenantId, 'listCustomers');
+    const res = await fetchSupabase(`/rest/v1/customers?tenant_id=eq.${encodeURIComponent(validTenantId)}&select=*`);
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
       console.error(`[supabaseBookingRepository] listCustomers failed: HTTP ${res.status}`, errBody.slice(0, 300));
@@ -260,18 +289,29 @@ export class SupabaseBookingRepository implements BookingRepository {
     return res.json();
   }
 
-  async getCustomerById(customerId: string): Promise<any | null> {
-    const res = await fetchSupabase(`/rest/v1/customers?id=eq.${customerId}&select=*`);
+  async getCustomerById(customerId: string, tenantId?: string): Promise<any | null> {
+    const cleanTenantId = assertTenantId(tenantId, 'getCustomerById');
+    let url = `/rest/v1/customers?id=eq.${encodeURIComponent(customerId)}&select=*`;
+    if (cleanTenantId) {
+      url += `&tenant_id=eq.${encodeURIComponent(cleanTenantId)}`;
+    }
+    const res = await fetchSupabase(url);
     if (!res.ok) {
       throw new Error(`Repository error getCustomerById: HTTP ${res.status}`);
     }
     const data = await res.json();
-    return data[0] || null;
+    const c = data[0];
+    if (!c) return null;
+    if (cleanTenantId && c.tenant_id && c.tenant_id !== cleanTenantId) {
+      throw new Error('[supabaseBookingRepository] Tenant isolation violation: returned customer does not match requested tenant');
+    }
+    return c;
   }
 
   async findCustomerByPhoneOrEmail(tenantId: string, phone?: string, email?: string): Promise<any | null> {
+    const validTenantId = requireTenantId(tenantId, 'findCustomerByPhoneOrEmail');
     try {
-       let url = `/rest/v1/customers?tenant_id=eq.${tenantId}&select=*`;
+       let url = `/rest/v1/customers?tenant_id=eq.${encodeURIComponent(validTenantId)}&select=*`;
        if (phone && email) {
            url += `&or=(phone.eq.${phone},email.eq.${email})`;
        } else if (phone) {
@@ -286,8 +326,9 @@ export class SupabaseBookingRepository implements BookingRepository {
   }
 
   async createOrUpdateCustomer(tenantId: string, input: any): Promise<any> {
+    const validTenantId = requireTenantId(tenantId, 'createOrUpdateCustomer');
     const body = {
-        tenant_id: tenantId,
+        tenant_id: validTenantId,
         full_name: input.fullName,
         email: input.email,
         phone: input.phone,
@@ -296,10 +337,9 @@ export class SupabaseBookingRepository implements BookingRepository {
         total_appointments: input.totalAppointments,
         preferred_staff_id: input.preferredStaffId,
         last_service_id: input.lastServiceId,
-        // ignoring raw JSON memory fields for this stub
     };
     if (input.id) {
-       await fetchSupabase(`/rest/v1/customers?id=eq.${input.id}`, {
+       await fetchSupabase(`/rest/v1/customers?id=eq.${encodeURIComponent(input.id)}&tenant_id=eq.${encodeURIComponent(validTenantId)}`, {
            method: 'PATCH',
            headers: { 'Content-Type': 'application/json' },
            body: JSON.stringify(body)
@@ -316,29 +356,36 @@ export class SupabaseBookingRepository implements BookingRepository {
     }
   }
 
-  async getCustomerMemory(customerId: string): Promise<any> {
-    return this.getCustomerById(customerId);
+  async getCustomerMemory(customerId: string, tenantId?: string): Promise<any> {
+    return this.getCustomerById(customerId, tenantId);
   }
 
-  async updateCustomerMemory(customerId: string, patch: any): Promise<void> {
+  async updateCustomerMemory(customerId: string, patch: any, tenantId?: string): Promise<void> {
+    assertTenantId(tenantId, 'updateCustomerMemory');
     // Requires JSONB manipulation in Supabase. Simplified to NOOP for stub.
   }
 
-  async addCustomerNote(customerId: string, text: string, author: string): Promise<void> {
+  async addCustomerNote(customerId: string, text: string, author: string, tenantId?: string): Promise<void> {
+    const cleanTenantId = assertTenantId(tenantId, 'addCustomerNote');
+    const body: any = {
+        customer_id: customerId,
+        text,
+        created_by: author
+    };
+    if (cleanTenantId) {
+      body.tenant_id = cleanTenantId;
+    }
     await fetchSupabase('/rest/v1/customer_memory_notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            customer_id: customerId,
-            text,
-            created_by: author
-        })
+        body: JSON.stringify(body)
     });
   }
 
   async getCustomer(tenantId: string, customerId: string): Promise<any | null> {
+    const validTenantId = requireTenantId(tenantId, 'getCustomer');
     try {
-      const res = await fetchSupabase(`/rest/v1/customers?id=eq.${customerId}&tenant_id=eq.${tenantId}&select=*`);
+      const res = await fetchSupabase(`/rest/v1/customers?id=eq.${encodeURIComponent(customerId)}&tenant_id=eq.${encodeURIComponent(validTenantId)}&select=*`);
       if (!res.ok) return null;
       const data = await res.json();
       return data[0] || null;
@@ -346,7 +393,8 @@ export class SupabaseBookingRepository implements BookingRepository {
   }
 
   async updateCustomer(tenantId: string, customerId: string, patch: any): Promise<any | null> {
-    const res = await fetchSupabase(`/rest/v1/customers?id=eq.${customerId}&tenant_id=eq.${tenantId}`, {
+    const validTenantId = requireTenantId(tenantId, 'updateCustomer');
+    const res = await fetchSupabase(`/rest/v1/customers?id=eq.${encodeURIComponent(customerId)}&tenant_id=eq.${encodeURIComponent(validTenantId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
       body: JSON.stringify(patch)
@@ -357,8 +405,9 @@ export class SupabaseBookingRepository implements BookingRepository {
   }
 
   async createOrFindCustomerForBooking(tenantId: string, input: any): Promise<any> {
-    const existing = await this.findCustomerByPhoneOrEmail(tenantId, input.phone, input.email);
+    const validTenantId = requireTenantId(tenantId, 'createOrFindCustomerForBooking');
+    const existing = await this.findCustomerByPhoneOrEmail(validTenantId, input.phone, input.email);
     if (existing) return existing;
-    return this.createOrUpdateCustomer(tenantId, input);
+    return this.createOrUpdateCustomer(validTenantId, input);
   }
 }

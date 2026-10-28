@@ -63,7 +63,17 @@ export class LocalBookingRepository implements BookingRepository {
     return existing;
   }
 
-  async getAppointmentById(appointmentId: string): Promise<Appointment | null> {
+async getAppointmentById(appointmentId: string, tenantId?: string): Promise<Appointment | null> {
+    if (tenantId !== undefined && (!tenantId || !tenantId.trim())) {
+      throw new Error('[localBookingRepository] Security error: invalid or empty tenantId provided');
+    }
+    const cleanTenantId = tenantId?.trim();
+    if (cleanTenantId) {
+      const key = this.getAppointmentsKey(cleanTenantId);
+      const list = await dataProvider.getList<Appointment>(key) || [];
+      const match = list.find((a: Appointment) => a && a.id === appointmentId);
+      return match || null;
+    }
     for (let i = 0; i < localStorage.length; i++) {
        const key = localStorage.key(i);
        if (key && key.endsWith(':appointments')) {
@@ -145,9 +155,15 @@ export class LocalBookingRepository implements BookingRepository {
     return newApt;
   }
 
-  async updateAppointment(appointmentId: string, patch: Partial<Appointment>): Promise<Appointment | null> {
-    const apt = await this.getAppointmentById(appointmentId);
+async updateAppointment(appointmentId: string, patch: Partial<Appointment>, tenantId?: string): Promise<Appointment | null> {
+    if (tenantId !== undefined && (!tenantId || !tenantId.trim())) {
+      throw new Error('[localBookingRepository] Security error: invalid or empty tenantId provided');
+    }
+    const apt = await this.getAppointmentById(appointmentId, tenantId);
     if (!apt) return null;
+    if (tenantId && apt.tenantId !== tenantId) {
+      throw new Error('[localBookingRepository] Tenant isolation violation: cannot update appointment of another tenant');
+    }
     const key = this.getAppointmentsKey(apt.tenantId!);
     const existing = await dataProvider.getList<Appointment>(key) || [];
     const updated = existing.map(a => a.id === appointmentId ? { ...a, ...patch } : a);
@@ -155,14 +171,14 @@ export class LocalBookingRepository implements BookingRepository {
     return { ...apt, ...patch };
   }
 
-  async cancelAppointment(appointmentId: string, reason?: string, cancelledBy?: 'customer' | 'salon' | 'system'): Promise<boolean> {
+  async cancelAppointment(appointmentId: string, reason?: string, cancelledBy?: 'customer' | 'salon' | 'system', tenantId?: string): Promise<boolean> {
     const patch = {
-      status: `cancelled${cancelledBy ? '_by_' + cancelledBy : ''}` as any,
+      status: (cancelledBy ? `cancelled_by_${cancelledBy}` : 'cancelled') as any,
       cancelReason: reason,
       cancelledAt: new Date().toISOString(),
       cancelledBy: cancelledBy
     };
-    const updated = await this.updateAppointment(appointmentId, patch);
+    const updated = await this.updateAppointment(appointmentId, patch, tenantId);
     return !!updated;
   }
 
@@ -172,7 +188,14 @@ export class LocalBookingRepository implements BookingRepository {
     return stored ? JSON.parse(stored) : [];
   }
 
-  async getCustomerById(customerId: string): Promise<CustomerProfile | null> {
+async getCustomerById(customerId: string, tenantId?: string): Promise<CustomerProfile | null> {
+    if (tenantId !== undefined && (!tenantId || !tenantId.trim())) {
+      throw new Error('[localBookingRepository] Security error: invalid or empty tenantId provided');
+    }
+    if (tenantId) {
+      const customers = await this.listCustomers(tenantId);
+      return customers.find(c => c.id === customerId) || null;
+    }
     for (let i = 0; i < localStorage.length; i++) {
        const key = localStorage.key(i);
        if (key && key.includes('mock_tenant_customers_')) {
@@ -257,18 +280,24 @@ export class LocalBookingRepository implements BookingRepository {
     }
   }
 
-  async getCustomerMemory(customerId: string): Promise<any> {
-    return this.getCustomerById(customerId);
+async getCustomerMemory(customerId: string, tenantId?: string): Promise<any> {
+    return this.getCustomerById(customerId, tenantId);
   }
 
-  async updateCustomerMemory(customerId: string, patch: any): Promise<void> {
-    const customer = await this.getCustomerById(customerId);
+  async updateCustomerMemory(customerId: string, patch: any, tenantId?: string): Promise<void> {
+    if (tenantId !== undefined && (!tenantId || !tenantId.trim())) {
+      throw new Error('[localBookingRepository] Security error: invalid or empty tenantId provided');
+    }
+    const customer = await this.getCustomerById(customerId, tenantId);
     if (!customer) return;
     await this.createOrUpdateCustomer(customer.tenantId, { id: customerId, ...patch });
   }
 
-  async addCustomerNote(customerId: string, text: string, author: string): Promise<void> {
-    const customer = await this.getCustomerById(customerId);
+  async addCustomerNote(customerId: string, text: string, author: string, tenantId?: string): Promise<void> {
+    if (tenantId !== undefined && (!tenantId || !tenantId.trim())) {
+      throw new Error('[localBookingRepository] Security error: invalid or empty tenantId provided');
+    }
+    const customer = await this.getCustomerById(customerId, tenantId);
     if (!customer) return;
     const note: CustomerMemoryNote = {
       id: crypto.randomUUID(),
@@ -277,7 +306,7 @@ export class LocalBookingRepository implements BookingRepository {
       createdBy: author
     };
     const currentNotes = customer.internalNotes || [];
-    await this.updateCustomerMemory(customerId, { internalNotes: [...currentNotes, note] });
+    await this.updateCustomerMemory(customerId, { internalNotes: [...currentNotes, note] }, tenantId);
   }
 
   async getCustomer(tenantId: string, customerId: string): Promise<any | null> {
