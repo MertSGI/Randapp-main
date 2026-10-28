@@ -515,7 +515,13 @@ const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
     status: 'queued'
   });
 
-  // Cross-tenant update check
+  const { SupabaseCommunicationOutboxRepository } = await import('../services/repositories/supabaseCommunicationOutboxRepository.ts');
+  const supabaseOutbox = new SupabaseCommunicationOutboxRepository();
+  const originalFetch = global.fetch;
+  global.fetch = async () => { throw new Error('LIVE_NETWORK_CALL_BLOCKED'); };
+
+  try {
+    // Cross-tenant update check
   let crossTenantFailed = false;
   try {
     await localOutbox.updateDeliveryStatus('tenant_bravo', 'scen_19_fabricated', 'sent');
@@ -542,6 +548,24 @@ const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
   }
   assert(fabricatedReceiptTrueFailed, 'Scenario 19: Client delivery status with verifiedProviderReceipt: true rejected');
 
+  // Supabase check (false)
+  let supabaseFabricatedFailed = false;
+  try {
+    await supabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'delivered', undefined, { verifiedProviderReceipt: false });
+  } catch (e) {
+    if (e.message.includes('verified provider receipt')) supabaseFabricatedFailed = true;
+  }
+  assert(supabaseFabricatedFailed, 'Scenario 19: Supabase client delivery status rejected');
+
+  // Supabase check (true)
+  let supabaseFabricatedTrueFailed = false;
+  try {
+    await supabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'delivered', undefined, { verifiedProviderReceipt: true });
+  } catch (e) {
+    if (e.message.includes('verified provider receipt')) supabaseFabricatedTrueFailed = true;
+  }
+  assert(supabaseFabricatedTrueFailed, 'Scenario 19: Supabase client delivery status with verifiedProviderReceipt: true rejected');
+
   // Verify historically stored 'sent' and 'delivered' records remain readable
   global.localStorage.setItem('lari_communication_events', JSON.stringify([
     {
@@ -564,6 +588,9 @@ const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
   const historicalSent = historicalEvents.find(e => e.id === 'scen_19_historical_sent');
   assert(historicalDelivered && historicalDelivered.status === 'delivered', 'Scenario 19: Historically stored delivered records remain readable');
   assert(historicalSent && historicalSent.status === 'sent', 'Scenario 19: Historically stored sent records remain readable');
+  } finally {
+    global.fetch = originalFetch;
+  }
 }
 
 // Scenario 20: Negative coverage for consent-skipped terminal behavior

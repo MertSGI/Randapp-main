@@ -250,6 +250,30 @@ try {
 }
 assert(crossTenantFailed, 'Step 16: Cross-tenant outbox status update rejected');
 
+  const { SupabaseCommunicationOutboxRepository } = await import('../services/repositories/supabaseCommunicationOutboxRepository.ts');
+  const supabaseOutbox = new SupabaseCommunicationOutboxRepository();
+  const originalFetch = global.fetch;
+  global.fetch = async () => { throw new Error('LIVE_NETWORK_CALL_BLOCKED'); };
+  try {
+    let supabaseFabricatedFailed = false;
+    try {
+      await supabaseOutbox.updateDeliveryStatus(fixture.tenantId, 'intent_rehearsal_fabricated_03', 'delivered', undefined, { verifiedProviderReceipt: false });
+    } catch (e) {
+      if (e.message.includes('verified provider receipt')) supabaseFabricatedFailed = true;
+    }
+    assert(supabaseFabricatedFailed, 'Step 16: Supabase fabricated client delivery status rejected');
+
+    let supabaseFabricatedTrueFailed = false;
+    try {
+      await supabaseOutbox.updateDeliveryStatus(fixture.tenantId, 'intent_rehearsal_fabricated_03', 'delivered', undefined, { verifiedProviderReceipt: true });
+    } catch (e) {
+      if (e.message.includes('verified provider receipt')) supabaseFabricatedTrueFailed = true;
+    }
+    assert(supabaseFabricatedTrueFailed, 'Step 16: Supabase client delivery status with verifiedProviderReceipt: true rejected');
+  } finally {
+    global.fetch = originalFetch;
+  }
+
 // Verify historically stored 'sent' and 'delivered' records remain readable
 global.localStorage.setItem('lari_communication_events', JSON.stringify([
   {
