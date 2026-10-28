@@ -250,17 +250,28 @@ try {
 }
 assert(crossTenantFailed, 'Step 16: Cross-tenant outbox status update rejected');
 
-// Verify historically stored 'delivered' records remain readable
-global.localStorage.setItem('lari_communication_events', JSON.stringify([{
-  id: 'intent_rehearsal_historical_03',
-  tenantId: fixture.tenantId,
-  channel: 'sms',
-  status: 'delivered',
-  body: 'Historical record'
-}]));
+// Verify historically stored 'sent' and 'delivered' records remain readable
+global.localStorage.setItem('lari_communication_events', JSON.stringify([
+  {
+    id: 'intent_rehearsal_historical_delivered',
+    tenantId: fixture.tenantId,
+    channel: 'sms',
+    status: 'delivered',
+    body: 'Historical delivered record'
+  },
+  {
+    id: 'intent_rehearsal_historical_sent',
+    tenantId: fixture.tenantId,
+    channel: 'sms',
+    status: 'sent',
+    body: 'Historical sent record'
+  }
+]));
 const historicalEvents = await localOutbox.listEvents(fixture.tenantId);
-const historicalRecord = historicalEvents.find(e => e.id === 'intent_rehearsal_historical_03');
-assert(historicalRecord && historicalRecord.status === 'delivered', 'Step 16: Historically stored delivered records remain readable');
+const historicalDelivered = historicalEvents.find(e => e.id === 'intent_rehearsal_historical_delivered');
+const historicalSent = historicalEvents.find(e => e.id === 'intent_rehearsal_historical_sent');
+assert(historicalDelivered && historicalDelivered.status === 'delivered', 'Step 16: Historically stored delivered records remain readable');
+assert(historicalSent && historicalSent.status === 'sent', 'Step 16: Historically stored sent records remain readable');
 
 // [Step 17] Negative coverage for consent-skipped terminal behavior
 console.log('\n[Step 17] Negative coverage for consent-skipped messages...');

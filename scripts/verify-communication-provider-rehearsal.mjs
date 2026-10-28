@@ -542,17 +542,28 @@ const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
   }
   assert(fabricatedReceiptTrueFailed, 'Scenario 19: Client delivery status with verifiedProviderReceipt: true rejected');
 
-  // Verify historically stored 'delivered' records remain readable
-  global.localStorage.setItem('lari_communication_events', JSON.stringify([{
-    id: 'scen_19_historical',
-    tenantId: 'tenant_alpha',
-    channel: 'sms',
-    status: 'delivered',
-    body: 'Historical record'
-  }]));
+  // Verify historically stored 'sent' and 'delivered' records remain readable
+  global.localStorage.setItem('lari_communication_events', JSON.stringify([
+    {
+      id: 'scen_19_historical_delivered',
+      tenantId: 'tenant_alpha',
+      channel: 'sms',
+      status: 'delivered',
+      body: 'Historical delivered record'
+    },
+    {
+      id: 'scen_19_historical_sent',
+      tenantId: 'tenant_alpha',
+      channel: 'sms',
+      status: 'sent',
+      body: 'Historical sent record'
+    }
+  ]));
   const historicalEvents = await localOutbox.listEvents('tenant_alpha');
-  const historicalRecord = historicalEvents.find(e => e.id === 'scen_19_historical');
-  assert(historicalRecord && historicalRecord.status === 'delivered', 'Scenario 19: Historically stored delivered records remain readable');
+  const historicalDelivered = historicalEvents.find(e => e.id === 'scen_19_historical_delivered');
+  const historicalSent = historicalEvents.find(e => e.id === 'scen_19_historical_sent');
+  assert(historicalDelivered && historicalDelivered.status === 'delivered', 'Scenario 19: Historically stored delivered records remain readable');
+  assert(historicalSent && historicalSent.status === 'sent', 'Scenario 19: Historically stored sent records remain readable');
 }
 
 // Scenario 20: Negative coverage for consent-skipped terminal behavior
