@@ -599,6 +599,39 @@ const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
   assert(supabaseFabricatedTrueFailed, 'Scenario 19: Supabase client delivery status with verifiedProviderReceipt: true rejected');
   assert(mockTransportCalls.length === 0, 'Scenario 19: Zero transport calls for true receipt');
 
+  // Supabase check (sent, absent)
+  mockTransportCalls = [];
+  let supabaseFabricatedSentAbsentFailed = false;
+  try {
+    await supabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'sent');
+  } catch (e) {
+    if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedSentAbsentFailed = true;
+  }
+  assert(supabaseFabricatedSentAbsentFailed, 'Scenario 19: Supabase client sent status (absent receipt) rejected');
+  assert(mockTransportCalls.length === 0, 'Scenario 19: Zero transport calls for sent status, absent receipt');
+
+  // Supabase check (sent, false)
+  mockTransportCalls = [];
+  let supabaseFabricatedSentFailed = false;
+  try {
+    await supabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'sent', undefined, { verifiedProviderReceipt: false });
+  } catch (e) {
+    if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedSentFailed = true;
+  }
+  assert(supabaseFabricatedSentFailed, 'Scenario 19: Supabase client sent status rejected');
+  assert(mockTransportCalls.length === 0, 'Scenario 19: Zero transport calls for sent status, false receipt');
+
+  // Supabase check (sent, true)
+  mockTransportCalls = [];
+  let supabaseFabricatedSentTrueFailed = false;
+  try {
+    await supabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'sent', undefined, { verifiedProviderReceipt: true });
+  } catch (e) {
+    if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedSentTrueFailed = true;
+  }
+  assert(supabaseFabricatedSentTrueFailed, 'Scenario 19: Supabase client sent status with verifiedProviderReceipt: true rejected');
+  assert(mockTransportCalls.length === 0, 'Scenario 19: Zero transport calls for sent status, true receipt');
+
   // Tenant-scoped updates
   mockTransportCalls = [];
   await supabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'queued');

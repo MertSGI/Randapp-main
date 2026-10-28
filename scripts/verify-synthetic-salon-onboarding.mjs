@@ -301,6 +301,36 @@ assert(crossTenantFailed, 'Step 16: Cross-tenant outbox status update rejected')
     }
     assert(supabaseFabricatedTrueFailed, 'Step 16: Supabase client delivery status with verifiedProviderReceipt: true rejected');
     assert(mockTransportCalls.length === 0, 'Step 16: Zero transport calls for true receipt');
+
+    mockTransportCalls = [];
+    let supabaseFabricatedSentAbsentFailed = false;
+    try {
+      await supabaseOutbox.updateDeliveryStatus(fixture.tenantId, 'intent_rehearsal_fabricated_03', 'sent');
+    } catch (e) {
+      if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedSentAbsentFailed = true;
+    }
+    assert(supabaseFabricatedSentAbsentFailed, 'Step 16: Supabase fabricated client sent status (absent receipt) rejected');
+    assert(mockTransportCalls.length === 0, 'Step 16: Zero transport calls for sent status, absent receipt');
+
+    mockTransportCalls = [];
+    let supabaseFabricatedSentFailed = false;
+    try {
+      await supabaseOutbox.updateDeliveryStatus(fixture.tenantId, 'intent_rehearsal_fabricated_03', 'sent', undefined, { verifiedProviderReceipt: false });
+    } catch (e) {
+      if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedSentFailed = true;
+    }
+    assert(supabaseFabricatedSentFailed, 'Step 16: Supabase fabricated client sent status rejected');
+    assert(mockTransportCalls.length === 0, 'Step 16: Zero transport calls for sent status, false receipt');
+
+    mockTransportCalls = [];
+    let supabaseFabricatedSentTrueFailed = false;
+    try {
+      await supabaseOutbox.updateDeliveryStatus(fixture.tenantId, 'intent_rehearsal_fabricated_03', 'sent', undefined, { verifiedProviderReceipt: true });
+    } catch (e) {
+      if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedSentTrueFailed = true;
+    }
+    assert(supabaseFabricatedSentTrueFailed, 'Step 16: Supabase client sent status with verifiedProviderReceipt: true rejected');
+    assert(mockTransportCalls.length === 0, 'Step 16: Zero transport calls for sent status, true receipt');
   } finally {
   }
 
