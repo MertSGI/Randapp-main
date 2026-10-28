@@ -76,22 +76,22 @@ export interface CatalogRepository {
 
 export interface BookingRepository {
   listAppointments(tenantId: string, filter?: { date?: string, upcomingOnly?: boolean }): Promise<Appointment[]>;
-  getAppointmentById(appointmentId: string): Promise<Appointment | null>;
+  getAppointmentById(appointmentId: string, tenantId?: string): Promise<Appointment | null>;
   createAppointment(tenantId: string, input: Omit<Appointment, 'id' | 'createdAt' | 'tenantId'>): Promise<Appointment>;
-  updateAppointment(appointmentId: string, patch: Partial<Appointment>): Promise<Appointment | null>;
-  cancelAppointment(appointmentId: string, reason?: string, cancelledBy?: 'customer' | 'salon' | 'system'): Promise<boolean>;
+  updateAppointment(appointmentId: string, patch: Partial<Appointment>, tenantId?: string): Promise<Appointment | null>;
+  cancelAppointment(appointmentId: string, reason?: string, cancelledBy?: 'customer' | 'salon' | 'system', tenantId?: string): Promise<boolean>;
   
   listCustomers(tenantId: string): Promise<any[]>;
-  getCustomerById(customerId: string): Promise<any | null>;
+  getCustomerById(customerId: string, tenantId?: string): Promise<any | null>;
   findCustomerByPhoneOrEmail(tenantId: string, phone?: string, email?: string): Promise<any | null>;
   createOrUpdateCustomer(tenantId: string, input: any): Promise<any>;
   createOrFindCustomerForBooking(tenantId: string, input: any): Promise<any>;
   getCustomer(tenantId: string, customerId: string): Promise<any | null>;
   updateCustomer(tenantId: string, customerId: string, patch: any): Promise<any | null>;
   
-  getCustomerMemory(customerId: string): Promise<any>;
-  updateCustomerMemory(customerId: string, patch: any): Promise<void>;
-  addCustomerNote(customerId: string, text: string, author: string): Promise<void>;
+  getCustomerMemory(customerId: string, tenantId?: string): Promise<any>;
+  updateCustomerMemory(customerId: string, patch: any, tenantId?: string): Promise<void>;
+  addCustomerNote(customerId: string, text: string, author: string, tenantId?: string): Promise<void>;
 }
 
 export interface SubscriptionRepository {
