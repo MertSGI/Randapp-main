@@ -74,7 +74,7 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
     }
 
     // Defect E-4: Browser cannot fabricate sent or delivered status
-    if ((status === 'sent' || status === 'delivered') && !options?.verifiedProviderReceipt) {
+    if (status === 'sent' || status === 'delivered') {
       throw new Error(`Browser client cannot assert delivery status '${status}' without verified provider receipt`);
     }
 

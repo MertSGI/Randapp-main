@@ -206,13 +206,108 @@ for (const vp of viewports) {
 const adminOnboardSrc = fs.readFileSync(path.join(process.cwd(), 'pages', 'super-admin', 'SuperAdminOnboardingPage.tsx'), 'utf8');
 assert(adminOnboardSrc.includes('md:hidden') && adminOnboardSrc.includes('hidden md:block'), 'Step 15: SuperAdminOnboardingPage defines separate mobile cards and desktop table views');
 
+
+
+// [Step 16] Fabricated Outbox Receipts and Skipped Intents
+console.log('\n[Step 16] Negative coverage for fabricated receipts...');
+global.localStorage = {
+  _data: {},
+  getItem(key) { return this._data[key] || null; },
+  setItem(key, value) { this._data[key] = value; },
+  removeItem(key) { delete this._data[key]; },
+  clear() { this._data = {}; }
+};
+const localOutbox = new (await import('../services/repositories/localCommunicationOutboxRepository.ts')).LocalCommunicationOutboxRepository();
+await localOutbox.enqueueEvent(fixture.tenantId, {
+  id: 'intent_rehearsal_fabricated_03',
+  channel: 'sms',
+  recipient: booking1.customerPhone,
+  body: 'Test',
+  status: 'queued'
+});
+
+let fabricatedFailed = false;
+try {
+  await localOutbox.updateDeliveryStatus(fixture.tenantId, 'intent_rehearsal_fabricated_03', 'delivered', undefined, { verifiedProviderReceipt: false });
+} catch (e) {
+  if (e.message.includes('verified provider receipt')) fabricatedFailed = true;
+}
+assert(fabricatedFailed, 'Step 16: Fabricated client delivery status rejected');
+
+let fabricatedTrueFailed = false;
+try {
+  await localOutbox.updateDeliveryStatus(fixture.tenantId, 'intent_rehearsal_fabricated_03', 'delivered', undefined, { verifiedProviderReceipt: true });
+} catch (e) {
+  if (e.message.includes('verified provider receipt')) fabricatedTrueFailed = true;
+}
+assert(fabricatedTrueFailed, 'Step 16: Client delivery status with verifiedProviderReceipt: true rejected');
+
+let crossTenantFailed = false;
+try {
+  await localOutbox.updateDeliveryStatus('some_other_tenant', 'intent_rehearsal_fabricated_03', 'delivered', undefined, { verifiedProviderReceipt: true });
+} catch (e) {
+  if (e.message.includes('Cross-tenant outbox violation')) crossTenantFailed = true;
+}
+assert(crossTenantFailed, 'Step 16: Cross-tenant outbox status update rejected');
+
+// Verify historically stored 'sent' and 'delivered' records remain readable
+global.localStorage.setItem('lari_communication_events', JSON.stringify([
+  {
+    id: 'intent_rehearsal_historical_delivered',
+    tenantId: fixture.tenantId,
+    channel: 'sms',
+    status: 'delivered',
+    body: 'Historical delivered record'
+  },
+  {
+    id: 'intent_rehearsal_historical_sent',
+    tenantId: fixture.tenantId,
+    channel: 'sms',
+    status: 'sent',
+    body: 'Historical sent record'
+  }
+]));
+const historicalEvents = await localOutbox.listEvents(fixture.tenantId);
+const historicalDelivered = historicalEvents.find(e => e.id === 'intent_rehearsal_historical_delivered');
+const historicalSent = historicalEvents.find(e => e.id === 'intent_rehearsal_historical_sent');
+assert(historicalDelivered && historicalDelivered.status === 'delivered', 'Step 16: Historically stored delivered records remain readable');
+assert(historicalSent && historicalSent.status === 'sent', 'Step 16: Historically stored sent records remain readable');
+
+// [Step 17] Negative coverage for consent-skipped terminal behavior
+console.log('\n[Step 17] Negative coverage for consent-skipped messages...');
+const intentSkipped = deliveryService.createIntent({
+  intentId: 'intent_rehearsal_skipped_04',
+  tenantId: fixture.tenantId,
+  branchId: branch.id,
+  channel: 'sms',
+  recipient: booking2.customerPhone,
+  templateId: 'booking_confirmed',
+  templateArgs: { customerName: booking2.customerName, salonName: fixture.businessName },
+  body: `Test`,
+  consentGranted: false,
+  consentDenialReason: 'Customer denied contact consent'
+});
+let forceDispatchFailed = false;
+try {
+  deliveryService.queueIntent(intentSkipped.intentId);
+} catch (e) {
+  forceDispatchFailed = true;
+}
+assert(forceDispatchFailed, 'Step 17: Attempt to queue skipped intent explicitly throws error');
+
+const simulator = new (await import('../services/offlineCommunicationProviderSimulator.js')).OfflineCommunicationProviderSimulator(deliveryService, { isSimulation: true });
+const dispatchResult = await simulator.simulateDispatch(intentSkipped.intentId);
+assert(dispatchResult.success === false, 'Step 17: Simulator blocks dispatch of consent-skipped intent');
+assert(dispatchResult.attempts.length === 0, 'Step 17: Zero dispatch attempts made for consent-skipped intent');
+assert(deliveryService.getIntent(intentSkipped.intentId).status === 'skipped', 'Step 17: Intent status remains skipped');
+
 // Terminal State
 console.log('\n============================================================================');
 if (failCount > 0) {
   console.error(`❌ Phase F Rehearsal QA Failed: ${failCount} errors.`);
   process.exit(1);
 } else {
-  console.log(`🎉 SYNTHETIC_PILOT_REHEARSAL_PASSED (15/15 Journey Steps Verified, ${passCount} checks passed).`);
+  console.log(`🎉 SYNTHETIC_PILOT_REHEARSAL_PASSED (17/17 Journey Steps Verified, ${passCount} checks passed).`);
   console.log('Terminal State: LARI_PHASE_E_COMMUNICATION_SOURCE_QUALIFIED_AND_PHASE_F_SYNTHETIC_ONBOARDING_READY');
   console.log('============================================================================');
   process.exit(0);
