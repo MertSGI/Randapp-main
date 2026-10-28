@@ -2,9 +2,11 @@ import { CommunicationOutboxRepository } from './types';
 import { fetchSupabase } from './supabaseClient';
 
 export class SupabaseCommunicationOutboxRepository implements CommunicationOutboxRepository {
+  constructor(private transport: typeof fetchSupabase = fetchSupabase) {}
+
   async listEvents(tenantId: string): Promise<any[]> {
     try {
-      const res = await fetchSupabase(`/rest/v1/communication_outbox?tenant_id=eq.${tenantId}&select=*`);
+      const res = await this.transport(`/rest/v1/communication_outbox?tenant_id=eq.${tenantId}&select=*`);
       if (!res.ok) return [];
       const data = await res.json();
       return data.map((e: any) => {
@@ -58,7 +60,7 @@ export class SupabaseCommunicationOutboxRepository implements CommunicationOutbo
       ...(isSkipped ? { skipped: true, terminalStatus: 'skipped', failureReason: event.failureReason || 'SKIPPED_CONSENT_DENIED' } : {})
     };
 
-    const res = await fetchSupabase('/rest/v1/communication_outbox', {
+    const res = await this.transport('/rest/v1/communication_outbox', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
       body: JSON.stringify({
@@ -102,7 +104,7 @@ export class SupabaseCommunicationOutboxRepository implements CommunicationOutbo
   ): Promise<void> {
     // Defect E-4: Browser cannot fabricate sent or delivered status
     if (status === 'sent' || status === 'delivered') {
-      throw new Error(`Browser client cannot assert delivery status '${status}' without verified provider receipt`);
+      throw new Error(`Browser client cannot assert delivery status '${status}' regardless of receipt metadata`);
     }
 
     let dbStatus = status;
@@ -111,7 +113,7 @@ export class SupabaseCommunicationOutboxRepository implements CommunicationOutbo
     }
 
     // Defect E-5: Scope query by both id and tenant_id, and do not swallow errors
-    const res = await fetchSupabase(`/rest/v1/communication_outbox?id=eq.${eventId}&tenant_id=eq.${tenantId}`, {
+    const res = await this.transport(`/rest/v1/communication_outbox?id=eq.${eventId}&tenant_id=eq.${tenantId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
