@@ -250,6 +250,90 @@ try {
 }
 assert(crossTenantFailed, 'Step 16: Cross-tenant outbox status update rejected');
 
+  const { SupabaseCommunicationOutboxRepository } = await import('../services/repositories/supabaseCommunicationOutboxRepository.ts');
+  let mockTransportCalls = [];
+  const mockTransport = async (path, options) => {
+    mockTransportCalls.push({ path, options });
+    return {
+      ok: true,
+      json: async () => [{
+        id: 'mock_id',
+        tenant_id: fixture.tenantId,
+        recipient: '+905550000000',
+        channel: 'sms',
+        message: 'Mock test',
+        status: 'queued',
+        metadata: {},
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }]
+    };
+  };
+  const supabaseOutbox = new SupabaseCommunicationOutboxRepository(mockTransport);
+
+  try {
+    mockTransportCalls = [];
+    let supabaseFabricatedAbsentFailed = false;
+    try {
+      await supabaseOutbox.updateDeliveryStatus(fixture.tenantId, 'intent_rehearsal_fabricated_03', 'delivered');
+    } catch (e) {
+      if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedAbsentFailed = true;
+    }
+    assert(supabaseFabricatedAbsentFailed, 'Step 16: Supabase fabricated client delivery status (absent receipt) rejected');
+    assert(mockTransportCalls.length === 0, 'Step 16: Zero transport calls for absent receipt');
+
+    mockTransportCalls = [];
+    let supabaseFabricatedFailed = false;
+    try {
+      await supabaseOutbox.updateDeliveryStatus(fixture.tenantId, 'intent_rehearsal_fabricated_03', 'delivered', undefined, { verifiedProviderReceipt: false });
+    } catch (e) {
+      if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedFailed = true;
+    }
+    assert(supabaseFabricatedFailed, 'Step 16: Supabase fabricated client delivery status rejected');
+    assert(mockTransportCalls.length === 0, 'Step 16: Zero transport calls for false receipt');
+
+    mockTransportCalls = [];
+    let supabaseFabricatedTrueFailed = false;
+    try {
+      await supabaseOutbox.updateDeliveryStatus(fixture.tenantId, 'intent_rehearsal_fabricated_03', 'delivered', undefined, { verifiedProviderReceipt: true });
+    } catch (e) {
+      if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedTrueFailed = true;
+    }
+    assert(supabaseFabricatedTrueFailed, 'Step 16: Supabase client delivery status with verifiedProviderReceipt: true rejected');
+    assert(mockTransportCalls.length === 0, 'Step 16: Zero transport calls for true receipt');
+
+    mockTransportCalls = [];
+    let supabaseFabricatedSentAbsentFailed = false;
+    try {
+      await supabaseOutbox.updateDeliveryStatus(fixture.tenantId, 'intent_rehearsal_fabricated_03', 'sent');
+    } catch (e) {
+      if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedSentAbsentFailed = true;
+    }
+    assert(supabaseFabricatedSentAbsentFailed, 'Step 16: Supabase fabricated client sent status (absent receipt) rejected');
+    assert(mockTransportCalls.length === 0, 'Step 16: Zero transport calls for sent status, absent receipt');
+
+    mockTransportCalls = [];
+    let supabaseFabricatedSentFailed = false;
+    try {
+      await supabaseOutbox.updateDeliveryStatus(fixture.tenantId, 'intent_rehearsal_fabricated_03', 'sent', undefined, { verifiedProviderReceipt: false });
+    } catch (e) {
+      if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedSentFailed = true;
+    }
+    assert(supabaseFabricatedSentFailed, 'Step 16: Supabase fabricated client sent status rejected');
+    assert(mockTransportCalls.length === 0, 'Step 16: Zero transport calls for sent status, false receipt');
+
+    mockTransportCalls = [];
+    let supabaseFabricatedSentTrueFailed = false;
+    try {
+      await supabaseOutbox.updateDeliveryStatus(fixture.tenantId, 'intent_rehearsal_fabricated_03', 'sent', undefined, { verifiedProviderReceipt: true });
+    } catch (e) {
+      if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedSentTrueFailed = true;
+    }
+    assert(supabaseFabricatedSentTrueFailed, 'Step 16: Supabase client sent status with verifiedProviderReceipt: true rejected');
+    assert(mockTransportCalls.length === 0, 'Step 16: Zero transport calls for sent status, true receipt');
+  } finally {
+  }
+
 // Verify historically stored 'sent' and 'delivered' records remain readable
 global.localStorage.setItem('lari_communication_events', JSON.stringify([
   {

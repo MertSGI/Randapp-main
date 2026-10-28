@@ -515,7 +515,31 @@ const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
     status: 'queued'
   });
 
-  // Cross-tenant update check
+  const { SupabaseCommunicationOutboxRepository } = await import('../services/repositories/supabaseCommunicationOutboxRepository.ts');
+
+  let mockTransportCalls = [];
+  const mockTransport = async (path, options) => {
+    mockTransportCalls.push({ path, options });
+    return {
+      ok: true,
+      json: async () => [{
+        id: 'mock_id',
+        tenant_id: 'tenant_alpha',
+        recipient: '+905550000000',
+        channel: 'sms',
+        message: 'Mock test',
+        status: 'queued',
+        metadata: {},
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }]
+    };
+  };
+
+  const supabaseOutbox = new SupabaseCommunicationOutboxRepository(mockTransport);
+
+  try {
+    // Cross-tenant update check
   let crossTenantFailed = false;
   try {
     await localOutbox.updateDeliveryStatus('tenant_bravo', 'scen_19_fabricated', 'sent');
@@ -542,6 +566,110 @@ const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
   }
   assert(fabricatedReceiptTrueFailed, 'Scenario 19: Client delivery status with verifiedProviderReceipt: true rejected');
 
+  // Supabase check (absent)
+  mockTransportCalls = [];
+  let supabaseFabricatedAbsentFailed = false;
+  try {
+    await supabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'delivered');
+  } catch (e) {
+    if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedAbsentFailed = true;
+  }
+  assert(supabaseFabricatedAbsentFailed, 'Scenario 19: Supabase client delivery status (absent receipt) rejected');
+  assert(mockTransportCalls.length === 0, 'Scenario 19: Zero transport calls for absent receipt');
+
+  // Supabase check (false)
+  mockTransportCalls = [];
+  let supabaseFabricatedFailed = false;
+  try {
+    await supabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'delivered', undefined, { verifiedProviderReceipt: false });
+  } catch (e) {
+    if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedFailed = true;
+  }
+  assert(supabaseFabricatedFailed, 'Scenario 19: Supabase client delivery status rejected');
+  assert(mockTransportCalls.length === 0, 'Scenario 19: Zero transport calls for false receipt');
+
+  // Supabase check (true)
+  mockTransportCalls = [];
+  let supabaseFabricatedTrueFailed = false;
+  try {
+    await supabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'delivered', undefined, { verifiedProviderReceipt: true });
+  } catch (e) {
+    if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedTrueFailed = true;
+  }
+  assert(supabaseFabricatedTrueFailed, 'Scenario 19: Supabase client delivery status with verifiedProviderReceipt: true rejected');
+  assert(mockTransportCalls.length === 0, 'Scenario 19: Zero transport calls for true receipt');
+
+  // Supabase check (sent, absent)
+  mockTransportCalls = [];
+  let supabaseFabricatedSentAbsentFailed = false;
+  try {
+    await supabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'sent');
+  } catch (e) {
+    if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedSentAbsentFailed = true;
+  }
+  assert(supabaseFabricatedSentAbsentFailed, 'Scenario 19: Supabase client sent status (absent receipt) rejected');
+  assert(mockTransportCalls.length === 0, 'Scenario 19: Zero transport calls for sent status, absent receipt');
+
+  // Supabase check (sent, false)
+  mockTransportCalls = [];
+  let supabaseFabricatedSentFailed = false;
+  try {
+    await supabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'sent', undefined, { verifiedProviderReceipt: false });
+  } catch (e) {
+    if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedSentFailed = true;
+  }
+  assert(supabaseFabricatedSentFailed, 'Scenario 19: Supabase client sent status rejected');
+  assert(mockTransportCalls.length === 0, 'Scenario 19: Zero transport calls for sent status, false receipt');
+
+  // Supabase check (sent, true)
+  mockTransportCalls = [];
+  let supabaseFabricatedSentTrueFailed = false;
+  try {
+    await supabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'sent', undefined, { verifiedProviderReceipt: true });
+  } catch (e) {
+    if (e.message.includes('regardless of receipt metadata')) supabaseFabricatedSentTrueFailed = true;
+  }
+  assert(supabaseFabricatedSentTrueFailed, 'Scenario 19: Supabase client sent status with verifiedProviderReceipt: true rejected');
+  assert(mockTransportCalls.length === 0, 'Scenario 19: Zero transport calls for sent status, true receipt');
+
+  // Tenant-scoped updates
+  mockTransportCalls = [];
+  await supabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'queued');
+  assert(mockTransportCalls.length === 1, 'Scenario 19: Mock transport called once for valid status update');
+  assert(mockTransportCalls[0].path.includes('tenant_id=eq.tenant_alpha'), 'Scenario 19: Supabase update is tenant-scoped');
+
+  // Consent-skipped terminal behavior
+  mockTransportCalls = [];
+  await supabaseOutbox.enqueueEvent('tenant_alpha', {
+    id: 'scen_19_skipped',
+    channel: 'sms',
+    recipient: '+905550000000',
+    body: 'Skipped test',
+    status: 'skipped'
+  });
+  assert(mockTransportCalls.length === 1, 'Scenario 19: Mock transport called for enqueueEvent');
+  const payload = JSON.parse(mockTransportCalls[0].options.body);
+  assert(payload.status === 'failed', 'Scenario 19: Consent-skipped mapped to failed status in DB payload');
+  assert(payload.metadata.skipped === true, 'Scenario 19: Consent-skipped mapped to metadata.skipped in DB payload');
+
+  // Unknown-status handling
+  mockTransportCalls = [];
+  await supabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'unknown_status');
+  assert(mockTransportCalls.length === 1, 'Scenario 19: Mock transport called for unknown status update');
+  const updatePayload = JSON.parse(mockTransportCalls[0].options.body);
+  assert(updatePayload.status === 'queued', 'Scenario 19: Unknown status mapped to queued in DB payload');
+
+  // Failed-response behavior
+  const failingMockTransport = async () => ({ ok: false, statusText: 'Mock Error' });
+  const failingSupabaseOutbox = new SupabaseCommunicationOutboxRepository(failingMockTransport);
+  let failedResponseHandled = false;
+  try {
+    await failingSupabaseOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'queued');
+  } catch (e) {
+    if (e.message.includes('Failed to update communication_outbox')) failedResponseHandled = true;
+  }
+  assert(failedResponseHandled, 'Scenario 19: Failed response from transport throws expected error');
+
   // Verify historically stored 'sent' and 'delivered' records remain readable
   global.localStorage.setItem('lari_communication_events', JSON.stringify([
     {
@@ -564,6 +692,7 @@ const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
   const historicalSent = historicalEvents.find(e => e.id === 'scen_19_historical_sent');
   assert(historicalDelivered && historicalDelivered.status === 'delivered', 'Scenario 19: Historically stored delivered records remain readable');
   assert(historicalSent && historicalSent.status === 'sent', 'Scenario 19: Historically stored sent records remain readable');
+  } finally {}
 }
 
 // Scenario 20: Negative coverage for consent-skipped terminal behavior
