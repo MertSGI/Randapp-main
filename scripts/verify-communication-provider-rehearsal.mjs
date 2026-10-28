@@ -524,7 +524,7 @@ const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
   }
   assert(crossTenantFailed, 'Scenario 19: Cross-tenant outbox status update rejected');
 
-  // Fabricated receipt check
+  // Fabricated receipt check (false)
   let fabricatedReceiptFailed = false;
   try {
     await localOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'delivered', undefined, { verifiedProviderReceipt: false });
@@ -532,6 +532,27 @@ const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
     if (e.message.includes('verified provider receipt')) fabricatedReceiptFailed = true;
   }
   assert(fabricatedReceiptFailed, 'Scenario 19: Fabricated client delivery status rejected');
+
+  // Fabricated receipt check (true)
+  let fabricatedReceiptTrueFailed = false;
+  try {
+    await localOutbox.updateDeliveryStatus('tenant_alpha', 'scen_19_fabricated', 'delivered', undefined, { verifiedProviderReceipt: true });
+  } catch (e) {
+    if (e.message.includes('verified provider receipt')) fabricatedReceiptTrueFailed = true;
+  }
+  assert(fabricatedReceiptTrueFailed, 'Scenario 19: Client delivery status with verifiedProviderReceipt: true rejected');
+
+  // Verify historically stored 'delivered' records remain readable
+  global.localStorage.setItem('lari_communication_events', JSON.stringify([{
+    id: 'scen_19_historical',
+    tenantId: 'tenant_alpha',
+    channel: 'sms',
+    status: 'delivered',
+    body: 'Historical record'
+  }]));
+  const historicalEvents = await localOutbox.listEvents('tenant_alpha');
+  const historicalRecord = historicalEvents.find(e => e.id === 'scen_19_historical');
+  assert(historicalRecord && historicalRecord.status === 'delivered', 'Scenario 19: Historically stored delivered records remain readable');
 }
 
 // Scenario 20: Negative coverage for consent-skipped terminal behavior
@@ -552,6 +573,9 @@ const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
   const res = await simulator.simulateDispatch(intent.intentId, { forceDispatchSkipped: true });
   assert(res.success === false, 'Scenario 20: Force dispatch on consent-skipped intent is rejected');
   assert(res.attempts.length === 0, 'Scenario 20: Zero attempts made despite forced dispatch attempt');
+
+  // Assert the intent status remains skipped
+  assert(deliveryService.getIntent(intent.intentId).status === 'skipped', 'Scenario 20: Intent status remains skipped');
 }
 
 // Final check

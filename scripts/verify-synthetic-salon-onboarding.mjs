@@ -234,6 +234,14 @@ try {
 }
 assert(fabricatedFailed, 'Step 16: Fabricated client delivery status rejected');
 
+let fabricatedTrueFailed = false;
+try {
+  await localOutbox.updateDeliveryStatus(fixture.tenantId, 'intent_rehearsal_fabricated_03', 'delivered', undefined, { verifiedProviderReceipt: true });
+} catch (e) {
+  if (e.message.includes('verified provider receipt')) fabricatedTrueFailed = true;
+}
+assert(fabricatedTrueFailed, 'Step 16: Client delivery status with verifiedProviderReceipt: true rejected');
+
 let crossTenantFailed = false;
 try {
   await localOutbox.updateDeliveryStatus('some_other_tenant', 'intent_rehearsal_fabricated_03', 'delivered', undefined, { verifiedProviderReceipt: true });
@@ -241,6 +249,18 @@ try {
   if (e.message.includes('Cross-tenant outbox violation')) crossTenantFailed = true;
 }
 assert(crossTenantFailed, 'Step 16: Cross-tenant outbox status update rejected');
+
+// Verify historically stored 'delivered' records remain readable
+global.localStorage.setItem('lari_communication_events', JSON.stringify([{
+  id: 'intent_rehearsal_historical_03',
+  tenantId: fixture.tenantId,
+  channel: 'sms',
+  status: 'delivered',
+  body: 'Historical record'
+}]));
+const historicalEvents = await localOutbox.listEvents(fixture.tenantId);
+const historicalRecord = historicalEvents.find(e => e.id === 'intent_rehearsal_historical_03');
+assert(historicalRecord && historicalRecord.status === 'delivered', 'Step 16: Historically stored delivered records remain readable');
 
 // [Step 17] Negative coverage for consent-skipped terminal behavior
 console.log('\n[Step 17] Negative coverage for consent-skipped messages...');
@@ -268,6 +288,7 @@ const simulator = new (await import('../services/offlineCommunicationProviderSim
 const dispatchResult = await simulator.simulateDispatch(intentSkipped.intentId);
 assert(dispatchResult.success === false, 'Step 17: Simulator blocks dispatch of consent-skipped intent');
 assert(dispatchResult.attempts.length === 0, 'Step 17: Zero dispatch attempts made for consent-skipped intent');
+assert(deliveryService.getIntent(intentSkipped.intentId).status === 'skipped', 'Step 17: Intent status remains skipped');
 
 // Terminal State
 console.log('\n============================================================================');
