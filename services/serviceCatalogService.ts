@@ -11,7 +11,7 @@ export const createService = async (tenantId: string, service: Omit<Service, 'id
 };
 
 export const updateService = async (tenantId: string, serviceId: string, updates: Partial<Service>): Promise<Service | null> => {
-  return getCatalogRepository().updateService(serviceId, updates);
+  return getCatalogRepository().updateService(serviceId, updates, tenantId);
 };
 
 export const deleteService = async (tenantId: string, serviceId: string): Promise<MutationResult<void>> => {

@@ -45,28 +45,28 @@ export interface AvailabilityRule {
 }
 export interface CatalogRepository {
   listServices(tenantId: string, options?: { activeOnly?: boolean }): Promise<Service[]>;
-  getServiceById(serviceId: string): Promise<Service | null>;
+  getServiceById(serviceId: string, tenantId?: string): Promise<Service | null>;
   createService(tenantId: string, input: Omit<Service, 'id' | 'tenantId'>): Promise<Service>;
-  updateService(serviceId: string, patch: Partial<Service>): Promise<Service | null>;
-  deleteOrDeactivateService(serviceId: string): Promise<boolean>;
+  updateService(serviceId: string, patch: Partial<Service>, tenantId?: string): Promise<Service | null>;
+  deleteOrDeactivateService(serviceId: string, tenantId?: string): Promise<boolean>;
   archiveService(tenantId: string, serviceId: string): Promise<boolean>;
   listPublicActiveServicesByTenantSlug(slug: string): Promise<Service[]>;
   
   listStaff(tenantId: string, options?: { activeOnly?: boolean }): Promise<Staff[]>;
-  getStaffById(staffId: string): Promise<Staff | null>;
+  getStaffById(staffId: string, tenantId?: string): Promise<Staff | null>;
   createStaff(tenantId: string, input: Omit<Staff, 'id' | 'tenantId'>): Promise<Staff>;
-  updateStaff(staffId: string, patch: Partial<Staff>): Promise<Staff | null>;
-  deleteOrDeactivateStaff(staffId: string): Promise<boolean>;
+  updateStaff(staffId: string, patch: Partial<Staff>, tenantId?: string): Promise<Staff | null>;
+  deleteOrDeactivateStaff(staffId: string, tenantId?: string): Promise<boolean>;
   archiveStaff(tenantId: string, staffId: string): Promise<boolean>;
   listPublicActiveStaffByTenantSlug(slug: string): Promise<Staff[]>;
   
-  assignServiceToStaff(staffId: string, serviceId: string): Promise<void>;
-  removeServiceFromStaff(staffId: string, serviceId: string): Promise<void>;
+  assignServiceToStaff(staffId: string, serviceId: string, tenantId?: string): Promise<void>;
+  removeServiceFromStaff(staffId: string, serviceId: string, tenantId?: string): Promise<void>;
   listStaffForService(tenantId: string, serviceId: string): Promise<Staff[]>;
-  listServicesForStaff(staffId: string): Promise<string[]>;
+  listServicesForStaff(staffId: string, tenantId?: string): Promise<string[]>;
   
   listAvailabilityRules(tenantId: string, staffId?: string): Promise<AvailabilityRule[]>;
-  updateAvailabilityRule(ruleId: string, patch: Partial<AvailabilityRule>): Promise<void>;
+  updateAvailabilityRule(ruleId: string, patch: Partial<AvailabilityRule>, tenantId?: string): Promise<void>;
   createAvailabilityRule(tenantId: string, input: Omit<AvailabilityRule, 'id' | 'tenantId'>): Promise<AvailabilityRule>;
 
   getAvailability(tenantId: string): Promise<any>;
