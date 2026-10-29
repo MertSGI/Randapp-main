@@ -159,9 +159,26 @@ async updateAppointment(appointmentId: string, patch: Partial<Appointment>, tena
     if (tenantId !== undefined && (!tenantId || !tenantId.trim())) {
       throw new Error('[localBookingRepository] Security error: invalid or empty tenantId provided');
     }
-    const apt = await this.getAppointmentById(appointmentId, tenantId);
+    const cleanTenantId = tenantId?.trim();
+    if (cleanTenantId) {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.endsWith(':appointments') && k !== this.getAppointmentsKey(cleanTenantId)) {
+          const raw = localStorage.getItem(k);
+          try {
+            const list = raw ? JSON.parse(raw) : [];
+            if (Array.isArray(list) && list.some((a: any) => a && a.id === appointmentId)) {
+              throw new Error('[localBookingRepository] Tenant isolation violation: cannot update appointment of another tenant');
+            }
+          } catch (e: any) {
+            if (e.message && e.message.includes('Tenant isolation violation')) throw e;
+          }
+        }
+      }
+    }
+    const apt = await this.getAppointmentById(appointmentId, cleanTenantId);
     if (!apt) return null;
-    if (tenantId && apt.tenantId !== tenantId) {
+    if (cleanTenantId && apt.tenantId !== cleanTenantId) {
       throw new Error('[localBookingRepository] Tenant isolation violation: cannot update appointment of another tenant');
     }
     const key = this.getAppointmentsKey(apt.tenantId!);
@@ -172,13 +189,33 @@ async updateAppointment(appointmentId: string, patch: Partial<Appointment>, tena
   }
 
   async cancelAppointment(appointmentId: string, reason?: string, cancelledBy?: 'customer' | 'salon' | 'system', tenantId?: string): Promise<boolean> {
+    if (tenantId !== undefined && (!tenantId || !tenantId.trim())) {
+      throw new Error('[localBookingRepository] Security error: invalid or empty tenantId provided');
+    }
+    const cleanTenantId = tenantId?.trim();
+    if (cleanTenantId) {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.endsWith(':appointments') && k !== this.getAppointmentsKey(cleanTenantId)) {
+          const raw = localStorage.getItem(k);
+          try {
+            const list = raw ? JSON.parse(raw) : [];
+            if (Array.isArray(list) && list.some((a: any) => a && a.id === appointmentId)) {
+              throw new Error('[localBookingRepository] Tenant isolation violation: cannot cancel appointment of another tenant');
+            }
+          } catch (e: any) {
+            if (e.message && e.message.includes('Tenant isolation violation')) throw e;
+          }
+        }
+      }
+    }
     const patch = {
-      status: (cancelledBy ? `cancelled_by_${cancelledBy}` : 'cancelled') as any,
+      status: (cancelledBy ? (`cancelled_by_` + cancelledBy) : 'cancelled') as any,
       cancelReason: reason,
       cancelledAt: new Date().toISOString(),
       cancelledBy: cancelledBy
     };
-    const updated = await this.updateAppointment(appointmentId, patch, tenantId);
+    const updated = await this.updateAppointment(appointmentId, patch, cleanTenantId);
     return !!updated;
   }
 
