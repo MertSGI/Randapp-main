@@ -1,57 +1,67 @@
 import { tenantService } from './tenantService';
 import { entitlementService } from './entitlementService';
-import { Tenant } from '../types';
+import type { Tenant } from '../types';
+import {
+  RESERVED_SLUGS_LIST,
+  SLUG_VALIDATION_REASONS,
+  type SlugValidationResult,
+  generateSlugFromName,
+  isReservedSlugWord,
+  normalizeCanonicalSlug,
+  validateSlugFormat,
+} from '../utils/slugUtils';
 
-export const RESERVED_SLUGS = [
-  'admin', 'login', 'register', 'pricing', 'demo', 'pilot', 'book', 'api',
-  'super-admin', 'settings', 'checkout', 'payment', 'help', 'support',
-  'randevu', 'lari', 'app', 'www', 'mail', 'ftp'
-];
+export const RESERVED_SLUGS: string[] = [...RESERVED_SLUGS_LIST];
 
 export const publicLinkService = {
   normalizeSlug(input: string): string {
-    const trMap: { [key: string]: string } = {
-      'ç': 'c', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u',
-      'Ç': 'c', 'Ğ': 'g', 'İ': 'i', 'Ö': 'o', 'Ş': 's', 'Ü': 'u'
-    };
-    let slug = input.replace(/[çğıöşüÇĞİÖŞÜ]/g, match => trMap[match] || match);
-    slug = slug.toLowerCase();
-    slug = slug.replace(/[^a-z0-9-]/g, '-');
-    slug = slug.replace(/-+/g, '-');
-    slug = slug.replace(/^-|-$/g, '');
-    return slug;
+    return normalizeCanonicalSlug(input);
   },
 
   isReservedSlug(slug: string): boolean {
-    return RESERVED_SLUGS.includes(slug.toLowerCase());
+    return isReservedSlugWord(slug);
   },
 
-  async validateSlug(slug: string, currentTenantId?: string): Promise<{ isValid: boolean; error?: string }> {
-    const normalized = this.normalizeSlug(slug);
-    
-    if (!normalized || normalized.length < 3) {
-      return { isValid: false, error: 'Link en az 3 karakter olmalıdır.' };
+  async validateSlug(slug: string, currentTenantId?: string): Promise<SlugValidationResult> {
+    const formatCheck = validateSlugFormat(slug);
+    if (!formatCheck.isValid) {
+      return formatCheck;
     }
-    
-    if (this.isReservedSlug(normalized)) {
-      return { isValid: false, error: 'Bu bağlantı adı sistem tarafından rezerve edilmiştir.' };
+
+    const normalized = formatCheck.normalizedSlug;
+
+    try {
+      const tenantBySlug = await tenantService.getTenantBySlug(normalized);
+      if (tenantBySlug && tenantBySlug.id !== currentTenantId) {
+        return {
+          isValid: false,
+          reason: SLUG_VALIDATION_REASONS.SLUG_TAKEN,
+          normalizedSlug: normalized,
+          error: 'Bu bağlantı adı başka bir işletme tarafından kullanılıyor.',
+        };
+      }
+    } catch {
+      return {
+        isValid: false,
+        reason: SLUG_VALIDATION_REASONS.UNKNOWN_ERROR,
+        normalizedSlug: normalized,
+        error: 'Bağlantı adı doğrulanırken beklenmeyen bir hata oluştu.',
+      };
     }
-    
-    // Check uniqueness
-    const tenantBySlug = await tenantService.getTenantBySlug(normalized);
-    if (tenantBySlug && tenantBySlug.id !== currentTenantId) {
-      return { isValid: false, error: 'Bu bağlantı adı başka bir işletme tarafından kullanılıyor.' };
-    }
-    
-    return { isValid: true };
+
+    return {
+      isValid: true,
+      reason: SLUG_VALIDATION_REASONS.VALID,
+      normalizedSlug: normalized,
+    };
   },
 
   generateTenantSlug(inputName: string): string {
-    const baseSlug = this.normalizeSlug(inputName) || 'randevu';
-    if (this.isReservedSlug(baseSlug)) {
-       return `${baseSlug}-${Math.floor(Math.random() * 1000)}`;
+    const baseSlug = generateSlugFromName(inputName);
+    if (baseSlug) {
+      return baseSlug;
     }
-    return baseSlug;
+    return 'isletme-randevu';
   },
 
   getTenantPublicUrl(tenant: Tenant): string {
