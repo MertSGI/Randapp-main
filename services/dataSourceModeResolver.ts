@@ -1,4 +1,4 @@
-import { DataSourceMode } from './dataSourceConfig';
+import type { DataSourceMode } from './dataSourceConfig.ts';
 
 /**
  * Pure configuration resolver for LARI data source mode.

@@ -1,4 +1,4 @@
-import { resolveDataSourceMode } from './dataSourceModeResolver';
+import { resolveDataSourceMode } from './dataSourceModeResolver.ts';
 
 export type DataSourceMode = 'local' | 'supabase';
 
