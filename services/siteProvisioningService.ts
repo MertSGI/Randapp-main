@@ -3,6 +3,7 @@ import { marketConfigService } from './marketConfigService';
 import { tenantService } from './tenantService';
 import { Tenant } from '../types';
 import { communicationEventService } from './communicationEventService';
+import { generateSlugFromName, getSlugAlternatives } from '../utils/slugUtils';
 
 export type ProvisioningStepStatus = 
   | 'not_started'
@@ -28,7 +29,7 @@ export interface CustomDomainRequest {
 
 export const siteProvisioningService = {
   generateTenantSlugFromBusinessName(name: string): string {
-    return publicLinkService.generateTenantSlug(name);
+    return generateSlugFromName(name);
   },
 
   async validateTenantSlug(slug: string, tenantId?: string): Promise<{ isValid: boolean; error?: string }> {
@@ -36,17 +37,32 @@ export const siteProvisioningService = {
   },
 
   async reserveTenantSlug(tenantId: string, desiredSlug: string): Promise<boolean> {
-    const val = await this.validateTenantSlug(desiredSlug, tenantId);
+    let normalizedSlug = generateSlugFromName(desiredSlug);
+    if (!normalizedSlug) return false;
+
+    let val = await this.validateTenantSlug(normalizedSlug, tenantId);
+    if (!val.isValid) {
+      const alternatives = getSlugAlternatives(normalizedSlug);
+      for (const alt of alternatives) {
+        const altVal = await this.validateTenantSlug(alt, tenantId);
+        if (altVal.isValid) {
+          normalizedSlug = alt;
+          val = altVal;
+          break;
+        }
+      }
+    }
+
     if (!val.isValid) return false;
     
     // In mock mode, simply update the tenant object
     const tenant = await tenantService.getTenantById(tenantId);
     if (tenant) {
-      await tenantService.updateTenant(tenantId, { slug: desiredSlug });
+      await tenantService.updateTenant(tenantId, { slug: normalizedSlug });
       
       // Queue preview ready event
       try {
-        const previewUrl = `https://${desiredSlug}.randevulari.com/preview`;
+        const previewUrl = `https://${normalizedSlug}.randevulari.com/preview`;
         communicationEventService.queueCommunicationEvent({
           tenantId,
           audience: 'business_owner',
