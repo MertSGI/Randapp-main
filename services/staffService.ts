@@ -11,12 +11,12 @@ export const createStaff = async (tenantId: string, staff: Omit<Staff, 'id' | 't
 };
 
 export const updateStaff = async (tenantId: string, staffId: string, updates: Partial<Staff>): Promise<Staff | null> => {
-  return getCatalogRepository().updateStaff(staffId, updates);
+  return getCatalogRepository().updateStaff(staffId, updates, tenantId);
 };
 
 export const deleteStaff = async (tenantId: string, staffId: string): Promise<MutationResult<void>> => {
   try {
-    const staff = await getCatalogRepository().getStaffById(staffId);
+    const staff = await getCatalogRepository().getStaffById(staffId, tenantId);
     if (staff?.id === 'staff_1' || staff?.isOwner) {
       return createError('deleted', 'owner_cannot_be_deleted');
     }

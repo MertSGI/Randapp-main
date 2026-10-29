@@ -29,7 +29,6 @@ const DEMO_STAFF: Staff[] = [
 export class LocalCatalogRepository implements CatalogRepository {
   private getServicesKey(tenantId: string) { return `lari:${tenantId}:services`; }
   private getStaffKey(tenantId: string) { return `lari:${tenantId}:staff`; }
-  // We'll store simple mappings as "staffId_serviceId" -> bool
   private getStaffServiceMappingKey(tenantId: string) { return `lari:${tenantId}:staff_services`; }
 
   async listServices(tenantId: string, options?: { activeOnly?: boolean }): Promise<Service[]> {
@@ -48,10 +47,14 @@ export class LocalCatalogRepository implements CatalogRepository {
     return options?.activeOnly ? existing.filter(s => s.active !== false) : existing;
   }
 
-  async getServiceById(serviceId: string): Promise<Service | null> {
-    // In local mode, we have to scan keys or assume we can find it.
-    // Better yet: we just iterate all services across tenant if we don't have tenantId...
-    // But usually we do. If we don't, we can search.
+  async getServiceById(serviceId: string, tenantId?: string): Promise<Service | null> {
+    const cleanTenantId = tenantId?.trim();
+    if (cleanTenantId) {
+      const key = this.getServicesKey(cleanTenantId);
+      const list = await dataProvider.getList<Service>(key) || [];
+      const match = list.find((s: Service) => s.id === serviceId);
+      return match || null;
+    }
     for (let i = 0; i < localStorage.length; i++) {
        const key = localStorage.key(i);
        if (key && key.includes(':services')) {
@@ -73,7 +76,23 @@ export class LocalCatalogRepository implements CatalogRepository {
     return newService;
   }
 
-  async updateService(serviceId: string, patch: Partial<Service>): Promise<Service | null> {
+  async updateService(serviceId: string, patch: Partial<Service>, tenantId?: string): Promise<Service | null> {
+    const cleanTenantId = tenantId?.trim() || patch.tenantId?.trim();
+    if (cleanTenantId) {
+      const existingInTenant = await this.getServiceById(serviceId, cleanTenantId);
+      if (!existingInTenant) {
+        const existingAnywhere = await this.getServiceById(serviceId);
+        if (existingAnywhere && existingAnywhere.tenantId !== cleanTenantId) {
+          throw new Error('[localCatalogRepository] Tenant isolation violation: cannot update service of another tenant');
+        }
+        return null;
+      }
+      const key = this.getServicesKey(cleanTenantId);
+      const existing = await dataProvider.getList<Service>(key);
+      const updated = existing?.map(s => s.id === serviceId ? { ...s, ...patch } : s) || [];
+      await dataProvider.set(key, updated);
+      return { ...existingInTenant, ...patch };
+    }
     const service = await this.getServiceById(serviceId);
     if (!service) return null;
     const key = this.getServicesKey(service.tenantId!);
@@ -83,10 +102,10 @@ export class LocalCatalogRepository implements CatalogRepository {
     return { ...service, ...patch };
   }
 
-  async deleteOrDeactivateService(serviceId: string): Promise<boolean> {
-    const service = await this.getServiceById(serviceId);
+  async deleteOrDeactivateService(serviceId: string, tenantId?: string): Promise<boolean> {
+    const service = await this.getServiceById(serviceId, tenantId?.trim());
     if (!service) return false;
-    await this.updateService(serviceId, { active: false });
+    await this.updateService(serviceId, { active: false }, tenantId);
     return true;
   }
 
@@ -106,7 +125,14 @@ export class LocalCatalogRepository implements CatalogRepository {
     return options?.activeOnly ? existing.filter(s => s.active !== false) : existing;
   }
 
-  async getStaffById(staffId: string): Promise<Staff | null> {
+  async getStaffById(staffId: string, tenantId?: string): Promise<Staff | null> {
+    const cleanTenantId = tenantId?.trim();
+    if (cleanTenantId) {
+      const key = this.getStaffKey(cleanTenantId);
+      const list = await dataProvider.getList<Staff>(key) || [];
+      const match = list.find((s: Staff) => s.id === staffId);
+      return match || null;
+    }
     for (let i = 0; i < localStorage.length; i++) {
        const key = localStorage.key(i);
        if (key && key.includes(':staff') && !key.includes('staff_services')) {
@@ -126,7 +152,23 @@ export class LocalCatalogRepository implements CatalogRepository {
     return newStaff;
   }
 
-  async updateStaff(staffId: string, patch: Partial<Staff>): Promise<Staff | null> {
+  async updateStaff(staffId: string, patch: Partial<Staff>, tenantId?: string): Promise<Staff | null> {
+    const cleanTenantId = tenantId?.trim() || patch.tenantId?.trim();
+    if (cleanTenantId) {
+      const existingInTenant = await this.getStaffById(staffId, cleanTenantId);
+      if (!existingInTenant) {
+        const existingAnywhere = await this.getStaffById(staffId);
+        if (existingAnywhere && existingAnywhere.tenantId !== cleanTenantId) {
+          throw new Error('[localCatalogRepository] Tenant isolation violation: cannot update staff of another tenant');
+        }
+        return null;
+      }
+      const key = this.getStaffKey(cleanTenantId);
+      const existing = await dataProvider.getList<Staff>(key);
+      const updated = existing?.map(s => s.id === staffId ? { ...s, ...patch } : s) || [];
+      await dataProvider.set(key, updated);
+      return { ...existingInTenant, ...patch };
+    }
     const staff = await this.getStaffById(staffId);
     if (!staff) return null;
     const key = this.getStaffKey(staff.tenantId!);
@@ -136,16 +178,20 @@ export class LocalCatalogRepository implements CatalogRepository {
     return { ...staff, ...patch };
   }
 
-  async deleteOrDeactivateStaff(staffId: string): Promise<boolean> {
-    const staff = await this.getStaffById(staffId);
+  async deleteOrDeactivateStaff(staffId: string, tenantId?: string): Promise<boolean> {
+    const staff = await this.getStaffById(staffId, tenantId?.trim());
     if (!staff) return false;
-    await this.updateStaff(staffId, { active: false });
+    await this.updateStaff(staffId, { active: false }, tenantId);
     return true;
   }
 
-  async assignServiceToStaff(staffId: string, serviceId: string): Promise<void> {
-    const staff = await this.getStaffById(staffId);
+  async assignServiceToStaff(staffId: string, serviceId: string, tenantId?: string): Promise<void> {
+    const cleanTenantId = tenantId?.trim();
+    const staff = await this.getStaffById(staffId, cleanTenantId || undefined);
     if (!staff?.tenantId) return;
+    if (cleanTenantId && staff.tenantId !== cleanTenantId) {
+      throw new Error('[localCatalogRepository] Tenant isolation violation: staff does not belong to requested tenant');
+    }
     const key = this.getStaffServiceMappingKey(staff.tenantId);
     const mappings = JSON.parse(localStorage.getItem(key) || '{}');
     if (!mappings[staffId]) mappings[staffId] = [];
@@ -155,9 +201,13 @@ export class LocalCatalogRepository implements CatalogRepository {
     }
   }
 
-  async removeServiceFromStaff(staffId: string, serviceId: string): Promise<void> {
-    const staff = await this.getStaffById(staffId);
+  async removeServiceFromStaff(staffId: string, serviceId: string, tenantId?: string): Promise<void> {
+    const cleanTenantId = tenantId?.trim();
+    const staff = await this.getStaffById(staffId, cleanTenantId || undefined);
     if (!staff?.tenantId) return;
+    if (cleanTenantId && staff.tenantId !== cleanTenantId) {
+      throw new Error('[localCatalogRepository] Tenant isolation violation: staff does not belong to requested tenant');
+    }
     const key = this.getStaffServiceMappingKey(staff.tenantId);
     const mappings = JSON.parse(localStorage.getItem(key) || '{}');
     if (mappings[staffId]) {
@@ -168,25 +218,25 @@ export class LocalCatalogRepository implements CatalogRepository {
 
   async listStaffForService(tenantId: string, serviceId: string): Promise<Staff[]> {
     const staffList = await this.listStaff(tenantId, { activeOnly: true });
-    // In local mode, if we haven't mapped anything, we assume all staff can do all seeded services for simplicity
-    // unless they specifically have a mapping array.
     const key = this.getStaffServiceMappingKey(tenantId);
     const mappings = JSON.parse(localStorage.getItem(key) || 'null');
     
     if (!mappings) {
-       return staffList; // No explicit mappings, everyone can do everything
+       return staffList;
     }
     
     return staffList.filter(s => {
        const theirServices = mappings[s.id];
-       if (!theirServices || theirServices.length === 0) return true; // If they have no mappings explicitly set, fallback to true, or false depending on rigidness. Let's say true for demo.
+       if (!theirServices || theirServices.length === 0) return true;
        return theirServices.includes(serviceId);
     });
   }
 
-  async listServicesForStaff(staffId: string): Promise<string[]> {
-    const staff = await this.getStaffById(staffId);
+  async listServicesForStaff(staffId: string, tenantId?: string): Promise<string[]> {
+    const cleanTenantId = tenantId?.trim();
+    const staff = await this.getStaffById(staffId, cleanTenantId || undefined);
     if (!staff?.tenantId) return [];
+    if (cleanTenantId && staff.tenantId !== cleanTenantId) return [];
     const key = this.getStaffServiceMappingKey(staff.tenantId);
     const mappings = JSON.parse(localStorage.getItem(key) || '{}');
     return Array.isArray(mappings[staffId]) ? mappings[staffId] : [];
@@ -245,12 +295,26 @@ export class LocalCatalogRepository implements CatalogRepository {
     return rules;
   }
 
-  async updateAvailabilityRule(ruleId: string, patch: Partial<AvailabilityRule>): Promise<void> {
+  async updateAvailabilityRule(ruleId: string, patch: Partial<AvailabilityRule>, tenantId?: string): Promise<void> {
+    const cleanTenantId = tenantId?.trim() || patch.tenantId?.trim();
+    if (cleanTenantId) {
+      const key = `lari:${cleanTenantId}:availability_rules`;
+      const rules = JSON.parse(localStorage.getItem(key) || '[]').map((rule: any) => this.normalizeAvailabilityRule(cleanTenantId, rule));
+      const index = rules.findIndex((rule: AvailabilityRule) => rule.id === ruleId);
+      if (index >= 0) {
+        const updated = { ...rules[index], ...patch };
+        this.assertValidAvailabilityRule(updated);
+        rules[index] = updated;
+        localStorage.setItem(key, JSON.stringify(rules));
+        return;
+      }
+      throw new Error(`Availability rule not found for tenant: ${ruleId}`);
+    }
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (!key || !key.endsWith(':availability_rules')) continue;
-      const tenantId = key.split(':')[1];
-      const rules = JSON.parse(localStorage.getItem(key) || '[]').map((rule: any) => this.normalizeAvailabilityRule(tenantId, rule));
+      const tId = key.split(':')[1];
+      const rules = JSON.parse(localStorage.getItem(key) || '[]').map((rule: any) => this.normalizeAvailabilityRule(tId, rule));
       const index = rules.findIndex((rule: AvailabilityRule) => rule.id === ruleId);
       if (index < 0) continue;
 
@@ -290,7 +354,7 @@ export class LocalCatalogRepository implements CatalogRepository {
   }
 
   async archiveService(tenantId: string, serviceId: string): Promise<boolean> {
-    await this.updateService(serviceId, { active: false });
+    await this.updateService(serviceId, { active: false }, tenantId);
     return true;
   }
 
@@ -300,7 +364,7 @@ export class LocalCatalogRepository implements CatalogRepository {
   }
 
   async archiveStaff(tenantId: string, staffId: string): Promise<boolean> {
-    await this.updateStaff(staffId, { active: false });
+    await this.updateStaff(staffId, { active: false }, tenantId);
     return true;
   }
 
@@ -332,4 +396,3 @@ export class LocalCatalogRepository implements CatalogRepository {
     return this.getAvailability(tenantId);
   }
 }
-

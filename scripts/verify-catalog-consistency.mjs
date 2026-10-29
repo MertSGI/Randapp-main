@@ -3,7 +3,7 @@ import path from 'path';
 
 const rootDir = process.cwd();
 
-console.log('🔍 Starting QA: Catalog Consistency...');
+console.log('📦 Starting QA: Catalog Consistency...');
 
 let failures = 0;
 
@@ -12,7 +12,7 @@ function assert(condition, message) {
     console.error(`❌ FAIL: ${message}`);
     failures++;
   } else {
-    console.log(`✅ PASS: ${message}`);
+    console.log(`✓  PASS: ${message}`);
   }
 }
 
@@ -50,10 +50,25 @@ const staffServicePath = path.join(rootDir, 'services', 'staffService.ts');
 const staffContent = fs.readFileSync(staffServicePath, 'utf8');
 assert(staffContent.includes('getCatalogRepository()'), 'staffService should use getCatalogRepository() instead of internal storage');
 
+// 5. Verify Multi-Tenant Isolation contracts (W-LARI-LP-2)
+const supaRepoPath = path.join(rootDir, 'services', 'repositories', 'supabaseCatalogRepository.ts');
+if (fs.existsSync(supaRepoPath)) {
+  const supaContent = fs.readFileSync(supaRepoPath, 'utf8');
+  assert(supaContent.includes('assertTenantId'), 'supabaseCatalogRepository must export assertTenantId');
+  assert(supaContent.includes('requireTenantId'), 'supabaseCatalogRepository must export requireTenantId');
+  assert(supaContent.includes('Tenant isolation violation: cannot alter service tenant_id'), 'supabaseCatalogRepository must protect service tenant_id');
+  assert(supaContent.includes('Tenant isolation violation: cannot alter staff tenant_id'), 'supabaseCatalogRepository must protect staff tenant_id');
+} else {
+  assert(false, 'supabaseCatalogRepository not found');
+}
+
+assert(serviceContent.includes('updateService(serviceId, updates, tenantId)'), 'serviceCatalogService must pass tenantId to updateService');
+assert(staffContent.includes('updateStaff(staffId, updates, tenantId)'), 'staffService must pass tenantId to updateStaff');
+
 if (failures > 0) {
   console.error(`❌ QA finished with ${failures} errors.`);
   process.exit(1);
 } else {
-  console.log('🎉 All Catalog Consistency QA checks passed successfully.');
+  console.log('✨ All Catalog Consistency QA checks passed successfully.');
   process.exit(0);
 }

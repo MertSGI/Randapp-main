@@ -2,191 +2,49 @@ import { AvailabilityRule, CatalogRepository } from './types';
 import { Service, Staff } from '../../types';
 import { fetchSupabase } from './supabaseClient';
 
+export function assertTenantId(tenantId?: string, operation: string = 'operation'): string {
+  if (tenantId !== undefined && (typeof tenantId !== 'string' || !tenantId.trim())) {
+    throw new Error(`[supabaseCatalogRepository] Security error: invalid or empty tenantId provided for ${operation}`);
+  }
+  return tenantId?.trim() || '';
+}
+
+export function requireTenantId(tenantId: string, operation: string = 'operation'): string {
+  if (!tenantId || typeof tenantId !== 'string' || !tenantId.trim()) {
+    throw new Error(`[supabaseCatalogRepository] Security error: non-empty tenantId is required for ${operation}`);
+  }
+  return tenantId.trim();
+}
+
 export class SupabaseCatalogRepository implements CatalogRepository {
 
-  async listServices(tenantId: string, options?: { activeOnly?: boolean }): Promise<Service[]> {
-    try {
-      let url = `/rest/v1/services?tenant_id=eq.${tenantId}&select=*`;
-      if (options?.activeOnly) url += '&active=eq.true';
-      const res = await fetchSupabase(url);
-      if (!res.ok) return [];
-      const data = await res.json();
-      return data.map((d: any) => ({
-        id: d.id,
-        tenantId: d.tenant_id,
-        name: d.name,
-        name_tr: d.name_tr,
-        duration: d.duration,
-        price: d.price,
-        image: d.image,
-        active: d.active,
-        category: d.category,
-      }));
-    } catch { return []; }
+  private mapServiceRow(d: any): Service {
+    return {
+      id: d.id,
+      tenantId: d.tenant_id,
+      name: d.name,
+      name_tr: d.name_tr,
+      duration: d.duration,
+      price: d.price,
+      image: d.image,
+      active: d.active,
+      category: d.category,
+    };
   }
 
-  async getServiceById(serviceId: string): Promise<Service | null> {
-    try {
-      const res = await fetchSupabase(`/rest/v1/services?id=eq.${serviceId}&select=*`);
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data[0] || null;
-    } catch { return null; }
+  private mapStaffRow(d: any): Staff {
+    return {
+      id: d.id,
+      tenantId: d.tenant_id,
+      name: d.name,
+      title: d.title,
+      image: d.image,
+      isOwner: d.is_owner ?? d.isOwner ?? false,
+      phone: d.phone,
+      calendarEmail: d.calendar_email ?? d.calendarEmail,
+      active: d.active
+    };
   }
-
-  async createService(tenantId: string, input: Omit<Service, 'id' | 'tenantId'>): Promise<Service> {
-    const res = await fetchSupabase('/rest/v1/services', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-      body: JSON.stringify({
-        tenant_id: tenantId,
-        name: input.name,
-        name_tr: input.name_tr,
-        duration: input.duration,
-        price: input.price,
-        image: input.image,
-        active: input.active,
-        category: input.category
-      })
-    });
-    if (!res.ok) throw new Error('Supabase insert failed');
-    const data = await res.json();
-    return data[0];
-  }
-
-  async updateService(serviceId: string, patch: Partial<Service>): Promise<Service | null> {
-    const res = await fetchSupabase(`/rest/v1/services?id=eq.${serviceId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-      body: JSON.stringify(patch)
-    });
-    if (!res.ok) throw new Error('Supabase update failed');
-    const data = await res.json();
-    return data[0];
-  }
-
-  async deleteOrDeactivateService(serviceId: string): Promise<boolean> {
-    await this.updateService(serviceId, { active: false });
-    return true;
-  }
-
-  async listStaff(tenantId: string, options?: { activeOnly?: boolean }): Promise<Staff[]> {
-     try {
-      let url = `/rest/v1/staff?tenant_id=eq.${tenantId}&select=*`;
-      if (options?.activeOnly) url += '&active=eq.true';
-      const res = await fetchSupabase(url);
-      if (!res.ok) return [];
-      const data = await res.json();
-      return data.map((d: any) => ({
-        id: d.id,
-        tenantId: d.tenant_id,
-        name: d.name,
-        title: d.title,
-        image: d.image,
-        isOwner: d.is_owner,
-        phone: d.phone,
-        calendarEmail: d.calendar_email,
-        active: d.active
-      }));
-    } catch { return []; }
-  }
-
-  async getStaffById(staffId: string): Promise<Staff | null> {
-    try {
-      const res = await fetchSupabase(`/rest/v1/staff?id=eq.${staffId}&select=*`);
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data[0] || null;
-    } catch { return null; }
-  }
-
-  async createStaff(tenantId: string, input: Omit<Staff, 'id' | 'tenantId'>): Promise<Staff> {
-    const res = await fetchSupabase('/rest/v1/staff', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-      body: JSON.stringify({
-        tenant_id: tenantId,
-        name: input.name,
-        title: input.title,
-        image: input.image,
-        is_owner: input.isOwner,
-        phone: input.phone,
-        calendar_email: input.calendarEmail,
-        active: input.active
-      })
-    });
-    if (!res.ok) throw new Error('Supabase insert failed');
-    const data = await res.json();
-    return data[0];
-  }
-
-  async updateStaff(staffId: string, patch: Partial<Staff>): Promise<Staff | null> {
-    const res = await fetchSupabase(`/rest/v1/staff?id=eq.${staffId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-      body: JSON.stringify(patch) // Mapping needed in reality, simplified here
-    });
-    if (!res.ok) throw new Error('update failed');
-    return (await res.json())[0];
-  }
-
-  async deleteOrDeactivateStaff(staffId: string): Promise<boolean> {
-    await this.updateStaff(staffId, { active: false });
-    return true;
-  }
-
-  async assignServiceToStaff(staffId: string, serviceId: string): Promise<void> {
-    await fetchSupabase('/rest/v1/staff_services', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Prefer': 'resolution=ignore-duplicates'
-      },
-      body: JSON.stringify({ staff_id: staffId, service_id: serviceId })
-    });
-  }
-
-  async removeServiceFromStaff(staffId: string, serviceId: string): Promise<void> {
-    await fetchSupabase(`/rest/v1/staff_services?staff_id=eq.${staffId}&service_id=eq.${serviceId}`, {
-      method: 'DELETE'
-    });
-  }
-
-  async listStaffForService(tenantId: string, serviceId: string): Promise<Staff[]> {
-    try {
-      const url = `/rest/v1/staff_services?service_id=eq.${serviceId}&select=staff_id,staff:staff(*)`;
-      const res = await fetchSupabase(url);
-      if (!res.ok) return [];
-      const data = await res.json();
-      return data
-        .filter((d: any) => d.staff && d.staff.tenant_id === tenantId && d.staff.active === true)
-        .map((d: any) => ({
-          id: d.staff.id,
-          tenantId: d.staff.tenant_id,
-          name: d.staff.name,
-          title: d.staff.title,
-          image: d.staff.image,
-          isOwner: d.staff.is_owner,
-          phone: d.staff.phone,
-          calendarEmail: d.staff.calendar_email,
-          active: d.staff.active
-        }));
-    } catch {
-      return [];
-    }
-  }
-
-  async listServicesForStaff(staffId: string): Promise<string[]> {
-    try {
-      const res = await fetchSupabase(`/rest/v1/staff_services?staff_id=eq.${staffId}&select=service_id`);
-      if (!res.ok) return [];
-      const data = await res.json();
-      return data.map((d: any) => d.service_id as string);
-    } catch {
-      return [];
-    }
-  }
-
 
   private mapAvailabilityRow(row: any): AvailabilityRule {
     return {
@@ -200,8 +58,32 @@ export class SupabaseCatalogRepository implements CatalogRepository {
     };
   }
 
-  private mapAvailabilityPatch(patch: Partial<AvailabilityRule>): any {
-    const mapped: any = {};
+  private mapServicePatch(patch: Partial<Service>): Record<string, any> {
+    const mapped: Record<string, any> = {};
+    if (patch.name !== undefined) mapped.name = patch.name;
+    if (patch.name_tr !== undefined) mapped.name_tr = patch.name_tr;
+    if (patch.duration !== undefined) mapped.duration = patch.duration;
+    if (patch.price !== undefined) mapped.price = patch.price;
+    if (patch.image !== undefined) mapped.image = patch.image;
+    if (patch.active !== undefined) mapped.active = patch.active;
+    if (patch.category !== undefined) mapped.category = patch.category;
+    return mapped;
+  }
+
+  private mapStaffPatch(patch: Partial<Staff>): Record<string, any> {
+    const mapped: Record<string, any> = {};
+    if (patch.name !== undefined) mapped.name = patch.name;
+    if (patch.title !== undefined) mapped.title = patch.title;
+    if (patch.image !== undefined) mapped.image = patch.image;
+    if (patch.isOwner !== undefined) mapped.is_owner = patch.isOwner;
+    if (patch.phone !== undefined) mapped.phone = patch.phone;
+    if (patch.calendarEmail !== undefined) mapped.calendar_email = patch.calendarEmail;
+    if (patch.active !== undefined) mapped.active = patch.active;
+    return mapped;
+  }
+
+  private mapAvailabilityPatch(patch: Partial<AvailabilityRule>): Record<string, any> {
+    const mapped: Record<string, any> = {};
     if (patch.staffId !== undefined) mapped.staff_id = patch.staffId;
     if (patch.weekday !== undefined) mapped.weekday = patch.weekday;
     if (patch.is_active !== undefined) mapped.is_active = patch.is_active;
@@ -210,37 +92,97 @@ export class SupabaseCatalogRepository implements CatalogRepository {
     return mapped;
   }
 
-  async listAvailabilityRules(tenantId: string, staffId?: string): Promise<AvailabilityRule[]> {
-    let url = `/rest/v1/availability_rules?tenant_id=eq.${tenantId}&select=*`;
-    if (staffId) url += `&staff_id=eq.${staffId}`;
-    const res = await fetchSupabase(url);
-    if (!res.ok) throw new Error('Supabase availability_rules list failed');
-    const data = await res.json();
-    return data.map((row: any) => this.mapAvailabilityRow(row));
+  async listServices(tenantId: string, options?: { activeOnly?: boolean }): Promise<Service[]> {
+    try {
+      const validTenantId = requireTenantId(tenantId, 'listServices');
+      let url = `/rest/v1/services?tenant_id=eq.${encodeURIComponent(validTenantId)}&select=*`;
+      if (options?.activeOnly) url += '&active=eq.true';
+      const res = await fetchSupabase(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data || []).map((d: any) => this.mapServiceRow(d));
+    } catch (err: any) {
+      if (err.message && err.message.includes('[supabaseCatalogRepository]')) throw err;
+      return [];
+    }
   }
 
-  async updateAvailabilityRule(ruleId: string, patch: Partial<AvailabilityRule>): Promise<void> {
-    const res = await fetchSupabase(`/rest/v1/availability_rules?id=eq.${ruleId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(this.mapAvailabilityPatch(patch))
-    });
-    if (!res.ok) throw new Error('Supabase availability_rules update failed');
+  async getServiceById(serviceId: string, tenantId?: string): Promise<Service | null> {
+    try {
+      const cleanTenantId = assertTenantId(tenantId, 'getServiceById');
+      let url = `/rest/v1/services?id=eq.${encodeURIComponent(serviceId)}&select=*`;
+      if (cleanTenantId) {
+        url += `&tenant_id=eq.${encodeURIComponent(cleanTenantId)}`;
+      }
+      const res = await fetchSupabase(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const s = data?.[0] || null;
+      if (!s) return null;
+      if (cleanTenantId && s.tenant_id && s.tenant_id !== cleanTenantId) {
+        throw new Error('[supabaseCatalogRepository] Tenant isolation violation: returned service does not match requested tenant');
+      }
+      return this.mapServiceRow(s);
+    } catch (err: any) {
+      if (err.message && err.message.includes('[supabaseCatalogRepository]')) throw err;
+      return null;
+    }
   }
 
-  async createAvailabilityRule(tenantId: string, input: Omit<AvailabilityRule, 'id' | 'tenantId'>): Promise<AvailabilityRule> {
-    const res = await fetchSupabase('/rest/v1/availability_rules', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-        body: JSON.stringify({ ...this.mapAvailabilityPatch(input), tenant_id: tenantId })
+  async createService(tenantId: string, input: Omit<Service, 'id' | 'tenantId'>): Promise<Service> {
+    const validTenantId = requireTenantId(tenantId, 'createService');
+    const res = await fetchSupabase('/rest/v1/services', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+      body: JSON.stringify({
+        tenant_id: validTenantId,
+        name: input.name,
+        name_tr: input.name_tr,
+        duration: input.duration,
+        price: input.price,
+        image: input.image,
+        active: input.active,
+        category: input.category
+      })
     });
-    if (!res.ok) throw new Error('Supabase availability_rules insert failed');
+    if (!res.ok) throw new Error(`Supabase insert failed: HTTP ${res.status}`);
     const data = await res.json();
-    return this.mapAvailabilityRow(data[0]);
+    return this.mapServiceRow(data[0]);
+  }
+
+  async updateService(serviceId: string, patch: Partial<Service>, tenantId?: string): Promise<Service | null> {
+    const cleanTenantId = assertTenantId(tenantId || patch.tenantId, 'updateService');
+    if (patch.tenantId && cleanTenantId && patch.tenantId !== cleanTenantId) {
+      throw new Error('[supabaseCatalogRepository] Tenant isolation violation: cannot alter service tenant_id');
+    }
+    let url = `/rest/v1/services?id=eq.${encodeURIComponent(serviceId)}`;
+    if (cleanTenantId) {
+      url += `&tenant_id=eq.${encodeURIComponent(cleanTenantId)}`;
+    }
+    const res = await fetchSupabase(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+      body: JSON.stringify(this.mapServicePatch(patch))
+    });
+    if (!res.ok) throw new Error(`Supabase update failed: HTTP ${res.status}`);
+    const data = await res.json();
+    const s = data?.[0] || null;
+    if (!s) return null;
+    if (cleanTenantId && s.tenant_id && s.tenant_id !== cleanTenantId) {
+      throw new Error('[supabaseCatalogRepository] Tenant isolation violation: returned service does not match requested tenant');
+    }
+    return this.mapServiceRow(s);
+  }
+
+  async deleteOrDeactivateService(serviceId: string, tenantId?: string): Promise<boolean> {
+    const cleanTenantId = assertTenantId(tenantId, 'deleteOrDeactivateService');
+    const res = await this.updateService(serviceId, { active: false }, cleanTenantId || undefined);
+    return !!res;
   }
 
   async archiveService(tenantId: string, serviceId: string): Promise<boolean> {
-    const res = await fetchSupabase(`/rest/v1/services?id=eq.${serviceId}&tenant_id=eq.${tenantId}`, {
+    const validTenantId = requireTenantId(tenantId, 'archiveService');
+    const res = await fetchSupabase(`/rest/v1/services?id=eq.${encodeURIComponent(serviceId)}&tenant_id=eq.${encodeURIComponent(validTenantId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ active: false })
@@ -248,9 +190,215 @@ export class SupabaseCatalogRepository implements CatalogRepository {
     return res.ok;
   }
 
+  async listStaff(tenantId: string, options?: { activeOnly?: boolean }): Promise<Staff[]> {
+    try {
+      const validTenantId = requireTenantId(tenantId, 'listStaff');
+      let url = `/rest/v1/staff?tenant_id=eq.${encodeURIComponent(validTenantId)}&select=*`;
+      if (options?.activeOnly) url += '&active=eq.true';
+      const res = await fetchSupabase(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data || []).map((d: any) => this.mapStaffRow(d));
+    } catch (err: any) {
+      if (err.message && err.message.includes('[supabaseCatalogRepository]')) throw err;
+      return [];
+    }
+  }
+
+  async getStaffById(staffId: string, tenantId?: string): Promise<Staff | null> {
+    try {
+      const cleanTenantId = assertTenantId(tenantId, 'getStaffById');
+      let url = `/rest/v1/staff?id=eq.${encodeURIComponent(staffId)}&select=*`;
+      if (cleanTenantId) {
+        url += `&tenant_id=eq.${encodeURIComponent(cleanTenantId)}`;
+      }
+      const res = await fetchSupabase(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const s = data?.[0] || null;
+      if (!s) return null;
+      if (cleanTenantId && s.tenant_id && s.tenant_id !== cleanTenantId) {
+        throw new Error('[supabaseCatalogRepository] Tenant isolation violation: returned staff does not match requested tenant');
+      }
+      return this.mapStaffRow(s);
+    } catch (err: any) {
+      if (err.message && err.message.includes('[supabaseCatalogRepository]')) throw err;
+      return null;
+    }
+  }
+
+  async createStaff(tenantId: string, input: Omit<Staff, 'id' | 'tenantId'>): Promise<Staff> {
+    const validTenantId = requireTenantId(tenantId, 'createStaff');
+    const res = await fetchSupabase('/rest/v1/staff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+      body: JSON.stringify({
+        tenant_id: validTenantId,
+        name: input.name,
+        title: input.title,
+        image: input.image,
+        is_owner: input.isOwner ?? false,
+        phone: input.phone,
+        calendar_email: input.calendarEmail,
+        active: input.active
+      })
+    });
+    if (!res.ok) throw new Error(`Supabase insert failed: HTTP ${res.status}`);
+    const data = await res.json();
+    return this.mapStaffRow(data[0]);
+  }
+
+  async updateStaff(staffId: string, patch: Partial<Staff>, tenantId?: string): Promise<Staff | null> {
+    const cleanTenantId = assertTenantId(tenantId || patch.tenantId, 'updateStaff');
+    if (patch.tenantId && cleanTenantId && patch.tenantId !== cleanTenantId) {
+      throw new Error('[supabaseCatalogRepository] Tenant isolation violation: cannot alter staff tenant_id');
+    }
+    let url = `/rest/v1/staff?id=eq.${encodeURIComponent(staffId)}`;
+    if (cleanTenantId) {
+      url += `&tenant_id=eq.${encodeURIComponent(cleanTenantId)}`;
+    }
+    const res = await fetchSupabase(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+      body: JSON.stringify(this.mapStaffPatch(patch))
+    });
+    if (!res.ok) throw new Error(`Supabase update failed: HTTP ${res.status}`);
+    const data = await res.json();
+    const s = data?.[0] || null;
+    if (!s) return null;
+    if (cleanTenantId && s.tenant_id && s.tenant_id !== cleanTenantId) {
+      throw new Error('[supabaseCatalogRepository] Tenant isolation violation: returned staff does not match requested tenant');
+    }
+    return this.mapStaffRow(s);
+  }
+
+  async deleteOrDeactivateStaff(staffId: string, tenantId?: string): Promise<boolean> {
+    const cleanTenantId = assertTenantId(tenantId, 'deleteOrDeactivateStaff');
+    const res = await this.updateStaff(staffId, { active: false }, cleanTenantId || undefined);
+    return !!res;
+  }
+
+  async archiveStaff(tenantId: string, staffId: string): Promise<boolean> {
+    const validTenantId = requireTenantId(tenantId, 'archiveStaff');
+    const res = await fetchSupabase(`/rest/v1/staff?id=eq.${encodeURIComponent(staffId)}&tenant_id=eq.${encodeURIComponent(validTenantId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: false })
+    });
+    return res.ok;
+  }
+
+  async assignServiceToStaff(staffId: string, serviceId: string, tenantId?: string): Promise<void> {
+    const cleanTenantId = assertTenantId(tenantId, 'assignServiceToStaff');
+    if (cleanTenantId) {
+      const [staff, service] = await Promise.all([
+        this.getStaffById(staffId, cleanTenantId),
+        this.getServiceById(serviceId, cleanTenantId)
+      ]);
+      if (!staff || !service) {
+        throw new Error('[supabaseCatalogRepository] Tenant isolation violation: cannot assign service to staff across tenants');
+      }
+    }
+    const res = await fetchSupabase('/rest/v1/staff_services', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=ignore-duplicates'
+      },
+      body: JSON.stringify({ staff_id: staffId, service_id: serviceId })
+    });
+    if (!res.ok) throw new Error(`Supabase assign service failed: HTTP ${res.status}`);
+  }
+
+  async removeServiceFromStaff(staffId: string, serviceId: string, tenantId?: string): Promise<void> {
+    const cleanTenantId = assertTenantId(tenantId, 'removeServiceFromStaff');
+    if (cleanTenantId) {
+      const staff = await this.getStaffById(staffId, cleanTenantId);
+      if (!staff) {
+        throw new Error('[supabaseCatalogRepository] Tenant isolation violation: cannot remove service from staff of another tenant');
+      }
+    }
+    const res = await fetchSupabase(`/rest/v1/staff_services?staff_id=eq.${encodeURIComponent(staffId)}&service_id=eq.${encodeURIComponent(serviceId)}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) throw new Error(`Supabase remove service failed: HTTP ${res.status}`);
+  }
+
+  async listStaffForService(tenantId: string, serviceId: string): Promise<Staff[]> {
+    try {
+      const validTenantId = requireTenantId(tenantId, 'listStaffForService');
+      const service = await this.getServiceById(serviceId, validTenantId);
+      if (!service) return [];
+
+      const url = `/rest/v1/staff_services?service_id=eq.${encodeURIComponent(serviceId)}&select=staff_id,staff:staff(*)`;
+      const res = await fetchSupabase(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data || [])
+        .filter((d: any) => d.staff && d.staff.tenant_id === validTenantId && d.staff.active !== false)
+        .map((d: any) => this.mapStaffRow(d.staff));
+    } catch (err: any) {
+      if (err.message && err.message.includes('[supabaseCatalogRepository]')) throw err;
+      return [];
+    }
+  }
+
+  async listServicesForStaff(staffId: string, tenantId?: string): Promise<string[]> {
+    try {
+      const cleanTenantId = assertTenantId(tenantId, 'listServicesForStaff');
+      if (cleanTenantId) {
+        const staff = await this.getStaffById(staffId, cleanTenantId);
+        if (!staff) return [];
+      }
+      const res = await fetchSupabase(`/rest/v1/staff_services?staff_id=eq.${encodeURIComponent(staffId)}&select=service_id`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data || []).map((d: any) => d.service_id as string);
+    } catch (err: any) {
+      if (err.message && err.message.includes('[supabaseCatalogRepository]')) throw err;
+      return [];
+    }
+  }
+
+  async listAvailabilityRules(tenantId: string, staffId?: string): Promise<AvailabilityRule[]> {
+    const validTenantId = requireTenantId(tenantId, 'listAvailabilityRules');
+    let url = `/rest/v1/availability_rules?tenant_id=eq.${encodeURIComponent(validTenantId)}&select=*`;
+    if (staffId) url += `&staff_id=eq.${encodeURIComponent(staffId)}`;
+    const res = await fetchSupabase(url);
+    if (!res.ok) throw new Error(`Supabase availability_rules list failed: HTTP ${res.status}`);
+    const data = await res.json();
+    return (data || []).map((row: any) => this.mapAvailabilityRow(row));
+  }
+
+  async updateAvailabilityRule(ruleId: string, patch: Partial<AvailabilityRule>, tenantId?: string): Promise<void> {
+    const cleanTenantId = assertTenantId(tenantId || patch.tenantId, 'updateAvailabilityRule');
+    let url = `/rest/v1/availability_rules?id=eq.${encodeURIComponent(ruleId)}`;
+    if (cleanTenantId) {
+      url += `&tenant_id=eq.${encodeURIComponent(cleanTenantId)}`;
+    }
+    const res = await fetchSupabase(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(this.mapAvailabilityPatch(patch))
+    });
+    if (!res.ok) throw new Error(`Supabase availability_rules update failed: HTTP ${res.status}`);
+  }
+
+  async createAvailabilityRule(tenantId: string, input: Omit<AvailabilityRule, 'id' | 'tenantId'>): Promise<AvailabilityRule> {
+    const validTenantId = requireTenantId(tenantId, 'createAvailabilityRule');
+    const res = await fetchSupabase('/rest/v1/availability_rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+      body: JSON.stringify({ ...this.mapAvailabilityPatch(input), tenant_id: validTenantId })
+    });
+    if (!res.ok) throw new Error(`Supabase availability_rules insert failed: HTTP ${res.status}`);
+    const data = await res.json();
+    return this.mapAvailabilityRow(data[0]);
+  }
+
   async listPublicActiveServicesByTenantSlug(slug: string): Promise<Service[]> {
     try {
-      const tenantRes = await fetchSupabase(`/rest/v1/tenants?slug=eq.${slug}&select=*`);
+      const tenantRes = await fetchSupabase(`/rest/v1/tenants?slug=eq.${encodeURIComponent(slug)}&select=*`);
       if (!tenantRes.ok) return [];
       const tenantData = await tenantRes.json();
       if (!tenantData[0]) return [];
@@ -263,18 +411,9 @@ export class SupabaseCatalogRepository implements CatalogRepository {
     }
   }
 
-  async archiveStaff(tenantId: string, staffId: string): Promise<boolean> {
-    const res = await fetchSupabase(`/rest/v1/staff?id=eq.${staffId}&tenant_id=eq.${tenantId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ active: false })
-    });
-    return res.ok;
-  }
-
   async listPublicActiveStaffByTenantSlug(slug: string): Promise<Staff[]> {
     try {
-      const tenantRes = await fetchSupabase(`/rest/v1/tenants?slug=eq.${slug}&select=*`);
+      const tenantRes = await fetchSupabase(`/rest/v1/tenants?slug=eq.${encodeURIComponent(slug)}&select=*`);
       if (!tenantRes.ok) return [];
       const tenantData = await tenantRes.json();
       if (!tenantData[0]) return [];
@@ -288,24 +427,25 @@ export class SupabaseCatalogRepository implements CatalogRepository {
   }
 
   async getAvailability(tenantId: string): Promise<any> {
-    return this.listAvailabilityRules(tenantId);
+    const validTenantId = requireTenantId(tenantId, 'getAvailability');
+    return this.listAvailabilityRules(validTenantId);
   }
 
   async updateAvailability(tenantId: string, input: any): Promise<any> {
-    // Check if rule exists or create one
-    const rules = await this.listAvailabilityRules(tenantId);
+    const validTenantId = requireTenantId(tenantId, 'updateAvailability');
+    const rules = await this.listAvailabilityRules(validTenantId);
     if (rules.length > 0) {
       const firstRule = rules[0];
-      await this.updateAvailabilityRule(firstRule.id, input);
+      await this.updateAvailabilityRule(firstRule.id || '', input, validTenantId);
       return { ...firstRule, ...input };
     } else {
-      return this.createAvailabilityRule(tenantId, input);
+      return this.createAvailabilityRule(validTenantId, input);
     }
   }
 
   async getPublicAvailabilityByTenantSlug(slug: string): Promise<any> {
     try {
-      const tenantRes = await fetchSupabase(`/rest/v1/tenants?slug=eq.${slug}&select=*`);
+      const tenantRes = await fetchSupabase(`/rest/v1/tenants?slug=eq.${encodeURIComponent(slug)}&select=*`);
       if (!tenantRes.ok) return [];
       const tenantData = await tenantRes.json();
       if (!tenantData[0]) return [];
