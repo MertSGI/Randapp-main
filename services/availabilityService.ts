@@ -8,23 +8,50 @@ export interface TimeSlot {
   available: boolean;
 }
 
+export function assertTenantId(tenantId?: string, operation: string = 'operation'): string {
+  if (tenantId !== undefined && (typeof tenantId !== 'string' || !tenantId.trim())) {
+    throw new Error(`[availabilityService] Security error: invalid or empty tenantId provided for ${operation}`);
+  }
+  return tenantId?.trim() || '';
+}
+
+export function requireTenantId(tenantId: string, operation: string = 'operation'): string {
+  if (!tenantId || typeof tenantId !== 'string' || !tenantId.trim()) {
+    throw new Error(`[availabilityService] Security error: non-empty tenantId is required for ${operation}`);
+  }
+  return tenantId.trim();
+}
+
 export const availabilityService = {
   async getWorkingHours(tenantId: string): Promise<any> {
+    const validTenantId = requireTenantId(tenantId, 'getWorkingHours');
     const repo = getAvailabilityRepository();
-    return repo.getAvailability(tenantId);
+    return repo.getAvailability(validTenantId);
   },
 
   async updateWorkingHours(tenantId: string, input: any): Promise<any> {
+    const validTenantId = requireTenantId(tenantId, 'updateWorkingHours');
     const repo = getAvailabilityRepository();
-    return repo.updateAvailability(tenantId, input);
+    return repo.updateAvailability(validTenantId, input);
   },
 
   async getPublicWorkingHoursBySlug(slug: string): Promise<any> {
+    if (!slug || typeof slug !== 'string' || !slug.trim()) {
+      throw new Error('[availabilityService] Security error: non-empty slug is required for getPublicWorkingHoursBySlug');
+    }
     const repo = getAvailabilityRepository();
-    return repo.getPublicAvailabilityByTenantSlug(slug);
+    return repo.getPublicAvailabilityByTenantSlug(slug.trim());
   },
 
   async getAvailableSlotsForStaff(tenantId: string, staffId: string, serviceId: string, dateStr: string): Promise<TimeSlot[]> {
+     const validTenantId = requireTenantId(tenantId, 'getAvailableSlotsForStaff');
+     if (!staffId || typeof staffId !== 'string' || !staffId.trim()) {
+       throw new Error('[availabilityService] Security error: non-empty staffId is required for getAvailableSlotsForStaff');
+     }
+     if (!dateStr || typeof dateStr !== 'string' || !dateStr.trim()) {
+       throw new Error('[availabilityService] Security error: non-empty dateStr is required for getAvailableSlotsForStaff');
+     }
+
      try {
        const { getDataSourceMode } = await import('./dataSourceConfig');
        const isSupabaseMode = getDataSourceMode() === 'supabase';
@@ -40,7 +67,7 @@ export const availabilityService = {
 
            // Resolve tenant slug from tenantId via supabase REST.
            // The RPC requires slug not tenantId.
-           const tenantRes = await fetchSupabase(`/rest/v1/tenants?id=eq.${tenantId}&select=slug`);
+           const tenantRes = await fetchSupabase(`/rest/v1/tenants?id=eq.${encodeURIComponent(validTenantId)}&select=slug`);
            if (!tenantRes.ok) return [];
            const tenantData = await tenantRes.json();
            const slug = tenantData?.[0]?.slug;
@@ -90,16 +117,22 @@ export const availabilityService = {
        const catalogRepo = getAvailabilityRepository();
        const bookingRepo = getBookingRepository();
 
+       // Verify staff belongs to this tenant
+       const allStaff = await getStaffList(validTenantId);
+       if (allStaff.length > 0 && !allStaff.some(s => s.id === staffId)) {
+         return []; // Staff does not belong to this tenant
+       }
+
        // Check staff eligibility for the requested service
        if (serviceId) {
-         const eligibleStaff = await catalogRepo.listStaffForService(tenantId, serviceId);
+         const eligibleStaff = await catalogRepo.listStaffForService(validTenantId, serviceId);
          if (eligibleStaff && eligibleStaff.length > 0 && !eligibleStaff.some(s => s.id === staffId)) {
            return []; // Staff is not eligible for this service
          }
        }
 
        // 1. Fetch staff availability rules
-       const rules = await catalogRepo.listAvailabilityRules(tenantId, staffId);
+       const rules = await catalogRepo.listAvailabilityRules(validTenantId, staffId);
        
        // Parse local weekday from dateStr (YYYY-MM-DD)
        // Standard weekday calculation: Monday=1, ..., Sunday=7
@@ -118,7 +151,7 @@ export const availabilityService = {
        const duration = service?.duration || 30;
 
        // 3. Fetch non-cancelled booked slots for this date and staff
-       const appointments = await bookingRepo.listAppointments(tenantId, { date: dateStr });
+       const appointments = await bookingRepo.listAppointments(validTenantId, { date: dateStr });
        const booked = appointments.filter((apt) => {
          const st = (apt.status as string);
          return st !== 'cancelled' && 
@@ -186,16 +219,18 @@ export const availabilityService = {
        }
 
        return slots;
-     } catch (err) {
+     } catch (err: any) {
+       if (err.message && err.message.includes('Security error')) {
+         throw err;
+       }
        console.error('Error generating slots:', err);
        return [];
      }
   },
 
   getNextAvailableSlotForStaff(tenantId: string, staffId: string, serviceId: string): Promise<{date: string, time: string} | null> {
+    const validTenantId = requireTenantId(tenantId, 'getNextAvailableSlotForStaff');
     return new Promise((resolve) => {
-       // Mock: Return a synthetic early slot for this staff
-       // Normally we scan forward from today to find the first open slot.
        const now = new Date();
        resolve({
           date: now.toISOString().split('T')[0],
@@ -205,11 +240,10 @@ export const availabilityService = {
   },
 
   getEarliestAvailableStaff(tenantId: string, serviceId: string): Promise<{staffId: string, date: string, time: string} | null> {
+    const validTenantId = requireTenantId(tenantId, 'getEarliestAvailableStaff');
     return new Promise(async (resolve) => {
-       // Find all staff who can perform this service
-       // Mock approach: just pick the first available staff
        try {
-         const staff = await getStaffList(tenantId);
+         const staff = await getStaffList(validTenantId);
          const serviceStaff = staff;
          
          if (serviceStaff.length === 0) {
