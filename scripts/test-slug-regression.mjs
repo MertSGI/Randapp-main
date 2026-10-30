@@ -263,6 +263,63 @@ tenantService.getTenantBySlug = origGetTenantBySlug;
 assertEqual('reserve under lookup error rejected without fallback', resLookupErr, false);
 assertEqual('tenant_3 slug unchanged after lookup error', (await tenantService.getTenantById('tenant_3'))?.slug, 'initial-valid-slug');
 
+// Case L: True concurrent Promise.all reservation of the same desired slug by 3 distinct tenants
+const baseTenantsL = JSON.parse(localStorageMock.getItem('lari_registered_tenants') || '[]');
+baseTenantsL.push(
+  { id: 'tenant_conc_1', name: 'Concurrent 1', slug: 'init-c1', status: 'active', customDomain: 'c1.example.com' },
+  { id: 'tenant_conc_2', name: 'Concurrent 2', slug: 'init-c2', status: 'active' },
+  { id: 'tenant_conc_3', name: 'Concurrent 3', slug: 'init-c3', status: 'active' }
+);
+localStorageMock.setItem('lari_registered_tenants', JSON.stringify(baseTenantsL));
+
+const [cRes1, cRes2, cRes3] = await Promise.all([
+  siteProvisioningService.reserveTenantSlug('tenant_conc_1', 'concurrent-salon'),
+  siteProvisioningService.reserveTenantSlug('tenant_conc_2', 'concurrent-salon'),
+  siteProvisioningService.reserveTenantSlug('tenant_conc_3', 'concurrent-salon'),
+]);
+assertEqual('concurrent Promise.all tenant_conc_1 result', cRes1, true);
+assertEqual('concurrent Promise.all tenant_conc_2 result', cRes2, true);
+assertEqual('concurrent Promise.all tenant_conc_3 result', cRes3, true);
+assertEqual('concurrent Promise.all tenant_conc_1 gets base slug', (await tenantService.getTenantById('tenant_conc_1'))?.slug, 'concurrent-salon');
+assertEqual('concurrent Promise.all tenant_conc_2 gets -studio alternative', (await tenantService.getTenantById('tenant_conc_2'))?.slug, 'concurrent-salon-studio');
+assertEqual('concurrent Promise.all tenant_conc_3 gets -guzellik alternative', (await tenantService.getTenantById('tenant_conc_3'))?.slug, 'concurrent-salon-guzellik');
+assertEqual('concurrent Promise.all preserves existing tenant customDomain', (await tenantService.getTenantById('tenant_conc_1'))?.customDomain, 'c1.example.com');
+
+// Case M: Concurrent Promise.all reservation when base + all 4 alternatives saturate mid-flight (6 callers for 5 slots)
+const baseTenantsM = JSON.parse(localStorageMock.getItem('lari_registered_tenants') || '[]');
+for (let i = 1; i <= 6; i++) {
+  baseTenantsM.push({ id: `tenant_sat_${i}`, name: `Sat ${i}`, slug: `init-sat-${i}`, status: 'active' });
+}
+localStorageMock.setItem('lari_registered_tenants', JSON.stringify(baseTenantsM));
+
+const satResults = await Promise.all([
+  siteProvisioningService.reserveTenantSlug('tenant_sat_1', 'saturated-salon'),
+  siteProvisioningService.reserveTenantSlug('tenant_sat_2', 'saturated-salon'),
+  siteProvisioningService.reserveTenantSlug('tenant_sat_3', 'saturated-salon'),
+  siteProvisioningService.reserveTenantSlug('tenant_sat_4', 'saturated-salon'),
+  siteProvisioningService.reserveTenantSlug('tenant_sat_5', 'saturated-salon'),
+  siteProvisioningService.reserveTenantSlug('tenant_sat_6', 'saturated-salon'),
+]);
+assertEqual('concurrent saturation 5 succeed', satResults.filter(Boolean).length, 5);
+assertEqual('concurrent saturation 6th fails closed', satResults[5], false);
+assertEqual('concurrent saturation 6th keeps initial slug', (await tenantService.getTenantById('tenant_sat_6'))?.slug, 'init-sat-6');
+
+// Case N: Out-of-band tail duplicate injection (where Array.prototype.find alone would return only the first match)
+let tailRaceTriggered = false;
+tenantService.updateTenant = async (tId, updates) => {
+  await origUpdateTenant(tId, updates);
+  if (!tailRaceTriggered && tId === 'tenant_3' && updates.slug === 'tail-race-slug') {
+    tailRaceTriggered = true;
+    const arr = JSON.parse(localStorageMock.getItem('lari_registered_tenants') || '[]');
+    arr.push({ id: 'tenant_tail_competitor', name: 'Tail Competitor', slug: 'tail-race-slug', status: 'active' });
+    localStorageMock.setItem('lari_registered_tenants', JSON.stringify(arr));
+  }
+};
+const resTailRace = await siteProvisioningService.reserveTenantSlug('tenant_3', 'tail-race-slug');
+tenantService.updateTenant = origUpdateTenant;
+assertEqual('tail duplicate race rejected', resTailRace, false);
+assertEqual('tenant_3 slug rolled back after tail duplicate race', (await tenantService.getTenantById('tenant_3'))?.slug, 'initial-valid-slug');
+
 // 3. HashRouter / path slug parser regression assertions
 const parseUrlSlug = (hash, pathStr) => {
   let urlSlug = '';

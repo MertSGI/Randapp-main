@@ -33,6 +33,51 @@ export interface CustomDomainRequest {
   notes?: string;
 }
 
+let slugReservationQueue: Promise<void> = Promise.resolve();
+
+function runWithSlugReservationLock<T>(operation: () => Promise<T>): Promise<T> {
+  const next = slugReservationQueue.then(operation, operation);
+  slugReservationQueue = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
+}
+
+async function hasExclusiveSlugOwnership(tenantId: string, targetSlug: string): Promise<boolean> {
+  const updatedTenant = await tenantService.getTenantById(tenantId);
+  const postWriteOwner = await tenantService.getTenantBySlug(targetSlug);
+  if (
+    !updatedTenant ||
+    updatedTenant.id !== tenantId ||
+    updatedTenant.slug !== targetSlug ||
+    !postWriteOwner ||
+    postWriteOwner.id !== tenantId
+  ) {
+    return false;
+  }
+
+  try {
+    const raw =
+      typeof localStorage !== 'undefined'
+        ? localStorage.getItem('lari_registered_tenants')
+        : null;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const owners = parsed.filter((t: any) => t && t.slug === targetSlug);
+        if (owners.length !== 1 || owners[0].id !== tenantId) {
+          return false;
+        }
+      }
+    }
+  } catch {
+    return false;
+  }
+
+  return true;
+}
+
 export const siteProvisioningService = {
   generateTenantSlugFromBusinessName(name: string): string {
     return generateSlugFromName(name);
@@ -43,96 +88,93 @@ export const siteProvisioningService = {
   },
 
   async reserveTenantSlug(tenantId: string, desiredSlug: string): Promise<boolean> {
-    if (typeof tenantId !== 'string' || !tenantId.trim()) {
-      return false;
-    }
-    if (typeof desiredSlug !== 'string' || !desiredSlug.trim()) {
-      return false;
-    }
-
-    const normalizedTenantId = tenantId.trim();
-    const tenant = await tenantService.getTenantById(normalizedTenantId);
-    if (!tenant || tenant.id !== normalizedTenantId) {
-      return false;
-    }
-
-    let val = await this.validateTenantSlug(desiredSlug, normalizedTenantId);
-    let targetSlug = val.normalizedSlug;
-
-    if (!val.isValid) {
-      // Policy gate: deterministic suffix fallback is permitted ONLY when a
-      // valid, non-reserved canonical slug is occupied by another tenant.
-      if (val.reason !== SLUG_VALIDATION_REASONS.SLUG_TAKEN || !isValidSlug(targetSlug)) {
+    return runWithSlugReservationLock(async () => {
+      if (typeof tenantId !== 'string' || !tenantId.trim()) {
+        return false;
+      }
+      if (typeof desiredSlug !== 'string' || !desiredSlug.trim()) {
         return false;
       }
 
-      const alternatives = getSlugAlternatives(targetSlug);
-      for (const alt of alternatives) {
-        if (!isValidSlug(alt)) {
-          continue;
+      const normalizedTenantId = tenantId.trim();
+      const tenant = await tenantService.getTenantById(normalizedTenantId);
+      if (!tenant || tenant.id !== normalizedTenantId) {
+        return false;
+      }
+
+      let val = await this.validateTenantSlug(desiredSlug, normalizedTenantId);
+      let targetSlug = val.normalizedSlug;
+
+      if (!val.isValid) {
+        // Policy gate: deterministic suffix fallback is permitted ONLY when a
+        // valid, non-reserved canonical slug is occupied by another tenant.
+        if (val.reason !== SLUG_VALIDATION_REASONS.SLUG_TAKEN || !isValidSlug(targetSlug)) {
+          return false;
         }
-        const altVal = await this.validateTenantSlug(alt, normalizedTenantId);
-        if (
-          altVal.isValid &&
-          altVal.reason === SLUG_VALIDATION_REASONS.VALID &&
-          altVal.normalizedSlug === alt
-        ) {
-          targetSlug = alt;
-          val = altVal;
-          break;
+
+        const alternatives = getSlugAlternatives(targetSlug);
+        for (const alt of alternatives) {
+          if (!isValidSlug(alt)) {
+            continue;
+          }
+          const altVal = await this.validateTenantSlug(alt, normalizedTenantId);
+          if (
+            altVal.isValid &&
+            altVal.reason === SLUG_VALIDATION_REASONS.VALID &&
+            altVal.normalizedSlug === alt
+          ) {
+            targetSlug = alt;
+            val = altVal;
+            break;
+          }
         }
       }
-    }
 
-    if (
-      !val.isValid ||
-      val.reason !== SLUG_VALIDATION_REASONS.VALID ||
-      !isValidSlug(targetSlug)
-    ) {
-      return false;
-    }
-
-    // Pre-write ownership re-check against cross-tenant collision
-    const preWriteOwner = await tenantService.getTenantBySlug(targetSlug);
-    if (preWriteOwner && preWriteOwner.id !== normalizedTenantId) {
-      return false;
-    }
-
-    const previousSlug = tenant.slug;
-    await tenantService.updateTenant(normalizedTenantId, { slug: targetSlug });
-
-    // Post-write verification against concurrent duplicate race or unverified write
-    const updatedTenant = await tenantService.getTenantById(normalizedTenantId);
-    const postWriteOwner = await tenantService.getTenantBySlug(targetSlug);
-    if (
-      !updatedTenant ||
-      updatedTenant.slug !== targetSlug ||
-      !postWriteOwner ||
-      postWriteOwner.id !== normalizedTenantId
-    ) {
-      if (updatedTenant && updatedTenant.slug !== previousSlug) {
-        await tenantService.updateTenant(normalizedTenantId, { slug: previousSlug });
+      if (
+        !val.isValid ||
+        val.reason !== SLUG_VALIDATION_REASONS.VALID ||
+        !isValidSlug(targetSlug)
+      ) {
+        return false;
       }
-      return false;
-    }
 
-    // Queue preview ready event
-    try {
-      const previewUrl = `https://${targetSlug}.randevulari.com/preview`;
-      communicationEventService.queueCommunicationEvent({
-        tenantId: normalizedTenantId,
-        audience: 'business_owner',
-        channel: 'in_app',
-        type: 'public_site_preview_ready',
-        contextArgs: {
-          businessName: tenant.branding?.businessName || tenant.name,
-          previewUrl
+      // Pre-write ownership re-check against cross-tenant collision
+      const preWriteOwner = await tenantService.getTenantBySlug(targetSlug);
+      if (preWriteOwner && preWriteOwner.id !== normalizedTenantId) {
+        return false;
+      }
+
+      const previousSlug = tenant.slug;
+      await tenantService.updateTenant(normalizedTenantId, { slug: targetSlug });
+
+      // Post-write verification against concurrent duplicate race (including tail duplicates) or unverified write
+      const isExclusive = await hasExclusiveSlugOwnership(normalizedTenantId, targetSlug);
+      if (!isExclusive) {
+        const currentTenant = await tenantService.getTenantById(normalizedTenantId);
+        if (currentTenant && currentTenant.slug !== previousSlug) {
+          await tenantService.updateTenant(normalizedTenantId, { slug: previousSlug });
         }
-      });
-    } catch (err) {
-      console.error('Slug preview outbox event fail:', err);
-    }
-    return true;
+        return false;
+      }
+
+      // Queue preview ready event
+      try {
+        const previewUrl = `https://${targetSlug}.randevulari.com/preview`;
+        communicationEventService.queueCommunicationEvent({
+          tenantId: normalizedTenantId,
+          audience: 'business_owner',
+          channel: 'in_app',
+          type: 'public_site_preview_ready',
+          contextArgs: {
+            businessName: tenant.branding?.businessName || tenant.name,
+            previewUrl
+          }
+        });
+      } catch (err) {
+        console.error('Slug preview outbox event fail:', err);
+      }
+      return true;
+    });
   },
 
   getProvisioningStatus(tenantId: string): ProvisioningStepStatus {
