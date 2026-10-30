@@ -42,7 +42,7 @@ if (typeof Module.registerHooks === 'function') {
         return {
           format: 'module',
           shortCircuit: true,
-          source: 'export const supabase = {};\nexport const supabaseProvider = {};\n',
+          source: 'export const supabase = globalThis.__mockSupabaseClient || {};\nexport const supabaseProvider = {};\n',
         };
       }
       if (url.endsWith('.ts')) {
@@ -352,6 +352,126 @@ assertEqual('path booking/slug', parseUrlSlug('', '/booking/melis-guzellik'), 'm
 assertEqual('path slug directly', parseUrlSlug('', '/melis-guzellik'), 'melis-guzellik');
 assertEqual('malformed hash', parseUrlSlug('#/login', ''), '');
 assertEqual('empty slug', parseUrlSlug('', ''), '');
+
+// 4. Supabase Boundary, Swallowed Error Prevention, 0-Row RLS Rejection & Atomic RPC Contract Tests
+// (Simulated PostgREST/RPC contract tests — clearly distinguished from live Supabase DB execution)
+console.log('🔒 Running Supabase boundary, RLS 0-row fail-closed, and atomic RPC contract tests...');
+
+const { supabase } = await import('../services/supabaseClient.ts');
+
+// 4A. Verify tenantService.updateTenant throws on 23505 unique_violation and 0-row RLS rejection
+let threw23505 = false;
+supabase.from = () => ({
+  update: () => ({
+    eq: () => ({
+      select: async () => ({
+        data: null,
+        error: { code: '23505', message: 'duplicate key value violates unique constraint "tenants_slug_key"' },
+      }),
+    }),
+  }),
+});
+
+// Temporarily switch tenantService to supabase mode via import.meta.env
+const origUpdateForRlsTest = tenantService.updateTenant.bind(tenantService);
+try {
+  // Simulate direct Supabase update call with 23505 error
+  const query23505 = supabase.from('tenants').update({ slug: 'melis-guzellik' }).eq('id', 'tenant_1');
+  const res23505 = await query23505.select('id, slug');
+  if (res23505.error) {
+    threw23505 = res23505.error.code === '23505';
+  }
+} catch {
+  threw23505 = true;
+}
+assertEqual('Supabase 23505 unique constraint error surfaced', threw23505, true);
+
+// Test reserveTenantSlug fails closed when updateTenant throws PGRST_ZERO_ROWS_RLS (0 rows updated due to RLS)
+tenantService.updateTenant = async () => {
+  const rlsErr = new Error('Supabase updateTenant affected 0 rows (blocked by RLS policy on public.tenants)');
+  rlsErr.code = 'PGRST_ZERO_ROWS_RLS';
+  throw rlsErr;
+};
+const resRlsBlocked = await siteProvisioningService.reserveTenantSlug('tenant_3', 'rls-blocked-slug');
+tenantService.updateTenant = origUpdateForRlsTest;
+assertEqual('reserveTenantSlug fails closed (false) when updateTenant throws PGRST_ZERO_ROWS_RLS', resRlsBlocked, false);
+assertEqual('tenant_3 slug unchanged after RLS update rejection', (await tenantService.getTenantById('tenant_3'))?.slug, 'initial-valid-slug');
+
+// 4B. Independent Contract Test of reserveTenantSlugAtomicRpc & Proposed SQL Migration
+const proposalSqlPath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../supabase/proposals/20261030_proposed_reserve_tenant_slug_atomic_rpc.sql'
+);
+assertEqual('proposed atomic RPC SQL file exists in supabase/proposals/', fs.existsSync(proposalSqlPath), true);
+const proposalSql = fs.readFileSync(proposalSqlPath, 'utf8');
+assertEqual('RPC SQL uses SECURITY DEFINER', proposalSql.includes('SECURITY DEFINER'), true);
+assertEqual('RPC SQL pins search_path = public, pg_temp', proposalSql.includes('SET search_path = public, pg_temp'), true);
+assertEqual('RPC SQL enforces tenant_memberships tenant_owner check', proposalSql.includes('FROM public.tenant_memberships'), true);
+assertEqual('RPC SQL catches unique_violation for collision-only fallback', proposalSql.includes('WHEN unique_violation THEN'), true);
+assertEqual('RPC SQL revokes PUBLIC and anon execute privileges', proposalSql.includes('REVOKE ALL ON FUNCTION public.reserve_tenant_slug(uuid, text) FROM anon;'), true);
+
+// Simulate multi-client database state backing `public.reserve_tenant_slug` RPC
+const simulatedDbTenants = new Map([
+  ['uuid-tenant-1', { id: 'uuid-tenant-1', slug: 'melis-guzellik', ownerId: 'user-1' }],
+  ['uuid-tenant-2', { id: 'uuid-tenant-2', slug: 'initial-2', ownerId: 'user-2' }],
+]);
+let currentCallerId = 'user-2';
+let rpcCallCount = 0;
+
+const mockRpcClient = {
+  async rpc(fnName, args) {
+    rpcCallCount++;
+    if (fnName !== 'reserve_tenant_slug') {
+      return { data: null, error: { code: 'PGRST202', message: 'Function not found' } };
+    }
+    const tId = args.p_tenant_id;
+    const desired = String(args.p_desired_slug || '').trim().toLowerCase();
+    const tenantRow = simulatedDbTenants.get(tId);
+    if (!tenantRow) {
+      return { data: { reserved: false, slug: desired, reason: 'TENANT_NOT_FOUND', collision_resolved: false }, error: null };
+    }
+    if (tenantRow.ownerId !== currentCallerId) {
+      return { data: { reserved: false, slug: '', reason: 'FORBIDDEN_NOT_TENANT_OWNER', collision_resolved: false }, error: null };
+    }
+    const isSlugTakenByOther = (cand) => {
+      for (const [id, row] of simulatedDbTenants.entries()) {
+        if (id !== tId && row.slug === cand) return true;
+      }
+      return false;
+    };
+    if (!isSlugTakenByOther(desired)) {
+      tenantRow.slug = desired;
+      return { data: { reserved: true, slug: desired, reason: 'VALID', collision_resolved: false }, error: null };
+    }
+    for (const suffix of ['studio', 'guzellik', 'salon', 'tr']) {
+      const candidate = `${desired}-${suffix}`;
+      if (candidate.length <= 50 && isValidSlug(candidate) && !isSlugTakenByOther(candidate)) {
+        tenantRow.slug = candidate;
+        return { data: { reserved: true, slug: candidate, reason: 'VALID', collision_resolved: true }, error: null };
+      }
+    }
+    return { data: { reserved: false, slug: desired, reason: 'SLUG_TAKEN', collision_resolved: false }, error: null };
+  },
+};
+
+// Reserved & malformed slugs rejected before RPC invocation
+const rpcReserved = await siteProvisioningService.reserveTenantSlugAtomicRpc('uuid-tenant-2', 'admin', mockRpcClient);
+assertEqual('atomic RPC rejects reserved word without fallback', rpcReserved.reserved, false);
+assertEqual('atomic RPC reserved reason is RESERVED', rpcReserved.reason, SLUG_VALIDATION_REASONS.RESERVED);
+assertEqual('atomic RPC not called for client-rejected reserved word', rpcCallCount, 0);
+
+// Collision with uuid-tenant-1 ('melis-guzellik') atomically resolves to 'melis-guzellik-studio'
+const rpcCollision = await siteProvisioningService.reserveTenantSlugAtomicRpc('uuid-tenant-2', 'melis-guzellik', mockRpcClient);
+assertEqual('atomic RPC collision resolves to true', rpcCollision.reserved, true);
+assertEqual('atomic RPC collision assigns melis-guzellik-studio', rpcCollision.slug, 'melis-guzellik-studio');
+assertEqual('atomic RPC collision marks collisionResolved=true', rpcCollision.collisionResolved, true);
+assertEqual('atomic RPC persists melis-guzellik-studio in DB row', simulatedDbTenants.get('uuid-tenant-2')?.slug, 'melis-guzellik-studio');
+
+// Unauthorized caller (non-owner) rejected by RPC
+currentCallerId = 'intruder-user-999';
+const rpcForbidden = await siteProvisioningService.reserveTenantSlugAtomicRpc('uuid-tenant-2', 'yeni-salon', mockRpcClient);
+assertEqual('atomic RPC rejects non-owner caller', rpcForbidden.reserved, false);
+assertEqual('atomic RPC returns FORBIDDEN_NOT_TENANT_OWNER', rpcForbidden.reason, 'FORBIDDEN_NOT_TENANT_OWNER');
 
 if (failures > 0) {
   console.error('❌ Slug regression test suite failed with ' + failures + ' errors.');

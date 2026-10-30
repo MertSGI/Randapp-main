@@ -70,6 +70,40 @@ export const tenantService = {
   },
 
   async getTenantById(tenantId: string): Promise<Tenant | null> {
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || 'mock';
+    if (mode.startsWith('supabase')) {
+      const query = supabase
+        .from('tenants')
+        .select('*')
+        .eq('id', tenantId);
+      const { data, error } =
+        typeof (query as any).maybeSingle === 'function'
+          ? await (query as any).maybeSingle()
+          : await (query as any).single();
+      if (error && error.code !== 'PGRST116') {
+        const dbErr = new Error(
+          `Supabase getTenantById failed for tenant '${tenantId}': ${error.message || error.code || 'UNKNOWN_DB_ERROR'}`
+        ) as Error & { code?: string };
+        dbErr.code = error.code || 'SUPABASE_GET_BY_ID_ERROR';
+        throw dbErr;
+      }
+      if (data) {
+        return {
+          id: data.id,
+          slug: data.slug,
+          name: data.name,
+          status: data.status,
+          customDomain: data.custom_domain,
+          planId: data.plan_id,
+          publicSiteStatus: data.public_site_status,
+          isPublished: data.is_published,
+          createdAt: data.created_at || new Date().toISOString(),
+          updatedAt: data.updated_at || new Date().toISOString(),
+        } as Tenant;
+      }
+      return null;
+    }
+
     const raw = typeof window !== 'undefined' ? localStorage.getItem('lari_registered_tenants') : null;
     if (raw) {
       try {
@@ -82,13 +116,20 @@ export const tenantService = {
   },
 
   async getTenantBySlug(slug: string): Promise<Tenant | null> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
       const { data, error } = await supabase
         .from('tenants')
         .select('*')
         .eq('slug', slug)
         .single();
+      if (error && error.code !== 'PGRST116') {
+        const dbErr = new Error(
+          `Supabase getTenantBySlug failed for slug '${slug}': ${error.message || error.code || 'UNKNOWN_DB_ERROR'}`
+        ) as Error & { code?: string };
+        dbErr.code = error.code || 'SUPABASE_GET_BY_SLUG_ERROR';
+        throw dbErr;
+      }
       if (data) {
         return {
           id: data.id,
@@ -320,23 +361,51 @@ export const tenantService = {
   },
 
   async updateTenant(tenantId: string, updates: Partial<Tenant>): Promise<void> {
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
-      const { error } = await supabase
+      const payload: Record<string, unknown> = {};
+      if (updates.slug !== undefined) payload.slug = updates.slug;
+      if (updates.name !== undefined) payload.name = updates.name;
+      if (updates.planId !== undefined) payload.plan_id = updates.planId;
+      if (updates.customDomain !== undefined) payload.custom_domain = updates.customDomain;
+      if (updates.status !== undefined) payload.status = updates.status;
+      if (updates.publicSiteStatus !== undefined) payload.public_site_status = updates.publicSiteStatus;
+      if (updates.isPublished !== undefined) payload.is_published = updates.isPublished;
+
+      const updateQuery = supabase
         .from('tenants')
-        .update({
-          slug: updates.slug,
-          name: updates.name,
-          plan_id: updates.planId,
-          custom_domain: updates.customDomain,
-          status: updates.status,
-          public_site_status: updates.publicSiteStatus,
-          is_published: updates.isPublished
-        })
+        .update(payload)
         .eq('id', tenantId);
-        
+
+      // PostgREST / RLS Verification:
+      // Migration 20260714_tenants_update_rls_hardening.sql dropped direct "Tenant Owner UPDATE own tenant"
+      // on public.tenants so tenant_owner cannot self-upgrade plan/billing/status columns directly.
+      // Without .select(), a blocked RLS UPDATE returns error=null with 0 rows modified.
+      // Never swallow database errors or 0-row RLS rejections!
+      const result =
+        typeof (updateQuery as any).select === 'function'
+          ? await (updateQuery as any).select('id, slug')
+          : await updateQuery;
+
+      const { data, error } = result || {};
       if (error) {
-        console.error("Error updating tenant in Supabase:", error);
+        console.error('Error updating tenant in Supabase:', error);
+        const dbErr = new Error(
+          `Supabase updateTenant failed for tenant '${tenantId}' (${error.code || 'DB_ERROR'}): ${error.message || 'Database error'}`
+        ) as Error & { code?: string };
+        dbErr.code = error.code || 'SUPABASE_UPDATE_ERROR';
+        throw dbErr;
+      }
+
+      if (typeof (updateQuery as any).select === 'function') {
+        const rows = Array.isArray(data) ? data : data ? [data] : [];
+        if (rows.length === 0) {
+          const rlsErr = new Error(
+            `Supabase updateTenant affected 0 rows for tenant '${tenantId}' (direct UPDATE blocked by RLS policy on public.tenants after 20260714_tenants_update_rls_hardening.sql or tenant not found). Use atomic SECURITY DEFINER RPC public.reserve_tenant_slug.`
+          ) as Error & { code?: string };
+          rlsErr.code = 'PGRST_ZERO_ROWS_RLS';
+          throw rlsErr;
+        }
       }
       return;
     }
@@ -409,4 +478,3 @@ export const tenantService = {
     return next;
   }
 };
-

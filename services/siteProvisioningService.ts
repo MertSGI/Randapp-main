@@ -1,6 +1,7 @@
 import { publicLinkService } from './publicLinkService';
 import { marketConfigService } from './marketConfigService';
 import { tenantService } from './tenantService';
+import { supabase } from './supabaseClient';
 import type { Tenant } from '../types';
 import { communicationEventService } from './communicationEventService';
 import {
@@ -9,6 +10,7 @@ import {
   generateSlugFromName,
   getSlugAlternatives,
   isValidSlug,
+  validateSlugFormat,
 } from '../utils/slugUtils';
 
 export type ProvisioningStepStatus = 
@@ -33,6 +35,28 @@ export interface CustomDomainRequest {
   notes?: string;
 }
 
+export interface AtomicSlugReservationRpcResult {
+  reserved: boolean;
+  slug: string;
+  reason: string;
+  collisionResolved: boolean;
+}
+
+/**
+ * ARCHITECTURAL BOUNDARY NOTE (P0 Correction 6):
+ * `slugReservationQueue` is strictly a client-side, single-tab in-memory Promise
+ * serialization queue. It serializes concurrent calls within a single JavaScript
+ * runtime (e.g. mock mode or same-tab UI actions), but it is NOT a distributed
+ * database lock across multiple browser clients, tabs, or server processes, and
+ * does NOT prove Supabase multi-client reservation correctness.
+ *
+ * True multi-client Supabase reservation correctness requires:
+ * 1. The PostgreSQL UNIQUE constraint on `public.tenants(slug)` (`tenants_slug_key`), AND
+ * 2. The least-privilege `SECURITY DEFINER` atomic RPC `public.reserve_tenant_slug`
+ *    (proposed in `supabase/proposals/20261030_proposed_reserve_tenant_slug_atomic_rpc.sql`),
+ *    because `20260714_tenants_update_rls_hardening.sql` dropped direct `tenant_owner`
+ *    UPDATE privileges on `public.tenants`.
+ */
 let slugReservationQueue: Promise<void> = Promise.resolve();
 
 function runWithSlugReservationLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -45,19 +69,19 @@ function runWithSlugReservationLock<T>(operation: () => Promise<T>): Promise<T> 
 }
 
 async function hasExclusiveSlugOwnership(tenantId: string, targetSlug: string): Promise<boolean> {
-  const updatedTenant = await tenantService.getTenantById(tenantId);
-  const postWriteOwner = await tenantService.getTenantBySlug(targetSlug);
-  if (
-    !updatedTenant ||
-    updatedTenant.id !== tenantId ||
-    updatedTenant.slug !== targetSlug ||
-    !postWriteOwner ||
-    postWriteOwner.id !== tenantId
-  ) {
-    return false;
-  }
-
   try {
+    const updatedTenant = await tenantService.getTenantById(tenantId);
+    const postWriteOwner = await tenantService.getTenantBySlug(targetSlug);
+    if (
+      !updatedTenant ||
+      updatedTenant.id !== tenantId ||
+      updatedTenant.slug !== targetSlug ||
+      !postWriteOwner ||
+      postWriteOwner.id !== tenantId
+    ) {
+      return false;
+    }
+
     const raw =
       typeof localStorage !== 'undefined'
         ? localStorage.getItem('lari_registered_tenants')
@@ -87,6 +111,98 @@ export const siteProvisioningService = {
     return publicLinkService.validateSlug(slug, tenantId);
   },
 
+  /**
+   * Client-side binding for the proposed least-privilege PostgreSQL atomic RPC
+   * `public.reserve_tenant_slug(p_tenant_id uuid, p_desired_slug text)`.
+   * Performs client-side pre-validation (rejecting reserved/malformed slugs without
+   * fallback) before invoking the database-side atomic transaction.
+   */
+  async reserveTenantSlugAtomicRpc(
+    tenantId: string,
+    desiredSlug: string,
+    rpcClient: { rpc?: (fn: string, args: Record<string, unknown>) => Promise<{ data: any; error: any }> } = supabase as any
+  ): Promise<AtomicSlugReservationRpcResult> {
+    if (typeof tenantId !== 'string' || !tenantId.trim()) {
+      return {
+        reserved: false,
+        slug: '',
+        reason: SLUG_VALIDATION_REASONS.EMPTY_OR_SHORT,
+        collisionResolved: false,
+      };
+    }
+    if (typeof desiredSlug !== 'string' || !desiredSlug.trim()) {
+      return {
+        reserved: false,
+        slug: '',
+        reason: SLUG_VALIDATION_REASONS.EMPTY_OR_SHORT,
+        collisionResolved: false,
+      };
+    }
+
+    const formatCheck = validateSlugFormat(desiredSlug);
+    if (!formatCheck.isValid || !isValidSlug(formatCheck.normalizedSlug)) {
+      return {
+        reserved: false,
+        slug: formatCheck.normalizedSlug,
+        reason: formatCheck.reason,
+        collisionResolved: false,
+      };
+    }
+
+    if (!rpcClient || typeof rpcClient.rpc !== 'function') {
+      return {
+        reserved: false,
+        slug: formatCheck.normalizedSlug,
+        reason: 'RPC_CLIENT_UNAVAILABLE',
+        collisionResolved: false,
+      };
+    }
+
+    try {
+      const { data, error } = await rpcClient.rpc('reserve_tenant_slug', {
+        p_tenant_id: tenantId.trim(),
+        p_desired_slug: formatCheck.normalizedSlug,
+      });
+
+      if (error || !data) {
+        return {
+          reserved: false,
+          slug: formatCheck.normalizedSlug,
+          reason: error?.code || error?.message || SLUG_VALIDATION_REASONS.UNKNOWN_ERROR,
+          collisionResolved: false,
+        };
+      }
+
+      const reserved = Boolean(data.reserved);
+      const assignedSlug = typeof data.slug === 'string' ? data.slug : '';
+      const reason = typeof data.reason === 'string' ? data.reason : (reserved ? SLUG_VALIDATION_REASONS.VALID : SLUG_VALIDATION_REASONS.UNKNOWN_ERROR);
+      const collisionResolved = Boolean(data.collision_resolved ?? data.collisionResolved);
+
+      if (!reserved || !isValidSlug(assignedSlug)) {
+        return {
+          reserved: false,
+          slug: assignedSlug,
+          reason,
+          collisionResolved: false,
+        };
+      }
+
+      return {
+        reserved: true,
+        slug: assignedSlug,
+        reason,
+        collisionResolved,
+      };
+    } catch {
+      return {
+        reserved: false,
+        slug: formatCheck.normalizedSlug,
+        reason: SLUG_VALIDATION_REASONS.UNKNOWN_ERROR,
+        collisionResolved: false,
+      };
+    }
+  },
+
   async reserveTenantSlug(tenantId: string, desiredSlug: string): Promise<boolean> {
     return runWithSlugReservationLock(async () => {
       if (typeof tenantId !== 'string' || !tenantId.trim()) {
@@ -97,7 +213,12 @@ export const siteProvisioningService = {
       }
 
       const normalizedTenantId = tenantId.trim();
-      const tenant = await tenantService.getTenantById(normalizedTenantId);
+      let tenant: Tenant | null = null;
+      try {
+        tenant = await tenantService.getTenantById(normalizedTenantId);
+      } catch {
+        return false;
+      }
       if (!tenant || tenant.id !== normalizedTenantId) {
         return false;
       }
@@ -139,20 +260,33 @@ export const siteProvisioningService = {
       }
 
       // Pre-write ownership re-check against cross-tenant collision
-      const preWriteOwner = await tenantService.getTenantBySlug(targetSlug);
-      if (preWriteOwner && preWriteOwner.id !== normalizedTenantId) {
+      try {
+        const preWriteOwner = await tenantService.getTenantBySlug(targetSlug);
+        if (preWriteOwner && preWriteOwner.id !== normalizedTenantId) {
+          return false;
+        }
+      } catch {
         return false;
       }
 
       const previousSlug = tenant.slug;
-      await tenantService.updateTenant(normalizedTenantId, { slug: targetSlug });
+      try {
+        await tenantService.updateTenant(normalizedTenantId, { slug: targetSlug });
+      } catch (updateErr) {
+        console.error('Slug reservation persistence failed in updateTenant:', updateErr);
+        return false;
+      }
 
       // Post-write verification against concurrent duplicate race (including tail duplicates) or unverified write
       const isExclusive = await hasExclusiveSlugOwnership(normalizedTenantId, targetSlug);
       if (!isExclusive) {
-        const currentTenant = await tenantService.getTenantById(normalizedTenantId);
-        if (currentTenant && currentTenant.slug !== previousSlug) {
-          await tenantService.updateTenant(normalizedTenantId, { slug: previousSlug });
+        try {
+          const currentTenant = await tenantService.getTenantById(normalizedTenantId);
+          if (currentTenant && currentTenant.slug !== previousSlug) {
+            await tenantService.updateTenant(normalizedTenantId, { slug: previousSlug });
+          }
+        } catch {
+          // Ignore rollback failure on read-only / RLS blocked backend
         }
         return false;
       }
