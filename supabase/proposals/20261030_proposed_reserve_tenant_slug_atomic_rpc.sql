@@ -18,7 +18,7 @@
 -- Least-privilege `SECURITY DEFINER` RPC `public.reserve_tenant_slug` with
 -- pinned `search_path = public, pg_temp` that:
 --   a) Authenticates caller (`auth.uid()`) and verifies active `tenant_owner`
---      membership in `public.tenant_memberships` for `p_tenant_id` (or active
+--      membership in `public.users_profile` for `p_tenant_id` (or active
 --      `super_admin`).
 --   b) Enforces canonical slug format (`^[a-z0-9]+(-[a-z0-9]+)*$`, length 3..50)
 --      and rejects all reserved platform/route identifiers without fallback.
@@ -49,6 +49,7 @@ DECLARE
   v_normalized text;
   v_candidate text;
   v_suffix text;
+  v_constraint_name text := '';
   v_suffixes constant text[] := ARRAY['studio', 'guzellik', 'salon', 'tr'];
   v_reserved constant text[] := ARRAY[
     'admin', 'super-admin', 'login', 'register', 'api', 'dashboard',
@@ -90,12 +91,12 @@ BEGIN
   -- 2. Least-privilege caller authorization: must be active tenant_owner of p_tenant_id or super_admin
   SELECT EXISTS (
     SELECT 1
-    FROM public.tenant_memberships tm
-    WHERE tm.tenant_id = p_tenant_id
-      AND tm.user_id = v_caller_id
-      AND tm.role IN ('tenant_owner', 'super_admin')
-      AND COALESCE(tm.status, 'active') = 'active'
-  ) OR COALESCE(public.is_super_admin(), false)
+    FROM public.users_profile up
+    WHERE up.id = v_caller_id
+      AND up.tenant_id = p_tenant_id
+      AND up.role IN ('tenant_owner', 'super_admin')
+      AND up.active = true
+  ) OR COALESCE(public.is_super_admin(v_caller_id), false)
   INTO v_is_authorized;
 
   IF NOT v_is_authorized THEN
@@ -186,6 +187,10 @@ BEGIN
     );
   EXCEPTION
     WHEN unique_violation THEN
+      GET STACKED DIAGNOSTICS v_constraint_name = CONSTRAINT_NAME;
+      IF v_constraint_name IS NOT NULL AND v_constraint_name != '' AND v_constraint_name NOT IN ('tenants_slug_key', 'tenants_slug_unique') THEN
+        RAISE;
+      END IF;
       -- Collision on public.tenants(slug) unique constraint: proceed to deterministic suffix fallback
       NULL;
   END;
@@ -212,6 +217,10 @@ BEGIN
         );
       EXCEPTION
         WHEN unique_violation THEN
+          GET STACKED DIAGNOSTICS v_constraint_name = CONSTRAINT_NAME;
+          IF v_constraint_name IS NOT NULL AND v_constraint_name != '' AND v_constraint_name NOT IN ('tenants_slug_key', 'tenants_slug_unique') THEN
+            RAISE;
+          END IF;
           CONTINUE;
       END;
     END IF;

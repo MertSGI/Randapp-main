@@ -280,13 +280,20 @@ export const siteProvisioningService = {
       // Post-write verification against concurrent duplicate race (including tail duplicates) or unverified write
       const isExclusive = await hasExclusiveSlugOwnership(normalizedTenantId, targetSlug);
       if (!isExclusive) {
+        let rollbackError: unknown = null;
         try {
           const currentTenant = await tenantService.getTenantById(normalizedTenantId);
           if (currentTenant && currentTenant.slug !== previousSlug) {
             await tenantService.updateTenant(normalizedTenantId, { slug: previousSlug });
           }
-        } catch {
-          // Ignore rollback failure on read-only / RLS blocked backend
+        } catch (err) {
+          rollbackError = err;
+          console.error(`CRITICAL: Post-write exclusivity verification failed for tenant ${normalizedTenantId} on slug '${targetSlug}' and automated rollback to '${previousSlug}' failed:`, err);
+        }
+
+        if (rollbackError) {
+          const errMsg = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+          throw new Error(`SLUG_RESERVATION_STATE_DIVERGENCE: Exclusivity verification failed for slug '${targetSlug}' and rollback to '${previousSlug}' failed (${errMsg}). Persistent manual remediation required.`);
         }
         return false;
       }

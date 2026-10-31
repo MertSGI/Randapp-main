@@ -406,7 +406,22 @@ assertEqual('proposed atomic RPC SQL file exists in supabase/proposals/', fs.exi
 const proposalSql = fs.readFileSync(proposalSqlPath, 'utf8');
 assertEqual('RPC SQL uses SECURITY DEFINER', proposalSql.includes('SECURITY DEFINER'), true);
 assertEqual('RPC SQL pins search_path = public, pg_temp', proposalSql.includes('SET search_path = public, pg_temp'), true);
-assertEqual('RPC SQL enforces tenant_memberships tenant_owner check', proposalSql.includes('FROM public.tenant_memberships'), true);
+assertEqual('RPC SQL enforces users_profile tenant_owner check', proposalSql.includes('FROM public.users_profile up'), true);
+assertEqual('RPC SQL calls is_super_admin(v_caller_id)', proposalSql.includes('public.is_super_admin(v_caller_id)'), true);
+assertEqual('RPC SQL checks tenants_slug_key constraint', proposalSql.includes('tenants_slug_key'), true);
+
+// 4B-1. Schema-reference static QA: Verify users_profile and is_super_admin exist in migrations
+const migrationsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../supabase/migrations');
+const migrationFiles = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql'));
+let usersProfileFound = false;
+let isSuperAdminFound = false;
+for (const mf of migrationFiles) {
+  const mContent = fs.readFileSync(path.join(migrationsDir, mf), 'utf8');
+  if (mContent.includes('CREATE TABLE public.users_profile') || mContent.includes('public.users_profile')) usersProfileFound = true;
+  if (mContent.includes('FUNCTION public.is_super_admin')) isSuperAdminFound = true;
+}
+assertEqual('schema QA: users_profile exists in migrations', usersProfileFound, true);
+assertEqual('schema QA: is_super_admin exists in migrations', isSuperAdminFound, true);
 assertEqual('RPC SQL catches unique_violation for collision-only fallback', proposalSql.includes('WHEN unique_violation THEN'), true);
 assertEqual('RPC SQL revokes PUBLIC and anon execute privileges', proposalSql.includes('REVOKE ALL ON FUNCTION public.reserve_tenant_slug(uuid, text) FROM anon;'), true);
 
@@ -472,6 +487,33 @@ currentCallerId = 'intruder-user-999';
 const rpcForbidden = await siteProvisioningService.reserveTenantSlugAtomicRpc('uuid-tenant-2', 'yeni-salon', mockRpcClient);
 assertEqual('atomic RPC rejects non-owner caller', rpcForbidden.reserved, false);
 assertEqual('atomic RPC returns FORBIDDEN_NOT_TENANT_OWNER', rpcForbidden.reason, 'FORBIDDEN_NOT_TENANT_OWNER');
+
+// 4C. Test that failed rollback after post-write exclusivity failure surfaces SLUG_RESERVATION_STATE_DIVERGENCE
+const origUpdateForDivergence = tenantService.updateTenant.bind(tenantService);
+let stateDivergenceThrown = false;
+try {
+  let updateCalls = 0;
+  tenantService.updateTenant = async (tId, data) => {
+    updateCalls++;
+    if (updateCalls === 1) {
+      await origUpdateForDivergence(tId, data);
+      const arr = JSON.parse(localStorageMock.getItem('lari_registered_tenants') || '[]');
+      arr.unshift({ id: 'tenant_diverge_comp', name: 'Comp', slug: 'diverge-target-slug', status: 'active' });
+      localStorageMock.setItem('lari_registered_tenants', JSON.stringify(arr));
+      return;
+    }
+    throw new Error('Database connection reset during rollback');
+  };
+
+  await siteProvisioningService.reserveTenantSlug('tenant_3', 'diverge-target-slug');
+} catch (err) {
+  if (err && String(err.message).includes('SLUG_RESERVATION_STATE_DIVERGENCE')) {
+    stateDivergenceThrown = true;
+  }
+} finally {
+  tenantService.updateTenant = origUpdateForDivergence;
+}
+assertEqual('rollback failure surfaces SLUG_RESERVATION_STATE_DIVERGENCE', stateDivergenceThrown, true);
 
 if (failures > 0) {
   console.error('❌ Slug regression test suite failed with ' + failures + ' errors.');
