@@ -185,8 +185,16 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
     try {
       const { siteProvisioningService } = await import('../services/siteProvisioningService');
       const val = await siteProvisioningService.validateTenantSlug(setupSlug, tenant.id);
-      if (!val.isValid) {
-        await showAlert(val.error || "Girdiğiniz web adresi başka bir işletme tarafından kullanılıyor veya geçersiz.");
+      if (!val.isValid && val.reason !== 'SLUG_TAKEN') {
+        await showAlert(val.error || "Girdiğiniz web adresi geçersiz.");
+        setSetupSaving(false);
+        return;
+      }
+
+      const canonicalSlug = val.normalizedSlug || setupSlug;
+      const reserved = await siteProvisioningService.reserveTenantSlug(tenant.id, canonicalSlug);
+      if (!reserved) {
+        await showAlert("Web adresi rezerve edilemedi veya başka bir işletme tarafından kullanılıyor.");
         setSetupSaving(false);
         return;
       }
@@ -194,9 +202,6 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
       const { tenantService } = await import('../services/tenantService');
       await tenantService.updateTenantBranding(tenant.id, {
         businessName: setupSalonName,
-      });
-      await tenantService.updateTenant(tenant.id, {
-        slug: setupSlug
       });
       await businessProfileService.updateBusinessProfile(tenant.id, {
         business_category: profileCategory,
@@ -207,8 +212,8 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
       await refreshReport();
       setActiveStep(2);
     } catch (err) {
-      console.error(err);
-      await showAlert("Kaydedilirken bir hata oluştu.");
+      console.error("Onboarding save error:", err);
+      await showAlert("Kaydedilirken bir hata oluştu. Lütfen tekrar deneyiniz.");
     } finally {
       setSetupSaving(false);
     }
