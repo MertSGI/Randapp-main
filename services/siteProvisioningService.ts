@@ -269,6 +269,33 @@ export const siteProvisioningService = {
         return false;
       }
 
+      // If Supabase client with RPC is available, attempt atomic RPC reservation path first
+      if (supabase && typeof (supabase as any).rpc === 'function') {
+        try {
+          const rpcRes = await this.reserveTenantSlugAtomicRpc(normalizedTenantId, targetSlug, supabase as any);
+          if (rpcRes.reserved && rpcRes.slug) {
+            // Queue preview ready event
+            try {
+              await communicationEventService.queueEvent({
+                tenantId: normalizedTenantId,
+                eventType: 'tenant.provisioning.preview_ready',
+                recipient: tenant.contactEmail || 'salon@example.com',
+                metadata: {
+                  tenantId: normalizedTenantId,
+                  slug: rpcRes.slug,
+                  step: 'preview_ready',
+                },
+              });
+            } catch (eventErr) {
+              console.warn('Failed to queue preview ready event (non-blocking):', eventErr);
+            }
+            return true;
+          }
+        } catch {
+          // Fall back gracefully to local/mock updateTenant path if RPC call encounters mock environment or missing RPC
+        }
+      }
+
       const previousSlug = tenant.slug;
       try {
         await tenantService.updateTenant(normalizedTenantId, { slug: targetSlug });

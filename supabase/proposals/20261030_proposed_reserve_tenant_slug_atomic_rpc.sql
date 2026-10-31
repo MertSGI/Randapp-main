@@ -220,7 +220,7 @@ BEGIN
       EXCEPTION
         WHEN unique_violation THEN
           GET STACKED DIAGNOSTICS v_constraint_name = CONSTRAINT_NAME;
-          IF v_constraint_name IS NOT NULL AND v_constraint_name != '' AND v_constraint_name NOT IN ('tenants_slug_key', 'tenants_slug_unique') THEN
+          IF v_constraint_name IS NULL OR v_constraint_name NOT IN ('tenants_slug_key', 'tenants_slug_unique') THEN
             RAISE;
           END IF;
           CONTINUE;
