@@ -212,8 +212,8 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
       await refreshReport();
       setActiveStep(2);
     } catch (err) {
-      console.error(err);
-      await showAlert(err instanceof Error ? err.message : "Kaydedilirken bir hata oluştu.");
+      console.error("Onboarding save error:", err);
+      await showAlert("Kaydedilirken bir hata oluştu. Lütfen tekrar deneyiniz.");
     } finally {
       setSetupSaving(false);
     }

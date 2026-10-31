@@ -88,15 +88,17 @@ BEGIN
     );
   END IF;
 
-  -- 2. Least-privilege caller authorization: must be active tenant_owner of p_tenant_id or super_admin
+  -- 2. Least-privilege caller authorization: must be active tenant_owner of p_tenant_id or active super_admin
   SELECT EXISTS (
     SELECT 1
     FROM public.users_profile up
     WHERE up.id = v_caller_id
-      AND up.tenant_id = p_tenant_id
-      AND up.role IN ('tenant_owner', 'super_admin')
       AND up.active = true
-  ) OR COALESCE(public.is_super_admin(v_caller_id), false)
+      AND (
+        (up.tenant_id = p_tenant_id AND up.role IN ('tenant_owner', 'super_admin'))
+        OR (public.is_super_admin(v_caller_id) AND up.role = 'super_admin')
+      )
+  )
   INTO v_is_authorized;
 
   IF NOT v_is_authorized THEN
@@ -188,7 +190,7 @@ BEGIN
   EXCEPTION
     WHEN unique_violation THEN
       GET STACKED DIAGNOSTICS v_constraint_name = CONSTRAINT_NAME;
-      IF v_constraint_name IS NOT NULL AND v_constraint_name != '' AND v_constraint_name NOT IN ('tenants_slug_key', 'tenants_slug_unique') THEN
+      IF v_constraint_name IS NULL OR v_constraint_name NOT IN ('tenants_slug_key', 'tenants_slug_unique') THEN
         RAISE;
       END IF;
       -- Collision on public.tenants(slug) unique constraint: proceed to deterministic suffix fallback

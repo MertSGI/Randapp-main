@@ -280,20 +280,28 @@ export const siteProvisioningService = {
       // Post-write verification against concurrent duplicate race (including tail duplicates) or unverified write
       const isExclusive = await hasExclusiveSlugOwnership(normalizedTenantId, targetSlug);
       if (!isExclusive) {
+        let rollbackSuccess = false;
         let rollbackError: unknown = null;
         try {
           const currentTenant = await tenantService.getTenantById(normalizedTenantId);
-          if (currentTenant && currentTenant.slug !== previousSlug) {
-            await tenantService.updateTenant(normalizedTenantId, { slug: previousSlug });
+          if (currentTenant) {
+            if (currentTenant.slug !== previousSlug) {
+              await tenantService.updateTenant(normalizedTenantId, { slug: previousSlug });
+            }
+            // Authoritatively re-verify that restored state matches previousSlug
+            const restoredTenant = await tenantService.getTenantById(normalizedTenantId);
+            if (restoredTenant && restoredTenant.slug === previousSlug) {
+              rollbackSuccess = true;
+            }
           }
         } catch (err) {
           rollbackError = err;
           console.error(`CRITICAL: Post-write exclusivity verification failed for tenant ${normalizedTenantId} on slug '${targetSlug}' and automated rollback to '${previousSlug}' failed:`, err);
         }
 
-        if (rollbackError) {
-          const errMsg = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
-          throw new Error(`SLUG_RESERVATION_STATE_DIVERGENCE: Exclusivity verification failed for slug '${targetSlug}' and rollback to '${previousSlug}' failed (${errMsg}). Persistent manual remediation required.`);
+        if (!rollbackSuccess) {
+          const errMsg = rollbackError instanceof Error ? rollbackError.message : String(rollbackError || 'Unverified restored state');
+          throw new Error(`SLUG_RESERVATION_STATE_DIVERGENCE: Exclusivity verification failed for slug '${targetSlug}' and rollback to '${previousSlug}' could not be verified (${errMsg}). Persistent manual remediation required.`);
         }
         return false;
       }
