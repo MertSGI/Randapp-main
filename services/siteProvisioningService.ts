@@ -224,6 +224,51 @@ export const siteProvisioningService = {
         return false;
       }
 
+      // Architectural Boundary: In Supabase mode, slug reservation MUST execute via the atomic RPC.
+      // Direct updateTenant is RLS-restricted for tenant owners; fallback to direct update is strictly
+      // prohibited in Supabase mode and only permitted in explicit local/mock mode.
+      // Database is sole authority: in Supabase mode, pass the unchanged canonical base slug directly to the RPC.
+      const mode = getDataSourceMode();
+      if (mode === 'supabase') {
+        const valFormat = validateSlugFormat(desiredSlug);
+        if (!valFormat.isValid) {
+          return false;
+        }
+        const canonicalBase = valFormat.normalizedSlug;
+        if (!supabase || typeof (supabase as any).rpc !== 'function') {
+          console.error('Slug reservation blocked: Supabase client or RPC unavailable in supabase mode.');
+          return false;
+        }
+        try {
+          const rpcRes = await this.reserveTenantSlugAtomicRpc(normalizedTenantId, canonicalBase, supabase as any);
+          if (rpcRes.reserved && rpcRes.slug) {
+            try {
+              const previewUrl = `https://${rpcRes.slug}.randevulari.com/preview`;
+              communicationEventService.queueCommunicationEvent({
+                tenantId: normalizedTenantId,
+                audience: 'business_owner',
+                channel: 'in_app',
+                type: 'public_site_preview_ready',
+                contextArgs: {
+                  businessName: tenant.branding?.businessName || tenant.name,
+                  previewUrl
+                }
+              });
+            } catch (eventErr) {
+              console.warn('Failed to queue preview ready event (non-blocking):', eventErr);
+            }
+            return true;
+          } else {
+            console.warn(`Atomic slug reservation rejected by RPC in supabase mode: ${rpcRes.reason}`);
+            return false;
+          }
+        } catch (rpcErr) {
+          console.error('Atomic slug reservation failed with error in supabase mode:', rpcErr);
+          return false;
+        }
+      }
+
+      // Local / Mock mode: in-process collision handling and validation
       let val = await this.validateTenantSlug(desiredSlug, normalizedTenantId);
       let targetSlug = val.normalizedSlug;
 
@@ -268,43 +313,6 @@ export const siteProvisioningService = {
         }
       } catch {
         return false;
-      }
-
-      // Architectural Boundary: In Supabase mode, slug reservation MUST execute via the atomic RPC.
-      // Direct updateTenant is RLS-restricted for tenant owners; fallback to direct update is strictly
-      // prohibited in Supabase mode and only permitted in explicit local/mock mode.
-      const mode = getDataSourceMode();
-      if (mode === 'supabase') {
-        if (!supabase || typeof (supabase as any).rpc !== 'function') {
-          console.error('Slug reservation blocked: Supabase client or RPC unavailable in supabase mode.');
-          return false;
-        }
-        try {
-          const rpcRes = await this.reserveTenantSlugAtomicRpc(normalizedTenantId, targetSlug, supabase as any);
-          if (rpcRes.reserved && rpcRes.slug) {
-            try {
-              await communicationEventService.queueEvent({
-                tenantId: normalizedTenantId,
-                eventType: 'tenant.provisioning.preview_ready',
-                recipient: tenant.contactEmail || 'salon@example.com',
-                metadata: {
-                  tenantId: normalizedTenantId,
-                  slug: rpcRes.slug,
-                  step: 'preview_ready',
-                },
-              });
-            } catch (eventErr) {
-              console.warn('Failed to queue preview ready event (non-blocking):', eventErr);
-            }
-            return true;
-          } else {
-            console.warn(`Atomic slug reservation rejected by RPC in supabase mode: ${rpcRes.reason}`);
-            return false;
-          }
-        } catch (rpcErr) {
-          console.error('Atomic slug reservation failed with error in supabase mode:', rpcErr);
-          return false;
-        }
       }
 
       // Explicit local / mock mode fallback path
