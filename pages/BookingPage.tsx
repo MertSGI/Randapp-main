@@ -18,6 +18,7 @@ import { SalonBusinessProfile, BusinessBranch } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { canPreviewTenantSite } from '../utils/previewAuth';
 import SalonWebsiteView from '../components/SalonWebsiteView';
+import SalonWebsiteViewV2 from '../components/SalonWebsiteViewV2';
 import { getDataSourceMode } from '../services/dataSourceConfig';
 
 
@@ -112,6 +113,14 @@ const BookingPage: React.FC = () => {
   const requestedPreview = new URLSearchParams(window.location.hash.split('?')[1]).get('preview') === 'true';
   const urlSource = new URLSearchParams(window.location.hash.split('?')[1]).get('source') || undefined;
   const isAuthorizedPreview = requestedPreview && canPreviewTenantSite(currentUser, tenant?.id);
+
+  const isUiV2 = typeof window !== 'undefined' && (() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashSearch = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '';
+    const hashParams = new URLSearchParams(hashSearch);
+    return searchParams.get('ui') === 'v2' || hashParams.get('ui') === 'v2';
+  })();
+  const WebsiteComponent = isUiV2 ? SalonWebsiteViewV2 : SalonWebsiteView;
 
   // Regenerate PII-free idempotency key when booking selection parameters change
   useEffect(() => {
@@ -803,8 +812,8 @@ isWaDelivered = waDelivered === true;
          </div>
       ) : (
       <div data-testid="public-booking-ready">
-        <SalonWebsiteView 
-          tenant={tenant}
+        <WebsiteComponent
+              tenant={tenant}
           businessProfile={businessProfile}
           staffList={staffList}
           servicesList={servicesList}
