@@ -58,7 +58,7 @@ DECLARE
     'payment', 'payments', 'billing', 'pricing', 'features', 'support',
     'help', 'contact', 'privacy', 'terms', 'pilot', 'demo', 'customer',
     'customers', 'mobile-app', 'lari', 'randevulari', 'randapp', 'radapp',
-    'onboarding', 'webhook', 'webhooks', 'status', 'health', 'graphql',
+    'onboarding', 'randevu', 'tenant', 'webhook', 'webhooks', 'status', 'health', 'graphql',
     'rest', 'v1', 'v2', 'app', 'www', 'mail', 'smtp', 'imap', 'pop', 'ftp',
     'cdn', 'media', 'files', 'uploads', 'downloads', 'blog', 'news', 'press',
     'careers', 'about', 'team', 'legal', 'security', 'trust', 'docs',

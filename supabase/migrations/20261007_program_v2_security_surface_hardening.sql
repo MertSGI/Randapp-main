@@ -6,6 +6,15 @@
 -- =========================================================================
 -- Finding S-01: Hardening public.ht_rate_limit_buckets table & RLS
 -- =========================================================================
+-- Ensure table exists for clean migration replayability on pristine databases
+CREATE TABLE IF NOT EXISTS public.ht_rate_limit_buckets (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    bucket_key text NOT NULL,
+    tokens integer NOT NULL DEFAULT 0,
+    last_refill_at timestamptz NOT NULL DEFAULT now(),
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
 -- Revoke all direct privileges on table from public and non-admin roles
 REVOKE ALL PRIVILEGES ON TABLE public.ht_rate_limit_buckets FROM PUBLIC;
 REVOKE ALL PRIVILEGES ON TABLE public.ht_rate_limit_buckets FROM anon;
@@ -31,6 +40,9 @@ AS $$
 DECLARE
     u_role text;
 BEGIN
+    IF auth.uid() IS NOT NULL AND auth.uid() != user_id AND NOT public.is_super_admin(auth.uid()) THEN
+        RAISE EXCEPTION 'Access denied: cannot inspect role of other users';
+    END IF;
     SELECT role INTO u_role FROM public.users_profile WHERE id = user_id AND active = true;
     RETURN u_role;
 END;
@@ -51,6 +63,9 @@ AS $$
 DECLARE
     u_tenant_id uuid;
 BEGIN
+    IF auth.uid() IS NOT NULL AND auth.uid() != user_id AND NOT public.is_super_admin(auth.uid()) THEN
+        RAISE EXCEPTION 'Access denied: cannot inspect tenant of other users';
+    END IF;
     SELECT tenant_id INTO u_tenant_id FROM public.users_profile WHERE id = user_id AND active = true;
     RETURN u_tenant_id;
 END;
@@ -74,7 +89,7 @@ AS $$
 BEGIN
     RETURN EXISTS (
         SELECT 1 FROM public.users_profile 
-        WHERE id = user_id AND role = 'super_admin'
+        WHERE id = user_id AND role = 'super_admin' AND active = true
     );
 END;
 $$;

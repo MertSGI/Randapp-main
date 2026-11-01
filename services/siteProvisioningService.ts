@@ -1,4 +1,5 @@
 import { publicLinkService } from './publicLinkService';
+import { getDataSourceMode } from './dataSourceConfig';
 import { marketConfigService } from './marketConfigService';
 import { tenantService } from './tenantService';
 import { supabase } from './supabaseClient';
@@ -269,12 +270,18 @@ export const siteProvisioningService = {
         return false;
       }
 
-      // If Supabase client with RPC is available, attempt atomic RPC reservation path first
-      if (supabase && typeof (supabase as any).rpc === 'function') {
+      // Architectural Boundary: In Supabase mode, slug reservation MUST execute via the atomic RPC.
+      // Direct updateTenant is RLS-restricted for tenant owners; fallback to direct update is strictly
+      // prohibited in Supabase mode and only permitted in explicit local/mock mode.
+      const mode = getDataSourceMode();
+      if (mode === 'supabase') {
+        if (!supabase || typeof (supabase as any).rpc !== 'function') {
+          console.error('Slug reservation blocked: Supabase client or RPC unavailable in supabase mode.');
+          return false;
+        }
         try {
           const rpcRes = await this.reserveTenantSlugAtomicRpc(normalizedTenantId, targetSlug, supabase as any);
           if (rpcRes.reserved && rpcRes.slug) {
-            // Queue preview ready event
             try {
               await communicationEventService.queueEvent({
                 tenantId: normalizedTenantId,
@@ -290,12 +297,17 @@ export const siteProvisioningService = {
               console.warn('Failed to queue preview ready event (non-blocking):', eventErr);
             }
             return true;
+          } else {
+            console.warn(`Atomic slug reservation rejected by RPC in supabase mode: ${rpcRes.reason}`);
+            return false;
           }
-        } catch {
-          // Fall back gracefully to local/mock updateTenant path if RPC call encounters mock environment or missing RPC
+        } catch (rpcErr) {
+          console.error('Atomic slug reservation failed with error in supabase mode:', rpcErr);
+          return false;
         }
       }
 
+      // Explicit local / mock mode fallback path
       const previousSlug = tenant.slug;
       try {
         await tenantService.updateTenant(normalizedTenantId, { slug: targetSlug });

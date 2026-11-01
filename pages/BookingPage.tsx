@@ -18,6 +18,7 @@ import { SalonBusinessProfile, BusinessBranch } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { canPreviewTenantSite } from '../utils/previewAuth';
 import SalonWebsiteView from '../components/SalonWebsiteView';
+import SalonWebsiteViewV2 from '../components/SalonWebsiteViewV2';
 import { getDataSourceMode } from '../services/dataSourceConfig';
 
 
@@ -803,8 +804,12 @@ isWaDelivered = waDelivered === true;
          </div>
       ) : (
       <div data-testid="public-booking-ready">
-        <SalonWebsiteView 
-          tenant={tenant}
+        {(() => {
+          const isUiV2 = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('ui') === 'v2';
+          const WebsiteComponent = isUiV2 ? SalonWebsiteViewV2 : SalonWebsiteView;
+          return (
+            <WebsiteComponent 
+              tenant={tenant}
           businessProfile={businessProfile}
           staffList={staffList}
           servicesList={servicesList}
