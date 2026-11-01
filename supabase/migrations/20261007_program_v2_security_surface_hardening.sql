@@ -96,7 +96,7 @@ SET search_path = pg_catalog, public
 AS $$
 BEGIN
     RETURN EXISTS (
-        SELECT 1 FROM public.users_profile 
+        SELECT 1 FROM public.users_profile
         WHERE id = user_id AND role = 'super_admin' AND active = true
     );
 END;

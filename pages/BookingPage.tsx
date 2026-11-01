@@ -812,7 +812,7 @@ isWaDelivered = waDelivered === true;
          </div>
       ) : (
       <div data-testid="public-booking-ready">
-        <WebsiteComponent 
+        <WebsiteComponent
               tenant={tenant}
           businessProfile={businessProfile}
           staffList={staffList}

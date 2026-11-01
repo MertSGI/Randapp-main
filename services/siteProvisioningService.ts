@@ -90,8 +90,10 @@ async function hasExclusiveSlugOwnership(tenantId: string, targetSlug: string): 
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        const owners = parsed.filter((t: any) => t && t.slug === targetSlug);
-        if (owners.length !== 1 || owners[0].id !== tenantId) {
+        const owners = (parsed as Array<{ id?: string; slug?: string } | null | undefined>).filter(
+          (t) => Boolean(t && typeof t === 'object' && t.slug === targetSlug)
+        );
+        if (owners.length !== 1 || !owners[0] || owners[0].id !== tenantId) {
           return false;
         }
       }
@@ -121,7 +123,7 @@ export const siteProvisioningService = {
   async reserveTenantSlugAtomicRpc(
     tenantId: string,
     desiredSlug: string,
-    rpcClient: { rpc?: (fn: string, args: Record<string, unknown>) => Promise<{ data: any; error: any }> } = supabase as any
+    rpcClient: { rpc?: (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null }> } = supabase
   ): Promise<AtomicSlugReservationRpcResult> {
     if (typeof tenantId !== 'string' || !tenantId.trim()) {
       return {
@@ -174,10 +176,11 @@ export const siteProvisioningService = {
         };
       }
 
-      const reserved = Boolean(data.reserved);
-      const assignedSlug = typeof data.slug === 'string' ? data.slug : '';
-      const reason = typeof data.reason === 'string' ? data.reason : (reserved ? SLUG_VALIDATION_REASONS.VALID : SLUG_VALIDATION_REASONS.UNKNOWN_ERROR);
-      const collisionResolved = Boolean(data.collision_resolved ?? data.collisionResolved);
+      const payload = typeof data === 'object' && data !== null ? (data as { reserved?: boolean; slug?: string; reason?: string; collision_resolved?: boolean; collisionResolved?: boolean }) : {};
+      const reserved = Boolean(payload.reserved);
+      const assignedSlug = typeof payload.slug === 'string' ? payload.slug : '';
+      const reason = typeof payload.reason === 'string' ? payload.reason : (reserved ? SLUG_VALIDATION_REASONS.VALID : SLUG_VALIDATION_REASONS.UNKNOWN_ERROR);
+      const collisionResolved = Boolean(payload.collision_resolved ?? payload.collisionResolved);
 
       if (!reserved || !isValidSlug(assignedSlug)) {
         return {
@@ -235,12 +238,12 @@ export const siteProvisioningService = {
           return false;
         }
         const canonicalBase = valFormat.normalizedSlug;
-        if (!supabase || typeof (supabase as any).rpc !== 'function') {
+        if (!supabase || typeof supabase.rpc !== 'function') {
           console.error('Slug reservation blocked: Supabase client or RPC unavailable in supabase mode.');
           return false;
         }
         try {
-          const rpcRes = await this.reserveTenantSlugAtomicRpc(normalizedTenantId, canonicalBase, supabase as any);
+          const rpcRes = await this.reserveTenantSlugAtomicRpc(normalizedTenantId, canonicalBase, supabase);
           if (rpcRes.reserved && rpcRes.slug) {
             try {
               const previewUrl = `https://${rpcRes.slug}.randevulari.com/preview`;
