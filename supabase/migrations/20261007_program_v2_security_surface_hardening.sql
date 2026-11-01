@@ -40,8 +40,8 @@ AS $$
 DECLARE
     u_role text;
 BEGIN
-    IF auth.uid() IS NOT NULL AND auth.uid() != user_id AND NOT public.is_super_admin(auth.uid()) THEN
-        RAISE EXCEPTION 'Access denied: cannot inspect role of other users';
+    IF auth.uid() IS NULL OR (auth.uid() <> user_id AND NOT public.is_super_admin(auth.uid())) THEN
+        RAISE EXCEPTION 'Access denied: cannot inspect role of other users without authenticated super-admin privilege';
     END IF;
     SELECT role INTO u_role FROM public.users_profile WHERE id = user_id AND active = true;
     RETURN u_role;
@@ -63,8 +63,8 @@ AS $$
 DECLARE
     u_tenant_id uuid;
 BEGIN
-    IF auth.uid() IS NOT NULL AND auth.uid() != user_id AND NOT public.is_super_admin(auth.uid()) THEN
-        RAISE EXCEPTION 'Access denied: cannot inspect tenant of other users';
+    IF auth.uid() IS NULL OR (auth.uid() <> user_id AND NOT public.is_super_admin(auth.uid())) THEN
+        RAISE EXCEPTION 'Access denied: cannot inspect tenant of other users without authenticated super-admin privilege';
     END IF;
     SELECT tenant_id INTO u_tenant_id FROM public.users_profile WHERE id = user_id AND active = true;
     RETURN u_tenant_id;

@@ -805,7 +805,12 @@ isWaDelivered = waDelivered === true;
       ) : (
       <div data-testid="public-booking-ready">
         {(() => {
-          const isUiV2 = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('ui') === 'v2';
+          const isUiV2 = typeof window !== 'undefined' && (() => {
+            const searchParams = new URLSearchParams(window.location.search);
+            const hashSearch = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '';
+            const hashParams = new URLSearchParams(hashSearch);
+            return searchParams.get('ui') === 'v2' || hashParams.get('ui') === 'v2';
+          })();
           const WebsiteComponent = isUiV2 ? SalonWebsiteViewV2 : SalonWebsiteView;
           return (
             <WebsiteComponent 
