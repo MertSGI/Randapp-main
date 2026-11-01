@@ -746,7 +746,15 @@ isWaDelivered = waDelivered === true;
     const stepLabels = ['Hizmet Seç', 'Uzman Seç', 'Saat Seç', 'Bilgiler'];
     const activeLabel = stepLabels[step - 1];
 
-    return (
+    const isUiV2 = typeof window !== 'undefined' && (() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashSearch = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '';
+    const hashParams = new URLSearchParams(hashSearch);
+    return searchParams.get('ui') === 'v2' || hashParams.get('ui') === 'v2';
+  })();
+  const WebsiteComponent = isUiV2 ? SalonWebsiteViewV2 : SalonWebsiteView;
+
+  return (
       <div className="mb-6 md:mb-10 max-w-2xl mx-auto">
         {/* Desktop Stepper */}
         <div className="hidden sm:flex items-center justify-between relative px-2">
@@ -804,16 +812,7 @@ isWaDelivered = waDelivered === true;
          </div>
       ) : (
       <div data-testid="public-booking-ready">
-        {(() => {
-          const isUiV2 = typeof window !== 'undefined' && (() => {
-            const searchParams = new URLSearchParams(window.location.search);
-            const hashSearch = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '';
-            const hashParams = new URLSearchParams(hashSearch);
-            return searchParams.get('ui') === 'v2' || hashParams.get('ui') === 'v2';
-          })();
-          const WebsiteComponent = isUiV2 ? SalonWebsiteViewV2 : SalonWebsiteView;
-          return (
-            <WebsiteComponent 
+        <WebsiteComponent 
               tenant={tenant}
           businessProfile={businessProfile}
           staffList={staffList}
@@ -1453,8 +1452,6 @@ isWaDelivered = waDelivered === true;
       ) : null
     }
     />
-          );
-        })()}
     </div>
     )}
   </div>
