@@ -88,6 +88,9 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
       failureReason: event.failureReason,
       internalOnly: !!event.internalOnly,
       ...event,
+      // Override caller fields after the spread: never lose generated canonical ID/status.
+      id,
+      status: event.status || 'queued',
       // Enforce tenantId belongs to the authorized tenant and cannot be spoofed
       tenantId: tenantId
     };
