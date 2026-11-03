@@ -173,8 +173,15 @@ export const consentLedgerService = {
 
     if (latestRecord.status === 'granted') {
       const timestamp = new Date().toISOString();
+      const withdrawalIdBase = `cld_withdrawn_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${latestRecord.id}`;
+      let withdrawalId = withdrawalIdBase;
+      let suffix = 0;
+      while (ledger.some(record => record.id === withdrawalId)) {
+        suffix += 1;
+        withdrawalId = `${withdrawalIdBase}_${suffix}`;
+      }
       const withdrawalRecord: ConsentLedgerRecord = {
-        id: `cld_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        id: withdrawalId,
         tenantId: latestRecord.tenantId,
         actorType: latestRecord.actorType,
         actorId: latestRecord.actorId,

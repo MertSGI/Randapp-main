@@ -116,7 +116,9 @@ try {
   });
   assert(history.length === 2, 'Grant + withdraw must produce two ledger records.');
   assert(history[0].status === 'withdrawn', 'Newest record must be withdrawn.');
+  assert(history[0].id !== grant.id, 'Withdrawal record ID must be distinct from original grant ID.');
   assert(history[0].metadata?.supersedesRecordId === grant.id, 'Withdrawal must link to superseded grant record.');
+  assert(history[0].metadata?.supersedesRecordId !== history[0].id, 'supersedesRecordId must never resolve to withdrawal record ID.');
   assert(history[1].status === 'granted', 'Original granted record must stay preserved.');
   assert(consentLedgerService.hasConsent('cust-a', 'marketing') === false, 'Latest withdrawn state must disable active consent.');
   assert(consentLedgerService.getConsentState('cust-a', 'marketing') === 'withdrawn', 'Latest state must be withdrawn.');
