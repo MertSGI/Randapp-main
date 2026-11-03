@@ -11,13 +11,25 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
 
   private getStoredEvents(): any[] {
     if (typeof localStorage === 'undefined') {
+      throw new Error('Local outbox persistence is unavailable in this runtime');
+    }
+    let raw: string | null;
+    try {
+      raw = localStorage.getItem('lari_communication_events');
+    } catch {
+      throw new Error('Local outbox persistence read failed');
+    }
+    if (raw === null || raw === '') {
       return [];
     }
     try {
-      const raw = localStorage.getItem('lari_communication_events');
-      return raw ? JSON.parse(raw) : [];
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        throw new Error('Stored outbox must be an array');
+      }
+      return parsed;
     } catch {
-      return [];
+      throw new Error('Local outbox persistence contains invalid stored event data');
     }
   }
 
@@ -43,8 +55,16 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
     }
 
     const events = this.getStoredEvents();
-    const id = event.id || `comm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    this.requireNonBlank(id, 'eventId');
+    const providedId = event?.id;
+    if (providedId !== null && providedId !== undefined) {
+      if (typeof providedId !== 'string') {
+        throw new Error('Local outbox requires a string eventId');
+      }
+      this.requireNonBlank(providedId, 'eventId');
+    }
+    const id = providedId == null
+      ? `comm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+      : providedId;
     if (events.some(e => e.tenantId === tenantId && e.id === id)) {
       throw new Error('Local outbox already contains this event id for the tenant');
     }
