@@ -3,8 +3,12 @@ import { LocalCommunicationOutboxRepository } from '../services/repositories/loc
 class SyntheticLocalStorage {
   private store = new Map<string, string>();
   failWrites = false;
+  failReads = false;
 
   getItem(key: string): string | null {
+    if (this.failReads) {
+      throw new Error('synthetic read failure');
+    }
     return this.store.has(key) ? this.store.get(key)! : null;
   }
 
@@ -88,6 +92,45 @@ async function run() {
   syntheticStorage.failWrites = false;
   const afterWriteFailure = (await repository.listEvents('tenant-write-failure')).length;
   assert(beforeWriteFailure === afterWriteFailure, 'failed write must not claim success or persist event');
+
+  // Explicit blank IDs must fail closed; only null or undefined can request an automatic ID.
+  await expectReject(
+    repository.enqueueEvent('tenant-a', { id: '', status: 'queued' }),
+    'explicit empty eventId must be rejected'
+  );
+  await expectReject(
+    repository.enqueueEvent('tenant-a', { id: '   ', status: 'queued' }),
+    'explicit whitespace eventId must be rejected'
+  );
+  const autoIdEvent = await repository.enqueueEvent('tenant-a', { status: 'queued' });
+  assert(typeof autoIdEvent.id === 'string' && autoIdEvent.id.length > 0, 'omitted ID should be generated');
+
+  const outboxStorageKey = 'lari_communication_events';
+  const validOutboxData = syntheticStorage.getItem(outboxStorageKey);
+  assert(validOutboxData !== null, 'expected stored events before corruption tests');
+  syntheticStorage.setItem(outboxStorageKey, '{bad-json');
+  await expectReject(repository.listEvents('tenant-a'), 'corrupt JSON must reject listEvents');
+  await expectReject(
+    repository.enqueueEvent('tenant-a', { id: 'must-not-overwrite-corrupt-data' }),
+    'corrupt JSON must reject enqueue rather than wipe existing stored events'
+  );
+  assert(
+    syntheticStorage.getItem(outboxStorageKey) === '{bad-json',
+    'corrupt stored data must never be overwritten by a failed enqueue'
+  );
+  syntheticStorage.setItem(outboxStorageKey, validOutboxData!);
+
+  syntheticStorage.failReads = true;
+  await expectReject(repository.listEvents('tenant-a'), 'getItem failure must reject listEvents');
+  await expectReject(
+    repository.enqueueEvent('tenant-a', { id: 'must-not-overwrite-on-read-error' }),
+    'getItem failure must reject enqueue'
+  );
+  syntheticStorage.failReads = false;
+  assert(
+    syntheticStorage.getItem(outboxStorageKey) === validOutboxData,
+    'read failure must not replace previously stored events'
+  );
 
   const okEvent = await repository.enqueueEvent('tenant-ok', { id: 'ok-event-1', status: 'queued', channel: 'sms' });
   assert(okEvent.tenantId === 'tenant-ok', 'legitimate enqueue should preserve authorized tenant');
