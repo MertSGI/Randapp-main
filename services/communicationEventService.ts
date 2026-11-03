@@ -65,11 +65,14 @@ export const communicationEventService = {
       const consent = consentService.getCustomerConsent(input.tenantId, input.customerId);
 
       if (isTransactional) {
-        // Must verify contact/reminder consent
-        const hasConsent = consent ? (consent.bookingContactConsent || consent.appointmentReminderConsent) : true;
-        if (consent && !consent.bookingContactConsent && !consent.appointmentReminderConsent) {
+        // Transactional customer communications require explicit contact/reminder consent.
+        const hasTransactionalConsent = !!(
+          consent &&
+          (consent.bookingContactConsent || consent.appointmentReminderConsent)
+        );
+        if (!hasTransactionalConsent) {
           initialStatus = 'skipped';
-          failureReason = 'Müşteri işlem onay/iletişim izni vermemiştir.';
+          failureReason = 'Müşteri işlem onay/iletişim izni bulunmamaktadır.';
         }
       } else {
         // Marketing or referrals/other campaign related
