@@ -1,25 +1,47 @@
 import { CommunicationOutboxRepository } from './types';
 
 export class LocalCommunicationOutboxRepository implements CommunicationOutboxRepository {
+  private readonly providerOnlyStatuses = new Set(['sent', 'delivered', 'accepted_by_provider']);
+
+  private requireNonBlank(value: string, fieldName: string) {
+    if (!value || !value.trim()) {
+      throw new Error(`Local outbox requires nonblank ${fieldName}`);
+    }
+  }
+
   private getStoredEvents(): any[] {
     if (typeof localStorage === 'undefined') {
+      throw new Error('Local outbox persistence is unavailable in this runtime');
+    }
+    let raw: string | null;
+    try {
+      raw = localStorage.getItem('lari_communication_events');
+    } catch {
+      throw new Error('Local outbox persistence read failed');
+    }
+    if (raw === null || raw === '') {
       return [];
     }
     try {
-      const raw = localStorage.getItem('lari_communication_events');
-      return raw ? JSON.parse(raw) : [];
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        throw new Error('Stored outbox must be an array');
+      }
+      return parsed;
     } catch {
-      return [];
+      throw new Error('Local outbox persistence contains invalid stored event data');
     }
   }
 
   private saveStoredEvents(events: any[]) {
     if (typeof localStorage === 'undefined') {
-      return;
+      throw new Error('Local outbox persistence is unavailable in this runtime');
     }
     try {
       localStorage.setItem('lari_communication_events', JSON.stringify(events));
-    } catch {}
+    } catch {
+      throw new Error('Local outbox persistence failed');
+    }
   }
 
   async listEvents(tenantId: string): Promise<any[]> {
@@ -27,9 +49,27 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
   }
 
   async enqueueEvent(tenantId: string, event: any): Promise<any> {
+    this.requireNonBlank(tenantId, 'tenantId');
+    if (this.providerOnlyStatuses.has(event?.status)) {
+      throw new Error(`Local outbox cannot enqueue provider-only status '${event.status}'`);
+    }
+
     const events = this.getStoredEvents();
+    const providedId = event?.id;
+    if (providedId !== null && providedId !== undefined) {
+      if (typeof providedId !== 'string') {
+        throw new Error('Local outbox requires a string eventId');
+      }
+      this.requireNonBlank(providedId, 'eventId');
+    }
+    const id = providedId == null
+      ? `comm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+      : providedId;
+    if (events.some(e => e.tenantId === tenantId && e.id === id)) {
+      throw new Error('Local outbox already contains this event id for the tenant');
+    }
+
     const newEvent = {
-      id: event.id || `comm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       branchId: event.branchId,
       customerId: event.customerId,
       appointmentId: event.appointmentId,
@@ -37,7 +77,6 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
       audience: event.audience,
       channel: event.channel,
       type: event.type,
-      status: event.status || 'queued',
       language: event.language || 'tr',
       subject: event.subject,
       body: event.body,
@@ -47,6 +86,9 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
       failureReason: event.failureReason,
       internalOnly: !!event.internalOnly,
       ...event,
+      // Override caller fields after the spread: never lose generated canonical ID/status.
+      id,
+      status: event.status || 'queued',
       // Enforce tenantId belongs to the authorized tenant and cannot be spoofed
       tenantId: tenantId
     };
@@ -62,20 +104,24 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
     notes?: string,
     options?: { verifiedProviderReceipt?: boolean }
   ): Promise<void> {
+    this.requireNonBlank(tenantId, 'tenantId');
+    this.requireNonBlank(eventId, 'eventId');
+    if (this.providerOnlyStatuses.has(status)) {
+      throw new Error(`Local outbox cannot set provider-only status '${status}' from browser state`);
+    }
+
     const events = this.getStoredEvents();
-    const idx = events.findIndex(e => e.id === eventId);
-    if (idx === -1) {
-      return;
+    const matchingEvents = events.filter(e => e.tenantId === tenantId && e.id === eventId);
+    if (matchingEvents.length === 0) {
+      throw new Error('Local outbox event not found for tenant');
+    }
+    if (matchingEvents.length > 1) {
+      throw new Error('Local outbox has duplicate event ids for tenant');
     }
 
-    // Defect E-1: Cross-tenant update check
-    if (events[idx].tenantId !== tenantId) {
-      throw new Error(`Cross-tenant outbox violation: event ${eventId} belongs to tenant ${events[idx].tenantId}, not ${tenantId}`);
-    }
-
-    // Defect E-4: Browser cannot fabricate sent or delivered status
-    if ((status === 'sent' || status === 'delivered') && !options?.verifiedProviderReceipt) {
-      throw new Error(`Browser client cannot assert delivery status '${status}' without verified provider receipt`);
+    const idx = events.findIndex(e => e.tenantId === tenantId && e.id === eventId);
+    if (events[idx]?.status === 'skipped' && status === 'queued') {
+      throw new Error("Local outbox cannot move terminal status 'skipped' back to 'queued'");
     }
 
     events[idx].status = status;
