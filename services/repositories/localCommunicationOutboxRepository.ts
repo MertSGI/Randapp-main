@@ -70,7 +70,6 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
     }
 
     const newEvent = {
-      id,
       branchId: event.branchId,
       customerId: event.customerId,
       appointmentId: event.appointmentId,
@@ -78,7 +77,6 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
       audience: event.audience,
       channel: event.channel,
       type: event.type,
-      status: event.status || 'queued',
       language: event.language || 'tr',
       subject: event.subject,
       body: event.body,
