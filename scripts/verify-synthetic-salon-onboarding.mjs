@@ -176,7 +176,7 @@ assert(intent2.status === 'skipped', 'Step 13: Consent-denied intent transitions
 assert(deliveryService.getFailuresForIntent(intent2.intentId)[0].failureType === 'CONSENT_DENIED', 'Step 13: Failure record logged as CONSENT_DENIED');
 
 // ----------------------------------------------------------------------------
-// Negative Regression Suite (5 Negative Tests for Consent & Tenant Boundaries)
+// Negative Regression Suite (7 Negative Tests for Consent, Tenant Boundaries & Idempotency)
 // ----------------------------------------------------------------------------
 console.log('\n[Step 13 - Negative Regression Suite] Enforcing Consent & Tenant Boundaries...');
 
@@ -269,6 +269,119 @@ assert(
   intent2Attempts.length === 0 &&
   rogueIntents.length === 0,
   'Step 13 (Negative 5): Post-rejection intent states remain immutable, zero fake delivery receipts exist, and tenant boundaries are intact'
+);
+
+// Negative Test 6: Cross-tenant intent ID collision rejected (Salon B reusing Salon A intent ID)
+let neg6Error = null;
+try {
+  deliveryService.createIntent({
+    intentId: intent1.intentId,
+    tenantId: 'synthetic_salon_beta_002',
+    branchId: 'branch_beta_01',
+    channel: 'sms',
+    recipient: '+905559876543',
+    templateId: 'booking_confirmed',
+    templateArgs: { customerName: 'Ayşe Kaya', salonName: 'Beta Kuaför' },
+    body: 'Sayın Ayşe Kaya, Beta Kuaför randevunuz onaylandı.',
+    consentGranted: true
+  });
+} catch (err) {
+  neg6Error = err;
+}
+assert(
+  neg6Error !== null && neg6Error.message.includes('Security violation: Intent ID collision across tenant boundaries (tenant mismatch).'),
+  'Step 13 (Negative 6): Cross-tenant intent ID collision (Salon B reusing Salon A intent ID) is securely rejected'
+);
+
+const intent1AfterNeg6 = deliveryService.getIntent(intent1.intentId);
+const salonBIntents = deliveryService.listIntentsForTenant('synthetic_salon_beta_002');
+assert(
+  intent1AfterNeg6?.status === 'rendered' &&
+  intent1AfterNeg6?.consentVerified === true &&
+  intent1AfterNeg6?.tenantId === fixture.tenantId &&
+  salonBIntents.length === 0,
+  'Step 13 (Negative 6): Ret sonrasında salon A intent durumu ve iletişim onayı değişmedi, salon B izole kaldı'
+);
+
+// Negative Test 7: Legitimate idempotent intent replay by same salon preserves safe idempotency
+let neg7Error = null;
+let intent1Replay = null;
+try {
+  intent1Replay = deliveryService.createIntent({
+    intentId: intent1.intentId,
+    tenantId: fixture.tenantId,
+    branchId: branch.id,
+    channel: 'sms',
+    recipient: booking1.customerPhone,
+    templateId: 'booking_confirmed',
+    templateArgs: { customerName: booking1.customerName, salonName: fixture.businessName },
+    body: `Sayın ${booking1.customerName}, ${fixture.businessName} randevunuz onaylandı.`,
+    consentGranted: true
+  });
+} catch (err) {
+  neg7Error = err;
+}
+assert(
+  neg7Error === null && intent1Replay !== null && intent1Replay === intent1,
+  'Step 13 (Negative 7): Legitimate idempotent replay by same salon returns existing intent reference without error'
+);
+assert(
+  intent1Replay?.status === 'rendered' &&
+  intent1Replay?.consentVerified === true &&
+  intent1Replay?.createdAt === intent1.createdAt &&
+  intent1Replay?.tenantId === fixture.tenantId,
+  'Step 13 (Negative 7): Replayed intent preserves original status, consent verification, and creation timestamp'
+);
+
+// Negative Test 7b: Permuted key order in templateArgs for legitimate idempotent replay
+const permutedArgsReplay = deliveryService.createIntent({
+  intentId: intent1.intentId,
+  tenantId: fixture.tenantId,
+  branchId: branch.id,
+  channel: 'sms',
+  recipient: booking1.customerPhone,
+  templateId: 'booking_confirmed',
+  templateArgs: { salonName: fixture.businessName, customerName: booking1.customerName },
+  body: `Sayın ${booking1.customerName}, ${fixture.businessName} randevunuz onaylandı.`,
+  consentGranted: true
+});
+assert(
+  permutedArgsReplay === intent1,
+  'Step 13 (Negative 7): Canonical key-order equivalence in templateArgs preserves legitimate idempotency'
+);
+
+// Negative Test 7c: Same salon conflicting payload for existing intent is rejected and leaves state unmodified
+let neg7ConflictError = null;
+try {
+  deliveryService.createIntent({
+    intentId: intent1.intentId,
+    tenantId: fixture.tenantId,
+    branchId: branch.id,
+    channel: 'sms',
+    recipient: '+905559998877',
+    templateId: 'booking_confirmed',
+    templateArgs: { customerName: booking1.customerName, salonName: fixture.businessName },
+    body: `Sayın ${booking1.customerName}, ${fixture.businessName} randevunuz onaylandı.`,
+    consentGranted: true
+  });
+} catch (err) {
+  neg7ConflictError = err;
+}
+assert(
+  neg7ConflictError !== null && neg7ConflictError.message.includes('Conflict error: Conflicting intent payload for existing intent'),
+  'Step 13 (Negative 7): Same salon conflicting payload for existing intent is rejected'
+);
+
+const intent1Final = deliveryService.getIntent(intent1.intentId);
+const intent2Final = deliveryService.getIntent(intent2.intentId);
+assert(
+  intent1Final?.status === 'rendered' &&
+  intent1Final?.consentVerified === true &&
+  intent2Final?.status === 'skipped' &&
+  intent2Final?.consentVerified === false &&
+  deliveryService.getAttemptsForIntent(intent1.intentId).length === 0 &&
+  deliveryService.getDeliveryReceipt(intent1.intentId) === undefined,
+  'Step 13 (Negative 7): Salon A intent status and consent remain intact with zero dispatch attempts and zero delivery receipts'
 );
 
 // ----------------------------------------------------------------------------
