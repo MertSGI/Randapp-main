@@ -176,6 +176,102 @@ assert(intent2.status === 'skipped', 'Step 13: Consent-denied intent transitions
 assert(deliveryService.getFailuresForIntent(intent2.intentId)[0].failureType === 'CONSENT_DENIED', 'Step 13: Failure record logged as CONSENT_DENIED');
 
 // ----------------------------------------------------------------------------
+// Negative Regression Suite (5 Negative Tests for Consent & Tenant Boundaries)
+// ----------------------------------------------------------------------------
+console.log('\n[Step 13 - Negative Regression Suite] Enforcing Consent & Tenant Boundaries...');
+
+// Negative Test 1: Skipped intent (consent denied) cannot be queued via queueIntent
+let neg1Error = null;
+try {
+  deliveryService.queueIntent(intent2.intentId);
+} catch (err) {
+  neg1Error = err;
+}
+assert(
+  neg1Error !== null && neg1Error.message.includes('Cannot queue skipped intent'),
+  'Step 13 (Negative 1): Skipped intent with denied consent cannot be queued via queueIntent'
+);
+
+// Negative Test 2: Mismatched/fake tenant cannot dispatch another tenant\'s intent
+let neg2Error = null;
+try {
+  deliveryService.recordDispatchAttempt({
+    intentId: intent1.intentId,
+    tenantId: 'fake_rogue_tenant_999',
+    channel: 'sms',
+    recipient: booking1.customerPhone,
+    status: 'in_flight',
+    providerName: 'rogue_provider'
+  });
+} catch (err) {
+  neg2Error = err;
+}
+assert(
+  neg2Error !== null && neg2Error.message.includes('Tenant mismatch'),
+  'Step 13 (Negative 2): recordDispatchAttempt with mismatched tenantId is rejected with Tenant mismatch error'
+);
+
+// Negative Test 3: Rogue provider delivery on skipped intent is rejected (illegal state transition)
+let neg3Error = null;
+try {
+  deliveryService.recordProviderDelivery({
+    receiptId: 'rcpt_rogue_delivery_01',
+    intentId: intent2.intentId,
+    providerMessageId: 'pmsg_rogue_01',
+    providerName: 'mock_provider',
+    deliveredAt: new Date().toISOString(),
+    signatureVerified: true,
+    rawProviderStatus: 'DELIVERED'
+  });
+} catch (err) {
+  neg3Error = err;
+}
+assert(
+  neg3Error !== null && neg3Error.message.includes('Illegal state transition'),
+  'Step 13 (Negative 3): recordProviderDelivery on skipped intent is rejected with Illegal state transition'
+);
+
+// Negative Test 4: Provider delivery receipt with unverified signature is rejected with security violation
+let neg4Error = null;
+try {
+  deliveryService.recordProviderDelivery({
+    receiptId: 'rcpt_unverified_sig_01',
+    intentId: intent1.intentId,
+    providerMessageId: 'pmsg_unverified_01',
+    providerName: 'mock_provider',
+    deliveredAt: new Date().toISOString(),
+    signatureVerified: false,
+    rawProviderStatus: 'DELIVERED'
+  });
+} catch (err) {
+  neg4Error = err;
+}
+assert(
+  neg4Error !== null && neg4Error.message.includes('Security violation'),
+  'Step 13 (Negative 4): Provider delivery receipt with unverified signature is rejected with Security violation'
+);
+
+// Negative Test 5: Post-rejection state immutability, zero fake delivery receipts, and strict isolation
+const intent1After = deliveryService.getIntent(intent1.intentId);
+const intent2After = deliveryService.getIntent(intent2.intentId);
+const intent1Receipt = deliveryService.getDeliveryReceipt(intent1.intentId);
+const intent2Receipt = deliveryService.getDeliveryReceipt(intent2.intentId);
+const intent1Attempts = deliveryService.getAttemptsForIntent(intent1.intentId);
+const intent2Attempts = deliveryService.getAttemptsForIntent(intent2.intentId);
+const rogueIntents = deliveryService.listIntentsForTenant('fake_rogue_tenant_999');
+
+assert(
+  intent1After?.status === 'rendered' &&
+  intent2After?.status === 'skipped' &&
+  intent1Receipt === undefined &&
+  intent2Receipt === undefined &&
+  intent1Attempts.length === 0 &&
+  intent2Attempts.length === 0 &&
+  rogueIntents.length === 0,
+  'Step 13 (Negative 5): Post-rejection intent states remain immutable, zero fake delivery receipts exist, and tenant boundaries are intact'
+);
+
+// ----------------------------------------------------------------------------
 // STEP 14: SuperAdmin Review & Synthetic Go-Live Approval Guard
 // ----------------------------------------------------------------------------
 console.log('\n[Step 14] SuperAdmin Review & Go-Live Guard...');
