@@ -34,6 +34,8 @@ export interface OutboxIntent {
   body: string;
   status: DeliveryState;
   consentVerified: boolean;
+  consentDenialReason?: string;
+  rawIdempotencyKey?: string;
   idempotencyKey: string;
   createdAt: string;
   updatedAt: string;

@@ -95,10 +95,10 @@ assert(!hasForbiddenNoCardCopy, 'Commercial safety check: All signup screens avo
 assert(!hasForbidden7DayCopy, 'Commercial duration check: Absolutely zero 7-day trials reference found, LARİ standardizes on 14-day trials');
 
 // ============================================================================
-// PART 2: 18 DETERMINISTIC OFFLINE SIMULATION SCENARIOS
+// PART 2: 19 DETERMINISTIC OFFLINE SIMULATION SCENARIOS
 // ============================================================================
 
-console.log('\n🧪 Executing 18 Deterministic Behavioral Simulation Scenarios...');
+console.log('\n🧪 Executing 19 Deterministic Behavioral Simulation Scenarios...');
 
 const deliveryService = new CommunicationDeliveryService();
 const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
@@ -493,6 +493,247 @@ const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
 
   const expiredCall = simulator.verifyAndProcessWebhook(body2, sig2, 'tenant_alpha');
   assert(expiredCall.valid === false && expiredCall.statusCode === 400, 'Scenario 18b: Expired timestamp outside replay window rejected with HTTP 400');
+}
+
+// Scenario 19: Communication intent identity collision & payload conflict safety
+{
+  const baseInput = {
+    intentId: 'scen_19_identity',
+    tenantId: 'tenant_alpha',
+    branchId: 'branch_kadikoy',
+    channel: 'sms',
+    recipient: '+905553334455',
+    templateId: 'appointment_reminder',
+    templateArgs: { customerName: 'Ayşe Kaya', time: '14:30' },
+    subject: 'Randevu Hatırlatması',
+    body: 'Sayın Ayşe Kaya, randevunuz 14:30 saatindedir.',
+    consentGranted: true,
+    idempotencyKey: 'idem_scen_19',
+    metadata: { source: 'online_booking', priority: 'normal' }
+  };
+
+  // 19a: Initial creation & snapshot
+  const intent1 = deliveryService.createIntent(baseInput);
+  const initialSnapshot = JSON.parse(JSON.stringify(intent1));
+
+  // 19b: Legitimate idempotent replays
+  const intent1Repeat = deliveryService.createIntent(baseInput);
+  assert(intent1Repeat === intent1, 'Scenario 19b: Legitimate idempotent replay returns identical existing intent reference');
+  assert(intent1Repeat.intentId === 'scen_19_identity', 'Scenario 19b: Intent ID preserved');
+  assert(intent1Repeat.createdAt === intent1.createdAt, 'Scenario 19b: CreatedAt timestamp remains unmodified');
+
+  // Permuted key order in templateArgs should be canonical-equivalent and succeed
+  const permutedArgsRepeat = deliveryService.createIntent({
+    ...baseInput,
+    templateArgs: { time: '14:30', customerName: 'Ayşe Kaya' }
+  });
+  assert(permutedArgsRepeat === intent1, 'Scenario 19b: Key-order agnostic canonical equivalence for templateArgs succeeds');
+
+  // Permuted key order in metadata should be canonical-equivalent and succeed
+  const permutedMetaRepeat = deliveryService.createIntent({
+    ...baseInput,
+    metadata: { priority: 'normal', source: 'online_booking' }
+  });
+  assert(permutedMetaRepeat === intent1, 'Scenario 19b: Key-order agnostic canonical equivalence for metadata succeeds');
+
+  // 19c: Cross-tenant intent ID collision
+  let crossTenantBlocked = false;
+  let crossTenantErrorMsg = '';
+  try {
+    deliveryService.createIntent({
+      ...baseInput,
+      tenantId: 'tenant_beta'
+    });
+  } catch (err) {
+    crossTenantBlocked = true;
+    crossTenantErrorMsg = err.message;
+  }
+  assert(crossTenantBlocked, 'Scenario 19c: Cross-tenant intent ID collision rejected');
+  assert(
+    crossTenantErrorMsg === 'Security violation: Intent ID collision across tenant boundaries (tenant mismatch).',
+    'Scenario 19c: Throws exact tenant mismatch security violation message'
+  );
+
+  // Helper for asserting conflict errors
+  const assertConflict = (modifier, testLabel, specificCheck) => {
+    let blocked = false;
+    let errorMsg = '';
+    const payload = typeof modifier === 'function' ? modifier({ ...baseInput }) : { ...baseInput, ...modifier };
+    try {
+      deliveryService.createIntent(payload);
+    } catch (err) {
+      blocked = true;
+      errorMsg = err.message;
+    }
+    assert(blocked, `${testLabel}: Conflicting payload rejected`);
+    assert(
+      errorMsg === `Conflict error: Conflicting intent payload for existing intent ${baseInput.intentId}.`,
+      `${testLabel}: Throws conflicting intent payload error`
+    );
+    if (specificCheck) {
+      specificCheck(errorMsg);
+    }
+  };
+
+  // 19d: Conflicting recipient payload & PII protection
+  assertConflict(
+    { recipient: '+905559990011' },
+    'Scenario 19d: Conflicting recipient',
+    (msg) => {
+      assert(
+        !msg.includes('+905559990011') && !msg.includes('+905553334455'),
+        'Scenario 19d: Zero recipient PII leaked in conflict error message'
+      );
+    }
+  );
+
+  // 19e: Conflicting channel payload
+  assertConflict({ channel: 'whatsapp' }, 'Scenario 19e: Conflicting channel');
+
+  // 19f: Conflicting template ID payload
+  assertConflict({ templateId: 'booking_cancelled' }, 'Scenario 19f: Conflicting templateId');
+
+  // 19g: Conflicting consent decision
+  assertConflict({ consentGranted: false }, 'Scenario 19g: Conflicting consent decision');
+
+  // 19h: Conflicting templateArgs - modified argument
+  assertConflict(
+    { templateArgs: { customerName: 'Ayşe Kaya', time: '15:00' } },
+    'Scenario 19h: Modified templateArgs value'
+  );
+
+  // 19i: Conflicting templateArgs - asymmetric key removal
+  assertConflict(
+    { templateArgs: { customerName: 'Ayşe Kaya' } },
+    'Scenario 19i: Asymmetric templateArgs key removal'
+  );
+
+  // 19j: Conflicting templateArgs - asymmetric key addition
+  assertConflict(
+    { templateArgs: { customerName: 'Ayşe Kaya', time: '14:30', room: 'Suite A' } },
+    'Scenario 19j: Asymmetric templateArgs key addition'
+  );
+
+  // 19k: Conflicting optional field - branchId modified
+  assertConflict({ branchId: 'branch_besiktas' }, 'Scenario 19k: Modified branchId');
+
+  // 19l: Conflicting optional field - branchId removed (asymmetric omission)
+  assertConflict(
+    (p) => { delete p.branchId; return p; },
+    'Scenario 19l: Asymmetric branchId omission'
+  );
+
+  // 19m: Conflicting optional field - subject modified
+  assertConflict({ subject: 'Farklı Konu Başlığı' }, 'Scenario 19m: Modified subject');
+
+  // 19n: Conflicting optional field - subject removed (asymmetric omission)
+  assertConflict(
+    (p) => { delete p.subject; return p; },
+    'Scenario 19n: Asymmetric subject omission'
+  );
+
+  // 19o: Conflicting optional field - idempotencyKey modified
+  assertConflict({ idempotencyKey: 'idem_other_key_999' }, 'Scenario 19o: Modified idempotencyKey');
+
+  // 19p: Conflicting optional field - idempotencyKey removed (asymmetric omission)
+  assertConflict(
+    (p) => { delete p.idempotencyKey; return p; },
+    'Scenario 19p: Asymmetric idempotencyKey omission'
+  );
+
+  // 19q: Conflicting metadata modified
+  assertConflict(
+    { metadata: { source: 'online_booking', priority: 'high' } },
+    'Scenario 19q: Modified metadata'
+  );
+
+  // 19r: Conflicting metadata removed (asymmetric omission)
+  assertConflict(
+    (p) => { delete p.metadata; return p; },
+    'Scenario 19r: Asymmetric metadata omission'
+  );
+
+  // 19s: Conflicting body payload
+  assertConflict(
+    { body: 'Sayın Ayşe Kaya, randevu saatiniz güncellendi.' },
+    'Scenario 19s: Modified body'
+  );
+
+  // 19t: Conflicting consent denial reason on denied intent
+  {
+    const deniedInput = {
+      ...baseInput,
+      intentId: 'scen_19_denied',
+      idempotencyKey: 'idem_scen_19_denied',
+      consentGranted: false,
+      consentDenialReason: 'Customer opted out via SMS'
+    };
+    const deniedIntent = deliveryService.createIntent(deniedInput);
+    const deniedSnapshot = JSON.parse(JSON.stringify(deniedIntent));
+
+    // Legitimate replay
+    const deniedRepeat = deliveryService.createIntent(deniedInput);
+    assert(deniedRepeat === deniedIntent, 'Scenario 19t: Denied consent intent legitimate replay succeeds');
+
+    // Conflicting denial reason
+    let deniedConflictBlocked = false;
+    try {
+      deliveryService.createIntent({
+        ...deniedInput,
+        consentDenialReason: 'Customer blacklisted'
+      });
+    } catch (err) {
+      deniedConflictBlocked = true;
+    }
+    assert(deniedConflictBlocked, 'Scenario 19t: Conflicting consent denial reason rejected');
+
+    // Asymmetric removal of consentDenialReason
+    let deniedOmissionBlocked = false;
+    try {
+      const omitted = { ...deniedInput };
+      delete omitted.consentDenialReason;
+      deliveryService.createIntent(omitted);
+    } catch (err) {
+      deniedOmissionBlocked = true;
+    }
+    assert(deniedOmissionBlocked, 'Scenario 19t: Asymmetric removal of consent denial reason rejected');
+
+    // Verify denied intent immutability
+    const persistedDenied = deliveryService.getIntent('scen_19_denied');
+    assert(
+      JSON.stringify(persistedDenied) === JSON.stringify(deniedSnapshot),
+      'Scenario 19t: Denied intent remains 100% byte-for-byte immutable after rejected attempts'
+    );
+  }
+
+  // 19u: Full ledger record snapshot immutability check
+  const persistedIntent = deliveryService.getIntent('scen_19_identity');
+  const finalSnapshot = JSON.parse(JSON.stringify(persistedIntent));
+
+  assert(
+    JSON.stringify(finalSnapshot) === JSON.stringify(initialSnapshot),
+    'Scenario 19u: Primary intent remains 100% byte-for-byte identical to initial snapshot'
+  );
+  assert(persistedIntent.tenantId === initialSnapshot.tenantId, 'Scenario 19u: Existing intent tenantId remains intact');
+  assert(persistedIntent.branchId === initialSnapshot.branchId, 'Scenario 19u: Existing intent branchId remains intact');
+  assert(persistedIntent.recipient === initialSnapshot.recipient, 'Scenario 19u: Existing intent recipient remains intact');
+  assert(persistedIntent.channel === initialSnapshot.channel, 'Scenario 19u: Existing intent channel remains intact');
+  assert(persistedIntent.templateId === initialSnapshot.templateId, 'Scenario 19u: Existing intent templateId remains intact');
+  assert(persistedIntent.subject === initialSnapshot.subject, 'Scenario 19u: Existing intent subject remains intact');
+  assert(persistedIntent.body === initialSnapshot.body, 'Scenario 19u: Existing intent body remains intact');
+  assert(persistedIntent.idempotencyKey === initialSnapshot.idempotencyKey, 'Scenario 19u: Existing intent idempotencyKey remains intact');
+  assert(persistedIntent.consentVerified === initialSnapshot.consentVerified, 'Scenario 19u: Existing intent consent remains verified');
+  assert(persistedIntent.status === initialSnapshot.status, 'Scenario 19u: Existing intent status remains rendered');
+  assert(persistedIntent.createdAt === initialSnapshot.createdAt, 'Scenario 19u: Existing intent createdAt remains unmodified');
+  assert(persistedIntent.updatedAt === initialSnapshot.updatedAt, 'Scenario 19u: Existing intent updatedAt remains unmodified');
+  assert(
+    JSON.stringify(persistedIntent.templateArgs) === JSON.stringify(initialSnapshot.templateArgs),
+    'Scenario 19u: Existing intent templateArgs remain intact'
+  );
+  assert(
+    JSON.stringify(persistedIntent.metadata) === JSON.stringify(initialSnapshot.metadata),
+    'Scenario 19u: Existing intent metadata remains intact'
+  );
 }
 
 // Final check

@@ -31,10 +31,57 @@ export class CommunicationDeliveryService {
   private acceptanceReceipts: Map<string, ProviderAcceptanceReceipt> = new Map(); // keyed by intentId
   private deliveryReceipts: Map<string, ProviderDeliveryReceipt> = new Map(); // keyed by intentId
   private failures: DeliveryFailure[] = [];
+  private consentDenialReasons: Map<string, string | undefined> = new Map();
+  private rawIdempotencyKeys: Map<string, string | undefined> = new Map();
   private retryPolicy: CommunicationRetryPolicy;
 
   constructor(retryPolicy?: CommunicationRetryPolicy) {
     this.retryPolicy = retryPolicy || new CommunicationRetryPolicy(DEFAULT_RETRY_POLICY);
+  }
+
+  // Canonical deep equality helper for deterministic payload comparison
+  static canonicalEqual(a: any, b: any): boolean {
+    if (a === b) return true;
+    if (a === null || a === undefined || b === null || b === undefined) {
+      return a === b;
+    }
+    if (typeof a !== typeof b) {
+      return false;
+    }
+
+    if (typeof a === 'number') {
+      return Number.isNaN(a) && Number.isNaN(b) ? true : a === b;
+    }
+
+    if (typeof a !== 'object') {
+      return a === b;
+    }
+
+    if (Array.isArray(a) || Array.isArray(b)) {
+      if (!Array.isArray(a) || !Array.isArray(b)) return false;
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        if (!this.canonicalEqual(a[i], b[i])) return false;
+      }
+      return true;
+    }
+
+    if (a instanceof Date || b instanceof Date) {
+      if (!(a instanceof Date) || !(b instanceof Date)) return false;
+      return a.getTime() === b.getTime();
+    }
+
+    const keysA = Object.keys(a).filter(k => a[k] !== undefined).sort();
+    const keysB = Object.keys(b).filter(k => b[k] !== undefined).sort();
+
+    if (keysA.length !== keysB.length) return false;
+    for (let i = 0; i < keysA.length; i++) {
+      const key = keysA[i];
+      if (key !== keysB[i]) return false;
+      if (!this.canonicalEqual(a[key], b[key])) return false;
+    }
+
+    return true;
   }
 
   // PII scrubbing helper for logging and diagnostics
@@ -54,6 +101,36 @@ export class CommunicationDeliveryService {
     // Check if intent with this ID already exists
     const existing = this.intents.get(intentId);
     if (existing) {
+      if (existing.tenantId !== input.tenantId) {
+        throw new Error('Security violation: Intent ID collision across tenant boundaries (tenant mismatch).');
+      }
+
+      const existingConsentDenialReason = this.consentDenialReasons.has(intentId)
+        ? this.consentDenialReasons.get(intentId)
+        : existing.consentDenialReason;
+
+      const existingRawIdempotencyKey = this.rawIdempotencyKeys.has(intentId)
+        ? this.rawIdempotencyKeys.get(intentId)
+        : existing.rawIdempotencyKey;
+
+      const hasConflict =
+        existing.channel !== input.channel ||
+        existing.recipient !== input.recipient ||
+        existing.templateId !== input.templateId ||
+        existing.body !== input.body ||
+        existing.consentVerified !== Boolean(input.consentGranted) ||
+        (existing.branchId ?? undefined) !== (input.branchId ?? undefined) ||
+        (existing.subject ?? undefined) !== (input.subject ?? undefined) ||
+        (existingConsentDenialReason ?? undefined) !== (input.consentDenialReason ?? undefined) ||
+        (existingRawIdempotencyKey ?? undefined) !== (input.idempotencyKey ?? undefined) ||
+        existing.idempotencyKey !== idempotencyKey ||
+        !CommunicationDeliveryService.canonicalEqual(existing.templateArgs, input.templateArgs) ||
+        !CommunicationDeliveryService.canonicalEqual(existing.metadata || {}, input.metadata || {});
+
+      if (hasConflict) {
+        throw new Error(`Conflict error: Conflicting intent payload for existing intent ${intentId}.`);
+      }
+
       return existing;
     }
 
@@ -80,6 +157,8 @@ export class CommunicationDeliveryService {
       body: input.body,
       status,
       consentVerified: input.consentGranted,
+      consentDenialReason: input.consentDenialReason,
+      rawIdempotencyKey: input.idempotencyKey,
       idempotencyKey,
       createdAt: now,
       updatedAt: now,
@@ -87,6 +166,8 @@ export class CommunicationDeliveryService {
       metadata: input.metadata || {}
     };
 
+    this.consentDenialReasons.set(intentId, input.consentDenialReason);
+    this.rawIdempotencyKeys.set(intentId, input.idempotencyKey);
     this.intents.set(intentId, intent);
 
     if (!input.consentGranted) {
