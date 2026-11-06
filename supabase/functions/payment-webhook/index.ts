@@ -104,13 +104,20 @@ serve(async (req) => {
     // Log sanitized metadata (no PII, no card data, no secrets)
     const eventType = parsedBody.eventType || parsedBody.iyziEventType || 'unknown';
     const providerEventId = parsedBody.iyziPaymentId
+      || parsedBody.paymentId
       || parsedBody.token
       || `${eventType}_${parsedBody.subscriptionReferenceCode || parsedBody.orderReferenceCode || parsedBody.conversationId || Date.now()}`;
+
+    const hasPaymentProof = iyzicoClient.hasPaymentProof(parsedBody);
+    const isPaymentEvent = eventType === 'payment.success' || eventType === 'checkoutform.auth' || eventType === 'subscription.order.success';
+    const effectiveStatus = (isPaymentEvent && !hasPaymentProof) ? 'pending' : mappedStatus;
 
     console.log('[iyzico-webhook] Processing verified webhook event:', {
       eventType,
       providerEventId,
-      mappedStatus
+      mappedStatus,
+      effectiveStatus,
+      hasPaymentProof
     });
 
     // Check Supabase admin configuration
@@ -188,28 +195,29 @@ serve(async (req) => {
       details: {
         providerEventId,
         eventType,
-        status: mappedStatus,
+        status: effectiveStatus,
+        hasPaymentProof,
         subscriptionReferenceCode,
         verifiedAt: new Date().toISOString()
       }
     });
 
-    // Update subscriptions table with verified status
+    // Update subscriptions table with verified status (fail closed to pending if payment event lacks proof)
     await supabaseAdmin.from('subscriptions')
       .update({
-        status: mappedStatus,
+        status: effectiveStatus,
         updated_at: new Date().toISOString()
       })
       .eq('id', subData.id);
 
-    // Record payment ledger entry if status is active
-    if (mappedStatus === 'active') {
+    // Record payment ledger entry if status is active AND hasPaymentProof is true
+    if (effectiveStatus === 'active' && hasPaymentProof) {
       await supabaseAdmin.from('payments').insert({
         tenant_id: subData.tenant_id,
         subscription_id: subData.id,
         provider: 'iyzico',
         provider_event_id: providerEventId,
-        amount: parsedBody.price || 0,
+        amount: parsedBody.price || parsedBody.paidPrice || 0,
         currency: parsedBody.currencyCode || 'TRY',
         status: 'paid',
         paid_at: new Date().toISOString(),
@@ -224,7 +232,8 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       received: true,
       verified: true,
-      status: mappedStatus
+      status: effectiveStatus,
+      paymentRecorded: Boolean(effectiveStatus === 'active' && hasPaymentProof)
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,

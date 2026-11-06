@@ -215,12 +215,14 @@ await runAsyncStep('8. Accepts valid HMAC-SHA256 for HPP / CheckoutForm webhooks
 
 // 9. Verified event status mapping
 runStep('9. Correctly maps verified provider event types to internal statuses', () => {
+  const createdSub = iyzicoClient.mapIyzicoWebhookToInternalStatus({ eventType: 'subscription.created' });
   const activeSub = iyzicoClient.mapIyzicoWebhookToInternalStatus({ eventType: 'subscription.active' });
   const pastDueSub = iyzicoClient.mapIyzicoWebhookToInternalStatus({ eventType: 'subscription.past_due' });
   const cancelledSub = iyzicoClient.mapIyzicoWebhookToInternalStatus({ eventType: 'subscription.cancelled' });
   const failedSub = iyzicoClient.mapIyzicoWebhookToInternalStatus({ eventType: 'subscription.failed' });
   const unknownSub = iyzicoClient.mapIyzicoWebhookToInternalStatus({ eventType: 'unknown_event' });
 
+  if (createdSub !== 'pending') throw new Error(`Expected pending for subscription.created, got ${createdSub}`);
   if (activeSub !== 'active') throw new Error(`Expected active, got ${activeSub}`);
   if (pastDueSub !== 'past_due') throw new Error(`Expected past_due, got ${pastDueSub}`);
   if (cancelledSub !== 'cancelled') throw new Error(`Expected cancelled, got ${cancelledSub}`);

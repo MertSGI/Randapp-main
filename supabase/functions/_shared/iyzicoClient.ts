@@ -19,6 +19,8 @@ export type SupportedEventType =
   | 'subscription.past_due'
   | 'subscription.failed'
   | 'subscription.expired'
+  | 'subscription.order.success'
+  | 'subscription.order.failure'
   | 'checkoutform.auth'
   | 'payment.success'
   | 'payment.failure';
@@ -31,6 +33,8 @@ export const SUPPORTED_EVENT_TYPES: readonly SupportedEventType[] = [
   'subscription.past_due',
   'subscription.failed',
   'subscription.expired',
+  'subscription.order.success',
+  'subscription.order.failure',
   'checkoutform.auth',
   'payment.success',
   'payment.failure'
@@ -200,16 +204,21 @@ export const iyzicoClient = {
 
     if (!eventType && !status) return 'unknown';
 
+    // 1. Subscription creation: Pending payment confirmation.
+    // subscription.created must NOT automatically grant active or paid status without verified payment proof.
+    if (eventType === 'subscription.created' || status === 'PENDING') {
+      return 'pending';
+    }
+
+    // 2. Explicit failure, past due, unpaid and cancellation statuses take absolute precedence
     if (
-      eventType === 'subscription.created' ||
-      eventType === 'subscription.active' ||
-      eventType === 'subscription.renewed' ||
-      eventType === 'payment.success' ||
-      eventType === 'checkoutform.auth' ||
-      status === 'ACTIVE' ||
-      status === 'SUCCESS'
+      eventType === 'subscription.failed' ||
+      eventType === 'subscription.order.failure' ||
+      eventType === 'payment.failure' ||
+      status === 'FAILURE' ||
+      status === 'FAILED'
     ) {
-      return 'active';
+      return 'past_due';
     }
 
     if (
@@ -224,19 +233,114 @@ export const iyzicoClient = {
       eventType === 'subscription.cancelled' ||
       eventType === 'subscription.expired' ||
       status === 'CANCELED' ||
+      status === 'CANCELLED' ||
       status === 'EXPIRED'
     ) {
       return 'cancelled';
     }
 
+    // 3. Payment collection events (payment.success, checkoutform.auth, subscription.order.success):
+    // Require verified payment proof to grant 'active' status.
+    // Without verified payment proof, fail closed to 'pending'.
     if (
-      eventType === 'subscription.failed' ||
-      eventType === 'payment.failure' ||
-      status === 'FAILURE'
+      eventType === 'payment.success' ||
+      eventType === 'checkoutform.auth' ||
+      eventType === 'subscription.order.success'
     ) {
-      return 'past_due';
+      return iyzicoClient.hasPaymentProof(payload) ? 'active' : 'pending';
+    }
+
+    // 4. Subscription activation lifecycle events
+    if (
+      eventType === 'subscription.active' ||
+      eventType === 'subscription.renewed' ||
+      status === 'ACTIVE' ||
+      status === 'SUCCESS'
+    ) {
+      return 'active';
     }
 
     return 'unknown';
+  },
+
+  hasPaymentProof: (payload: any): boolean => {
+    if (!payload || typeof payload !== 'object') return false;
+
+    const eventType = payload.eventType || payload.iyziEventType;
+    if (!eventType || typeof eventType !== 'string') return false;
+
+    // 1. Subscription lifecycle events NEVER constitute payment proof
+    // Per strict security contract: subscription.created, subscription.active, and subscription.renewed
+    // even if containing status=SUCCESS or PAID, must NEVER produce hasPaymentProof=true!
+    if (
+      eventType === 'subscription.created' ||
+      eventType === 'subscription.active' ||
+      eventType === 'subscription.renewed'
+    ) {
+      return false;
+    }
+
+    // 2. Reject non-payment or explicit failure events immediately
+    const nonPaymentEvents: readonly string[] = [
+      'payment.failure',
+      'subscription.failed',
+      'subscription.order.failure',
+      'subscription.past_due',
+      'subscription.cancelled',
+      'subscription.expired'
+    ];
+    if (nonPaymentEvents.includes(eventType)) {
+      return false;
+    }
+
+    // 3. Status extraction and explicit failure / non-success rejection
+    const status = payload.status;
+    if (!status || typeof status !== 'string') {
+      return false;
+    }
+
+    const normalizedStatus = status.trim().toUpperCase();
+    const nonSuccessStatuses: readonly string[] = [
+      'FAILURE',
+      'FAILED',
+      'UNPAID',
+      'PAST_DUE',
+      'CANCELED',
+      'CANCELLED',
+      'EXPIRED',
+      'PENDING',
+      'ACTIVE' // CRITICAL: 'ACTIVE' is a subscription lifecycle state, NEVER a payment proof!
+    ];
+    if (nonSuccessStatuses.includes(normalizedStatus)) {
+      return false;
+    }
+
+    // 4. Provider payment ID validation (must be non-empty string or numeric identifier)
+    const rawPaymentId = payload.iyziPaymentId ?? payload.paymentId;
+    if (rawPaymentId === undefined || rawPaymentId === null) {
+      return false;
+    }
+    const paymentIdStr = String(rawPaymentId).trim();
+    if (paymentIdStr.length === 0) {
+      return false;
+    }
+
+    // 5. Explicit payment collection events:
+    // Hosted Payment Page (HPP) checkout authorization strictly requires status === 'SUCCESS'
+    if (eventType === 'checkoutform.auth') {
+      return normalizedStatus === 'SUCCESS';
+    }
+
+    // Direct payment success webhook requires status === 'SUCCESS' or 'PAID'
+    if (eventType === 'payment.success') {
+      return normalizedStatus === 'SUCCESS' || normalizedStatus === 'PAID';
+    }
+
+    // Official iyzico recurring subscription payment webhook (subscription.order.success)
+    if (eventType === 'subscription.order.success') {
+      return normalizedStatus === 'SUCCESS' || normalizedStatus === 'PAID';
+    }
+
+    return false;
   }
 };
