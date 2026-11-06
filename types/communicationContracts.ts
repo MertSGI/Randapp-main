@@ -60,6 +60,7 @@ export interface DispatchAttempt {
 export interface ProviderAcceptanceReceipt {
   receiptId: string;
   intentId: string;
+  tenantId: string;
   providerMessageId: string;
   providerName: string;
   acceptedAt: string;
@@ -70,6 +71,7 @@ export interface ProviderAcceptanceReceipt {
 export interface ProviderDeliveryReceipt {
   receiptId: string;
   intentId: string;
+  tenantId: string;
   providerMessageId: string;
   providerName: string;
   deliveredAt: string;

@@ -230,12 +230,21 @@ export class CommunicationDeliveryService {
       throw new Error(`Intent ${receipt.intentId} not found`);
     }
 
-    if (intent.status !== 'queued') {
-      throw new Error(`Illegal state transition: cannot accept intent in '${intent.status}'. Expected 'queued'`);
-    }
-
     if (!receipt.signatureVerified) {
       throw new Error(`Security violation: acceptance receipt signature verification failed for intent ${receipt.intentId}`);
+    }
+
+    // Tenant isolation: tenantId is strictly mandatory and must match intent.tenantId
+    const receiptTenant = (receipt.tenantId || '').trim();
+    if (!receiptTenant || receiptTenant !== intent.tenantId) {
+      throw new Error(
+        `Security violation: Tenant mismatch or missing tenant on acceptance receipt for intent ${receipt.intentId}. ` +
+        `Expected tenant '${intent.tenantId}', received '${receipt.tenantId || ''}'`
+      );
+    }
+
+    if (intent.status !== 'queued') {
+      throw new Error(`Illegal state transition: cannot accept intent in '${intent.status}'. Expected 'queued'`);
     }
 
     this.acceptanceReceipts.set(receipt.intentId, receipt);
@@ -250,21 +259,45 @@ export class CommunicationDeliveryService {
       throw new Error(`Intent ${receipt.intentId} not found`);
     }
 
-    // Check duplicate delivery callback (idempotent ignore)
-    const existingReceipt = this.deliveryReceipts.get(receipt.intentId);
-    if (existingReceipt) {
-      return intent; // Idempotent return
-    }
-
+    // 1. Security Check: Verify provider callback signature BEFORE duplicate checking!
+    // Prevents signature bypass on replayed or forged delivery callbacks.
     if (!receipt.signatureVerified) {
       throw new Error(`Security violation: delivery receipt signature verification failed for intent ${receipt.intentId}`);
     }
 
-    // Out-of-order handling: if delivery arrives before acceptance, record acceptance synthetic receipt
+    // 1b. Tenant isolation: tenantId is strictly mandatory and must match intent.tenantId
+    const receiptTenant = (receipt.tenantId || '').trim();
+    if (!receiptTenant || receiptTenant !== intent.tenantId) {
+      throw new Error(
+        `Security violation: Tenant mismatch or missing tenant on delivery receipt for intent ${receipt.intentId}. ` +
+        `Expected tenant '${intent.tenantId}', received '${receipt.tenantId || ''}'`
+      );
+    }
+
+    // 2. Check duplicate delivery callback (idempotent ignore only for verified, non-conflicting replays)
+    const existingReceipt = this.deliveryReceipts.get(receipt.intentId);
+    if (existingReceipt) {
+      const provMsgId = (receipt.providerMessageId || '').trim();
+      const provName = (receipt.providerName || '').trim();
+      const existMsgId = (existingReceipt.providerMessageId || '').trim();
+      const existName = (existingReceipt.providerName || '').trim();
+
+      if (!provMsgId || !provName || provMsgId !== existMsgId || provName !== existName) {
+        throw new Error(
+          `Conflict error: Conflicting delivery callback for intent ${receipt.intentId}. ` +
+          `Expected provider '${existName}' / messageId '${existMsgId}', ` +
+          `received '${provName}' / '${provMsgId}'.`
+        );
+      }
+      return intent; // Idempotent return for verified legitimate duplicate
+    }
+
+    // 3. Out-of-order handling: if delivery arrives before acceptance, record acceptance synthetic receipt
     if (intent.status === 'queued') {
       this.acceptanceReceipts.set(receipt.intentId, {
         receiptId: `synth_acc_${receipt.receiptId}`,
         intentId: receipt.intentId,
+        tenantId: intent.tenantId,
         providerMessageId: receipt.providerMessageId,
         providerName: receipt.providerName,
         acceptedAt: receipt.deliveredAt,

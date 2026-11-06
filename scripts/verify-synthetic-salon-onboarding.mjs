@@ -217,6 +217,7 @@ try {
   deliveryService.recordProviderDelivery({
     receiptId: 'rcpt_rogue_delivery_01',
     intentId: intent2.intentId,
+    tenantId: intent2.tenantId,
     providerMessageId: 'pmsg_rogue_01',
     providerName: 'mock_provider',
     deliveredAt: new Date().toISOString(),
@@ -237,6 +238,7 @@ try {
   deliveryService.recordProviderDelivery({
     receiptId: 'rcpt_unverified_sig_01',
     intentId: intent1.intentId,
+    tenantId: intent1.tenantId,
     providerMessageId: 'pmsg_unverified_01',
     providerName: 'mock_provider',
     deliveredAt: new Date().toISOString(),

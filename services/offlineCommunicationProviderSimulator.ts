@@ -121,6 +121,19 @@ export class OfflineCommunicationProviderSimulator {
       return { valid: false, statusCode: 403, error: `TENANT_MISMATCH: Payload tenant ${payload.tenantId} does not match expected tenant ${expectedTenantId}` };
     }
 
+    // 5b. Bind callback processing to target intent's tenant before mutation (prevent cross-tenant attack)
+    const targetIntent = this.deliveryService.getIntent(payload.intentId);
+    if (!targetIntent) {
+      return { valid: false, statusCode: 404, error: `INTENT_NOT_FOUND: Intent ${payload.intentId} not found` };
+    }
+    if (targetIntent.tenantId !== expectedTenantId || targetIntent.tenantId !== payload.tenantId) {
+      return {
+        valid: false,
+        statusCode: 403,
+        error: `TENANT_MISMATCH: Target intent ${payload.intentId} belongs to tenant '${targetIntent.tenantId}', not caller/payload tenant '${expectedTenantId}'`
+      };
+    }
+
     // 6. Record nonce
     this.seenNonces.add(payload.nonce);
 
@@ -129,6 +142,7 @@ export class OfflineCommunicationProviderSimulator {
       const receipt: ProviderAcceptanceReceipt = {
         receiptId: `acc_${payload.nonce}`,
         intentId: payload.intentId,
+        tenantId: payload.tenantId,
         providerMessageId: payload.providerMessageId,
         providerName: 'offline_simulator',
         acceptedAt: payload.timestamp,
@@ -139,6 +153,7 @@ export class OfflineCommunicationProviderSimulator {
       const receipt: ProviderDeliveryReceipt = {
         receiptId: `del_${payload.nonce}`,
         intentId: payload.intentId,
+        tenantId: payload.tenantId,
         providerMessageId: payload.providerMessageId,
         providerName: 'offline_simulator',
         deliveredAt: payload.timestamp,
@@ -335,6 +350,7 @@ export class OfflineCommunicationProviderSimulator {
       this.deliveryService.recordProviderAcceptance({
         receiptId: `rcpt_acc_${providerMsgId}`,
         intentId,
+        tenantId: intent.tenantId,
         providerMessageId: providerMsgId,
         providerName: 'offline_simulator',
         acceptedAt: new Date().toISOString(),
