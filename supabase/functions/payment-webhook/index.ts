@@ -108,16 +108,10 @@ serve(async (req) => {
       || parsedBody.token
       || `${eventType}_${parsedBody.subscriptionReferenceCode || parsedBody.orderReferenceCode || parsedBody.conversationId || Date.now()}`;
 
-    const hasPaymentProof = iyzicoClient.hasPaymentProof(parsedBody);
-    const isPaymentEvent = eventType === 'payment.success' || eventType === 'checkoutform.auth' || eventType === 'subscription.order.success';
-    const effectiveStatus = (isPaymentEvent && !hasPaymentProof) ? 'pending' : mappedStatus;
-
     console.log('[iyzico-webhook] Processing verified webhook event:', {
       eventType,
       providerEventId,
-      mappedStatus,
-      effectiveStatus,
-      hasPaymentProof
+      mappedStatus
     });
 
     // Check Supabase admin configuration
@@ -188,6 +182,14 @@ serve(async (req) => {
       });
     }
 
+    // Verify payment proof
+    const hasPaymentProof = iyzicoClient.hasPaymentProof(parsedBody);
+    const isPaymentEvent = eventType === 'payment.success' || eventType === 'checkoutform.auth' || eventType === 'subscription.order.success';
+
+    // Fail-closed security rule: Payment events without verified payment proof
+    // must NEVER activate the subscription. Retain / downgrade to 'pending'.
+    const effectiveStatus = (isPaymentEvent && !hasPaymentProof) ? 'pending' : mappedStatus;
+
     // Log sanitized audit entry (never store raw PII or secret material)
     await supabaseAdmin.from('audit_logs').insert({
       tenant_id: subData.tenant_id,
@@ -196,13 +198,13 @@ serve(async (req) => {
         providerEventId,
         eventType,
         status: effectiveStatus,
-        hasPaymentProof,
         subscriptionReferenceCode,
+        hasPaymentProof,
         verifiedAt: new Date().toISOString()
       }
     });
 
-    // Update subscriptions table with verified status (fail closed to pending if payment event lacks proof)
+    // Update subscriptions table with verified status
     await supabaseAdmin.from('subscriptions')
       .update({
         status: effectiveStatus,
@@ -210,7 +212,8 @@ serve(async (req) => {
       })
       .eq('id', subData.id);
 
-    // Record payment ledger entry if status is active AND hasPaymentProof is true
+    // Record payment ledger entry ONLY when payment proof is verified and status is active.
+    // Prevents recording fake paid records on subscription creation or unverified activation.
     if (effectiveStatus === 'active' && hasPaymentProof) {
       await supabaseAdmin.from('payments').insert({
         tenant_id: subData.tenant_id,

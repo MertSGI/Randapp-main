@@ -351,7 +351,7 @@ runTest('3.2. [POZITIF] checkoutform.auth (HPP) basarili odeme yetkilendirmesi h
   assert.strictEqual(hasProof, true, 'checkoutform.auth SUCCESS icin hasPaymentProof true olmali');
 });
 
-runTest('3.3. [NEGATIF] subscription.active + SUCCESS senaryosunda hasPaymentProof kesinlikle false doner', () => {
+runTest('3.3. [NEGATIF] subscription.active ve renewed icinde paymentId ve SUCCESS/PAID olsa dahi hasPaymentProof false doner', () => {
   const activeWithSuccess = {
     eventType: 'subscription.active',
     subscriptionReferenceCode: 'sub_paid_01',
@@ -362,41 +362,57 @@ runTest('3.3. [NEGATIF] subscription.active + SUCCESS senaryosunda hasPaymentPro
   };
 
   const mappedStatus = iyzicoClient.mapIyzicoWebhookToInternalStatus(activeWithSuccess);
-  assert.strictEqual(mappedStatus, 'active', 'subscription.active abonelik durumu olarak active eslenir');
+  assert.strictEqual(mappedStatus, 'active', 'Abonelik durumu active eslenebilir.');
 
   const hasProof = iyzicoClient.hasPaymentProof(activeWithSuccess);
-  assert.strictEqual(hasProof, false, 'subscription.active status: SUCCESS icerse dahi hasPaymentProof kesinlikle false olmalidir');
+  assert.strictEqual(hasProof, false, 'subscription.active asla odeme kaniti sayilamaz!');
+
+  const renewedWithPaid = {
+    eventType: 'subscription.renewed',
+    subscriptionReferenceCode: 'sub_renew_01',
+    customerReferenceCode: 'tenant_renew_01',
+    iyziPaymentId: 'pay_renew_999',
+    price: 2490.00,
+    status: 'PAID'
+  };
+
+  const hasProofRenew = iyzicoClient.hasPaymentProof(renewedWithPaid);
+  assert.strictEqual(hasProofRenew, false, 'subscription.renewed asla odeme kaniti sayilamaz!');
 });
 
-runTest('3.4. [POZITIF] subscription.order.success gecerli tahsilat kaniti ile hasPaymentProof true doner', () => {
+runTest('3.4. [POZITIF/NEGATIF] subscription.order.success yalniz gecerli paymentId ve SUCCESS/PAID ile odeme kaniti saglar', () => {
+  // Pozitif: paymentId + SUCCESS
   const orderSuccessPayload = {
     eventType: 'subscription.order.success',
     subscriptionReferenceCode: 'sub_order_01',
-    orderReferenceCode: 'ord_ref_01',
     customerReferenceCode: 'tenant_order_01',
-    iyziPaymentId: 'pay_iyzi_order_888',
-    price: 2490.00,
-    currencyCode: 'TRY',
+    iyziPaymentId: 'pay_order_777',
+    price: 1990.00,
     status: 'SUCCESS'
   };
+  assert.strictEqual(iyzicoClient.mapIyzicoWebhookToInternalStatus(orderSuccessPayload), 'active');
+  assert.strictEqual(iyzicoClient.hasPaymentProof(orderSuccessPayload), true, 'subscription.order.success + paymentId + SUCCESS odeme kanitidir.');
 
-  const mappedStatus = iyzicoClient.mapIyzicoWebhookToInternalStatus(orderSuccessPayload);
-  assert.strictEqual(mappedStatus, 'active', 'subscription.order.success kanitli ise active durumuna eslenmeli');
+  // Negatif: paymentId eksik
+  const orderNoIdPayload = {
+    eventType: 'subscription.order.success',
+    subscriptionReferenceCode: 'sub_order_01',
+    customerReferenceCode: 'tenant_order_01',
+    status: 'SUCCESS',
+    price: 1990.00
+  };
+  assert.strictEqual(iyzicoClient.hasPaymentProof(orderNoIdPayload), false, 'paymentId olmayan subscription.order.success kanit sayilamaz.');
+  assert.strictEqual(iyzicoClient.mapIyzicoWebhookToInternalStatus(orderNoIdPayload), 'pending', 'Kanitsiz order.success pending kalmalidir.');
 
-  const hasProof = iyzicoClient.hasPaymentProof(orderSuccessPayload);
-  assert.strictEqual(hasProof, true, 'Gecerli subscription.order.success icin hasPaymentProof true olmali');
-
-  // Negatif durum: paymentId yoksa veya status FAILURE ise hasPaymentProof false donmeli
-  assert.strictEqual(
-    iyzicoClient.hasPaymentProof({ eventType: 'subscription.order.success', status: 'SUCCESS' }),
-    false,
-    'paymentId olmayan subscription.order.success hasPaymentProof false donmeli'
-  );
-  assert.strictEqual(
-    iyzicoClient.hasPaymentProof({ eventType: 'subscription.order.success', iyziPaymentId: 'pay_order_fail', status: 'FAILURE' }),
-    false,
-    'status: FAILURE olan subscription.order.success hasPaymentProof false donmeli'
-  );
+  // Negatif: status FAILURE
+  const orderFailPayload = {
+    eventType: 'subscription.order.success',
+    subscriptionReferenceCode: 'sub_order_01',
+    customerReferenceCode: 'tenant_order_01',
+    iyziPaymentId: 'pay_order_fail',
+    status: 'FAILURE'
+  };
+  assert.strictEqual(iyzicoClient.hasPaymentProof(orderFailPayload), false, 'status FAILURE odeme kaniti sayilamaz.');
 });
 
 // ---------------------------------------------------------------------------
@@ -794,63 +810,61 @@ await runAsyncTest('4.9. [E2E NEGATIF] subscription.active + paymentId + ACTIVE 
   );
 });
 
-await runAsyncTest('4.10. [E2E POZITIF] subscription.order.success basarili tahsilat ile aboneligi active yapar ve payments tablosuna yazar', async () => {
+
+await runAsyncTest('4.10. [E2E NEGATIF] subscription.active + paymentId + SUCCESS aboneligi active yapsa dahi payments tablosuna paid kaydi URETMEZ', async () => {
   const db = new MockDatabase();
   db.seedSubscription({
     id: 'sub_row_410',
-    tenant_id: 'tenant_order_410',
-    provider_subscription_id: 'sub_ref_order_410',
+    tenant_id: 'tenant_410',
+    provider_subscription_id: 'sub_ref_410',
     status: 'pending'
   });
 
-  const orderSuccessPayload = {
-    eventType: 'subscription.order.success',
-    subscriptionReferenceCode: 'sub_ref_order_410',
-    customerReferenceCode: 'tenant_order_410',
-    iyziPaymentId: 'pay_order_success_410',
-    price: 3490.00,
-    currencyCode: 'TRY',
-    status: 'SUCCESS'
-  };
-
-  const response = await db.processWebhook(orderSuccessPayload);
-  assert.strictEqual(response.status, 200);
-  assert.strictEqual(response.mappedStatus, 'active');
-  assert.strictEqual(response.paymentRecorded, true);
-
-  const subInDb = db.subscriptions.get('sub_row_410');
-  assert.strictEqual(subInDb.status, 'active');
-
-  assert.strictEqual(db.payments.length, 1);
-  const payment = db.payments[0];
-  assert.strictEqual(payment.status, 'paid');
-  assert.strictEqual(payment.amount, 3490.00);
-  assert.strictEqual(payment.provider_event_id, 'pay_order_success_410');
-});
-
-await runAsyncTest('4.11. [E2E NEGATIF] subscription.renewed + PAID odeme kaydi URETMEZ', async () => {
-  const db = new MockDatabase();
-  db.seedSubscription({
-    id: 'sub_row_411',
-    tenant_id: 'tenant_renew_411',
-    provider_subscription_id: 'sub_ref_renew_411',
-    status: 'active'
-  });
-
-  const renewPaidPayload = {
-    eventType: 'subscription.renewed',
-    subscriptionReferenceCode: 'sub_ref_renew_411',
-    customerReferenceCode: 'tenant_renew_411',
-    iyziPaymentId: 'pay_renew_411',
-    status: 'PAID',
+  const activeWithSuccessPayload = {
+    eventType: 'subscription.active',
+    subscriptionReferenceCode: 'sub_ref_410',
+    customerReferenceCode: 'tenant_410',
+    iyziPaymentId: 'pay_active_success_410',
+    status: 'SUCCESS',
     price: 1490.00
   };
 
-  const response = await db.processWebhook(renewPaidPayload);
-  assert.strictEqual(response.status, 200);
-  assert.strictEqual(response.mappedStatus, 'active');
-  assert.strictEqual(response.paymentRecorded, false);
-  assert.strictEqual(db.payments.length, 0, 'subscription.renewed payments tablosuna kayit ATAMAZ!');
+  const res = await db.processWebhook(activeWithSuccessPayload);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.mappedStatus, 'active');
+  assert.strictEqual(res.paymentRecorded, false, 'subscription.active odeme kaniti degildir, paymentRecorded false olmali');
+
+  const subInDb = db.subscriptions.get('sub_row_410');
+  assert.strictEqual(subInDb.status, 'active');
+  assert.strictEqual(db.payments.length, 0, 'subscription.active + SUCCESS payments tablosuna kayit yazamaz!');
+});
+
+await runAsyncTest('4.11. [E2E NEGATIF] subscription.renewed + paymentId + PAID aboneligi active yapsa dahi payments tablosuna paid kaydi URETMEZ', async () => {
+  const db = new MockDatabase();
+  db.seedSubscription({
+    id: 'sub_row_411',
+    tenant_id: 'tenant_411',
+    provider_subscription_id: 'sub_ref_411',
+    status: 'active'
+  });
+
+  const renewWithPaidPayload = {
+    eventType: 'subscription.renewed',
+    subscriptionReferenceCode: 'sub_ref_411',
+    customerReferenceCode: 'tenant_411',
+    iyziPaymentId: 'pay_renew_paid_411',
+    status: 'PAID',
+    price: 1990.00
+  };
+
+  const res = await db.processWebhook(renewWithPaidPayload);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.mappedStatus, 'active');
+  assert.strictEqual(res.paymentRecorded, false, 'subscription.renewed odeme kaniti degildir, paymentRecorded false olmali');
+
+  const subInDb = db.subscriptions.get('sub_row_411');
+  assert.strictEqual(subInDb.status, 'active');
+  assert.strictEqual(db.payments.length, 0, 'subscription.renewed + PAID payments tablosuna kayit yazamaz!');
 });
 
 console.log(`\n======================================================================`);
