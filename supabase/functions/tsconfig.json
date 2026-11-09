@@ -11,6 +11,7 @@
   },
   "include": [
     "./payment-webhook/**/*.ts",
+    "./subscription-sync/**/*.ts",
     "./_shared/iyzicoClient.ts"
   ]
 }
