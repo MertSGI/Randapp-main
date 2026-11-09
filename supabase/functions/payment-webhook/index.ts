@@ -26,6 +26,329 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-iyz-signature-v3',
 };
 
+// ==============================================================================
+// PII, SENSITIVE DATA, AND CREDENTIAL SANITIZATION FOR SAFE LOGS & RESPONSES
+// ==============================================================================
+
+const SENSITIVE_KEY_PATTERNS = [
+  /pass(?:word)?/i,
+  /secret/i,
+  /apikey/i,
+  /api[_-]?key/i,
+  /auth/i,
+  /bearer/i,
+  /token/i,
+  /signature/i,
+  /hash/i,
+  /salt/i,
+  /card/i,
+  /pan/i,
+  /cvv\d?/i,
+  /cvc\d?/i,
+  /security[_-]?code/i,
+  /verification[_-]?code/i,
+  /cardholder/i,
+  /exp(?:iry)?(?:month|year)?/i,
+  /email/i,
+  /phone/i,
+  /gsm/i,
+  /mobile/i,
+  /identity/i,
+  /tckn/i,
+  /tc[_-]?kimlik/i,
+  /vkn/i,
+  /tax[_-]?number/i,
+  /tax[_-]?id/i,
+  /iban/i,
+  /account[_-]?number/i,
+  /address/i,
+  /buyer/i,
+  /customer/i,
+  /payer/i,
+  /billing/i,
+  /shipping/i,
+  /user[_-]?key/i,
+  /bin[_-]?number/i,
+  /last[_-]?four/i,
+  /client[_-]?ip/i,
+  /ip[_-]?address/i
+];
+
+export function isSensitiveKey(key: string): boolean {
+  if (!key || typeof key !== 'string') return false;
+  const lower = key.toLowerCase();
+  // Safe structural property names that should not be redacted
+  if (
+    lower === 'functionname' ||
+    lower === 'eventtype' ||
+    lower === 'iyzieventtype' ||
+    lower === 'status' ||
+    lower === 'subscriptionstatus' ||
+    lower === 'provider' ||
+    lower === 'reason' ||
+    lower === 'code' ||
+    lower === 'errorcode' ||
+    lower === 'error' ||
+    lower === 'unhandled_error' ||
+    lower === 'message' ||
+    lower === 'received' ||
+    lower === 'duplicate' ||
+    lower === 'idempotent' ||
+    lower === 'paymentrecorded' ||
+    lower === 'outofordersuppressed' ||
+    lower === 'providereventid' ||
+    lower === 'providerpaymentid' ||
+    lower === 'orderreferencecode' ||
+    lower === 'subscriptionreferencecode' ||
+    lower === 'haspaymentproof' ||
+    lower === 'action' ||
+    lower === 'details' ||
+    lower === 'created_at' ||
+    lower === 'updated_at' ||
+    lower === 'paid_at' ||
+    lower === 'last_webhook_event_at' ||
+    lower === 'finalized' ||
+    lower === 'retryable' ||
+    lower === 'verified'
+  ) {
+    return false;
+  }
+  if (
+    lower === 'name' || lower === 'surname' || lower === 'firstname' || lower === 'lastname' ||
+    lower === 'fullname' || lower === 'contactname' || lower === 'payername' || lower === 'buyername' ||
+    lower === 'city' || lower === 'country' || lower === 'district' || lower === 'zipcode' || lower === 'postcode'
+  ) {
+    return true;
+  }
+  return SENSITIVE_KEY_PATTERNS.some(pat => pat.test(key));
+}
+
+// Regex for credit card PAN (13 to 19 digits)
+const CARD_REGEX = /\b(?:\d{4}[ -]\d{4}[ -]\d{4}[ -]\d{1,7}|\d{4}[ -]\d{6}[ -]\d{4,5}|\d{13,19})\b/g;
+// Regex for CVV / CVC
+const CVV_REGEX = /\b(?:cvv|cvc|cvv2|cvc2|security[_-]?code)\s*[:=]\s*\d{3,4}\b/gi;
+// Regex for email
+const EMAIL_REGEX = /[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+/g;
+// Regex for phone numbers (Turkish and international formats)
+const PHONE_REGEX = /(?:\+?90|0)?\s*\(?[1-9]\d{2}\)?[-.\s]?\d{3}[-.\s]?\d{2}[-.\s]?\d{2}\b/g;
+// Regex for 11-digit Turkish National ID (TCKN)
+const TCKN_REGEX = /\b[1-9]\d{10}\b/g;
+// Regex for Bearer tokens
+const BEARER_REGEX = /Bearer\s+[A-Za-z0-9._~+/-]+=*/gi;
+// Regex for IYZWS Authorization
+const IYZWS_REGEX = /IYZWS\s+[A-Za-z0-9._~+/-:]+/gi;
+// Regex for JWT tokens
+const JWT_REGEX = /\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b/g;
+// Regex for Turkish IBAN
+const IBAN_REGEX = /\bTR\d{2}[0-9A-Z]{20,24}\b/gi;
+// Regex for 64-char Hex signatures / secrets
+const HEX_SIG_REGEX = /\b[0-9a-fA-F]{64}\b/g;
+// Regex for query string or key-value secrets
+const QUERY_SECRET_REGEX = /((?:api[_-]?key|secret|token|signature|password|auth)=)[^&\s]+/gi;
+// Regex for secret key-value pairs separated by colon, equals, or whitespace
+const SECRET_KV_REGEX = /\b((?:client[_-]?secret|api[_-]?key|secret[_-]?key|secret|token|signature|password|auth)\s*[:=\s]\s*)[^\s,;'"}{]+/gi;
+// Regex for Google / Firebase style API keys
+const GENERIC_API_KEY_REGEX = /\b(?:AIza[0-9A-Za-z-_]{35}|AIzaSy[0-9A-Za-z-_]+)\b/g;
+
+/**
+ * Validates whether an error string is a stable, safe programmatic error code
+ */
+export function isStableErrorCode(str: string): boolean {
+  if (!str || typeof str !== 'string') return false;
+  const trimmed = str.trim();
+  if (/^[A-Z0-9_-]{2,64}$/.test(trimmed)) return true;
+  if (/^Database transaction failed: [A-Z0-9_-]{2,64}$/.test(trimmed)) return true;
+  const knownSafeMessages = [
+    'Method not allowed',
+    'Invalid JSON payload',
+    'Internal Server Error',
+    'Service Unavailable: Transactional database interface unavailable',
+    'Service Unavailable: Backend database service role is not configured',
+    'Service Unavailable: Database idempotency reservation failure',
+    'Service Unavailable: Subscription lookup failure',
+    'Service Unavailable: Subscription record not yet provisioned; retryable for eventual consistency',
+    'Service Unavailable: Database transaction failure',
+    'Service Unavailable: Database idempotency reservation not found',
+    'Service Unavailable: Failed to finalize tenant mismatch security rejection',
+    'Service Unavailable: Concurrent leader timed out and event has not committed in DB',
+    'Service Unavailable: Concurrent webhook transaction failed in leader',
+    'Service Unavailable: Webhook event is currently in processing state by another worker',
+    'Service Unavailable: Checkout binding lookup failed',
+    'Service Unavailable: Missing verified subscription reference',
+    'Service Unavailable: Lease was taken over by another worker which has not yet committed',
+    'Service Unavailable: Webhook execution terminated unexpectedly',
+    'Forbidden: Tenant mismatch between payload and subscription',
+    'Forbidden: Checkout binding failed under subscription row lock',
+    'Forbidden: Unbound checkout session',
+    'Forbidden: Unbound checkout session; signed token/conversationId has no verified server-side binding',
+    'Conflict: In-flight payload fingerprint mismatch for event',
+    'Conflict: Event ID collision with mismatched payload',
+    'Conflict: Webhook event is not in processing state and cannot be executed',
+    'Bad Request: Missing unique provider event identification or timestamp',
+    'Bad Request: Missing canonical subscriptionReferenceCode',
+    'Bad Request: Unauthenticated customer/tenant reference alias',
+    'Bad Request: Conflicting eventType and iyziEventType in HPP webhook',
+    'Bad Request: Missing signed orderReferenceCode; un-signed alias rejected',
+    'Bad Request: Missing signed checkout binding',
+    'Bad Request: Unsupported event type',
+    'Unauthorized: Invalid or missing cryptographic signature',
+    'Unauthorized: Diagnostic access requires valid service authorization',
+    'Unsupported provider webhook event: use authorized provider state reconciliation',
+    'ok'
+  ];
+  return knownSafeMessages.includes(trimmed);
+}
+
+/**
+ * Sanitizes raw string against customer PII, secrets, API keys, tokens, and card numbers
+ */
+export function sanitizeString(str: string): string {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .replace(BEARER_REGEX, 'Bearer [REDACTED_TOKEN]')
+    .replace(IYZWS_REGEX, 'IYZWS [REDACTED]')
+    .replace(JWT_REGEX, '[REDACTED_JWT]')
+    .replace(SECRET_KV_REGEX, '$1[REDACTED]')
+    .replace(GENERIC_API_KEY_REGEX, '[REDACTED_API_KEY]')
+    .replace(QUERY_SECRET_REGEX, '$1[REDACTED]')
+    .replace(IBAN_REGEX, '[REDACTED_IBAN]')
+    .replace(EMAIL_REGEX, '[REDACTED_EMAIL]')
+    .replace(CARD_REGEX, '[REDACTED_CARD]')
+    .replace(CVV_REGEX, 'cvv: [REDACTED]')
+    .replace(TCKN_REGEX, '[REDACTED_ID]')
+    .replace(PHONE_REGEX, '[REDACTED_PHONE]')
+    .replace(HEX_SIG_REGEX, '[REDACTED_SIGNATURE]');
+}
+
+/**
+ * Recursively sanitizes objects, arrays, and primitives for safe logging
+ */
+export function sanitizeLogValue(val: any, depth = 0): any {
+  if (depth > 6) return '[NESTING_LIMIT]';
+  if (val === null || val === undefined) return val;
+  if (typeof val === 'string') {
+    return sanitizeString(val);
+  }
+  if (typeof val === 'number' || typeof val === 'boolean') {
+    return val;
+  }
+  if (val instanceof Error) {
+    const code = (val as any).code || (val as any).errorCode;
+    return {
+      name: val.name,
+      errorCode: typeof code === 'string' && isStableErrorCode(code) ? code : 'UNHANDLED_EXCEPTION',
+      message: '[REDACTED_ERROR_MESSAGE]'
+    };
+  }
+  if (Array.isArray(val)) {
+    return val.map(item => sanitizeLogValue(item, depth + 1));
+  }
+  if (typeof val === 'object') {
+    const sanitizedObj: Record<string, any> = {};
+    for (const [key, value] of Object.entries(val)) {
+      const lowerKey = key.toLowerCase();
+      if (isSensitiveKey(key)) {
+        sanitizedObj[key] = '[REDACTED]';
+      } else if (
+        lowerKey === 'unhandled_error' ||
+        lowerKey === 'message' ||
+        lowerKey === 'error' ||
+        lowerKey === 'details' ||
+        lowerKey === 'hint' ||
+        lowerKey === 'description' ||
+        lowerKey === 'reason'
+      ) {
+        if (typeof value === 'string') {
+          if (isStableErrorCode(value)) {
+            sanitizedObj[key] = value;
+          } else {
+            sanitizedObj[key] = '[REDACTED_ERROR]';
+          }
+        } else if (value instanceof Error) {
+          sanitizedObj[key] = sanitizeLogValue(value, depth + 1);
+        } else if (typeof value === 'object' && value !== null) {
+          sanitizedObj[key] = sanitizeLogValue(value, depth + 1);
+        } else {
+          sanitizedObj[key] = '[REDACTED_ERROR]';
+        }
+      } else {
+        sanitizedObj[key] = sanitizeLogValue(value, depth + 1);
+      }
+    }
+    return sanitizedObj;
+  }
+  return '[UNSERIALIZABLE]';
+}
+
+export const sanitizeObject = sanitizeLogValue;
+
+/**
+ * Safe logger that strictly intercepts and sanitizes any sensitive material
+ */
+export const safeLogger = {
+  log: (...args: any[]) => {
+    console.log(...args.map(arg => {
+      if (typeof arg === 'string') return sanitizeString(arg);
+      if (arg instanceof Error) {
+        const code = (arg as any).code || (arg as any).errorCode;
+        return typeof code === 'string' && isStableErrorCode(code) ? `[Error: ${code}]` : '[Error: UNHANDLED_EXCEPTION]';
+      }
+      return sanitizeLogValue(arg);
+    }));
+  },
+  warn: (...args: any[]) => {
+    console.warn(...args.map(arg => {
+      if (typeof arg === 'string') return sanitizeString(arg);
+      if (arg instanceof Error) {
+        const code = (arg as any).code || (arg as any).errorCode;
+        return typeof code === 'string' && isStableErrorCode(code) ? `[Error: ${code}]` : '[Error: UNHANDLED_EXCEPTION]';
+      }
+      return sanitizeLogValue(arg);
+    }));
+  },
+  error: (...args: any[]) => {
+    console.error(...args.map(arg => {
+      if (typeof arg === 'string') return sanitizeString(arg);
+      if (arg instanceof Error) {
+        const code = (arg as any).code || (arg as any).errorCode;
+        return typeof code === 'string' && isStableErrorCode(code) ? `[Error: ${code}]` : '[Error: UNHANDLED_EXCEPTION]';
+      }
+      return sanitizeLogValue(arg);
+    }));
+  }
+};
+
+/**
+ * Helper to construct safe, PII-sanitized error responses
+ */
+export function createSafeErrorResponse(
+  status: number,
+  error: string,
+  errorCode?: string,
+  extraFields: Record<string, any> = {}
+): Response {
+  const sanitizedExtra = sanitizeLogValue(extraFields);
+  // Redact reference codes and provider event identifiers from error responses unconditionally
+  if (typeof sanitizedExtra === 'object' && sanitizedExtra !== null) {
+    delete sanitizedExtra.referenceCode;
+    delete sanitizedExtra.subscriptionReferenceCode;
+    delete sanitizedExtra.orderReferenceCode;
+    delete sanitizedExtra.providerEventId;
+  }
+  const safeError = isStableErrorCode(error)
+    ? error
+    : (errorCode && isStableErrorCode(errorCode) ? errorCode : '[REDACTED_ERROR]');
+  const payload: Record<string, any> = {
+    error: safeError,
+    ...(errorCode ? { errorCode } : {}),
+    ...(typeof sanitizedExtra === 'object' && sanitizedExtra !== null ? sanitizedExtra : {})
+  };
+  return new Response(JSON.stringify(payload), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    status,
+  });
+}
+
 // In-flight concurrency lock to prevent duplicate execution within the same runtime container
 export interface InFlightExecution {
   fingerprint: string;
@@ -49,21 +372,25 @@ async function finalizeWebhookEvent(
 ): Promise<boolean> {
   if (!client || !providerEventId) return false;
   try {
-    const { data: finData, error: finErr } = await client.rpc('finalize_payment_webhook_event', {
-      p_provider: provider,
-      p_provider_event_id: providerEventId,
-      p_status: status,
-      p_claim_attempt_id: claimAttemptId || null,
-      p_response_payload: payload
-    });
+    const sanitizedPayload = sanitizeLogValue(payload);
+    if (typeof client.rpc === 'function') {
+      const { data: finData, error: finErr } = await client.rpc('finalize_payment_webhook_event', {
+        p_provider: provider,
+        p_provider_event_id: providerEventId,
+        p_status: status,
+        p_claim_attempt_id: claimAttemptId || null,
+        p_response_payload: sanitizedPayload
+      });
 
-    if (finErr) {
-      console.error(`[iyzico-webhook] Error finalizing idempotency event via RPC:`, finErr);
-      return false;
+      if (finErr) {
+        safeLogger.error(`[iyzico-webhook] Error finalizing idempotency event via RPC:`, finErr?.code || 'FINALIZE_RPC_ERROR');
+        return false;
+      }
+      return Boolean(finData?.finalized === true);
     }
-    return Boolean(finData?.finalized === true);
+    return false;
   } catch (err: any) {
-    console.error(`[iyzico-webhook] Exception finalizing idempotency state:`, err?.message);
+    safeLogger.error(`[iyzico-webhook] Exception finalizing idempotency state:`, err?.code || 'FINALIZE_EXCEPTION');
     return false;
   }
 }
@@ -177,23 +504,14 @@ export async function handlePaymentWebhook(
       req.headers, parsedBody, envGetter('IYZICO_SECRET_KEY'), envGetter('IYZICO_MERCHANT_ID')
     );
     if (!verification.isValid) {
-      console.warn(`[SECURITY] Rejected unauthorized webhook call. Reason: ${verification.reason}`);
+      safeLogger.warn(`[SECURITY] Rejected unauthorized webhook call. Reason: ${verification.reason}`);
       if (verification.reason === 'CONFLICTING_EVENT_TYPE') {
-        return new Response(JSON.stringify({
-          error: 'Bad Request: Conflicting eventType and iyziEventType in HPP webhook',
-          errorCode: 'CONFLICTING_EVENT_TYPE',
+        return createSafeErrorResponse(400, 'Bad Request: Conflicting eventType and iyziEventType in HPP webhook', 'CONFLICTING_EVENT_TYPE', {
           reason: 'CONFLICTING_EVENT_TYPE'
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 400,
         });
       }
-      return new Response(JSON.stringify({
-        error: 'Unauthorized: Invalid or missing cryptographic signature',
+      return createSafeErrorResponse(401, 'Unauthorized: Invalid or missing cryptographic signature', 'INVALID_SIGNATURE', {
         reason: verification.reason
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 401,
       });
     }
 
@@ -266,14 +584,8 @@ export async function handlePaymentWebhook(
 
     // Conflicting eventType check: HPP HMAC signs iyziEventType. If un-signed eventType is injected and differs, reject with 400!
     if (format === 'hpp' && parsedBody.eventType && parsedBody.iyziEventType && parsedBody.eventType !== parsedBody.iyziEventType) {
-      console.warn(`[SECURITY] Rejected HPP webhook with conflicting un-signed eventType "${parsedBody.eventType}" vs signed iyziEventType "${parsedBody.iyziEventType}"`);
-      return new Response(JSON.stringify({
-        error: 'Bad Request: Conflicting eventType and iyziEventType in HPP webhook',
-        errorCode: 'CONFLICTING_EVENT_TYPE'
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 400,
-      });
+      safeLogger.warn('[SECURITY] Rejected HPP webhook with conflicting un-signed eventType vs signed iyziEventType.');
+      return createSafeErrorResponse(400, 'Bad Request: Conflicting eventType and iyziEventType in HPP webhook', 'CONFLICTING_EVENT_TYPE');
     }
 
     // Signature was verified against the RAW provider event value above. Only
@@ -283,14 +595,8 @@ export async function handlePaymentWebhook(
     // For subscription payment events, reject un-signed orderReference alias if signed orderReferenceCode is missing
     if (format === 'subscription' && (eventType === 'subscription.order.success' || eventType === 'payment.success')) {
       if (!parsedBody.orderReferenceCode && parsedBody.orderReference) {
-        console.warn(`[SECURITY] Rejected subscription payment webhook with untrusted orderReference alias.`);
-        return new Response(JSON.stringify({
-          error: 'Bad Request: Missing signed orderReferenceCode; un-signed alias rejected',
-          errorCode: 'UNTRUSTED_ORDER_REFERENCE_ALIAS'
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 400,
-        });
+        safeLogger.warn(`[SECURITY] Rejected subscription payment webhook with untrusted orderReference alias.`);
+        return createSafeErrorResponse(400, 'Bad Request: Missing signed orderReferenceCode; un-signed alias rejected', 'UNTRUSTED_ORDER_REFERENCE_ALIAS');
       }
     }
 
@@ -299,14 +605,8 @@ export async function handlePaymentWebhook(
     try {
       providerEventId = iyzicoClient.extractProviderEventId(parsedBody);
     } catch (err: any) {
-      console.warn(`[iyzico-webhook] Failed to extract provider event identifier:`, err?.message);
-      return new Response(JSON.stringify({
-        error: 'Bad Request: Missing unique provider event identification or timestamp',
-        errorCode: 'MISSING_PROVIDER_EVENT_IDENTIFIER'
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 400,
-      });
+      safeLogger.warn(`[iyzico-webhook] Failed to extract provider event identifier:`, err?.code || 'MISSING_PROVIDER_EVENT_IDENTIFIER');
+      return createSafeErrorResponse(400, 'Bad Request: Missing unique provider event identification or timestamp', 'MISSING_PROVIDER_EVENT_IDENTIFIER');
     }
     activeProviderEventId = providerEventId;
 
@@ -318,31 +618,20 @@ export async function handlePaymentWebhook(
     const payloadFingerprint = await iyzicoClient.hmacSha256Hex(signedFingerprintMaterial, 'payload-fingerprint-salt');
 
     // In-flight concurrency check:
-    // If a request with identical providerEventId is currently in-flight:
-    // - Check payload fingerprint collision: if active fingerprint differs from incoming fingerprint,
-    //   it is a conflicting concurrent payload -> MUST fail closed with HTTP 409 conflict!
-    // - If fingerprints match: legitimate in-flight concurrent request -> await leader's execution!
-    //   Only if the leader successfully commits (HTTP 200) does the follower return HTTP 200 duplicate.
-    //   If the leader fails (HTTP 5xx / error), the follower propagates the failure so the payment provider retries.
     const hasInFlight = inFlightExecutions.has(providerEventId) || inFlightEvents.has(providerEventId) || inFlightFingerprints.has(providerEventId);
     if (hasInFlight) {
       const activeExec = inFlightExecutions.get(providerEventId);
       const activeFingerprint = activeExec?.fingerprint || inFlightFingerprints.get(providerEventId);
       if (activeFingerprint && activeFingerprint !== payloadFingerprint) {
-        console.warn(`[SECURITY] In-flight payload fingerprint mismatch for event: ${providerEventId}`);
-        return new Response(JSON.stringify({
-          error: 'Conflict: In-flight payload fingerprint mismatch for event',
-          errorCode: 'PAYLOAD_FINGERPRINT_MISMATCH',
+        safeLogger.warn('[SECURITY] In-flight payload fingerprint mismatch for event');
+        return createSafeErrorResponse(409, 'Conflict: In-flight payload fingerprint mismatch for event', 'PAYLOAD_FINGERPRINT_MISMATCH', {
           conflict: true
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 409,
         });
       }
 
       // Check if leader promise is registered
       if (activeExec && activeExec.promise) {
-        console.log(`[iyzico-webhook] Concurrent in-flight request detected for: ${providerEventId}. Awaiting leader completion with timeout...`);
+        safeLogger.log('[iyzico-webhook] Concurrent in-flight request detected. Awaiting leader completion with timeout...');
         const inFlightTimeoutMs = options.inFlightTimeoutMs ?? Number(envGetter('IN_FLIGHT_TIMEOUT_MS') || 2500);
         let leaderRes: Response | null = null;
         let leaderTimedOut = false;
@@ -363,16 +652,16 @@ export async function handlePaymentWebhook(
             leaderRes = raceResult.res;
           } else {
             leaderTimedOut = true;
-            console.warn(`[iyzico-webhook] In-flight leader timed out after ${inFlightTimeoutMs}ms for: ${providerEventId}. Falling back to DB observation...`);
+            safeLogger.warn(`[iyzico-webhook] In-flight leader timed out after ${inFlightTimeoutMs}ms. Falling back to DB observation...`);
           }
         } catch (err: any) {
-          console.error(`[iyzico-webhook] In-flight leader execution threw an error for ${providerEventId}:`, err?.message);
+          safeLogger.error('[iyzico-webhook] In-flight leader execution threw an error:', err?.code || 'LEADER_EXECUTION_ERROR');
           leaderTimedOut = true;
         }
 
         if (leaderRes && !leaderTimedOut) {
           if (leaderRes.status === 200) {
-            console.log(`[iyzico-webhook] Leader completed with 200 for: ${providerEventId}. Returning idempotent duplicate 200.`);
+            safeLogger.log('[iyzico-webhook] Leader completed with 200. Returning idempotent duplicate 200.');
             let leaderData: any = {};
             try {
               leaderData = await leaderRes.clone().json();
@@ -392,7 +681,7 @@ export async function handlePaymentWebhook(
             });
           }
 
-          console.warn(`[iyzico-webhook] In-flight leader returned failure (status ${leaderRes.status}) for ${providerEventId}. Propagating failure to follower.`);
+          safeLogger.warn(`[iyzico-webhook] In-flight leader returned failure (status ${leaderRes.status}). Propagating failure to follower.`);
           let leaderBodyText = '';
           try {
             leaderBodyText = await leaderRes.clone().text();
@@ -408,8 +697,7 @@ export async function handlePaymentWebhook(
         }
 
         // Leader timed out or threw error -> Fall back to persistent DB observation contract!
-        // Never return 200 unless leader/new worker's terminal success is strictly verified in DB!
-        console.log(`[iyzico-webhook] Observing persistent DB state for timed out / stuck leader on: ${providerEventId}...`);
+        safeLogger.log('[iyzico-webhook] Observing persistent DB state for timed out / stuck leader...');
         const maxWaitMs = options.crossInstanceWaitMs ?? Number(envGetter('WEBHOOK_OBSERVATION_TIMEOUT_MS') || 2500);
         const pollIntervalMs = 50;
         const startTime = Date.now();
@@ -432,14 +720,14 @@ export async function handlePaymentWebhook(
                 }
               }
             } catch (err: any) {
-              console.warn(`[iyzico-webhook] Error observing DB status during leader timeout recovery:`, err?.message);
+              safeLogger.warn(`[iyzico-webhook] Error observing DB status during leader timeout recovery:`, err?.code || 'OBSERVATION_ERROR');
             }
             await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
           }
         }
 
         if (dbRecord && (dbRecord.status === 'processed' || dbRecord.status === 'duplicate_suppressed')) {
-          console.log(`[iyzico-webhook] DB observation confirmed terminal '${dbRecord.status}' for: ${providerEventId}. Returning idempotent 200.`);
+          safeLogger.log(`[iyzico-webhook] DB observation confirmed terminal '${dbRecord.status}'. Returning idempotent 200.`);
           const savedPayload = (typeof dbRecord.response_payload === 'object' && dbRecord.response_payload !== null)
             ? dbRecord.response_payload
             : {};
@@ -462,25 +750,17 @@ export async function handlePaymentWebhook(
           });
         }
 
-        console.warn(`[iyzico-webhook] Leader timed out and DB did not reach terminal processed state (status: ${dbRecord?.status || 'unknown'}). Returning retryable 503.`);
-        return new Response(JSON.stringify({
-          error: 'Service Unavailable: Concurrent leader timed out and event has not committed in DB',
+        safeLogger.warn(`[iyzico-webhook] Leader timed out and DB did not reach terminal processed state (status: ${dbRecord?.status || 'unknown'}). Returning retryable 503.`);
+        return createSafeErrorResponse(503, 'Service Unavailable: Concurrent leader timed out and event has not committed in DB', 'LEADER_TIMEOUT', {
           status: dbRecord?.status || 'processing',
           retryable: true
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 503,
         });
       }
 
-      console.warn(`[iyzico-webhook] In-flight detected without promise for ${providerEventId}. Returning retryable 503.`);
-      return new Response(JSON.stringify({
-        error: 'Service Unavailable: Webhook event is currently in processing state by another worker',
+      safeLogger.warn('[iyzico-webhook] In-flight detected without promise. Returning retryable 503.');
+      return createSafeErrorResponse(503, 'Service Unavailable: Webhook event is currently in processing state by another worker', 'CONCURRENT_PROCESSING', {
         status: 'processing',
         retryable: true
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 503,
       });
     }
 
@@ -514,18 +794,22 @@ export async function handlePaymentWebhook(
       const supabaseKey = envGetter('SUPABASE_SERVICE_ROLE_KEY');
 
       if (!supabaseUrl || !supabaseKey) {
-        console.error('[iyzico-webhook] Fail-closed: Supabase database URL or service role key is not configured.');
-        return new Response(JSON.stringify({
-          error: 'Service Unavailable: Backend database service role is not configured',
+        safeLogger.error('[iyzico-webhook] Fail-closed: Supabase database URL or service role key is not configured.');
+        return createSafeErrorResponse(503, 'Service Unavailable: Backend database service role is not configured', 'MISSING_DB_CONFIG', {
           retryable: true
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 503,
         });
       }
 
       const createClient = await getCreateClient();
       supabaseAdmin = createClient(supabaseUrl, supabaseKey);
+    }
+
+    // Fail-closed guard: database client MUST support transactional RPC execution
+    if (!supabaseAdmin || typeof supabaseAdmin.rpc !== 'function') {
+      safeLogger.error('[iyzico-webhook] Fail-closed: Transactional RPC interface is unavailable on database client.');
+      return createSafeErrorResponse(503, 'Service Unavailable: Transactional database interface unavailable', 'RPC_UNAVAILABLE', {
+        retryable: true
+      });
     }
 
     // HPP binding MUST be resolved from signed fields before the DB claim.
@@ -536,9 +820,7 @@ export async function handlePaymentWebhook(
       const signedConversationId = typeof parsedBody.paymentConversationId === 'string'
         ? parsedBody.paymentConversationId.trim() : '';
       if (!signedToken && !signedConversationId) {
-        return new Response(JSON.stringify({ errorCode: 'MISSING_SIGNED_CHECKOUT_BINDING' }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400
-        });
+        return createSafeErrorResponse(400, 'Bad Request: Missing signed checkout binding', 'MISSING_SIGNED_CHECKOUT_BINDING');
       }
 
       // maybeSingle rejects multiple matches in real PostgREST. The test
@@ -551,24 +833,18 @@ export async function handlePaymentWebhook(
       const conversationResult = signedConversationId
         ? await resolveSignedBinding('provider_session_id', signedConversationId) : null;
       if (tokenResult?.error || conversationResult?.error) {
-        console.error('[SECURITY] HPP checkout identity lookup is ambiguous or unavailable.');
-        return new Response(JSON.stringify({ errorCode: 'CHECKOUT_BINDING_LOOKUP_FAILED', retryable: true }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 503
-        });
+        safeLogger.error('[SECURITY] HPP checkout identity lookup is ambiguous or unavailable.');
+        return createSafeErrorResponse(503, 'Service Unavailable: Checkout binding lookup failed', 'CHECKOUT_BINDING_LOOKUP_FAILED', { retryable: true });
       }
       const tokenRow = tokenResult?.data || null;
       const conversationRow = conversationResult?.data || null;
       if ((signedToken && !tokenRow) || (signedConversationId && !conversationRow) ||
           (tokenRow && conversationRow && tokenRow.id !== conversationRow.id)) {
-        return new Response(JSON.stringify({ errorCode: 'UNBOUND_CHECKOUT_SESSION', paymentRecorded: false }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403
-        });
+        return createSafeErrorResponse(403, 'Forbidden: Unbound checkout session', 'UNBOUND_CHECKOUT_SESSION', { paymentRecorded: false });
       }
       const resolved = tokenRow || conversationRow;
       if (!resolved?.provider_subscription_id) {
-        return new Response(JSON.stringify({ errorCode: 'MISSING_VERIFIED_SUBSCRIPTION_REFERENCE' }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 503
-        });
+        return createSafeErrorResponse(503, 'Service Unavailable: Missing verified subscription reference', 'MISSING_VERIFIED_SUBSCRIPTION_REFERENCE');
       }
       subscriptionReferenceCode = resolved.provider_subscription_id;
     }
@@ -577,12 +853,13 @@ export async function handlePaymentWebhook(
     const eventTimestampEpoch = iyzicoClient.extractProviderEventTimestamp(parsedBody);
     const eventTimestampISO = eventTimestampEpoch ? new Date(eventTimestampEpoch).toISOString() : null;
 
-    // Determine payment proof
+    // Determine payment proof and fail-closed effective status
     const hasPaymentProof = iyzicoClient.hasPaymentProof(parsedBody);
+    const isPaymentEvent = eventType === 'payment.success' || eventType === 'checkoutform.auth' || eventType === 'subscription.order.success';
+    const effectiveStatus = (isPaymentEvent && !hasPaymentProof) ? 'pending' : mappedStatus;
     const paymentAmount = Number(parsedBody.price || parsedBody.paidPrice || parsedBody.amount || 0);
-    // CRITICAL: Unsigned payload currencyCode / currency is strictly ignored; ledger currency comes exclusively from verified DB contract.
 
-    // 1. Atomic Reservation with Lease Timeout & claim_attempt_id fencing
+    // 1. Atomic Reservation with Lease Timeout & claim_attempt_id fencing via RPC
     const { data: claimRes, error: claimErr } = await supabaseAdmin.rpc('claim_payment_webhook_event', {
       p_provider: 'iyzico',
       p_provider_event_id: providerEventId,
@@ -595,36 +872,21 @@ export async function handlePaymentWebhook(
     });
 
     if (claimErr) {
-      console.error(`[iyzico-webhook] Database claim RPC error:`, claimErr);
-      return new Response(JSON.stringify({
-        error: 'Service Unavailable: Database idempotency reservation failure',
+      safeLogger.error(`[iyzico-webhook] Database claim RPC error:`, claimErr?.code || 'CLAIM_RPC_ERROR');
+      return createSafeErrorResponse(500, 'Service Unavailable: Database idempotency reservation failure', 'IDEMPOTENCY_RESERVATION_FAILURE', {
         retryable: true
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500,
       });
     }
 
     if (claimRes) {
       if (claimRes.status === 'conflict') {
-        console.warn(`[SECURITY] Payload fingerprint mismatch detected for event ID: ${providerEventId}`);
-        return new Response(JSON.stringify({
-          error: 'Conflict: Event ID collision with mismatched payload',
-          errorCode: 'PAYLOAD_FINGERPRINT_MISMATCH'
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 409,
-        });
+        safeLogger.warn('[SECURITY] Payload fingerprint mismatch detected for event ID.');
+        return createSafeErrorResponse(409, 'Conflict: Event ID collision with mismatched payload', 'PAYLOAD_FINGERPRINT_MISMATCH');
       }
 
       if (claimRes.is_duplicate || claimRes.can_proceed === false) {
-        // FAIL-CLOSED PROCESSING GUARD & DURABLE DB OBSERVATION:
-        // If an event is currently locked in 'processing' state by another worker/instance:
-        // We observe the durable DB record for a bounded duration.
-        // - If the leader successfully commits (status: 'processed' or 'duplicate_suppressed'), return idempotent HTTP 200 duplicate!
-        // - If the leader fails (status: 'failed') or observation times out, return retryable HTTP 503 so the provider retries.
         if (claimRes.status === 'processing') {
-          console.log(`[iyzico-webhook] Cross-instance processing lock detected for: ${providerEventId}. Observing DB for leader completion...`);
+          safeLogger.log('[iyzico-webhook] Cross-instance processing lock detected. Observing DB for leader completion...');
           const maxWaitMs = options.crossInstanceWaitMs ?? Number(envGetter('WEBHOOK_OBSERVATION_TIMEOUT_MS') || 8000);
           const pollIntervalMs = 100;
           const startTime = Date.now();
@@ -647,12 +909,12 @@ export async function handlePaymentWebhook(
                 }
               }
             } catch (err: any) {
-              console.warn(`[iyzico-webhook] Error during durable status observation:`, err?.message);
+              safeLogger.warn(`[iyzico-webhook] Error during durable status observation:`, err?.code || 'OBSERVATION_ERROR');
             }
           }
 
           if (terminalRecord && (terminalRecord.status === 'processed' || terminalRecord.status === 'duplicate_suppressed')) {
-            console.log(`[iyzico-webhook] Leader completed with status '${terminalRecord.status}' in DB for: ${providerEventId}. Returning idempotent 200.`);
+            safeLogger.log(`[iyzico-webhook] Leader completed with status '${terminalRecord.status}' in DB. Returning idempotent 200.`);
             const savedPayload = (typeof terminalRecord.response_payload === 'object' && terminalRecord.response_payload !== null)
               ? terminalRecord.response_payload
               : {};
@@ -675,19 +937,15 @@ export async function handlePaymentWebhook(
             });
           }
 
-          console.warn(`[iyzico-webhook] In-flight leader did not commit successfully in DB for ${providerEventId} (status: ${terminalRecord?.status || 'processing'}). Returning retryable 503.`);
-          return new Response(JSON.stringify({
-            error: 'Service Unavailable: Webhook event is currently in processing state by another worker',
+          safeLogger.warn(`[iyzico-webhook] In-flight leader did not commit successfully in DB (status: ${terminalRecord?.status || 'processing'}). Returning retryable 503.`);
+          return createSafeErrorResponse(503, 'Service Unavailable: Webhook event is currently in processing state by another worker', 'CONCURRENT_PROCESSING', {
             status: terminalRecord?.status || 'processing',
             retryable: true
-          }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 503,
           });
         }
 
         // Only processed or terminal records (processed, duplicate_suppressed) return HTTP 200
-        console.log(`[iyzico-webhook] Idempotency record confirmed for: ${providerEventId}. Returning idempotent 200.`);
+        safeLogger.log('[iyzico-webhook] Idempotency record confirmed. Returning idempotent 200.');
         const savedPayload = (typeof claimRes.response_payload === 'object' && claimRes.response_payload !== null)
           ? claimRes.response_payload
           : {};
@@ -720,34 +978,24 @@ export async function handlePaymentWebhook(
       .maybeSingle();
 
     if (subError) {
-      console.error(`[iyzico-webhook] Error querying subscription:`, subError);
+      safeLogger.error(`[iyzico-webhook] Error querying subscription:`, subError?.code || 'SUBSCRIPTION_QUERY_ERROR');
       const finalized = await finalizeWebhookEvent(supabaseAdmin, 'iyzico', providerEventId, 'failed', activeClaimAttemptId, {
-        error: subError.message
+        error: 'SUBSCRIPTION_LOOKUP_FAILURE'
       });
-      return new Response(JSON.stringify({
-        error: 'Service Unavailable: Subscription lookup failure',
+      return createSafeErrorResponse(500, 'Service Unavailable: Subscription lookup failure', 'SUBSCRIPTION_LOOKUP_FAILURE', {
         finalized,
         retryable: true
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500,
       });
     }
 
     if (!subscription) {
-      console.warn(`[iyzico-webhook] Subscription not yet provisioned: ${subscriptionReferenceCode}. Marking failed and returning retryable 503.`);
+      safeLogger.warn('[iyzico-webhook] Subscription not yet provisioned. Marking failed and returning retryable 503.');
       const finalized = await finalizeWebhookEvent(supabaseAdmin, 'iyzico', providerEventId, 'failed', activeClaimAttemptId, {
         error: 'SUBSCRIPTION_NOT_YET_PROVISIONED'
       });
-      return new Response(JSON.stringify({
-        error: 'Service Unavailable: Subscription record not yet provisioned; retryable for eventual consistency',
-        errorCode: 'SUBSCRIPTION_NOT_YET_PROVISIONED',
-        referenceCode: subscriptionReferenceCode,
+      return createSafeErrorResponse(503, 'Service Unavailable: Subscription record not yet provisioned; retryable for eventual consistency', 'SUBSCRIPTION_NOT_YET_PROVISIONED', {
         finalized,
         retryable: true
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 503,
       });
     }
 
@@ -756,15 +1004,10 @@ export async function handlePaymentWebhook(
 
     // Cryptographic Contract Binding:
     // HPP format checkout binding verification:
-    // A valid HPP signature alone cannot mutate arbitrary subscriptions. The signed checkout token or
-    // paymentConversationId MUST match a verified server-side subscription checkout binding!
     if (format === 'hpp') {
       const signedCheckoutToken = parsedBody.token ? String(parsedBody.token).trim() : null;
       const signedConversationId = parsedBody.paymentConversationId ? String(parsedBody.paymentConversationId).trim() : null;
 
-      // Each signed identifier has exactly one DB namespace. A matching
-      // provider_subscription_id (or a cross-namespace match) is NOT a checkout binding.
-      // If both signed identifiers exist, both must match their respective fields.
       const isBound = Boolean(
         subscription && (signedCheckoutToken || signedConversationId) &&
         (!signedCheckoutToken || subscription.provider_token === signedCheckoutToken) &&
@@ -772,35 +1015,24 @@ export async function handlePaymentWebhook(
       );
 
       if (!isBound) {
-        console.warn(`[SECURITY] Unbound HPP checkout webhook rejected for subscription: ${subscriptionReferenceCode}`);
+        safeLogger.warn('[SECURITY] Unbound HPP checkout webhook rejected for subscription.');
         const finalized = await finalizeWebhookEvent(supabaseAdmin, 'iyzico', providerEventId, 'failed', activeClaimAttemptId, {
           error: 'UNBOUND_CHECKOUT_SESSION'
         });
-        return new Response(JSON.stringify({
-          error: 'Forbidden: Unbound checkout session; signed token/conversationId has no verified server-side binding',
-          errorCode: 'UNBOUND_CHECKOUT_SESSION',
+        return createSafeErrorResponse(403, 'Forbidden: Unbound checkout session; signed token/conversationId has no verified server-side binding', 'UNBOUND_CHECKOUT_SESSION', {
           finalized,
           paymentRecorded: false
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 403,
         });
       }
     }
 
     // Unsigned Financial Field Protection (Controller Directive 1):
-    // Neither subscription nor HPP webhook signatures cover payload.price or payload.currency.
-    // Authorized amount and currency MUST come strictly from verified DB subscription contract.
-    // Fallback to unauthenticated payload.price or payload.currency is STRICTLY FORBIDDEN.
-    // Proof is cryptographic and must never be downgraded by a possibly stale
-    // pre-lock subscription read: the locked SQL contract decides whether the
-    // event can be finalized, or must stay retryable until price/currency exist.
     const authorizedAmount = (subscription && subscription.price != null && Number(subscription.price) > 0)
       ? Number(subscription.price) : 0;
     const verifiedDbCurrency = (subscription && typeof subscription.currency === 'string' && subscription.currency.trim())
       ? subscription.currency.trim().toUpperCase() : null;
 
-    // 3. Execute Atomic Webhook Transaction inside PostgreSQL
+    // 3. Execute Atomic Webhook Transaction inside PostgreSQL via RPC
     const { data: txRes, error: txErr } = await supabaseAdmin.rpc('execute_payment_webhook_transaction', {
       p_provider: 'iyzico',
       p_provider_event_id: providerEventId,
@@ -815,17 +1047,11 @@ export async function handlePaymentWebhook(
       p_payment_metadata: {
         raw_event_type: eventType,
         mapped_status: mappedStatus,
-        // RPC receives only identities that were authenticated by HPP HMAC.
-        // It re-verifies them against the FOR UPDATE locked subscription row.
         ...(format === 'hpp' && parsedBody?.token
           ? { verifiedCheckoutToken: String(parsedBody.token).trim() } : {}),
         ...(format === 'hpp' && parsedBody?.paymentConversationId
           ? { verifiedCheckoutConversationId: String(parsedBody.paymentConversationId).trim() } : {}),
-        // This value comes from HMAC-authenticated canonical identity extraction.
         providerPaymentId: providerPaymentId,
-        // iyziPaymentId is HMAC-signed only in HPP. Never store a subscription
-        // payload's unsigned alias, even as metadata: legacy readers must not
-        // be able to mistake it for an authenticated payment identity.
         ...(format === 'hpp' && parsedBody?.iyziPaymentId != null
           ? { iyziPaymentId: parsedBody.iyziPaymentId } : {}),
         orderReferenceCode: format === 'subscription' ? parsedBody?.orderReferenceCode : (parsedBody?.orderReferenceCode ?? parsedBody?.orderReference),
@@ -839,113 +1065,78 @@ export async function handlePaymentWebhook(
     });
 
     if (txErr) {
-      console.error(`[iyzico-webhook] Transaction RPC error:`, txErr);
+      safeLogger.error(`[iyzico-webhook] Transaction RPC error:`, txErr?.code || 'DATABASE_TRANSACTION_FAILURE');
       const finalized = await finalizeWebhookEvent(supabaseAdmin, 'iyzico', providerEventId, 'failed', activeClaimAttemptId, {
-        error: txErr.message
+        error: 'DATABASE_TRANSACTION_FAILURE'
       });
-      return new Response(JSON.stringify({
-        error: 'Service Unavailable: Database transaction failure',
+      return createSafeErrorResponse(500, 'Service Unavailable: Database transaction failure', 'DATABASE_TRANSACTION_FAILURE', {
         finalized,
         retryable: true
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500,
       });
     }
 
     // Positive success contract: Only proceed to HTTP 200 when txRes exists and txRes.success === true
     if (!txRes || txRes.success !== true) {
-      const txError = txRes?.error || 'Database transaction produced non-success outcome';
+      const txError = typeof txRes?.error === 'string' ? txRes.error : 'DATABASE_TRANSACTION_FAILED';
       if (txError === 'UNBOUND_CHECKOUT_SESSION') {
-        // A pre-read checkout binding cannot authorize a mutation after a
-        // concurrent reassignment. The locked DB row is authoritative.
         const finalized = await finalizeWebhookEvent(supabaseAdmin, 'iyzico', providerEventId, 'failed', activeClaimAttemptId, {
           error: 'UNBOUND_CHECKOUT_SESSION'
         });
-        return new Response(JSON.stringify({
-          error: 'Forbidden: Checkout binding failed under subscription row lock',
-          errorCode: 'UNBOUND_CHECKOUT_SESSION',
+        return createSafeErrorResponse(finalized ? 403 : 503, 'Forbidden: Checkout binding failed under subscription row lock', 'UNBOUND_CHECKOUT_SESSION', {
           finalized,
           paymentRecorded: false
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: finalized ? 403 : 503
         });
       }
 
       if (txError === 'TENANT_MISMATCH') {
-        console.warn(`[SECURITY] Atomic tenant mismatch under row lock for event: ${providerEventId}`);
+        safeLogger.warn('[SECURITY] Atomic tenant mismatch under row lock.');
         const realSubStatus = txRes?.current_subscription_status || subscription.status;
         const finalized = await finalizeWebhookEvent(supabaseAdmin, 'iyzico', providerEventId, 'duplicate_suppressed', activeClaimAttemptId, {
-          error: 'Forbidden: Tenant mismatch between payload and locked subscription',
+          error: 'TENANT_MISMATCH',
           status: realSubStatus,
           subscriptionStatus: realSubStatus,
           rejected: true,
           rejectionReason: 'TENANT_MISMATCH'
         });
         if (!finalized) {
-          console.error(`[iyzico-webhook] Failed to finalize tenant mismatch security rejection for event: ${providerEventId}`);
-          return new Response(JSON.stringify({
-            error: 'Service Unavailable: Failed to finalize tenant mismatch security rejection',
+          safeLogger.error('[iyzico-webhook] Failed to finalize tenant mismatch security rejection.');
+          return createSafeErrorResponse(503, 'Service Unavailable: Failed to finalize tenant mismatch security rejection', 'TENANT_MISMATCH_FINALIZATION_FAILED', {
             finalized: false,
             retryable: true
-          }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 503,
           });
         }
-        return new Response(JSON.stringify({
-          error: 'Forbidden: Tenant mismatch between payload and subscription',
-          errorCode: 'TENANT_MISMATCH',
+        return createSafeErrorResponse(403, 'Forbidden: Tenant mismatch between payload and subscription', 'TENANT_MISMATCH', {
           finalized: true
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 403,
         });
       }
 
       if (txError === 'RESERVATION_NOT_FOUND') {
-        console.error(`[iyzico-webhook] Atomic reservation not found for event: ${providerEventId}`);
-        return new Response(JSON.stringify({
-          error: 'Service Unavailable: Database idempotency reservation not found',
+        safeLogger.error('[iyzico-webhook] Atomic reservation not found for event.');
+        return createSafeErrorResponse(503, 'Service Unavailable: Database idempotency reservation not found', 'RESERVATION_NOT_FOUND', {
           retryable: true
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 503,
         });
       }
 
       if (txError === 'SUBSCRIPTION_NOT_FOUND') {
-        console.warn(`[iyzico-webhook] Subscription not yet provisioned in transaction: ${subscriptionReferenceCode}. Marking failed and returning retryable 503.`);
+        safeLogger.warn('[iyzico-webhook] Subscription not yet provisioned in transaction. Marking failed and returning retryable 503.');
         const finalized = await finalizeWebhookEvent(supabaseAdmin, 'iyzico', providerEventId, 'failed', activeClaimAttemptId, {
           error: 'SUBSCRIPTION_NOT_YET_PROVISIONED'
         });
-        return new Response(JSON.stringify({
-          error: 'Service Unavailable: Subscription record not yet provisioned; retryable for eventual consistency',
-          errorCode: 'SUBSCRIPTION_NOT_YET_PROVISIONED',
-          referenceCode: subscriptionReferenceCode,
+        return createSafeErrorResponse(503, 'Service Unavailable: Subscription record not yet provisioned; retryable for eventual consistency', 'SUBSCRIPTION_NOT_YET_PROVISIONED', {
           finalized,
           retryable: true
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 503,
         });
       }
 
       if (txError === 'NOT_IN_PROCESSING_STATE') {
-        console.warn(`[iyzico-webhook] Webhook event not in processing state for event: ${providerEventId}`);
-        return new Response(JSON.stringify({
-          error: 'Conflict: Webhook event is not in processing state and cannot be executed',
-          errorCode: 'NOT_IN_PROCESSING_STATE',
+        safeLogger.warn('[iyzico-webhook] Webhook event not in processing state.');
+        return createSafeErrorResponse(409, 'Conflict: Webhook event is not in processing state and cannot be executed', 'NOT_IN_PROCESSING_STATE', {
           retryable: false
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 409,
         });
       }
 
       if (txError === 'LEASE_LOST_TO_ANOTHER_WORKER') {
-        console.warn(`[iyzico-webhook] Lease lost to concurrent worker for event: ${providerEventId}. Observing DB for new worker completion...`);
+        safeLogger.warn('[iyzico-webhook] Lease lost to concurrent worker. Observing DB for new worker completion...');
         const maxWaitMs = options.crossInstanceWaitMs ?? Number(envGetter('WEBHOOK_OBSERVATION_TIMEOUT_MS') || 8000);
         const pollIntervalMs = 100;
         const startTime = Date.now();
@@ -968,12 +1159,12 @@ export async function handlePaymentWebhook(
               }
             }
           } catch (err: any) {
-            console.warn(`[iyzico-webhook] Error observing new worker status:`, err?.message);
+            safeLogger.warn(`[iyzico-webhook] Error observing new worker status:`, err?.code || 'OBSERVATION_ERROR');
           }
         }
 
         if (terminalRecord && (terminalRecord.status === 'processed' || terminalRecord.status === 'duplicate_suppressed')) {
-          console.log(`[iyzico-webhook] New lease owner completed with status '${terminalRecord.status}' in DB for: ${providerEventId}. Returning idempotent 200.`);
+          safeLogger.log(`[iyzico-webhook] New lease owner completed with status '${terminalRecord.status}' in DB. Returning idempotent 200.`);
           const savedPayload = (typeof terminalRecord.response_payload === 'object' && terminalRecord.response_payload !== null)
             ? terminalRecord.response_payload
             : {};
@@ -996,27 +1187,29 @@ export async function handlePaymentWebhook(
           });
         }
 
-        console.warn(`[iyzico-webhook] New lease owner did not commit successfully in DB for ${providerEventId} (status: ${terminalRecord?.status || 'processing'}). Returning retryable 503.`);
-        return new Response(JSON.stringify({
-          error: 'Service Unavailable: Lease was taken over by another worker which has not yet committed',
+        safeLogger.warn(`[iyzico-webhook] New lease owner did not commit successfully in DB (status: ${terminalRecord?.status || 'processing'}). Returning retryable 503.`);
+        return createSafeErrorResponse(503, 'Service Unavailable: Lease was taken over by another worker which has not yet committed', 'LEASE_RECLAIM_TIMEOUT', {
           status: terminalRecord?.status || 'processing',
           retryable: true
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 503,
         });
       }
 
+      const errorCode = (
+        txError === 'AUDIT_LOG_INSERT_FAILED' ? 'AUDIT_LOG_INSERT_FAILED' :
+        txError === 'SUBSCRIPTION_UPDATE_FAILED' ? 'SUBSCRIPTION_UPDATE_FAILED' :
+        txError === 'PAYMENT_INSERT_FAILED' ? 'PAYMENT_INSERT_FAILED' :
+        txError === 'MISSING_SUBSCRIPTION_PRICE' ? 'MISSING_SUBSCRIPTION_PRICE' :
+        txError === 'MISSING_SUBSCRIPTION_CURRENCY' ? 'MISSING_SUBSCRIPTION_CURRENCY' :
+        'DATABASE_TRANSACTION_FAILED'
+      );
+
       const finalized = await finalizeWebhookEvent(supabaseAdmin, 'iyzico', providerEventId, 'failed', activeClaimAttemptId, {
-        error: txError
+        error: errorCode
       });
-      return new Response(JSON.stringify({
-        error: `Database transaction failed: ${txError}`,
+
+      return createSafeErrorResponse(500, `Database transaction failed: ${errorCode}`, errorCode, {
         finalized,
         retryable: txRes?.retryable ?? true
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500,
       });
     }
 
@@ -1047,21 +1240,16 @@ export async function handlePaymentWebhook(
   return completeLeader(leaderResponse);
 
 } catch (error: any) {
-    console.error(`[iyzico-webhook] Unhandled webhook processing exception:`, error.message);
+    safeLogger.error(`[iyzico-webhook] Unhandled webhook processing exception:`, error?.code || 'UNHANDLED_EXCEPTION');
     let finalized = false;
     if (activeProviderEventId && supabaseAdmin) {
       finalized = await finalizeWebhookEvent(supabaseAdmin, 'iyzico', activeProviderEventId, 'failed', activeClaimAttemptId, {
-        unhandled_error: error.message
+        error: 'UNHANDLED_EXCEPTION'
       });
     }
-    const errRes = new Response(JSON.stringify({
-      error: 'Internal Server Error',
-      message: error.message,
+    const errRes = createSafeErrorResponse(500, 'Internal Server Error', 'UNHANDLED_EXCEPTION', {
       finalized,
       retryable: true
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
     });
     if (completeLeader) {
       completeLeader(errRes);
