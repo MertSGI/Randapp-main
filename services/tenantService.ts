@@ -78,6 +78,21 @@ export const tenantService = {
         if (t) return t as Tenant;
       } catch (e) {}
     }
+    const isLocalMode = getDataSourceMode() === 'local';
+    if (tenantId === 'synthetic_salon_aura_001' && isLocalMode) {
+      const { SYNTHETIC_SALON_AURA } = await import('./syntheticSalonFixtureService');
+      return {
+        id: SYNTHETIC_SALON_AURA.tenantId,
+        slug: SYNTHETIC_SALON_AURA.slug,
+        name: SYNTHETIC_SALON_AURA.businessName,
+        status: 'active',
+        publicSiteStatus: 'published',
+        verificationStatus: 'approved',
+        businessRiskStatus: 'normal',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as Tenant;
+    }
     return null;
   },
 
@@ -111,10 +126,41 @@ export const tenantService = {
         if (tenant) return tenant;
       } catch(e) {}
     }
+    const isLocalMode = getDataSourceMode() === 'local';
+    if (slug === 'aura-nisantasi' && isLocalMode) {
+      const { SYNTHETIC_SALON_AURA } = await import('./syntheticSalonFixtureService');
+      return {
+        id: SYNTHETIC_SALON_AURA.tenantId,
+        slug: SYNTHETIC_SALON_AURA.slug,
+        name: SYNTHETIC_SALON_AURA.businessName,
+        status: 'active',
+        publicSiteStatus: 'published',
+        verificationStatus: 'approved',
+        businessRiskStatus: 'normal',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as Tenant;
+    }
+    if (slug === 'tenant_pilot_demo') {
+      return {
+        id: 'tenant_pilot_demo',
+        slug: 'tenant_pilot_demo',
+        name: 'Lumina Güzellik & Kuaför',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        verificationStatus: 'approved',
+        publicSiteStatus: 'published',
+        businessRiskStatus: 'normal',
+      } as Tenant;
+    }
     return null;
   },
 
   async getCurrentTenant(): Promise<Tenant | null> {
+    if (typeof window === 'undefined') {
+      return null;
+    }
     const hash = window.location.hash || '';
     const path = window.location.pathname || '';
 
@@ -134,7 +180,7 @@ export const tenantService = {
       // e.g. #, booking, melis-guzellik
       if (parts.length >= 3 && parts[1] === 'booking') {
         urlSlug = parts[2].split('?')[0];
-      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment') {
+      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment' && parts[1] !== 'ai-visualizer' && parts[1] !== 'admin-preview') {
         urlSlug = parts[1].split('?')[0];
       }
     }
@@ -144,7 +190,7 @@ export const tenantService = {
       const parts = path.split('/');
       if (parts.length >= 3 && parts[1] === 'booking') {
         urlSlug = parts[2];
-      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment') {
+      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment' && parts[1] !== 'ai-visualizer' && parts[1] !== 'admin-preview') {
         urlSlug = parts[1];
       }
     }
@@ -157,6 +203,7 @@ export const tenantService = {
         }
         return resolved;
       }
+      return null;
     }
 
     // In all modes, if we are specifically previewing pilot demo, return it.
@@ -273,6 +320,17 @@ export const tenantService = {
         tagline: 'Kendinizi özel hissedeceğiniz o yer',
         footerText: 'Lumina Güzellik. Tüm hakları saklıdır.',
         primaryColor: '#8b5cf6',
+      } as TenantBranding;
+    }
+
+    const isLocalMode = getDataSourceMode() === 'local';
+    if (tenantId === 'synthetic_salon_aura_001' && isLocalMode) {
+      return {
+        tenantId: 'synthetic_salon_aura_001',
+        businessName: 'Aura Kuaför & Güzellik',
+        tagline: 'Aura Kuaför ve Güzellik',
+        footerText: 'Aura Kuaför & Güzellik. Tüm hakları saklıdır.',
+        primaryColor: '#3b82f6',
       } as TenantBranding;
     }
     

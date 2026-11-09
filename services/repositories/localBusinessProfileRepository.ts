@@ -36,6 +36,24 @@ export class LocalBusinessProfileRepository implements BusinessProfileRepository
     if (localData) {
       return JSON.parse(localData);
     }
+    if (tenantId === 'synthetic_salon_aura_001') {
+      return {
+        id: 'prof_aura_001',
+        tenant_id: 'synthetic_salon_aura_001',
+        public_display_name: 'Aura Kuaför & Güzellik',
+        short_description: 'Aura Nişantaşı şubesinde seçkin saç ve güzellik stüdyosu.',
+        about_text: 'Aura Nişantaşı şubesi — Aura Kuaför ve Güzellik Hizmetleri Tic. Ltd. Şti.',
+        business_category: 'hair_and_beauty',
+        address: 'Teşvikiye Cad. No: 42, Kat: 2',
+        district: 'Nişantaşı',
+        city: 'İstanbul',
+        phone: '+90 212 555 0142',
+        whatsapp_number: '+902125550142',
+        is_public_profile_enabled: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+    }
     return getMockProfile(tenantId);
   }
 

@@ -1,9 +1,20 @@
 import fs from 'fs';
 import path from 'path';
-import { SYNTHETIC_SALON_AURA, SyntheticSalonFixtureService } from '../services/syntheticSalonFixtureService.js';
-import { CommunicationDeliveryService } from '../services/communicationDeliveryService.js';
-import { OfflineCommunicationProviderSimulator } from '../services/offlineCommunicationProviderSimulator.js';
-import { superAdminService } from '../services/superAdminService.js';
+import { spawnSync } from 'child_process';
+import { fileURLToPath } from 'url';
+
+if (!process.execArgv.some(a => a.includes('tsx')) && !process.env._TSX_RESPAWNED) {
+  const result = spawnSync(process.execPath, ['--import', 'tsx', fileURLToPath(import.meta.url), ...process.argv.slice(2)], {
+    stdio: 'inherit',
+    env: { ...process.env, _TSX_RESPAWNED: '1' }
+  });
+  process.exit(result.status ?? 0);
+}
+
+const { SYNTHETIC_SALON_AURA, SyntheticSalonFixtureService } = await import('../services/syntheticSalonFixtureService.ts');
+const { CommunicationDeliveryService } = await import('../services/communicationDeliveryService.ts');
+const { OfflineCommunicationProviderSimulator } = await import('../services/offlineCommunicationProviderSimulator.ts');
+const { superAdminService } = await import('../services/superAdminService.ts');
 
 let passCount = 0;
 let failCount = 0;
@@ -394,9 +405,26 @@ const approved = await superAdminService.approveGoLive(fixture.tenantId, { isReh
 assert(approved === true, 'Step 14: SuperAdmin synthetic rehearsal approval returned true');
 
 // Verify that the data provider has DEMO_REHEARSAL_APPROVED
-const { dataProvider } = await import('../services/dataProvider.js');
+const { dataProvider } = await import('../services/dataProvider.ts');
 const provStatus = await dataProvider.get(`lari:${fixture.tenantId}:go_live_status`);
 assert(provStatus === 'DEMO_REHEARSAL_APPROVED', 'Step 14: Rehearsal guard stored DEMO_REHEARSAL_APPROVED without calling live RPC');
+
+// Negative Test (Finding 1): Verify that under Supabase mode without DB record, synthetic salon cannot accept bookings
+const originalMode = process.env.VITE_DATA_MODE;
+const originalUrl = process.env.VITE_SUPABASE_URL;
+const originalKey = process.env.VITE_SUPABASE_ANON_KEY;
+try {
+  process.env.VITE_DATA_MODE = 'supabase_staging';
+  process.env.VITE_SUPABASE_URL = 'http://127.0.0.1:54321';
+  process.env.VITE_SUPABASE_ANON_KEY = 'mock_anon_key_for_test';
+  const { goLiveService } = await import('../services/goLiveService.ts');
+  const supabaseCheck = await goLiveService.canTenantAcceptBookings(fixture.tenantId);
+  assert(supabaseCheck.allowed === false, 'Step 14 (Negative Finding 1): Under VITE_DATA_MODE=supabase_staging without DB record, synthetic salon cannot accept bookings');
+} finally {
+  process.env.VITE_DATA_MODE = originalMode;
+  if (originalUrl) process.env.VITE_SUPABASE_URL = originalUrl; else delete process.env.VITE_SUPABASE_URL;
+  if (originalKey) process.env.VITE_SUPABASE_ANON_KEY = originalKey; else delete process.env.VITE_SUPABASE_ANON_KEY;
+}
 
 // ----------------------------------------------------------------------------
 // STEP 15: Responsive UI Layout & Terminal State Assertion

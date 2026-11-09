@@ -318,4 +318,161 @@ export class SyntheticSalonFixtureService {
   static getFixture(): SyntheticSalonData {
     return JSON.parse(JSON.stringify(SYNTHETIC_SALON_AURA));
   }
+
+  static getBrowserStorageSnapshot(): Record<string, string> {
+    const fixture = this.getFixture();
+    const registeredTenant = {
+      id: fixture.tenantId,
+      slug: fixture.slug,
+      name: fixture.businessName,
+      businessName: fixture.businessName,
+      status: 'active',
+      publicSiteStatus: 'published',
+      verificationStatus: 'approved',
+      businessRiskStatus: 'normal',
+      planId: 'professional',
+      branding: {
+        tenantId: fixture.tenantId,
+        businessName: fixture.businessName,
+        tagline: 'Aura Kuaför ve Güzellik',
+        footerText: 'Aura Kuaför & Güzellik. Tüm hakları saklıdır.',
+        primaryColor: '#3b82f6',
+      }
+    };
+
+    const businessProfile = {
+      id: 'prof_aura_001',
+      tenant_id: fixture.tenantId,
+      public_display_name: fixture.businessName,
+      business_name: fixture.businessName,
+      short_description: 'Aura Nişantaşı şubesinde seçkin saç ve güzellik stüdyosu.',
+      about_text: fixture.branch.name + ' şubesi — ' + fixture.officialBusinessName,
+      business_category: fixture.category,
+      address: fixture.branch.address,
+      district: fixture.branch.district,
+      city: fixture.branch.city,
+      phone: fixture.phone,
+      whatsapp_number: fixture.phone.replace(/[\s+]/g, ''),
+      is_public_profile_enabled: true,
+      cover_images: [],
+      gallery_images: []
+    };
+
+    const subscription = {
+      tenantId: fixture.tenantId,
+      planId: 'professional',
+      status: 'active',
+      trialStart: '2026-01-01T00:00:00.000Z',
+      trialEnd: '2026-12-31T23:59:59.000Z',
+      currentPeriodStart: '2026-01-01T00:00:00.000Z',
+      currentPeriodEnd: '2026-12-31T23:59:59.000Z',
+      cancelAtPeriodEnd: false,
+      paymentProvider: 'local_dry_run'
+    };
+
+    const branches = [
+      {
+        id: fixture.branch.id,
+        tenantId: fixture.tenantId,
+        name: fixture.branch.name,
+        slug: fixture.slug,
+        address: fixture.branch.address,
+        district: fixture.branch.district,
+        city: fixture.branch.city,
+        phone: fixture.branch.phone,
+        isPrimary: true,
+        isActive: fixture.branch.isActive,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z'
+      }
+    ];
+
+    const services = fixture.services.map(s => ({
+      id: s.id,
+      tenantId: fixture.tenantId,
+      name: s.name,
+      name_tr: s.name,
+      category: s.category,
+      duration: s.durationMinutes,
+      durationMinutes: s.durationMinutes,
+      price: s.price,
+      currency: s.currency,
+      active: s.isActive,
+      isActive: s.isActive
+    }));
+
+    const staff = fixture.staff.map(st => ({
+      id: st.id,
+      tenantId: fixture.tenantId,
+      branchId: st.branchId,
+      name: st.name,
+      role: st.role,
+      title: st.role,
+      email: st.email,
+      phone: st.phone,
+      serviceIds: st.serviceIds,
+      active: st.isActive,
+      isActive: st.isActive
+    }));
+
+    const staffServices: Record<string, string[]> = {};
+    for (const s of fixture.staff) {
+      staffServices[s.id] = s.serviceIds;
+    }
+
+    const availabilityRules: any[] = [];
+    for (const st of fixture.staff) {
+      for (const h of fixture.weeklyHours) {
+        availabilityRules.push({
+          id: `rule_${st.id}_${h.weekday}`,
+          tenantId: fixture.tenantId,
+          staffId: st.id,
+          weekday: h.weekday,
+          is_active: h.isOpen,
+          start_time: h.openTime + ':00',
+          end_time: h.closeTime + ':00'
+        });
+      }
+    }
+    for (const h of fixture.weeklyHours) {
+      availabilityRules.push({
+        id: `rule_salon_${h.weekday}`,
+        tenantId: fixture.tenantId,
+        staffId: null,
+        weekday: h.weekday,
+        is_active: h.isOpen,
+        start_time: h.openTime + ':00',
+        end_time: h.closeTime + ':00'
+      });
+    }
+
+    return {
+      'lari_registered_tenants': JSON.stringify([registeredTenant]),
+      [`mock_subscription_${fixture.tenantId}`]: JSON.stringify(subscription),
+      [`lari:${fixture.tenantId}:subscription`]: JSON.stringify(subscription),
+      [`mock_business_profile_${fixture.tenantId}`]: JSON.stringify(businessProfile),
+      [`lari:${fixture.tenantId}:profile`]: JSON.stringify(businessProfile),
+      [`lari_branches_${fixture.tenantId}`]: JSON.stringify(branches),
+      [`lari:${fixture.tenantId}:services`]: JSON.stringify(services),
+      [`lari:${fixture.tenantId}:staff`]: JSON.stringify(staff),
+      [`lari:${fixture.tenantId}:staff_services`]: JSON.stringify(staffServices),
+      [`lari:${fixture.tenantId}:availability_rules`]: JSON.stringify(availabilityRules),
+      [`lari:${fixture.tenantId}:appointments`]: JSON.stringify(fixture.bookings),
+      [`lari:${fixture.tenantId}:go_live_status`]: 'DEMO_REHEARSAL_APPROVED'
+    };
+  }
+
+  static seedBrowserStorage(storage: Storage = localStorage): void {
+    const snapshot = this.getBrowserStorageSnapshot();
+    for (const [k, v] of Object.entries(snapshot)) {
+      if (k === 'lari_registered_tenants') {
+        const existing = JSON.parse(storage.getItem('lari_registered_tenants') || '[]');
+        const updated = existing.filter((t: any) => t.id !== SYNTHETIC_SALON_AURA.tenantId);
+        updated.push(...JSON.parse(v));
+        storage.setItem(k, JSON.stringify(updated));
+      } else {
+        storage.setItem(k, v);
+      }
+    }
+  }
 }

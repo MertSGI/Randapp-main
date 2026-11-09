@@ -84,6 +84,19 @@ export const subscriptionService = {
     if (saved) {
       return JSON.parse(saved);
     }
+    if (tenantId === 'synthetic_salon_aura_001') {
+      return {
+        tenantId,
+        planId: 'professional',
+        status: 'active',
+        trialStart: '2026-01-01T00:00:00.000Z',
+        trialEnd: '2026-12-31T23:59:59.000Z',
+        currentPeriodStart: '2026-01-01T00:00:00.000Z',
+        currentPeriodEnd: '2026-12-31T23:59:59.000Z',
+        cancelAtPeriodEnd: false,
+        paymentProvider: 'local_dry_run'
+      };
+    }
     const dataProvSaved = await dataProvider.get<any>(`lari:${tenantId}:subscription`);
     if (dataProvSaved) {
       return dataProvSaved;

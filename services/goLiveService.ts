@@ -6,6 +6,7 @@ import { provisioningService } from './provisioningService';
 import { getServices } from './serviceCatalogService';
 import { getStaffList } from './staffService';
 import { businessVerificationService } from './businessVerificationService';
+import { getDataSourceMode } from './dataSourceConfig';
 
 export interface GoLiveReadiness {
   canGoLive: boolean;
@@ -25,7 +26,8 @@ export interface GoLiveReadiness {
 
 export const goLiveService = {
   async getGoLiveReadiness(tenantId: string): Promise<GoLiveReadiness> {
-    if (tenantId === 'tenant_pilot_demo') {
+    const isLocalMode = getDataSourceMode() === 'local';
+    if ((tenantId === 'tenant_pilot_demo' || tenantId === 'synthetic_salon_aura_001') && isLocalMode) {
       return {
         canGoLive: true,
         canAcceptBookings: true,
@@ -49,7 +51,7 @@ export const goLiveService = {
     const staff = await getStaffList(tenantId, { activeOnly: true });
     const tenant = await tenantService.getCurrentTenant();
 
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || (typeof process !== 'undefined' ? process.env?.VITE_DATA_MODE : '') || 'mock';
     let publicSiteStatus = 'draft';
     
     // Fallbacks
@@ -95,11 +97,12 @@ export const goLiveService = {
   },
 
   async canTenantAcceptBookings(tenantId: string): Promise<{ allowed: boolean; reason?: string }> {
-    if (tenantId === 'tenant_pilot_demo') {
+    const isLocalMode = getDataSourceMode() === 'local';
+    if ((tenantId === 'tenant_pilot_demo' || tenantId === 'synthetic_salon_aura_001') && isLocalMode) {
       return { allowed: true };
     }
 
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || (typeof process !== 'undefined' ? process.env?.VITE_DATA_MODE : '') || 'mock';
     if (mode.startsWith('supabase')) {
       const tenant = await tenantService.getCurrentTenant();
       if (!tenant || !tenant.slug) {
@@ -169,7 +172,7 @@ export const goLiveService = {
   },
 
   async markReadyForReview(tenantId: string): Promise<void> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || (typeof process !== 'undefined' ? process.env?.VITE_DATA_MODE : '') || 'mock';
     if (mode.startsWith('supabase')) {
       await supabase.from('tenants').update({ public_site_status: 'pending_review' }).eq('id', tenantId);
       await provisioningService.markTenantProvisioningStatus(tenantId, 'ready_for_review');
@@ -185,7 +188,7 @@ export const goLiveService = {
   },
 
   async markTenantLive(tenantId: string): Promise<void> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || (typeof process !== 'undefined' ? process.env?.VITE_DATA_MODE : '') || 'mock';
     if (mode.startsWith('supabase')) {
       await supabase.from('tenants').update({ public_site_status: 'published' }).eq('id', tenantId);
       await provisioningService.markTenantProvisioningStatus(tenantId, 'live');
@@ -202,7 +205,7 @@ export const goLiveService = {
   },
 
   async markTenantPaused(tenantId: string): Promise<void> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || (typeof process !== 'undefined' ? process.env?.VITE_DATA_MODE : '') || 'mock';
     if (mode.startsWith('supabase')) {
       await supabase.from('tenants').update({ public_site_status: 'paused' }).eq('id', tenantId);
     } else {
@@ -216,7 +219,7 @@ export const goLiveService = {
   },
 
   async markTenantNeedsChanges(tenantId: string): Promise<void> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || (typeof process !== 'undefined' ? process.env?.VITE_DATA_MODE : '') || 'mock';
     if (mode.startsWith('supabase')) {
       await supabase.from('tenants').update({ public_site_status: 'preview_ready', verification_status: 'rejected' }).eq('id', tenantId);
       await provisioningService.markTenantProvisioningStatus(tenantId, 'setup_in_progress');
