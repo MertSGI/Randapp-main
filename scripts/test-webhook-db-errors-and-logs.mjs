@@ -2,6 +2,7 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import net from 'node:net';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import EmbeddedPostgres from 'embedded-postgres';
@@ -860,15 +861,30 @@ await runAsyncTest('3.7. [FAIL-CLOSED RPC INTERFACE] supabaseAdmin.rpc metodu yo
 // ---------------------------------------------------------------------------
 let pgEngine = null;
 let pgClient = null;
+let disposableTmpDir = null;
+
+async function getAvailablePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const port = server.address().port;
+      server.close(() => resolve(port));
+    });
+  });
+}
 
 async function getDisposablePgEngine() {
   if (pgClient) return pgClient;
   const tmpDir = path.join(os.tmpdir(), `pg_lari_dberr_${Date.now()}_${Math.floor(Math.random() * 10000)}`);
   fs.mkdirSync(tmpDir, { recursive: true });
+  disposableTmpDir = tmpDir;
 
+  const port = await getAvailablePort();
   const pg = new EmbeddedPostgres({
     databaseDir: tmpDir,
-    port: 54339,
+    port,
     user: 'postgres',
     password: 'password',
     initdbFlags: ['--locale=C', '--encoding=UTF8'],
@@ -881,6 +897,7 @@ async function getDisposablePgEngine() {
 
   const client = pg.getPgClient();
   await client.connect();
+  await client.query(`ALTER DATABASE postgres SET synchronous_commit = 'off'; SET synchronous_commit = 'off';`);
   pgClient = client;
 
   // Create roles required by migration
@@ -1102,6 +1119,11 @@ if (pgEngine) {
   } catch (err) {
     // Ignore cleanup error on exit
   }
+}
+if (disposableTmpDir) {
+  try {
+    fs.rmSync(disposableTmpDir, { recursive: true, force: true });
+  } catch {}
 }
 
 console.log('\n================================================================================');

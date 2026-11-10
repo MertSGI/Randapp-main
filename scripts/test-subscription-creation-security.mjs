@@ -322,6 +322,7 @@ runTest('3.1. [POZITIF] payment.success olayi active duruma eslenir ve hasPaymen
     eventType: 'payment.success',
     subscriptionReferenceCode: 'sub_verified_01',
     customerReferenceCode: 'tenant_verified_01',
+    orderReferenceCode: 'ord_verified_01',
     iyziPaymentId: 'pay_iyzi_987654',
     price: 499.00,
     currencyCode: 'TRY',
@@ -386,6 +387,7 @@ runTest('3.4. [POZITIF/NEGATIF] subscription.order.success yalniz gecerli paymen
     eventType: 'subscription.order.success',
     subscriptionReferenceCode: 'sub_order_01',
     customerReferenceCode: 'tenant_order_01',
+    orderReferenceCode: 'ord_order_777',
     iyziPaymentId: 'pay_order_777',
     price: 1990.00,
     status: 'SUCCESS'
@@ -573,6 +575,7 @@ await runAsyncTest('4.3. [E2E POZITIF] payment.success gelince subscriptions act
     eventType: 'payment.success',
     subscriptionReferenceCode: 'iyzi_sub_ref_300',
     customerReferenceCode: 'tenant_gamma_03',
+    orderReferenceCode: 'ord_trans_success_777',
     iyziPaymentId: 'pay_trans_success_777',
     price: 1490.00,
     currencyCode: 'TRY',
@@ -622,6 +625,7 @@ await runAsyncTest('4.4. [E2E YASAM DONGUSU] Sirali akis: created -> pending (no
     eventType: 'payment.success',
     subscriptionReferenceCode: 'iyzi_sub_ref_cycle',
     customerReferenceCode: 'tenant_lifecycle_01',
+    orderReferenceCode: 'ord_cycle_success_888',
     iyziPaymentId: 'pay_cycle_success_888',
     price: 2490.00,
     currencyCode: 'TRY',
@@ -727,7 +731,7 @@ await runAsyncTest('4.6. [E2E NEGATIF] checkoutform.auth status SUCCESS veya pay
   assert.strictEqual(subInDb2.status, 'pending', 'Abonelik durumu pending kalmalidir');
 });
 
-await runAsyncTest('4.7. [E2E NEGATIF] subscription.active/renewed + paymentId + FAILURE payments tablosuna yazilmaz ve abonelik active olmaz', async () => {
+await runAsyncTest('4.7. [E2E NEGATIF] subscription.failed + paymentId + FAILURE payments tablosuna yazilmaz ve abonelik active olmaz', async () => {
   const db = new MockDatabase();
   db.seedSubscription({
     id: 'sub_row_407',
@@ -737,7 +741,7 @@ await runAsyncTest('4.7. [E2E NEGATIF] subscription.active/renewed + paymentId +
   });
 
   const failurePayload = {
-    eventType: 'subscription.active',
+    eventType: 'subscription.failed',
     subscriptionReferenceCode: 'sub_ref_407',
     customerReferenceCode: 'tenant_407',
     iyziPaymentId: 'pay_fake_failure_123',
@@ -753,7 +757,7 @@ await runAsyncTest('4.7. [E2E NEGATIF] subscription.active/renewed + paymentId +
   assert.strictEqual(subInDb.status, 'past_due');
 });
 
-await runAsyncTest('4.8. [E2E NEGATIF] subscription.renewed + paymentId + FAILURE payments tablosuna yazilmaz', async () => {
+await runAsyncTest('4.8. [E2E NEGATIF] subscription.order.failure / renewed + paymentId + FAILURE payments tablosuna yazilmaz', async () => {
   const db = new MockDatabase();
   db.seedSubscription({
     id: 'sub_row_408',
@@ -763,9 +767,10 @@ await runAsyncTest('4.8. [E2E NEGATIF] subscription.renewed + paymentId + FAILUR
   });
 
   const renewFailPayload = {
-    eventType: 'subscription.renewed',
+    eventType: 'subscription.order.failure',
     subscriptionReferenceCode: 'sub_ref_408',
     customerReferenceCode: 'tenant_408',
+    orderReferenceCode: 'ord_renew_fail_456',
     iyziPaymentId: 'pay_renew_fail_456',
     status: 'FAILURE',
     price: 1990.00

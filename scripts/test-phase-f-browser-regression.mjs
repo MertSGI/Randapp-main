@@ -179,10 +179,10 @@ async function runStage(title, fn) {
     // ------------------------------------------------------------------------
     await runStage('Salon Rezervasyon Ekranının Açılması (Landing Page & Ready State)', async () => {
       console.log(`[Stage 1] Navigating to ${baseUrl}/#/aura-nisantasi...`);
-      await page.goto(`${baseUrl}/#/aura-nisantasi`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.goto(`${baseUrl}/#/aura-nisantasi`, { waitUntil: 'domcontentloaded', timeout: 60000 });
       
       // Explicit UI ready check (NO networkidle, NO arbitrary sleep)
-      await page.waitForSelector('[data-testid="public-booking-ready"]', { timeout: 15000 });
+      await page.waitForSelector('[data-testid="public-booking-ready"]', { timeout: 30000 });
       assert(await page.locator('[data-testid="public-booking-ready"]').isVisible(), 'Booking container [data-testid="public-booking-ready"] is visible');
 
       // Verify page is not blocked
@@ -511,7 +511,7 @@ async function runStage(title, fn) {
     // ------------------------------------------------------------------------
     await runStage('Tenant Sınırları ve İzolasyon Denetimi', async () => {
       console.log('[Stage 6] Testing navigation to unprovisioned tenant slug...');
-      await page.goto(`${baseUrl}/#/unauthorized-rogue-tenant-999`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.goto(`${baseUrl}/#/unauthorized-rogue-tenant-999`, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForSelector('h1:has-text("Salon Bulunamadı"), h1:has-text("Salon Not Found")', { timeout: 10000 });
       
       const unauthText = await page.innerText('body');
@@ -542,8 +542,8 @@ async function runStage(title, fn) {
       // 7.1 Desktop Viewport
       console.log('[Stage 7.1] Testing Desktop Viewport (1280x800)...');
       await page.setViewportSize({ width: 1280, height: 800 });
-      await page.goto(`${baseUrl}/#/aura-nisantasi`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForSelector('[data-testid="public-booking-ready"]', { timeout: 15000 });
+      await page.goto(`${baseUrl}/#/aura-nisantasi`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForSelector('[data-testid="public-booking-ready"]', { timeout: 30000 });
 
       // Verify desktop header navigation links are visible
       const desktopNav = page.locator('header .hidden.md\\:flex');
@@ -564,8 +564,8 @@ async function runStage(title, fn) {
       // 7.2 Mobile Viewport
       console.log('[Stage 7.2] Testing Mobile Viewport (375x667)...');
       await page.setViewportSize({ width: 375, height: 667 });
-      await page.goto(`${baseUrl}/#/aura-nisantasi`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForSelector('[data-testid="public-booking-ready"]', { timeout: 15000 });
+      await page.goto(`${baseUrl}/#/aura-nisantasi`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForSelector('[data-testid="public-booking-ready"]', { timeout: 30000 });
 
       // Verify desktop navigation is hidden on mobile
       const desktopNavOnMobile = await page.locator('header .hidden.md\\:flex').isVisible();

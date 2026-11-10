@@ -2,6 +2,7 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import net from 'node:net';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -2544,11 +2545,23 @@ let embeddedPgServer = null;
 let disposablePgClient = null;
 let disposableTmpDir = null;
 
+async function getAvailablePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const port = server.address().port;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
 async function getDisposablePgEngine() {
   if (disposablePgClient) return disposablePgClient;
 
   disposableTmpDir = path.join(os.tmpdir(), `pg_lari_${Date.now()}_${Math.floor(Math.random() * 10000)}`);
-  const port = 54333;
+  const port = await getAvailablePort();
   const pg = new EmbeddedPostgres({
     databaseDir: disposableTmpDir,
     port,
@@ -2564,6 +2577,7 @@ async function getDisposablePgEngine() {
 
   const client = pg.getPgClient();
   await client.connect();
+  await client.query(`ALTER DATABASE postgres SET synchronous_commit = 'off'; SET synchronous_commit = 'off';`);
 
   await client.query(`
     DO $$ BEGIN
