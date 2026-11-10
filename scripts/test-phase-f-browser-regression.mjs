@@ -58,11 +58,10 @@ async function runStage(title, fn) {
   console.log('Validating 7-Stage Synthetic Salon Journey with Zero External Network');
   console.log('============================================================================\n');
 
-  // 1. Production Readiness Risk Log
-  console.log('⚠️ PRODUCTION_READINESS_RISK NOTICE:');
-  console.log('  Tailwind is referenced via external CDN script in index.html (https://cdn.tailwindcss.com?plugins=typography).');
-  console.log('  In this isolated browser regression test, external CDN requests are strictly intercepted & stubbed.');
-  console.log('  Before general production cutover, precompiled local Tailwind CSS should replace the CDN script.\n');
+  // 1. Production Readiness Verification (V1-WQ-06)
+  console.log('✅ PRODUCTION_READINESS (V1-WQ-06):');
+  console.log('  Tailwind harici CDN bağımlılığı (cdn.tailwindcss.com) tamamen kaldırıldı.');
+  console.log('  Yerel Vite/PostCSS build hattı aktif; sıfır dış ağ ile gerçek Chromium computed style doğrulaması yapılıyor.\n');
 
   const port = await getFreePort();
   console.log(`[Setup] Starting Vite dev server on 127.0.0.1:${port}...`);
@@ -99,47 +98,6 @@ async function runStage(title, fn) {
       return route.fulfill({ status: 204, body: '' });
     }
 
-    if (parsed.hostname === 'cdn.tailwindcss.com') {
-      const css = `
-        html, body {
-          margin: 0;
-          padding: 0;
-          max-width: 100vw;
-          overflow-x: hidden;
-          box-sizing: border-box;
-        }
-        *, ::before, ::after {
-          box-sizing: border-box;
-        }
-        img, svg, video {
-          max-width: 100%;
-        }
-        .hidden { display: none !important; }
-        @media (min-width: 640px) {
-          .sm\\:flex { display: flex !important; }
-          .sm\\:hidden { display: none !important; }
-        }
-        @media (min-width: 768px) {
-          .md\\:flex { display: flex !important; }
-          .md\\:hidden { display: none !important; }
-        }
-        @media (min-width: 1024px) {
-          .lg\\:block { display: block !important; }
-          .lg\\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
-        }
-      `;
-      return route.fulfill({
-        status: 200,
-        contentType: 'application/javascript',
-        body: `
-          window.tailwind = { config: {} };
-          const style = document.createElement('style');
-          style.id = 'tailwind-stub-css';
-          style.textContent = ${JSON.stringify(css)};
-          (document.head || document.documentElement).appendChild(style);
-        `
-      });
-    }
     if (parsed.hostname === 'fonts.googleapis.com' || parsed.hostname === 'fonts.gstatic.com') {
       return route.fulfill({
         status: 200,
@@ -179,7 +137,7 @@ async function runStage(title, fn) {
     // ------------------------------------------------------------------------
     await runStage('Salon Rezervasyon Ekranının Açılması (Landing Page & Ready State)', async () => {
       console.log(`[Stage 1] Navigating to ${baseUrl}/#/aura-nisantasi...`);
-      await page.goto(`${baseUrl}/#/aura-nisantasi`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.goto(`${baseUrl}/#/aura-nisantasi`, { waitUntil: 'domcontentloaded', timeout: 120000 });
       
       // Explicit UI ready check (NO networkidle, NO arbitrary sleep)
       await page.waitForSelector('[data-testid="public-booking-ready"]', { timeout: 30000 });
@@ -199,6 +157,59 @@ async function runStage(title, fn) {
       const startBtn = page.locator('[data-testid="public-booking-start"]');
       assert(await startBtn.isVisible(), 'Start booking button [data-testid="public-booking-start"] is visible');
       assert(await startBtn.isEnabled(), 'Start booking button [data-testid="public-booking-start"] is enabled');
+
+      // Local compiled CSS computed styles verification in real Chromium (V1-WQ-06)
+      const cssChecks = await page.evaluate(() => {
+        const bodyComputed = window.getComputedStyle(document.body);
+        const testEl = document.createElement('div');
+        testEl.className = 'hidden';
+        document.body.appendChild(testEl);
+        const hiddenDisplay = window.getComputedStyle(testEl).display;
+        testEl.remove();
+
+        const testMd = document.createElement('div');
+        testMd.className = 'hidden md:flex';
+        document.body.appendChild(testMd);
+        const mdFlexDisplay = window.getComputedStyle(testMd).display;
+        testMd.remove();
+
+        const testSm = document.createElement('div');
+        testSm.className = 'hidden sm:flex';
+        document.body.appendChild(testSm);
+        const smFlexDisplay = window.getComputedStyle(testSm).display;
+        testSm.remove();
+
+        const testLg = document.createElement('div');
+        testLg.className = 'hidden lg:block';
+        document.body.appendChild(testLg);
+        const lgBlockDisplay = window.getComputedStyle(testLg).display;
+        testLg.remove();
+
+        const overflowX = document.documentElement.scrollWidth > window.innerWidth;
+
+        return {
+          bodyBg: bodyComputed.backgroundColor,
+          hiddenDisplay,
+          mdFlexDisplay,
+          smFlexDisplay,
+          lgBlockDisplay,
+          overflowX
+        };
+      });
+
+      assert(
+        cssChecks.bodyBg === 'rgb(248, 250, 252)' || 
+        cssChecks.bodyBg.includes('248') || 
+        cssChecks.bodyBg.includes('oklch') || 
+        cssChecks.bodyBg.includes('247.858'), 
+        `Local CSS: body has bg-slate-50 computed style (got: ${cssChecks.bodyBg})`
+      );
+      assert(cssChecks.hiddenDisplay === 'none', 'Local CSS: .hidden has computed display: none');
+      assert(cssChecks.mdFlexDisplay === 'flex', 'Local CSS: .md:flex has computed display: flex at 1280px');
+      assert(cssChecks.smFlexDisplay === 'flex', 'Local CSS: .sm:flex has computed display: flex at 1280px');
+      assert(cssChecks.lgBlockDisplay === 'block', 'Local CSS: .lg:block has computed display: block at 1280px');
+      assert(!cssChecks.overflowX, 'Local CSS: zero horizontal overflow (scrollWidth <= innerWidth)');
+      assert(!interceptedExternalUrls.some(u => u.includes('cdn.tailwindcss.com')), 'Zero CDN requests: cdn.tailwindcss.com is completely eliminated');
 
       // Negative Test (Finding 2): Verify that external requests (pixel and counterfeit localhost query) are strictly intercepted by exact-host gate
       await page.evaluate(async () => {

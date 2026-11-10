@@ -17,40 +17,7 @@
     <meta name="twitter:title" content="LARİ | Randevulu İşletmeler İçin Web Sitesi ve Randevu Sistemi" />
     <meta name="twitter:description" content="LARİ, randevu ile çalışan tüm işletmeler (kuaförler, klinikler, stüdyolar) için mini web sitesi, online randevu, müşteri paneli ve raporlama sunan abonelikli SaaS platformudur." />
     <!-- TODO: Dynamic SEO for tenant pages requires SSR/pre-rendering -->
-    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script>
-      tailwind.config = {
-        darkMode: 'class',
-        theme: {
-          extend: {
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-            },
-            colors: {
-              primary: '#0f172a',
-              accent: '#3b82f6',
-            },
-            keyframes: {
-              slideUpFade: {
-                '0%': { opacity: '0', transform: 'translateY(10px)' },
-                '20%': { opacity: '1', transform: 'translateY(0)' },
-                '80%': { opacity: '1', transform: 'translateY(0)' },
-                '100%': { opacity: '0', transform: 'translateY(-10px)' },
-              }
-            },
-            animation: {
-              slideUpFade: 'slideUpFade 5s linear infinite',
-            }
-          }
-        }
-      }
-    </script>
-    <style>
-      body { font-family: 'Inter', sans-serif; }
-      .hide-scrollbar::-webkit-scrollbar { display: none; }
-      .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-    </style>
   <script type="importmap">
 {
   "imports": {
