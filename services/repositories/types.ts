@@ -74,12 +74,39 @@ export interface CatalogRepository {
   getPublicAvailabilityByTenantSlug(slug: string): Promise<any>;
 }
 
+export interface PublicBookingResult {
+  success: boolean;
+  appointmentId?: string;
+  manageToken?: string;
+  branchId?: string;
+  reasonCode: string;
+}
+
+export interface PublicBookingParams {
+  slug: string;
+  branchId?: string;
+  serviceId: string;
+  staffId: string;
+  appointmentDate: string; // YYYY-MM-DD
+  appointmentTime: string; // HH:MM or HH:MM:SS
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  requiredConsent: boolean;
+  marketingConsent?: boolean;
+  reminderConsent?: boolean;
+  idempotencyKey?: string;
+  otpVerificationToken?: string;
+  clientFingerprint?: string;
+}
+
 export interface BookingRepository {
   listAppointments(tenantId: string, filter?: { date?: string, upcomingOnly?: boolean }): Promise<Appointment[]>;
   getAppointmentById(appointmentId: string): Promise<Appointment | null>;
   createAppointment(tenantId: string, input: Omit<Appointment, 'id' | 'createdAt' | 'tenantId'>): Promise<Appointment>;
   updateAppointment(appointmentId: string, patch: Partial<Appointment>): Promise<Appointment | null>;
   cancelAppointment(appointmentId: string, reason?: string, cancelledBy?: 'customer' | 'salon' | 'system'): Promise<boolean>;
+  createPublicBooking?(params: PublicBookingParams): Promise<PublicBookingResult>;
   
   listCustomers(tenantId: string): Promise<any[]>;
   getCustomerById(customerId: string): Promise<any | null>;

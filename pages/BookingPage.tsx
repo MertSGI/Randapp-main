@@ -36,6 +36,20 @@ const generateTimeSlots = (): string[] => {
   return slots;
 };
 
+const getClientFingerprint = (): string => {
+  if (typeof window === 'undefined') return 'server_ssr';
+  try {
+    let fp = sessionStorage.getItem('lari_client_fingerprint');
+    if (!fp) {
+      fp = `fp_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+      sessionStorage.setItem('lari_client_fingerprint', fp);
+    }
+    return fp;
+  } catch {
+    return 'fallback_fp';
+  }
+};
+
 const BookingPage: React.FC = () => {
   const { t, language } = useLanguage();
   const { tenant, branding } = useTenant();
@@ -67,6 +81,7 @@ const BookingPage: React.FC = () => {
   const [isMultiBranchEnabled, setIsMultiBranchEnabled] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState<BusinessBranch | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string>('');
+  const [otpVerificationToken, setOtpVerificationToken] = useState<string | null>(null);
   // Stored confirmation payload for durable post-booking display
   const [bookingConfirmation, setBookingConfirmation] = useState<{
     appointmentId: string;
@@ -379,7 +394,8 @@ const BookingPage: React.FC = () => {
     if (isSubmitting) return; // Prevent duplicate submission
     setIsSubmitting(true);
     
-    // Core Operation: Anti-Abuse Protection Check
+    // Core Operation: Anti-Abuse Protection Check (V1-WQ-07 / FINDING-ADIM010-005, 007)
+    const clientFp = getClientFingerprint();
     try {
       const { bookingAbuseProtectionService } = await import('../services/bookingAbuseProtectionService');
       const evaluation = await bookingAbuseProtectionService.evaluateBookingRequest({
@@ -387,7 +403,8 @@ const BookingPage: React.FC = () => {
         phone: formData.phone,
         email: formData.email,
         date: selectedDate,
-        serviceId: selectedService.id
+        serviceId: selectedService.id,
+        clientFingerprint: clientFp,
       });
 
       if (!evaluation.allowed) {
@@ -395,6 +412,7 @@ const BookingPage: React.FC = () => {
           tenantId: tenant.id,
           phone: formData.phone,
           email: formData.email,
+          clientFingerprint: clientFp,
           success: false
         });
         alert(evaluation.reason || 'Rezervasyon talebiniz güvenlik politikaları gereğince onaylanamadı.');
@@ -403,6 +421,9 @@ const BookingPage: React.FC = () => {
       }
     } catch (err) {
       console.error('Abuse protection evaluation failed', err);
+      alert(language === 'tr' ? 'Güvenlik doğrulaması sırasında bir hata oluştu. Lütfen tekrar deneyin.' : 'An error occurred during security verification. Please try again.');
+      setIsSubmitting(false);
+      return;
     }
 
     // Determine data source mode early — needed to gate consent writes
@@ -567,6 +588,8 @@ const BookingPage: React.FC = () => {
             marketingConsent: consentForms.marketingConsent,
             reminderConsent: consentForms.reminderConsent,
             idempotencyKey,
+            otpVerificationToken: otpVerificationToken || undefined,
+            clientFingerprint: clientFp,
           });
         } catch (e) {
           console.error('create_public_booking RPC exception', e);
@@ -585,6 +608,13 @@ const BookingPage: React.FC = () => {
             invalid_staff:        language === 'tr' ? 'Seçilen uzman bu hizmeti şu an sunmuyor.' : 'Selected staff is not available for this service.',
             consent_required:     language === 'tr' ? 'Devam etmek için gerekli onayları vermeniz gerekiyor.' : 'Required consents must be granted to proceed.',
             invalid_customer_data: language === 'tr' ? 'Lütfen ad ve iletişim bilgilerinizi doldurun.' : 'Please fill in your name and contact details.',
+            rate_limit_exceeded:  language === 'tr' ? 'Çok fazla istek gönderildi. Lütfen biraz bekleyin ve tekrar deneyin.' : 'Rate limit exceeded. Please wait a moment and try again.',
+            duplicate_booking_same_day: language === 'tr' ? 'Seçilen tarih ve hizmet için zaten aktif bir randevunuz bulunmaktadır.' : 'You already have an active appointment for the selected date and service.',
+            otp_required:         language === 'tr' ? 'Randevuyu onaylamak için WhatsApp doğrulama kodu gereklidir.' : 'WhatsApp verification code is required to confirm booking.',
+            otp_invalid:          language === 'tr' ? 'Girdiğiniz doğrulama kodu geçersiz veya hatalı.' : 'The verification code entered is invalid or incorrect.',
+            otp_brute_force_locked: language === 'tr' ? 'Çok fazla hatalı doğrulama kodu girildi. Güvenlik nedeniyle bu işlem kilitlendi.' : 'Too many incorrect verification attempts. This request has been locked for security.',
+            otp_expired:          language === 'tr' ? 'Doğrulama kodunun süresi doldu. Lütfen yeni bir kod talep edin.' : 'Verification code has expired. Please request a new code.',
+            otp_token_invalid_or_consumed: language === 'tr' ? 'Doğrulama oturumu geçersiz veya daha önce kullanılmış. Lütfen tekrar doğrulayın.' : 'Verification session is invalid or already used. Please verify again.',
             temporary_failure:    language === 'tr' ? 'Randevu işlemi şu anda tamamlanamıyor. Lütfen kısa süre sonra tekrar deneyin.' : 'Booking could not be completed right now. Please try again shortly.',
           };
           throw new Error(messages[reasonCode] || messages['temporary_failure']);
@@ -641,6 +671,7 @@ const BookingPage: React.FC = () => {
           tenantId: tenant.id,
           phone: formData.phone,
           email: formData.email,
+          clientFingerprint: clientFp,
           success: true
         });
       } catch (err) {}

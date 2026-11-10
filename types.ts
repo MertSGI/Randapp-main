@@ -724,6 +724,7 @@ export interface BookingPolicy {
   blockRepeatedNoShowPhone: boolean;
   noShowThreshold: number;
   requireContactConsent: boolean;
+  requireOtpForBooking?: boolean;
 }
 
 // === OBSERVABILITY & AUDIT LOGS MODEL ===

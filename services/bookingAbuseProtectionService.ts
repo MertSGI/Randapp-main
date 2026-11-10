@@ -6,11 +6,16 @@ import { supportTicketService } from './supportTicketService';
 const ATTEMPTS_STORAGE_KEY = 'lari_booking_attempts';
 const NOSHOW_STORAGE_KEY = 'lari_noshow_signals';
 
+// In-memory fallback for environments without localStorage (Node.js tests, SSR)
+let memoryAttempts: BookingAttempt[] = [];
+let memoryNoShowSignals: NoShowSignal[] = [];
+
 export interface BookingAttempt {
   id: string;
   tenantId: string;
   phone: string;
   email: string;
+  clientFingerprint?: string;
   success: boolean;
   timestamp: string;
 }
@@ -24,51 +29,70 @@ export interface NoShowSignal {
 export const bookingAbuseProtectionService = {
   // Helper to load booking attempts
   getAllAttempts(): BookingAttempt[] {
-    if (typeof window === 'undefined') return [];
+    if (typeof window === 'undefined') return memoryAttempts;
     try {
       const stored = localStorage.getItem(ATTEMPTS_STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
+      return stored ? JSON.parse(stored) : memoryAttempts;
     } catch {
-      return [];
+      return memoryAttempts;
     }
   },
 
   // Helper to save booking attempts
   saveAllAttempts(attempts: BookingAttempt[]): void {
+    memoryAttempts = attempts;
     if (typeof window !== 'undefined') {
-      localStorage.setItem(ATTEMPTS_STORAGE_KEY, JSON.stringify(attempts));
+      try {
+        localStorage.setItem(ATTEMPTS_STORAGE_KEY, JSON.stringify(attempts));
+      } catch {}
     }
   },
 
   // Helper to load no-show signals
   getAllNoShowSignals(): NoShowSignal[] {
-    if (typeof window === 'undefined') return [];
+    if (typeof window === 'undefined') return memoryNoShowSignals;
     try {
       const stored = localStorage.getItem(NOSHOW_STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
+      return stored ? JSON.parse(stored) : memoryNoShowSignals;
     } catch {
-      return [];
+      return memoryNoShowSignals;
     }
   },
 
   // Helper to save no-show signals
   saveAllNoShowSignals(signals: NoShowSignal[]): void {
+    memoryNoShowSignals = signals;
     if (typeof window !== 'undefined') {
-      localStorage.setItem(NOSHOW_STORAGE_KEY, JSON.stringify(signals));
+      try {
+        localStorage.setItem(NOSHOW_STORAGE_KEY, JSON.stringify(signals));
+      } catch {}
     }
   },
 
-  // Part 8: evaluateBookingRequest
-  async evaluateBookingRequest(input: { tenantId: string; phone: string; email: string; date?: string; serviceId?: string }): Promise<{ allowed: boolean; reason?: string }> {
+  // Part 8 & V1-WQ-07: evaluateBookingRequest
+  async evaluateBookingRequest(input: {
+    tenantId: string;
+    phone: string;
+    email: string;
+    date?: string;
+    serviceId?: string;
+    clientFingerprint?: string;
+  }): Promise<{ allowed: boolean; reason?: string; reasonCode?: string }> {
     const blockCheck = await this.shouldBlockBooking(input);
     if (blockCheck.block) {
-      return { allowed: false, reason: blockCheck.reason };
+      return { allowed: false, reason: blockCheck.reason, reasonCode: blockCheck.reasonCode };
     }
-    return { allowed: true };
+    return { allowed: true, reasonCode: 'ok' };
   },
 
-  // Part 8: recordBookingAttempt
-  recordBookingAttempt(input: { tenantId: string; phone: string; email: string; success: boolean }): void {
+  // Part 8 & V1-WQ-07: recordBookingAttempt
+  recordBookingAttempt(input: {
+    tenantId: string;
+    phone: string;
+    email: string;
+    clientFingerprint?: string;
+    success: boolean;
+  }): void {
     const attempts = this.getAllAttempts();
     const id = `att_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const newAttempt: BookingAttempt = {
@@ -76,6 +100,7 @@ export const bookingAbuseProtectionService = {
       tenantId: input.tenantId,
       phone: input.phone.replace(/\s+/g, ''),
       email: input.email.toLowerCase().trim(),
+      clientFingerprint: input.clientFingerprint,
       success: input.success,
       timestamp: new Date().toISOString()
     };
@@ -106,8 +131,15 @@ export const bookingAbuseProtectionService = {
     };
   },
 
-  // Part 8: shouldBlockBooking
-  async shouldBlockBooking(input: { tenantId: string; phone: string; email: string; date?: string; serviceId?: string }): Promise<{ block: boolean; reason?: string }> {
+  // Part 8 & V1-WQ-07: shouldBlockBooking
+  async shouldBlockBooking(input: {
+    tenantId: string;
+    phone: string;
+    email: string;
+    date?: string;
+    serviceId?: string;
+    clientFingerprint?: string;
+  }): Promise<{ block: boolean; reason?: string; reasonCode?: string }> {
     const policy = appointmentSelfServiceService.getBookingPolicy(input.tenantId);
     if (!policy.spamProtectionEnabled) {
       return { block: false };
@@ -115,9 +147,45 @@ export const bookingAbuseProtectionService = {
 
     const cleanPhone = input.phone.replace(/\s+/g, '');
     const cleanEmail = input.email.toLowerCase().trim();
+    const attempts = this.getAllAttempts();
+    const nowMs = Date.now();
+    const tenMinutesAgoMs = nowMs - 10 * 60 * 1000;
+
+    // 0a. Phone Burst Limit (max 5 booking attempts per 10 minutes)
+    if (cleanPhone) {
+      const recentPhoneAttempts = attempts.filter(a => {
+        return a.tenantId === input.tenantId &&
+          a.phone === cleanPhone &&
+          new Date(a.timestamp).getTime() > tenMinutesAgoMs;
+      });
+
+      if (recentPhoneAttempts.length >= 5) {
+        return {
+          block: true,
+          reasonCode: 'rate_limit_exceeded',
+          reason: 'Çok fazla rezervasyon denemesi yapıldı. Lütfen biraz bekleyin ve tekrar deneyin.'
+        };
+      }
+    }
+
+    // 0b. Client Fingerprint Burst Limit (max 10 booking attempts per 10 minutes)
+    if (input.clientFingerprint && input.clientFingerprint.trim()) {
+      const recentFpAttempts = attempts.filter(a => {
+        return a.tenantId === input.tenantId &&
+          a.clientFingerprint === input.clientFingerprint &&
+          new Date(a.timestamp).getTime() > tenMinutesAgoMs;
+      });
+
+      if (recentFpAttempts.length >= 10) {
+        return {
+          block: true,
+          reasonCode: 'rate_limit_exceeded',
+          reason: 'Cihazınızdan çok fazla istek gönderildi. Lütfen biraz bekleyin.'
+        };
+      }
+    }
 
     // 1. Max bookings per phone per day limit
-    const attempts = this.getAllAttempts();
     const todayStr = new Date().toISOString().split('T')[0];
     const phoneAttemptsToday = attempts.filter(a => {
       return a.tenantId === input.tenantId &&
@@ -154,6 +222,7 @@ export const bookingAbuseProtectionService = {
 
       return { 
         block: true, 
+        reasonCode: 'rate_limit_exceeded',
         reason: 'Günlük maksimum online randevu limitine ulaştınız. Lütfen yarın tekrar deneyin veya işletmeyle iletişime geçin.' 
       };
     }
@@ -189,6 +258,7 @@ export const bookingAbuseProtectionService = {
 
         return {
           block: true,
+          reasonCode: 'no_show_blocked',
           reason: 'Geçmiş randevularınıza defalarca katılmadığınız (no-show) saptandığı için online rezervasyon sistemimiz kullanımınıza kapatılmıştır. Lütfen işletmeyle doğrudan iletişime geçin.'
         };
       }
@@ -209,11 +279,18 @@ export const bookingAbuseProtectionService = {
         if (duplicate) {
           return {
             block: true,
+            reasonCode: 'duplicate_booking_same_day',
             reason: 'Seçilen tarih ve hizmet için zaten aktif bir randevunuz bulunmaktadır.'
           };
         }
       } catch (e) {
         console.error('Error querying duplicate bookings', e);
+        // Fail-closed invariant (FINDING-ADIM010-005): Terminate evaluation on DB/repo error
+        return {
+          block: true,
+          reasonCode: 'temporary_failure',
+          reason: 'Randevu uygunluğu kontrol edilirken bir hata oluştu. Lütfen tekrar deneyin.'
+        };
       }
     }
 

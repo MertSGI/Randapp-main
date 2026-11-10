@@ -65,6 +65,9 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 54. **`20260829_h1e_c_controlled_transition_runtime_fix.sql`** — Stage H1E-C4 Controlled Release Transition Runtime Forward Fix: Aligns transition audit_events INSERT with canonical schema (tenant_id, actor_id, actor_role, action, resource_type, resource_id, payload), enforces actor_user_id match on idempotency replay, and updates evidence read RPC to query canonical action column.
 55. **`20260830_p1c_public_branch_read_contract.sql`** — Server-authoritative public branch read RPC get_public_branches for active tenant storefront branch discovery.
 56. **`20260831_p1c_public_branch_read_contract_runtime_fix.sql`** — Aligns get_public_branches RPC eligibility predicate with canonical can_accept_public_booking contract (status, onboarding_status, public_site_status).
+57. **`20260901_payment_webhook_idempotency_and_replay_security.sql`** — Database-level unique constraints, idempotency table, and transactional RPCs for payment webhook idempotency, replay safety, and out-of-order transition ordering.
+58. **`20260902_subscription_sync_transaction.sql`** — Atomic all-in-one transaction RPC for subscription sync operations, fail-closed enforcement across subscriptions, tenants, and audit_logs.
+59. **`20260903_public_booking_ratelimit_spam_and_otp_contract.sql`** — Public booking server-side rate-limiting, burst quotas, brute-force lockout, secure OTP single-use token contract, and synthetic-only outbox queueing.
 
 ---
 
@@ -113,6 +116,8 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 | `consent_ledger` | `20260620_paymentless_production_core_tables.sql`| — | `20260622_paymentless_production_rls_identity_alignment.sql` |
 | `data_rights_requests` | `20260620_paymentless_production_core_tables.sql`| — | `20260622_paymentless_production_rls_identity_alignment.sql` |
 | `admin_mutation_idempotency` | `20260731_admin_appointment_status_mutation_rpc.sql`| — | `20260731_admin_appointment_status_mutation_rpc.sql` |
+| `public_booking_rate_limit_events` | `20260903_public_booking_ratelimit_spam_and_otp_contract.sql` | — | `20260903_public_booking_ratelimit_spam_and_otp_contract.sql` |
+| `public_booking_otp_challenges` | `20260903_public_booking_ratelimit_spam_and_otp_contract.sql` | — | `20260903_public_booking_ratelimit_spam_and_otp_contract.sql` |
 
 ---
 

@@ -1,4 +1,4 @@
-﻿import { BookingRepository } from './types';
+﻿import { BookingRepository, PublicBookingResult } from './types';
 import { Appointment, CustomerProfile, CustomerMemoryNote } from '../../types';
 import { dataProvider } from '../dataProvider';
 const normalizeEmail = (email?: string): string => email ? email.trim().toLowerCase() : '';
@@ -294,6 +294,72 @@ export class LocalBookingRepository implements BookingRepository {
     const existing = await this.findCustomerByPhoneOrEmail(tenantId, input.phone, input.email);
     if (existing) return existing;
     return this.createOrUpdateCustomer(tenantId, input);
+  }
+
+  async createPublicBooking(params: {
+    slug: string;
+    branchId?: string;
+    serviceId: string;
+    staffId: string;
+    appointmentDate: string;
+    appointmentTime: string;
+    customerName: string;
+    customerEmail: string;
+    customerPhone: string;
+    requiredConsent: boolean;
+    marketingConsent?: boolean;
+    reminderConsent?: boolean;
+    idempotencyKey?: string;
+    otpVerificationToken?: string;
+    clientFingerprint?: string;
+  }): Promise<PublicBookingResult> {
+    if (!params.requiredConsent) {
+      return { success: false, reasonCode: 'consent_required' };
+    }
+    if (!params.customerName?.trim() || (!params.customerPhone?.trim() && !params.customerEmail?.trim())) {
+      return { success: false, reasonCode: 'invalid_customer_data' };
+    }
+
+    if (params.otpVerificationToken) {
+      const { publicBookingOtpService } = await import('../publicBookingOtpService');
+      const consumed = publicBookingOtpService.consumeVerificationTokenLocal(
+        params.otpVerificationToken,
+        params.slug,
+        params.customerPhone
+      );
+      if (!consumed) {
+        return { success: false, reasonCode: 'otp_token_invalid_or_consumed' };
+      }
+    }
+
+    try {
+      const apt = await this.createAppointment(params.slug, {
+        userId: `cust_${Date.now()}`,
+        user_name: params.customerName.trim(),
+        user_email: params.customerEmail?.trim() || '',
+        phone: params.customerPhone?.trim() || '',
+        serviceId: params.serviceId,
+        staffId: params.staffId,
+        branchId: params.branchId,
+        date: params.appointmentDate,
+        time: params.appointmentTime,
+        status: 'confirmed',
+        syncedToGoogle: false,
+      });
+
+      return {
+        success: true,
+        appointmentId: apt.id,
+        manageToken: `tok_mock_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+        branchId: params.branchId,
+        reasonCode: 'ok',
+      };
+    } catch (err: any) {
+      if (err?.message?.includes('Slot conflict')) {
+        return { success: false, reasonCode: 'slot_conflict' };
+      }
+      return { success: false, reasonCode: 'temporary_failure' };
+    }
   }
 }
 

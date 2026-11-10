@@ -10,6 +10,7 @@ import { tenantService } from './tenantService';
 import { auditLogService } from './auditLogService';
 
 const POLICY_STORAGE_KEY = 'lari_tenant_booking_policies';
+const memoryPolicies = new Map<string, BookingPolicy>();
 
 // Default booking policy per Part 5
 export const DEFAULT_BOOKING_POLICY: BookingPolicy = {
@@ -24,7 +25,8 @@ export const DEFAULT_BOOKING_POLICY: BookingPolicy = {
   maxBookingsPerIpPerDay: 5,
   blockRepeatedNoShowPhone: true,
   noShowThreshold: 2,
-  requireContactConsent: true
+  requireContactConsent: true,
+  requireOtpForBooking: false
 };
 
 export type SelfServiceAppointmentResult = 
@@ -70,7 +72,9 @@ export const appointmentSelfServiceService = {
 
   // Helper to load booking policy for a tenant
   getBookingPolicy(tenantId: string): BookingPolicy {
-    if (typeof window === 'undefined') return DEFAULT_BOOKING_POLICY;
+    if (typeof window === 'undefined') {
+      return memoryPolicies.get(tenantId) || DEFAULT_BOOKING_POLICY;
+    }
     try {
       const stored = localStorage.getItem(`${POLICY_STORAGE_KEY}_${tenantId}`);
       if (stored) {
@@ -79,15 +83,18 @@ export const appointmentSelfServiceService = {
     } catch (e) {
       console.error('Failed to parse booking policy for tenant ' + tenantId, e);
     }
-    return DEFAULT_BOOKING_POLICY;
+    return memoryPolicies.get(tenantId) || DEFAULT_BOOKING_POLICY;
   },
 
   // Helper to save booking policy for a tenant
   saveBookingPolicy(tenantId: string, policy: Partial<BookingPolicy>): BookingPolicy {
     const current = this.getBookingPolicy(tenantId);
     const updated = { ...current, ...policy };
+    memoryPolicies.set(tenantId, updated);
     if (typeof window !== 'undefined') {
-      localStorage.setItem(`${POLICY_STORAGE_KEY}_${tenantId}`, JSON.stringify(updated));
+      try {
+        localStorage.setItem(`${POLICY_STORAGE_KEY}_${tenantId}`, JSON.stringify(updated));
+      } catch {}
     }
     return updated;
   },

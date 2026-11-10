@@ -10,7 +10,7 @@ if (!process.execArgv.some(a => a.includes('tsx')) && !process.env._TSX_RESPAWNE
     stdio: 'inherit',
     env: { ...process.env, _TSX_RESPAWNED: '1' }
   });
-  process.exit(result.status ?? 0);
+  process.exit(result.status !== null && result.status !== undefined ? result.status : 1);
 }
 
 process.env.VITE_DATA_MODE = 'local';
@@ -72,6 +72,20 @@ async function runStage(title, fn) {
   });
   await viteServer.listen();
   console.log(`[Setup] Vite dev server listening at http://127.0.0.1:${port}`);
+
+  console.log(`[Setup] Pre-warming Vite module transform cache...`);
+  try {
+    await fetch(`http://127.0.0.1:${port}/`).then(r => r.text()).catch(() => '');
+    await Promise.allSettled([
+      viteServer.transformRequest('/index.css'),
+      viteServer.transformRequest('/index.tsx'),
+      viteServer.transformRequest('/App.tsx'),
+      viteServer.transformRequest('/pages/BookingPage.tsx')
+    ]);
+    console.log(`[Setup] Vite module transform cache warmed.`);
+  } catch (err) {
+    console.warn(`[Setup] Warmup warning (non-fatal):`, err?.message || err);
+  }
 
   const browser = await chromium.launch({
     headless: true,
@@ -137,7 +151,7 @@ async function runStage(title, fn) {
     // ------------------------------------------------------------------------
     await runStage('Salon Rezervasyon Ekranının Açılması (Landing Page & Ready State)', async () => {
       console.log(`[Stage 1] Navigating to ${baseUrl}/#/aura-nisantasi...`);
-      await page.goto(`${baseUrl}/#/aura-nisantasi`, { waitUntil: 'domcontentloaded', timeout: 120000 });
+      await page.goto(`${baseUrl}/#/aura-nisantasi`, { waitUntil: 'domcontentloaded', timeout: 60000 });
       
       // Explicit UI ready check (NO networkidle, NO arbitrary sleep)
       await page.waitForSelector('[data-testid="public-booking-ready"]', { timeout: 30000 });
