@@ -102,12 +102,13 @@ interface LocalOtpChallenge {
 
 // In-memory mock store for local/synthetic execution & test harness
 const localChallenges: Map<string, LocalOtpChallenge> = new Map();
+const reservedChallengeIds: Set<string> = new Set();
 const syntheticOutbox: SyntheticOutboxEntry[] = [];
 
 // Robust cryptographic SHA-256 helper (WebCrypto subtle in browsers, node:crypto in Node.js)
 // Invariant (FINDING-ADIM010-008): Reversible fallback (sim_hash) is removed; fails closed if no crypto available.
 async function computeSha256(input: string): Promise<string> {
-  if (typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) {
+  if (typeof globalThis !== 'undefined' && typeof globalThis.crypto?.subtle?.digest === 'function') {
     const encoder = new TextEncoder();
     const data = encoder.encode(input);
     const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', data);
@@ -213,9 +214,19 @@ export const publicBookingOtpService = {
       };
     }
 
-    // 3. Generate 6-digit synthetic code
+    // 3. Generate 6-digit synthetic code and compute cryptographic SHA-256 (fail-closed if unavailable)
     const rawOtp = request.syntheticOtp || String(Math.floor(100000 + Math.random() * 900000));
-    const otpHash = await computeSha256(rawOtp);
+    let otpHash: string;
+    try {
+      otpHash = await computeSha256(rawOtp);
+    } catch (err) {
+      console.error('[publicBookingOtpService] requestOtp crypto hash unavailable:', err);
+      return {
+        success: false,
+        reasonCode: 'temporary_failure',
+        message: 'Güvenlik doğrulama servisi geçici olarak kullanılamıyor.',
+      };
+    }
     const challengeId = `otp_${now}_${Math.random().toString(36).substring(2, 9)}`;
 
     const newChallenge: LocalOtpChallenge = {
@@ -329,7 +340,17 @@ export const publicBookingOtpService = {
       return { success: false, reasonCode: 'otp_already_consumed', message: 'Bu kod daha önce kullanılmış.' };
     }
 
-    const inputHash = await computeSha256(request.otpCode.trim());
+    let inputHash: string;
+    try {
+      inputHash = await computeSha256(request.otpCode.trim());
+    } catch (err) {
+      console.error('[publicBookingOtpService] verifyOtp crypto hash unavailable:', err);
+      return {
+        success: false,
+        reasonCode: 'temporary_failure',
+        message: 'Güvenlik doğrulama servisi geçici olarak kullanılamıyor.',
+      };
+    }
     if (inputHash !== challenge.otpCodeHash) {
       challenge.attemptsCount++;
       if (challenge.attemptsCount >= challenge.maxAttempts) {
@@ -349,12 +370,23 @@ export const publicBookingOtpService = {
       };
     }
 
-    // Verification successful: issue single-use token
+    // Verification successful: hash token before committing verified status (fail-closed)
     const token = `vtok_${now}_${Math.random().toString(36).substring(2, 12)}`;
+    let tokenHash: string;
+    try {
+      tokenHash = await computeSha256(token);
+    } catch (err) {
+      console.error('[publicBookingOtpService] verifyOtp token hash unavailable:', err);
+      return {
+        success: false,
+        reasonCode: 'temporary_failure',
+        message: 'Güvenlik doğrulama servisi geçici olarak kullanılamıyor.',
+      };
+    }
     challenge.status = 'verified';
     challenge.verifiedAt = now;
     challenge.verificationToken = token;
-    challenge.verificationTokenHash = await computeSha256(token);
+    challenge.verificationTokenHash = tokenHash;
 
     return {
       success: true,
@@ -388,28 +420,104 @@ export const publicBookingOtpService = {
    */
   clearSyntheticHarness(): void {
     localChallenges.clear();
+    reservedChallengeIds.clear();
     syntheticOutbox.length = 0;
   },
 
   /**
-   * Local verification token consumption helper for local mode booking flow.
-   * Marks token as consumed; subsequent calls will fail (fail-closed).
+   * Read-only metadata snapshot of a local synthetic OTP challenge (never exposes verificationToken).
+   */
+  getSyntheticChallengeAudit(
+    challengeId: string
+  ): Omit<LocalOtpChallenge, 'verificationToken' | 'verificationTokenHash'> | null {
+    const ch = localChallenges.get(challengeId);
+    if (!ch) return null;
+    return {
+      id: ch.id,
+      slug: ch.slug,
+      phone: ch.phone,
+      clientFingerprint: ch.clientFingerprint,
+      otpCodeHash: ch.otpCodeHash,
+      status: ch.status,
+      attemptsCount: ch.attemptsCount,
+      maxAttempts: ch.maxAttempts,
+      expiresAt: ch.expiresAt,
+      createdAt: ch.createdAt,
+      verifiedAt: ch.verifiedAt,
+      consumedAt: ch.consumedAt,
+    };
+  },
+
+  /**
+   * Synchronously reserves a verified local OTP token before appointment creation.
+   * Prevents concurrent duplicate submissions while deferring consumed state until booking succeeds.
+   */
+  reserveVerificationTokenLocal(
+    token: string,
+    slug: string,
+    phone: string
+  ):
+    | { ok: true; challengeId: string }
+    | { ok: false; reasonCode: 'otp_token_invalid_or_consumed' | 'tenant_mismatch' | 'phone_mismatch' } {
+    const cleanPhone = cleanPhoneNumber(phone);
+    const now = Date.now();
+    for (const challenge of localChallenges.values()) {
+      if (challenge.verificationToken !== token) {
+        continue;
+      }
+      if (challenge.slug !== slug) {
+        return { ok: false, reasonCode: 'tenant_mismatch' };
+      }
+      if (challenge.status !== 'verified' || challenge.expiresAt <= now) {
+        return { ok: false, reasonCode: 'otp_token_invalid_or_consumed' };
+      }
+      if (cleanPhoneNumber(challenge.phone) !== cleanPhone) {
+        return { ok: false, reasonCode: 'phone_mismatch' };
+      }
+      if (reservedChallengeIds.has(challenge.id)) {
+        return { ok: false, reasonCode: 'otp_token_invalid_or_consumed' };
+      }
+      reservedChallengeIds.add(challenge.id);
+      return { ok: true, challengeId: challenge.id };
+    }
+    return { ok: false, reasonCode: 'otp_token_invalid_or_consumed' };
+  },
+
+  /**
+   * Commits local OTP token consumption strictly after appointment creation succeeds.
+   */
+  commitVerificationTokenConsumptionLocal(challengeId: string, token: string): boolean {
+    const hasLock = reservedChallengeIds.has(challengeId);
+    reservedChallengeIds.delete(challengeId);
+    const challenge = localChallenges.get(challengeId);
+    if (
+      !hasLock ||
+      !challenge ||
+      challenge.verificationToken !== token ||
+      challenge.status !== 'verified' ||
+      challenge.expiresAt <= Date.now()
+    ) {
+      return false;
+    }
+    challenge.status = 'consumed';
+    challenge.consumedAt = Date.now();
+    return true;
+  },
+
+  /**
+   * Releases an in-flight local OTP token reservation on booking failure (preserves verified status for retry).
+   */
+  releaseVerificationTokenReservationLocal(challengeId: string): void {
+    reservedChallengeIds.delete(challengeId);
+  },
+
+  /**
+   * Local verification token consumption helper for direct local calls.
+   * Marks token as consumed atomically; subsequent calls fail closed.
    */
   consumeVerificationTokenLocal(token: string, slug: string, phone: string): boolean {
-    const cleanPhone = cleanPhoneNumber(phone);
-    for (const challenge of localChallenges.values()) {
-      if (
-        challenge.verificationToken === token &&
-        challenge.slug === slug &&
-        challenge.phone === cleanPhone &&
-        challenge.status === 'verified' &&
-        challenge.expiresAt > Date.now()
-      ) {
-        challenge.status = 'consumed';
-        challenge.consumedAt = Date.now();
-        return true;
-      }
-    }
-    return false;
+    const res = this.reserveVerificationTokenLocal(token, slug, phone);
+    if (!res.ok) return false;
+    return this.commitVerificationTokenConsumptionLocal(res.challengeId, token);
   },
 };

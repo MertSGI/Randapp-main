@@ -562,10 +562,14 @@ REVOKE ALL ON FUNCTION public.verify_public_booking_otp(text, uuid, text, text) 
 GRANT EXECUTE ON FUNCTION public.verify_public_booking_otp(text, uuid, text, text) TO anon, authenticated, service_role;
 
 -- 7. Updated create_public_booking with rate-limit, spam, and OTP single-use token consumption
+-- Preserves exact 13-parameter canonical signature from 20260813_h1c_commercial_eligibility_and_quota_enforcement.sql:
+--   (text, uuid, uuid, date, time, text, text, text, boolean, boolean, boolean, text, uuid)
+-- and appends 2 trailing nullable text parameters (p_otp_verification_token, p_client_fingerprint).
+-- Drops prior 12-arg (20260720/20260722), 13-arg (20260723/20260813), and 15-arg signatures so only ONE
+-- hardened function exists in pg_proc (preventing any unguarded legacy overload / OTP bypass).
+DROP FUNCTION IF EXISTS public.create_public_booking(text, uuid, uuid, date, time, text, text, text, boolean, boolean, boolean, text);
 DROP FUNCTION IF EXISTS public.create_public_booking(text, uuid, uuid, date, time, text, text, text, boolean, boolean, boolean, text, uuid);
-DROP FUNCTION IF EXISTS public.create_public_booking(text, uuid, uuid, date, time, text, text, text, text, uuid, text, text, text);
 DROP FUNCTION IF EXISTS public.create_public_booking(text, uuid, uuid, date, time, text, text, text, boolean, boolean, boolean, text, uuid, text, text);
-DROP FUNCTION IF EXISTS public.create_public_booking(text, uuid, uuid, date, time, text, text, text, text, uuid, text, text, text, text, text);
 
 CREATE OR REPLACE FUNCTION public.create_public_booking(
     p_slug                   text,
@@ -902,5 +906,5 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.create_public_booking(text, uuid, uuid, date, time, text, text, text, boolean, boolean, boolean, text, uuid, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.create_public_booking(text, uuid, uuid, date, time, text, text, text, boolean, boolean, boolean, text, uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.create_public_booking(text, uuid, uuid, date, time, text, text, text, boolean, boolean, boolean, text, uuid, text, text) TO anon, authenticated, service_role;

@@ -1,9 +1,10 @@
-﻿import { BookingRepository, PublicBookingResult } from './types';
+import { BookingRepository, PublicBookingResult } from './types';
 import { Appointment, CustomerProfile, CustomerMemoryNote } from '../../types';
 import { dataProvider } from '../dataProvider';
 const normalizeEmail = (email?: string): string => email ? email.trim().toLowerCase() : '';
 const normalizePhone = (phone?: string): string => phone ? phone.replace(/[\s\-\(\)\+]/g, '') : '';
 import { LocalCatalogRepository } from './localCatalogRepository';
+import { publicBookingOtpService } from '../publicBookingOtpService';
 
 export class LocalBookingRepository implements BookingRepository {
   private getAppointmentsKey(tenantId: string) { return `lari:${tenantId}:appointments`; }
@@ -320,16 +321,19 @@ export class LocalBookingRepository implements BookingRepository {
       return { success: false, reasonCode: 'invalid_customer_data' };
     }
 
+    // Reserve OTP token synchronously BEFORE any await / appointment write so concurrent
+    // duplicate submissions fail closed while failed bookings keep token status verified.
+    let reservedChallengeId: string | null = null;
     if (params.otpVerificationToken) {
-      const { publicBookingOtpService } = await import('../publicBookingOtpService');
-      const consumed = publicBookingOtpService.consumeVerificationTokenLocal(
+      const reservation = publicBookingOtpService.reserveVerificationTokenLocal(
         params.otpVerificationToken,
         params.slug,
         params.customerPhone
       );
-      if (!consumed) {
-        return { success: false, reasonCode: 'otp_token_invalid_or_consumed' };
+      if (!('challengeId' in reservation)) {
+        return { success: false, reasonCode: reservation.reasonCode };
       }
+      reservedChallengeId = reservation.challengeId;
     }
 
     try {
@@ -347,6 +351,20 @@ export class LocalBookingRepository implements BookingRepository {
         syncedToGoogle: false,
       });
 
+      if (!apt?.id) {
+        throw new Error('Failed to create appointment record');
+      }
+
+      if (reservedChallengeId && params.otpVerificationToken) {
+        const committed = publicBookingOtpService.commitVerificationTokenConsumptionLocal(
+          reservedChallengeId,
+          params.otpVerificationToken
+        );
+        if (!committed) {
+          return { success: false, reasonCode: 'otp_token_invalid_or_consumed' };
+        }
+      }
+
       return {
         success: true,
         appointmentId: apt.id,
@@ -355,6 +373,9 @@ export class LocalBookingRepository implements BookingRepository {
         reasonCode: 'ok',
       };
     } catch (err: any) {
+      if (reservedChallengeId) {
+        publicBookingOtpService.releaseVerificationTokenReservationLocal(reservedChallengeId);
+      }
       if (err?.message?.includes('Slot conflict')) {
         return { success: false, reasonCode: 'slot_conflict' };
       }
