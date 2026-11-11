@@ -352,14 +352,21 @@ jobs:
           }
           EOF
 
-      - name: Upload browser evidence & failure traces artifact
+      - name: Upload browser evidence artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: acceptance-evidence-browser-${{ needs.exact-sha-and-static-build-gate.outputs.short_sha }}-run-${{ github.run_id }}
-          path: |
-            ci-artifacts/
-            test-results/
+          path: ci-artifacts/
+          retention-days: 30
+
+      - name: Upload Playwright failure traces (when present)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-browser-traces-${{ needs.exact-sha-and-static-build-gate.outputs.short_sha }}-run-${{ github.run_id }}
+          path: test-results/
+          if-no-files-found: ignore
           retention-days: 30
 
   independent-acceptance-verdict:
