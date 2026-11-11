@@ -1,4 +1,5 @@
 import { SelfServiceRepository } from './types';
+import { generateSecureId } from '../appointmentSelfServiceService';
 
 export class LocalSelfServiceRepository implements SelfServiceRepository {
   private getStoredTokens(): any[] {
@@ -30,7 +31,7 @@ export class LocalSelfServiceRepository implements SelfServiceRepository {
   async createToken(tenantId: string, input: any): Promise<any> {
     const tokens = this.getStoredTokens();
     const newToken = {
-      id: input.id || `tok_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: input.id || generateSecureId('tok_'),
       tenantId,
       appointmentId: input.appointmentId,
       tokenHash: input.tokenHash,
@@ -60,7 +61,7 @@ export class LocalSelfServiceRepository implements SelfServiceRepository {
   async createChangeRequest(tenantId: string, input: any): Promise<any> {
     const requests = this.getStoredChangeRequests();
     const newRequest = {
-      id: input.id || `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: input.id || generateSecureId('req_'),
       tenantId,
       appointmentId: input.appointmentId,
       requestType: input.requestType,

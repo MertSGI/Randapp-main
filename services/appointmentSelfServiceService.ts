@@ -12,6 +12,83 @@ import { auditLogService } from './auditLogService';
 const POLICY_STORAGE_KEY = 'lari_tenant_booking_policies';
 const memoryPolicies = new Map<string, BookingPolicy>();
 
+// ============================================================================
+// CSPRNG & Cryptographic Security Helpers (ADIM-012 / V1A-SEC-01)
+// Invariant: Zero insecure pseudo-randomness. Minimum 128-bit (256-bit default) entropy.
+// WebCrypto in browser/Deno, node:crypto in Node.js.
+// ============================================================================
+
+export interface ClientSecurityContext {
+  clientIp?: string;
+  clientFingerprint?: string;
+  userAgent?: string;
+}
+
+export interface TokenLookupFailureRecord {
+  key: string;
+  failedCount: number;
+  lockedUntil: number | null; // epoch ms
+  lastFailedAt: number; // epoch ms
+}
+
+const TOKEN_LOOKUP_FAILURES_KEY = 'lari_self_service_token_failures';
+const MAX_CONSECUTIVE_FAILED_LOOKUPS = 5;
+const LOOKUP_LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes fail-closed lockout
+
+let memoryTokenLookupFailures = new Map<string, TokenLookupFailureRecord>();
+
+export function getSecureRandomBytes(byteCount: number): Uint8Array {
+  if (typeof globalThis !== 'undefined' && typeof globalThis.crypto?.getRandomValues === 'function') {
+    const bytes = new Uint8Array(byteCount);
+    globalThis.crypto.getRandomValues(bytes);
+    return bytes;
+  }
+  if (typeof process !== 'undefined' && process.versions?.node) {
+    try {
+      const nodeCrypto = typeof require !== 'undefined' ? require('crypto') : null;
+      if (nodeCrypto && typeof nodeCrypto.randomBytes === 'function') {
+        return new Uint8Array(nodeCrypto.randomBytes(byteCount));
+      }
+    } catch {}
+  }
+  throw new Error('SEC_CSPRNG_UNAVAILABLE: Cryptographically secure random number generator is required.');
+}
+
+export function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+export function generateSecureToken(prefix = 'apt_tok_', bytes = 32): string {
+  // 32 bytes = 256 bits of CSPRNG entropy
+  const randomHex = bytesToHex(getSecureRandomBytes(bytes));
+  return `${prefix}${randomHex}`;
+}
+
+export function generateSecureId(prefix = 'tok_', bytes = 16): string {
+  const randomHex = bytesToHex(getSecureRandomBytes(bytes));
+  return `${prefix}${Date.now()}_${randomHex}`;
+}
+
+export async function computeSha256(input: string): Promise<string> {
+  const trimmed = input.trim();
+  if (typeof globalThis !== 'undefined' && typeof globalThis.crypto?.subtle?.digest === 'function') {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(trimmed);
+    const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  if (typeof process !== 'undefined' && process.versions?.node) {
+    try {
+      const nodeCrypto = await import('node:crypto');
+      return nodeCrypto.createHash('sha256').update(trimmed, 'utf8').digest('hex');
+    } catch {}
+  }
+
+  throw new Error('SEC_CRYPTO_UNAVAILABLE: Cryptographically secure SHA-256 implementation is required.');
+}
+
 // Default booking policy per Part 5
 export const DEFAULT_BOOKING_POLICY: BookingPolicy = {
   cancellationWindowHours: 24,
@@ -31,8 +108,8 @@ export const DEFAULT_BOOKING_POLICY: BookingPolicy = {
 
 export type SelfServiceAppointmentResult = 
   | { kind: 'success'; appointment: Appointment; tokenObj: AppointmentAccessToken; rawData: any }
-  | { kind: 'invalid_token'; reasonCode: string }
-  | { kind: 'service_error'; message: string };
+  | { kind: 'invalid_token'; reasonCode: 'invalid_token' | 'TOKEN_EXPIRED' | 'TOKEN_LOOKUP_RATE_LIMITED' | string }
+  | { kind: 'service_error'; message: string; reasonCode?: string };
 
 export const appointmentSelfServiceService = {
   // Asynchronous replacement for loaded tokens
@@ -99,17 +176,193 @@ export const appointmentSelfServiceService = {
     return updated;
   },
 
+  // Helper to load failure records
+  getStoredTokenFailures(): Map<string, TokenLookupFailureRecord> {
+    if (typeof window === 'undefined') return memoryTokenLookupFailures;
+    try {
+      const raw = localStorage.getItem(TOKEN_LOOKUP_FAILURES_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const map = new Map<string, TokenLookupFailureRecord>();
+        for (const [k, v] of Object.entries(parsed)) {
+          map.set(k, v as TokenLookupFailureRecord);
+        }
+        return map;
+      }
+    } catch {}
+    return memoryTokenLookupFailures;
+  },
+
+  saveStoredTokenFailures(failures: Map<string, TokenLookupFailureRecord>): void {
+    memoryTokenLookupFailures = failures;
+    if (typeof window !== 'undefined') {
+      try {
+        const obj: Record<string, TokenLookupFailureRecord> = {};
+        for (const [k, v] of failures.entries()) {
+          obj[k] = v;
+        }
+        localStorage.setItem(TOKEN_LOOKUP_FAILURES_KEY, JSON.stringify(obj));
+      } catch {}
+    }
+  },
+
+  resolveClientKeys(context?: ClientSecurityContext): string[] {
+    const keys: string[] = [];
+    const cleanIp = context?.clientIp ? context.clientIp.trim().toLowerCase() : '';
+    const cleanFp = context?.clientFingerprint ? context.clientFingerprint.trim().toLowerCase() : '';
+    
+    if (cleanIp) keys.push(`ip:${cleanIp}`);
+    if (cleanFp) keys.push(`fp:${cleanFp}`);
+    if (cleanIp && cleanFp) keys.push(`combo:${cleanIp}:${cleanFp}`);
+
+    if (keys.length === 0) {
+      if (typeof window !== 'undefined') {
+        try {
+          let deviceFp = localStorage.getItem('lari_client_device_fingerprint');
+          if (!deviceFp) {
+            deviceFp = `dev_${bytesToHex(getSecureRandomBytes(16))}`;
+            localStorage.setItem('lari_client_device_fingerprint', deviceFp);
+          }
+          keys.push(`fp:${deviceFp}`);
+        } catch {
+          keys.push('ctx:browser_anonymous');
+        }
+      } else {
+        keys.push('ctx:anonymous_default');
+      }
+    }
+    return keys;
+  },
+
+  checkRateLimit(context?: ClientSecurityContext): { allowed: boolean; reasonCode?: string; retryAfterSeconds?: number } {
+    const keys = this.resolveClientKeys(context);
+    const failures = this.getStoredTokenFailures();
+    const now = Date.now();
+
+    for (const key of keys) {
+      const record = failures.get(key);
+      if (!record) continue;
+
+      if (record.lockedUntil && now < record.lockedUntil) {
+        const remainingSec = Math.ceil((record.lockedUntil - now) / 1000);
+        return {
+          allowed: false,
+          reasonCode: 'TOKEN_LOOKUP_RATE_LIMITED',
+          retryAfterSeconds: remainingSec
+        };
+      }
+
+      // If failedCount reached 5 within the 15-minute window, lock it!
+      if (record.failedCount >= MAX_CONSECUTIVE_FAILED_LOOKUPS && (now - record.lastFailedAt) < LOOKUP_LOCKOUT_DURATION_MS) {
+        record.lockedUntil = now + LOOKUP_LOCKOUT_DURATION_MS;
+        failures.set(key, record);
+        this.saveStoredTokenFailures(failures);
+        return {
+          allowed: false,
+          reasonCode: 'TOKEN_LOOKUP_RATE_LIMITED',
+          retryAfterSeconds: Math.ceil(LOOKUP_LOCKOUT_DURATION_MS / 1000)
+        };
+      }
+    }
+
+    return { allowed: true, reasonCode: 'ok' };
+  },
+
+  recordLookupFailure(context?: ClientSecurityContext): { locked: boolean; failedCount: number } {
+    const keys = this.resolveClientKeys(context);
+    const failures = this.getStoredTokenFailures();
+    const now = Date.now();
+    let isNowLocked = false;
+    let maxCount = 0;
+
+    for (const key of keys) {
+      let record = failures.get(key);
+      if (!record) {
+        record = {
+          key,
+          failedCount: 1,
+          lockedUntil: null,
+          lastFailedAt: now
+        };
+      } else {
+        if (record.lockedUntil && now < record.lockedUntil) {
+          // Already locked, extend or maintain lock
+          record.failedCount += 1;
+          record.lastFailedAt = now;
+        } else if (record.lockedUntil && now >= record.lockedUntil) {
+          // Lock expired, reset to 1
+          record.failedCount = 1;
+          record.lockedUntil = null;
+          record.lastFailedAt = now;
+        } else if ((now - record.lastFailedAt) > LOOKUP_LOCKOUT_DURATION_MS) {
+          // Window expired without reaching limit, reset to 1
+          record.failedCount = 1;
+          record.lastFailedAt = now;
+        } else {
+          record.failedCount += 1;
+          record.lastFailedAt = now;
+          if (record.failedCount >= MAX_CONSECUTIVE_FAILED_LOOKUPS) {
+            record.lockedUntil = now + LOOKUP_LOCKOUT_DURATION_MS;
+            isNowLocked = true;
+          }
+        }
+      }
+
+      if (record.lockedUntil && now < record.lockedUntil) {
+        isNowLocked = true;
+      }
+      if (record.failedCount > maxCount) {
+        maxCount = record.failedCount;
+      }
+
+      failures.set(key, record);
+    }
+
+    this.saveStoredTokenFailures(failures);
+    return { locked: isNowLocked, failedCount: maxCount };
+  },
+
+  recordLookupSuccess(context?: ClientSecurityContext): void {
+    const keys = this.resolveClientKeys(context);
+    const failures = this.getStoredTokenFailures();
+    const now = Date.now();
+
+    for (const key of keys) {
+      const record = failures.get(key);
+      if (record && (!record.lockedUntil || now >= record.lockedUntil)) {
+        // Reset failures on verified lookup only if not actively locked
+        record.failedCount = 0;
+        record.lockedUntil = null;
+        failures.set(key, record);
+      }
+    }
+
+    this.saveStoredTokenFailures(failures);
+  },
+
+  resetRateLimitRegistry(): void {
+    memoryTokenLookupFailures.clear();
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(TOKEN_LOOKUP_FAILURES_KEY);
+      } catch {}
+    }
+  },
+
   // Part 3: createAppointmentAccessToken
   async createAppointmentAccessToken(
     tenantId: string, 
     appointmentId: string, 
-    purpose: AppointmentAccessToken['purpose']
+    purpose: AppointmentAccessToken['purpose'] = 'view'
   ): Promise<string> {
     const repo = getSelfServiceRepository();
     
-    // Generate secure simulated plain token
-    const token = `apt_tok_${Math.random().toString(36).substring(2, 9)}${Math.random().toString(36).substring(2, 9)}`;
-    const id = `tok_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    // Generate secure 256-bit CSPRNG plain token and ID
+    const token = generateSecureToken();
+    const id = generateSecureId('tok_');
+    
+    // Compute cryptographic SHA-256 digest
+    const tokenHash = await computeSha256(token);
     
     // 7 days expiration default
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -117,7 +370,7 @@ export const appointmentSelfServiceService = {
     await repo.createToken(tenantId, {
       id,
       appointmentId,
-      tokenHash: token,
+      tokenHash,
       expiresAt,
       purpose,
       createdAt: new Date().toISOString()
@@ -148,36 +401,80 @@ export const appointmentSelfServiceService = {
   },
 
   // Part 3: validateAppointmentAccessToken
-  async validateAppointmentAccessToken(token: string): Promise<boolean> {
+  async validateAppointmentAccessToken(token: string, clientContext?: ClientSecurityContext): Promise<boolean> {
+    if (!token || typeof token !== 'string' || token.trim().length === 0) {
+      this.recordLookupFailure(clientContext);
+      return false;
+    }
+
+    const rateCheck = this.checkRateLimit(clientContext);
+    if (!rateCheck.allowed) {
+      return false;
+    }
+
+    const trimmed = token.trim();
+    const tokenHash = await computeSha256(trimmed);
     const repo = getSelfServiceRepository();
-    const tokenObj = await repo.getTokenByHash(token);
+    let tokenObj = await repo.getTokenByHash(tokenHash);
+    if (!tokenObj) {
+      // Legacy compatibility
+      tokenObj = await repo.getTokenByHash(trimmed);
+    }
     
-    if (!tokenObj) return false;
-    if (tokenObj.usedAt) return false;
-    
-    const expired = new Date(tokenObj.expiresAt).getTime() < Date.now();
-    if (expired) {
+    if (!tokenObj) {
+      this.recordLookupFailure(clientContext);
+      return false;
+    }
+    if (tokenObj.usedAt) {
+      this.recordLookupFailure(clientContext);
       return false;
     }
     
+    const expired = new Date(tokenObj.expiresAt).getTime() < Date.now();
+    if (expired) {
+      this.recordLookupFailure(clientContext);
+      return false;
+    }
+    
+    this.recordLookupSuccess(clientContext);
     return true;
   },
 
-  async getAppointmentByManageToken(token: string): Promise<SelfServiceAppointmentResult> {
+  async getAppointmentByManageToken(
+    token: string, 
+    clientContext?: ClientSecurityContext
+  ): Promise<SelfServiceAppointmentResult> {
+    // 1. Client-side / In-memory Rate Limiting Check
+    const rateCheck = this.checkRateLimit(clientContext);
+    if (!rateCheck.allowed) {
+      return { kind: 'invalid_token', reasonCode: 'TOKEN_LOOKUP_RATE_LIMITED' };
+    }
+
     if (!token || typeof token !== 'string' || token.trim().length === 0) {
+      this.recordLookupFailure(clientContext);
       return { kind: 'invalid_token', reasonCode: 'invalid_token' };
     }
+
+    const trimmedToken = token.trim();
 
     try {
       const { getDataSourceMode } = await import('./dataSourceConfig');
       if (getDataSourceMode() === 'supabase') {
         const { fetchSupabase } = await import('./repositories/supabaseClient');
+        const payload: Record<string, any> = { p_token: trimmedToken };
+        if (clientContext?.clientFingerprint) {
+          payload.p_client_fingerprint = clientContext.clientFingerprint.trim().toLowerCase();
+        }
+        if (clientContext?.clientIp) {
+          payload.p_client_ip = clientContext.clientIp.trim().toLowerCase();
+        }
+
         const res = await fetchSupabase('/rest/v1/rpc/get_public_appointment_by_manage_token', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ p_token: token.trim() })
+          body: JSON.stringify(payload)
         });
 
         if (!res.ok) {
@@ -191,13 +488,24 @@ export const appointmentSelfServiceService = {
         }
 
         if (!data.success) {
-          return { kind: 'invalid_token', reasonCode: data.reason_code || 'invalid_token' };
+          const failRes = this.recordLookupFailure(clientContext);
+          if (failRes.failedCount > MAX_CONSECUTIVE_FAILED_LOOKUPS || data.reason_code === 'TOKEN_LOOKUP_RATE_LIMITED') {
+            return { kind: 'invalid_token', reasonCode: 'TOKEN_LOOKUP_RATE_LIMITED' };
+          }
+          const reasonCode = data.reason_code || 'invalid_token';
+          return { kind: 'invalid_token', reasonCode };
         }
 
         const apt = data.appointment;
         if (!apt || !apt.id) {
+          const failRes = this.recordLookupFailure(clientContext);
+          if (failRes.failedCount > MAX_CONSECUTIVE_FAILED_LOOKUPS) {
+            return { kind: 'invalid_token', reasonCode: 'TOKEN_LOOKUP_RATE_LIMITED' };
+          }
           return { kind: 'invalid_token', reasonCode: 'invalid_token' };
         }
+
+        this.recordLookupSuccess(clientContext);
 
         const appointment: Appointment = {
           id: apt.id,
@@ -239,18 +547,43 @@ export const appointmentSelfServiceService = {
 
     // Local / Mock fallback mode only
     const repo = getSelfServiceRepository();
-    const tokenObj = await repo.getTokenByHash(token);
-    if (!tokenObj) return { kind: 'invalid_token', reasonCode: 'invalid_token' };
+    const tokenHash = await computeSha256(trimmedToken);
+    let tokenObj = await repo.getTokenByHash(tokenHash);
+    if (!tokenObj) {
+      tokenObj = await repo.getTokenByHash(trimmedToken);
+    }
+
+    if (!tokenObj) {
+      const failRes = this.recordLookupFailure(clientContext);
+      if (failRes.failedCount > MAX_CONSECUTIVE_FAILED_LOOKUPS) {
+        return { kind: 'invalid_token', reasonCode: 'TOKEN_LOOKUP_RATE_LIMITED' };
+      }
+      return { kind: 'invalid_token', reasonCode: 'invalid_token' };
+    }
     
     const isExpired = new Date(tokenObj.expiresAt).getTime() < Date.now();
-    if (isExpired || tokenObj.usedAt) return { kind: 'invalid_token', reasonCode: 'invalid_token' };
+    if (isExpired || tokenObj.usedAt) {
+      const failRes = this.recordLookupFailure(clientContext);
+      if (failRes.failedCount > MAX_CONSECUTIVE_FAILED_LOOKUPS) {
+        return { kind: 'invalid_token', reasonCode: 'TOKEN_LOOKUP_RATE_LIMITED' };
+      }
+      // Zero PII leakage on expired or used tokens!
+      return { kind: 'invalid_token', reasonCode: 'TOKEN_EXPIRED' };
+    }
 
     try {
       const appointment = await getBookingRepository().getAppointmentById(tokenObj.appointmentId);
       if (!appointment || appointment.tenantId !== tokenObj.tenantId) {
+        // Cross-tenant mismatch protection
+        const failRes = this.recordLookupFailure(clientContext);
+        if (failRes.failedCount > MAX_CONSECUTIVE_FAILED_LOOKUPS) {
+          return { kind: 'invalid_token', reasonCode: 'TOKEN_LOOKUP_RATE_LIMITED' };
+        }
         return { kind: 'invalid_token', reasonCode: 'invalid_token' };
       }
       
+      this.recordLookupSuccess(clientContext);
+
       const mappedTokenObj: AppointmentAccessToken = {
         id: tokenObj.id,
         tenantId: tokenObj.tenantId,
@@ -269,8 +602,11 @@ export const appointmentSelfServiceService = {
   },
 
   // Part 3: getAppointmentByAccessToken
-  async getAppointmentByAccessToken(token: string): Promise<{ appointment: Appointment; tokenObj: AppointmentAccessToken } | null> {
-    const result = await this.getAppointmentByManageToken(token);
+  async getAppointmentByAccessToken(
+    token: string, 
+    clientContext?: ClientSecurityContext
+  ): Promise<{ appointment: Appointment; tokenObj: AppointmentAccessToken } | null> {
+    const result = await this.getAppointmentByManageToken(token, clientContext);
     if (result.kind === 'success') {
       return { appointment: result.appointment, tokenObj: result.tokenObj };
     }
@@ -317,7 +653,7 @@ export const appointmentSelfServiceService = {
 
     const isLate = this.isCancellationLate(appointment, policy);
     const repo = getSelfServiceRepository();
-    const id = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const id = generateSecureId('req_');
 
     const newRequest: AppointmentChangeRequest = {
       id,
@@ -477,7 +813,7 @@ export const appointmentSelfServiceService = {
     }
 
     const repo = getSelfServiceRepository();
-    const id = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const id = generateSecureId('req_');
     const [proposedDate, proposedTime] = requestedDateTime.split(' ');
 
     const newRequest: AppointmentChangeRequest = {
@@ -585,7 +921,7 @@ export const appointmentSelfServiceService = {
 
     const { supabase } = await import('./supabaseClient');
 
-    const idempotencyKey = params.idempotencyKey || `resched_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const idempotencyKey = params.idempotencyKey || generateSecureId('resched_');
 
     const { data, error } = await supabase.rpc('request_public_appointment_reschedule_by_manage_token', {
       p_token: params.token.trim(),
@@ -743,7 +1079,7 @@ export const appointmentSelfServiceService = {
       const { getDataSourceMode } = await import('./dataSourceConfig');
       if (getDataSourceMode() === 'supabase') {
         const { supabase } = await import('./supabaseClient');
-        const idempotencyKey = params.idempotencyKey || `admin_dec_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const idempotencyKey = params.idempotencyKey || generateSecureId('admin_dec_');
         const { data, error } = await supabase.rpc('admin_decide_reschedule_request', {
           p_change_request_id: params.changeRequestId,
           p_decision: params.decision,
