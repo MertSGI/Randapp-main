@@ -2,6 +2,8 @@ import { getBookingRepository } from './repositories';
 import { appointmentSelfServiceService } from './appointmentSelfServiceService';
 import { auditLogService } from './auditLogService';
 import { supportTicketService } from './supportTicketService';
+import { parsePublicBookingPhone, normalizePublicBookingPhone } from './publicBookingOtpService';
+import { readStrictStoredBookingPolicy } from './repositories/localBookingRepository';
 
 const ATTEMPTS_STORAGE_KEY = 'lari_booking_attempts';
 const NOSHOW_STORAGE_KEY = 'lari_noshow_signals';
@@ -98,7 +100,7 @@ export const bookingAbuseProtectionService = {
     const newAttempt: BookingAttempt = {
       id,
       tenantId: input.tenantId,
-      phone: input.phone.replace(/\s+/g, ''),
+      phone: normalizePublicBookingPhone(input.phone),
       email: input.email.toLowerCase().trim(),
       clientFingerprint: input.clientFingerprint,
       success: input.success,
@@ -116,7 +118,9 @@ export const bookingAbuseProtectionService = {
     // Group attempts by phone to list high frequency callers
     const phoneCalls: Record<string, number> = {};
     attempts.forEach(a => {
-      phoneCalls[a.phone] = (phoneCalls[a.phone] || 0) + 1;
+      if (a.phone) {
+        phoneCalls[a.phone] = (phoneCalls[a.phone] || 0) + 1;
+      }
     });
 
     const flaggedPhones = Object.entries(phoneCalls)
@@ -140,13 +144,70 @@ export const bookingAbuseProtectionService = {
     serviceId?: string;
     clientFingerprint?: string;
   }): Promise<{ block: boolean; reason?: string; reasonCode?: string }> {
-    const policy = appointmentSelfServiceService.getBookingPolicy(input.tenantId);
+    const storedPolicy = readStrictStoredBookingPolicy(input.tenantId);
+    if (storedPolicy.state === 'corrupt') {
+      return {
+        block: true,
+        reasonCode: 'temporary_failure',
+        reason: 'Güvenlik politikası okunamadı. Lütfen tekrar deneyin.'
+      };
+    }
+
+    let policy;
+    try {
+      const basePolicy = appointmentSelfServiceService.getBookingPolicy(input.tenantId);
+      if (!basePolicy || typeof basePolicy !== 'object' || typeof basePolicy.requireOtpForBooking !== 'boolean') {
+        return {
+          block: true,
+          reasonCode: 'temporary_failure',
+          reason: 'Güvenlik politikası doğrulanamadı. Lütfen tekrar deneyin.'
+        };
+      }
+      policy = storedPolicy.state === 'present' ? { ...basePolicy, ...storedPolicy.record } : basePolicy;
+    } catch {
+      return {
+        block: true,
+        reasonCode: 'temporary_failure',
+        reason: 'Güvenlik politikası doğrulanırken bir hata oluştu. Lütfen tekrar deneyin.'
+      };
+    }
+
+    // FINDING-ADIM010-009: Enforce phone validity and OTP phone requirement
+    // unconditionally BEFORE any spamProtectionEnabled early return.
+    const parsedPhone = parsePublicBookingPhone(input.phone);
+    if (parsedPhone.provided && !parsedPhone.valid) {
+      return {
+        block: true,
+        reasonCode: 'invalid_phone',
+        reason: 'Geçersiz telefon numarası.'
+      };
+    }
+
+    if (policy.requireOtpForBooking && !parsedPhone.valid) {
+      return {
+        block: true,
+        reasonCode: 'invalid_phone',
+        reason: 'Bu salon için telefon numarası zorunludur.'
+      };
+    }
+
     if (!policy.spamProtectionEnabled) {
       return { block: false };
     }
 
-    const cleanPhone = input.phone.replace(/\s+/g, '');
-    const cleanEmail = input.email.toLowerCase().trim();
+    const cleanPhone = parsedPhone.canonical;
+    const cleanEmail = (input.email || '').toLowerCase().trim();
+    const cleanFp = (input.clientFingerprint || '').trim();
+
+    // Fail-closed when both cleanPhone and cleanFp are missing
+    if (!cleanPhone && !cleanFp) {
+      return {
+        block: true,
+        reasonCode: 'rate_limit_exceeded',
+        reason: 'Güvenlik sınırları doğrulanamadı. Lütfen telefon numaranızı girin veya tarayıcınızı güncelleyin.'
+      };
+    }
+
     const attempts = this.getAllAttempts();
     const nowMs = Date.now();
     const tenMinutesAgoMs = nowMs - 10 * 60 * 1000;
@@ -166,13 +227,28 @@ export const bookingAbuseProtectionService = {
           reason: 'Çok fazla rezervasyon denemesi yapıldı. Lütfen biraz bekleyin ve tekrar deneyin.'
         };
       }
+    } else if (cleanEmail) {
+      // 0a-email. Email Burst Limit when phone is missing (max 5 booking attempts per 10 minutes)
+      const recentEmailAttempts = attempts.filter(a => {
+        return a.tenantId === input.tenantId &&
+          a.email === cleanEmail &&
+          new Date(a.timestamp).getTime() > tenMinutesAgoMs;
+      });
+
+      if (recentEmailAttempts.length >= 5) {
+        return {
+          block: true,
+          reasonCode: 'rate_limit_exceeded',
+          reason: 'Bu e-posta adresi ile çok fazla rezervasyon denemesi yapıldı. Lütfen biraz bekleyin.'
+        };
+      }
     }
 
     // 0b. Client Fingerprint Burst Limit (max 10 booking attempts per 10 minutes)
-    if (input.clientFingerprint && input.clientFingerprint.trim()) {
+    if (cleanFp) {
       const recentFpAttempts = attempts.filter(a => {
         return a.tenantId === input.tenantId &&
-          a.clientFingerprint === input.clientFingerprint &&
+          a.clientFingerprint === cleanFp &&
           new Date(a.timestamp).getTime() > tenMinutesAgoMs;
       });
 
@@ -185,50 +261,67 @@ export const bookingAbuseProtectionService = {
       }
     }
 
-    // 1. Max bookings per phone per day limit
+    // 1. Max bookings per phone or email per day limit
     const todayStr = new Date().toISOString().split('T')[0];
-    const phoneAttemptsToday = attempts.filter(a => {
-      return a.tenantId === input.tenantId &&
-        a.phone === cleanPhone &&
-        a.success &&
-        a.timestamp.startsWith(todayStr);
-    });
+    if (cleanPhone) {
+      const phoneAttemptsToday = attempts.filter(a => {
+        return a.tenantId === input.tenantId &&
+          a.phone === cleanPhone &&
+          a.success &&
+          a.timestamp.startsWith(todayStr);
+      });
 
-    if (phoneAttemptsToday.length >= policy.maxBookingsPerPhonePerDay) {
-      try {
-        const ev = auditLogService.logAuditEvent({
-          tenantId: input.tenantId,
-          actorType: 'customer',
-          category: 'anti_abuse',
-          severity: 'warning',
-          action: 'booking_blocked_rate_limit',
-          summary: `Rezervasyon engellendi: Telefon günlük limit aşımı (${cleanPhone})`,
-          safeDetails: { phone: cleanPhone }
-        });
-        
-        supportTicketService.createSupportTicket({
-          tenantId: input.tenantId,
-          source: 'system',
-          category: 'abuse_spam',
-          priority: 'normal',
-          title: `Olası Spam Engel: Telefon Günlük Oda Limiti (#${cleanPhone})`,
-          description: `Sistem, ${cleanPhone} telefon numarasını günlük maksimum online randevu limitine (${policy.maxBookingsPerPhonePerDay}) ulaştığı için engelledi.`,
-          requesterPhone: cleanPhone,
-          relatedAuditEventIds: [ev.id]
-        });
-      } catch (e) {
-        console.error('Anti-abuse logging failed:', e);
+      if (phoneAttemptsToday.length >= policy.maxBookingsPerPhonePerDay) {
+        try {
+          const ev = auditLogService.logAuditEvent({
+            tenantId: input.tenantId,
+            actorType: 'customer',
+            category: 'anti_abuse',
+            severity: 'warning',
+            action: 'booking_blocked_rate_limit',
+            summary: `Rezervasyon engellendi: Telefon günlük limit aşımı (${cleanPhone})`,
+            safeDetails: { phone: cleanPhone }
+          });
+          
+          supportTicketService.createSupportTicket({
+            tenantId: input.tenantId,
+            source: 'system',
+            category: 'abuse_spam',
+            priority: 'normal',
+            title: `Olası Spam Engel: Telefon Günlük Oda Limiti (#${cleanPhone})`,
+            description: `Sistem, ${cleanPhone} telefon numarasını günlük maksimum online randevu limitine (${policy.maxBookingsPerPhonePerDay}) ulaştığı için engelledi.`,
+            requesterPhone: cleanPhone,
+            relatedAuditEventIds: [ev.id]
+          });
+        } catch (e) {
+          console.error('Anti-abuse logging failed:', e);
+        }
+
+        return { 
+          block: true, 
+          reasonCode: 'rate_limit_exceeded',
+          reason: 'Günlük maksimum online randevu limitine ulaştınız. Lütfen yarın tekrar deneyin veya işletmeyle iletişime geçin.' 
+        };
       }
+    } else if (cleanEmail) {
+      const emailAttemptsToday = attempts.filter(a => {
+        return a.tenantId === input.tenantId &&
+          a.email === cleanEmail &&
+          a.success &&
+          a.timestamp.startsWith(todayStr);
+      });
 
-      return { 
-        block: true, 
-        reasonCode: 'rate_limit_exceeded',
-        reason: 'Günlük maksimum online randevu limitine ulaştınız. Lütfen yarın tekrar deneyin veya işletmeyle iletişime geçin.' 
-      };
+      if (emailAttemptsToday.length >= policy.maxBookingsPerPhonePerDay) {
+        return {
+          block: true,
+          reasonCode: 'rate_limit_exceeded',
+          reason: 'Günlük maksimum online randevu limitine ulaştınız. Lütfen yarın tekrar deneyin veya işletmeyle iletişime geçin.'
+        };
+      }
     }
 
-    // 2. Repeated no-show phone blocking
-    if (policy.blockRepeatedNoShowPhone) {
+    // 2. Repeated no-show phone blocking (only if cleanPhone is provided)
+    if (cleanPhone && policy.blockRepeatedNoShowPhone) {
       const riskCount = this.getNoShowRiskCountForCustomer(input.tenantId, cleanPhone);
       if (riskCount >= policy.noShowThreshold) {
         try {
@@ -269,11 +362,17 @@ export const bookingAbuseProtectionService = {
       try {
         const appointments = await getBookingRepository().listAppointments(input.tenantId);
         const duplicate = appointments.find(apt => {
-          const aptPhone = apt.phone ? apt.phone.replace(/\s+/g, '') : '';
-          return apt.status === 'confirmed' &&
-            aptPhone === cleanPhone &&
-            apt.date === input.date &&
-            apt.serviceId === input.serviceId;
+          if (apt.status !== 'confirmed' || apt.date !== input.date || apt.serviceId !== input.serviceId) {
+            return false;
+          }
+          if (cleanPhone) {
+            const aptPhone = normalizePublicBookingPhone(apt.phone);
+            return aptPhone === cleanPhone;
+          } else if (cleanEmail) {
+            const aptEmail = (apt.user_email || '').toLowerCase().trim();
+            return aptEmail === cleanEmail;
+          }
+          return false;
         });
 
         if (duplicate) {
@@ -299,8 +398,9 @@ export const bookingAbuseProtectionService = {
 
   // Part 8: recordNoShowSignal
   recordNoShowSignal(tenantId: string, customerPhone: string): void {
+    const cleanPhone = normalizePublicBookingPhone(customerPhone);
+    if (!cleanPhone) return;
     const signals = this.getAllNoShowSignals();
-    const cleanPhone = customerPhone.replace(/\s+/g, '');
     
     const newSignal: NoShowSignal = {
       tenantId,
@@ -328,7 +428,8 @@ export const bookingAbuseProtectionService = {
 
   // Helper inside risk calculation
   getNoShowRiskCountForCustomer(tenantId: string, customerPhone: string): number {
-    const cleanPhone = customerPhone.replace(/\s+/g, '');
+    const cleanPhone = normalizePublicBookingPhone(customerPhone);
+    if (!cleanPhone) return 0;
     const signals = this.getAllNoShowSignals();
     return signals.filter(s => s.tenantId === tenantId && s.phone === cleanPhone).length;
   },

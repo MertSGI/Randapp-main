@@ -67,6 +67,7 @@ export interface OtpVerifyResponse {
     | 'phone_mismatch'
     | 'invalid_challenge'
     | 'otp_already_consumed'
+    | 'invalid_phone'
     | 'invalid_parameters'
     | 'temporary_failure';
   message?: string;
@@ -126,8 +127,75 @@ async function computeSha256(input: string): Promise<string> {
   throw new Error('SEC_CRYPTO_UNAVAILABLE: Cryptographic SHA-256 implementation is required.');
 }
 
-function cleanPhoneNumber(phone?: string): string {
-  return (phone || '').replace(/\s+/g, '');
+export interface ParsedPublicBookingPhone {
+  provided: boolean;
+  valid: boolean;
+  canonical: string;
+}
+
+export function parsePublicBookingPhone(phone?: string | null): ParsedPublicBookingPhone {
+  if (phone === null || phone === undefined) {
+    return { provided: false, valid: false, canonical: '' };
+  }
+  const trimmed = phone.trim();
+  if (trimmed === '') {
+    return { provided: false, valid: false, canonical: '' };
+  }
+
+  // Allowed characters: ASCII digits, whitespace, -, (, ), . and optional single leading +
+  if (!/^\+?[0-9\s().-]+$/.test(trimmed)) {
+    return { provided: true, valid: false, canonical: '' };
+  }
+
+  const compact = trimmed.replace(/[\s().-]+/g, '');
+
+  if (compact.startsWith('+')) {
+    const d = compact.slice(1);
+    if (d.startsWith('90')) {
+      if (/^90[1-9][0-9]{9}$/.test(d)) {
+        return { provided: true, valid: true, canonical: '+' + d };
+      }
+      return { provided: true, valid: false, canonical: '' };
+    } else {
+      if (/^[1-9][0-9]{7,14}$/.test(d)) {
+        return { provided: true, valid: true, canonical: '+' + d };
+      }
+      return { provided: true, valid: false, canonical: '' };
+    }
+  } else if (compact.startsWith('00')) {
+    const d = compact.slice(2);
+    if (d.startsWith('90')) {
+      if (/^90[1-9][0-9]{9}$/.test(d)) {
+        return { provided: true, valid: true, canonical: '+90' + d.slice(2) };
+      }
+      return { provided: true, valid: false, canonical: '' };
+    } else {
+      if (/^[1-9][0-9]{7,14}$/.test(d)) {
+        return { provided: true, valid: true, canonical: '+' + d };
+      }
+      return { provided: true, valid: false, canonical: '' };
+    }
+  } else if (compact.startsWith('0')) {
+    if (/^0[1-9][0-9]{9}$/.test(compact)) {
+      return { provided: true, valid: true, canonical: '+90' + compact.slice(1) };
+    }
+    return { provided: true, valid: false, canonical: '' };
+  } else if (compact.startsWith('90')) {
+    if (/^90[1-9][0-9]{9}$/.test(compact)) {
+      return { provided: true, valid: true, canonical: '+' + compact };
+    }
+    return { provided: true, valid: false, canonical: '' };
+  }
+
+  return { provided: true, valid: false, canonical: '' };
+}
+
+export function normalizePublicBookingPhone(phone?: string | null): string {
+  return parsePublicBookingPhone(phone).canonical;
+}
+
+function cleanPhoneNumber(phone?: string | null): string {
+  return normalizePublicBookingPhone(phone);
 }
 
 export const publicBookingOtpService = {
@@ -140,10 +208,14 @@ export const publicBookingOtpService = {
     if (!request.slug || !request.slug.trim()) {
       return { success: false, reasonCode: 'invalid_parameters', message: 'Salon kimliği zorunludur.' };
     }
-    const cleanPhone = cleanPhoneNumber(request.phone);
-    if (!cleanPhone || cleanPhone.length < 7) {
+    const parsedPhone = parsePublicBookingPhone(request.phone);
+    if (!parsedPhone.provided) {
+      return { success: false, reasonCode: 'invalid_parameters', message: 'Telefon numarası zorunludur.' };
+    }
+    if (!parsedPhone.valid) {
       return { success: false, reasonCode: 'invalid_phone', message: 'Geçersiz telefon numarası.' };
     }
+    const cleanPhone = parsedPhone.canonical;
 
     if (isSupabaseConfigured()) {
       try {
@@ -269,10 +341,14 @@ export const publicBookingOtpService = {
    * Enforces brute-force lockout on max attempts and issues a single-use verification token.
    */
   async verifyOtp(request: OtpVerifyRequest): Promise<OtpVerifyResponse> {
-    if (!request.slug || !request.challengeId || !request.otpCode || !request.phone) {
+    if (!request.slug || !request.challengeId || !request.otpCode || !request.phone || !request.phone.trim()) {
       return { success: false, reasonCode: 'invalid_parameters', message: 'Eksik doğrulama bilgileri.' };
     }
-    const cleanPhone = cleanPhoneNumber(request.phone);
+    const parsedPhone = parsePublicBookingPhone(request.phone);
+    if (!parsedPhone.valid) {
+      return { success: false, reasonCode: 'invalid_phone', message: 'Geçersiz telefon numarası.' };
+    }
+    const cleanPhone = parsedPhone.canonical;
 
     if (isSupabaseConfigured()) {
       try {

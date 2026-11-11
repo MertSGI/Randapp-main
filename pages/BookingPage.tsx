@@ -608,6 +608,7 @@ const BookingPage: React.FC = () => {
             invalid_staff:        language === 'tr' ? 'Seçilen uzman bu hizmeti şu an sunmuyor.' : 'Selected staff is not available for this service.',
             consent_required:     language === 'tr' ? 'Devam etmek için gerekli onayları vermeniz gerekiyor.' : 'Required consents must be granted to proceed.',
             invalid_customer_data: language === 'tr' ? 'Lütfen ad ve iletişim bilgilerinizi doldurun.' : 'Please fill in your name and contact details.',
+            invalid_phone:        language === 'tr' ? 'Lütfen geçerli bir telefon numarası girin.' : 'Please enter a valid phone number.',
             rate_limit_exceeded:  language === 'tr' ? 'Çok fazla istek gönderildi. Lütfen biraz bekleyin ve tekrar deneyin.' : 'Rate limit exceeded. Please wait a moment and try again.',
             duplicate_booking_same_day: language === 'tr' ? 'Seçilen tarih ve hizmet için zaten aktif bir randevunuz bulunmaktadır.' : 'You already have an active appointment for the selected date and service.',
             otp_required:         language === 'tr' ? 'Randevuyu onaylamak için WhatsApp doğrulama kodu gereklidir.' : 'WhatsApp verification code is required to confirm booking.',

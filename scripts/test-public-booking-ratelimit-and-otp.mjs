@@ -104,7 +104,7 @@ runTest('1.5. Client tarafı servis dosyalarında service_role anahtarı geçmiy
 // -----------------------------------------------------------------------------
 // SECTION 2: TYPESCRIPT SENTETİK OTP VE SUİSTİMAL KORUMASI HARNESS TESTLERİ
 // -----------------------------------------------------------------------------
-const { publicBookingOtpService, LIVE_SMS_DISPATCH_FORBIDDEN } = await import('../services/publicBookingOtpService.ts');
+const { publicBookingOtpService, LIVE_SMS_DISPATCH_FORBIDDEN, parsePublicBookingPhone, normalizePublicBookingPhone } = await import('../services/publicBookingOtpService.ts');
 const { bookingAbuseProtectionService } = await import('../services/bookingAbuseProtectionService.ts');
 
 runTest('2.1. publicBookingOtpService LIVE_SMS_DISPATCH_FORBIDDEN bayrağı devrede', () => {
@@ -799,7 +799,8 @@ await runAsyncTest('2.15. [LOCAL REPO TELAFİ & EŞZAMANLILIK] Yazma sonrası OT
     // geri alma senaryosunda Date.now sadece reqRbConc sırasında geçici olarak +6dk atlatıp geri alınabilir!
     repo.createAppointment = async (tId, input) => {
       const apt = await origCreateAppointment(tId, input);
-      if (input.phone === '+90 555 999 6611') {
+      const normInputPhone = normalizePublicBookingPhone(input.phone);
+      if (normInputPhone === '+905559996611' || input.phone === '+90 555 999 6611') {
         simOffsetMs += 6 * 60 * 1000;
       } else {
         simOffsetMs = 0; // Paralel ikinci isteğin tokenı hala geçerli
@@ -840,10 +841,335 @@ await runAsyncTest('2.15. [LOCAL REPO TELAFİ & EŞZAMANLILIK] Yazma sonrası OT
     assert.strictEqual(publicBookingOtpService.getSyntheticChallengeAudit(reqKeepConc.challengeId).status, 'consumed');
     const finalApts = await repo.listAppointments('salon-local-rb');
     assert.strictEqual(finalApts.length, 3, 'Baseline + Slot Race 1 + Korunan Paralel = 3 randevu bulunmalıdır');
-    assert(!finalApts.some(a => a.phone === '+90 555 999 6611'), 'Geri alınan randevu depoda bulunmamalıdır');
+    assert(!finalApts.some(a => a.phone === '+90 555 999 6611' || a.phone === '+905559996611'), 'Geri alınan randevu depoda bulunmamalıdır');
   } finally {
     Date.now = origDateNow;
     repo.createAppointment = origCreateAppointment;
+    restoreLS();
+  }
+});
+
+await runAsyncTest('2.16. [MAT-09] TS Birim & Yerel Depo Negatif Matrisi (Boş telefon+fp fail-closed, email burst=5, alias phone matching, no-show guard, requireOtpForBooking)', async () => {
+  const restoreLS = installNodeLocalStorageShim();
+  const { LocalBookingRepository } = await import('../services/repositories/localBookingRepository.ts');
+  const { appointmentSelfServiceService } = await import('../services/appointmentSelfServiceService.ts');
+  const repo = new LocalBookingRepository();
+
+  try {
+    localStorage.clear();
+    publicBookingOtpService.clearSyntheticHarness();
+
+    // 1. shouldBlockBooking: Boş telefon + boş fingerprint -> fail-closed rate_limit_exceeded
+    const blockEmpty = await bookingAbuseProtectionService.shouldBlockBooking({
+      tenantId: 't_neg_mat9',
+      phone: '',
+      email: 'user@test.com',
+      clientFingerprint: '',
+    });
+    assert.strictEqual(blockEmpty.block, true);
+    assert.strictEqual(blockEmpty.reasonCode, 'rate_limit_exceeded', 'Boş telefon ve boş fingerprint fail-closed engellenmelidir');
+
+    // 2. shouldBlockBooking: Boş telefon + geçerli fingerprint -> email burst=5
+    const tenantIdEmail = 't_neg_mat9_email';
+    for (let i = 0; i < 5; i++) {
+      bookingAbuseProtectionService.recordBookingAttempt({
+        tenantId: tenantIdEmail,
+        phone: '',
+        email: 'sybil_email@test.com',
+        clientFingerprint: 'fp_valid_mat9',
+        success: false,
+      });
+    }
+    const blockEmailBurst = await bookingAbuseProtectionService.shouldBlockBooking({
+      tenantId: tenantIdEmail,
+      phone: '',
+      email: 'sybil_email@test.com',
+      clientFingerprint: 'fp_valid_mat9',
+    });
+    assert.strictEqual(blockEmailBurst.block, true);
+    assert.strictEqual(blockEmailBurst.reasonCode, 'rate_limit_exceeded', 'Email burst 5 deneme sonrası engellenmelidir');
+
+    // 3. shouldBlockBooking: Farklı biçimli alias telefonlar aynı burst sınırına çarpar
+    const tenantIdAlias = 't_neg_mat9_alias';
+    for (let i = 0; i < 5; i++) {
+      bookingAbuseProtectionService.recordBookingAttempt({
+        tenantId: tenantIdAlias,
+        phone: '+90 555 111 2233',
+        email: `alias${i}@test.com`,
+        clientFingerprint: `fp_alias_${i}`,
+        success: false,
+      });
+    }
+    const blockAlias = await bookingAbuseProtectionService.shouldBlockBooking({
+      tenantId: tenantIdAlias,
+      phone: '0555 111 22 33', // Eşdeğer TR formatı
+      email: 'checkalias@test.com',
+      clientFingerprint: 'fp_alias_check',
+    });
+    assert.strictEqual(blockAlias.block, true);
+    assert.strictEqual(blockAlias.reasonCode, 'rate_limit_exceeded', 'Eşdeğer telefon formatı aynı burst limitine takılmalıdır');
+
+    // 4. No-show guard: Boş telefon için no-show sayacı 0 dönmeli ve boş telefonları eşleştirmemelidir
+    bookingAbuseProtectionService.recordNoShowSignal('t_noshow_test', '+90 555 444 3322');
+    bookingAbuseProtectionService.recordNoShowSignal('t_noshow_test', '');
+    const emptyNoShowRisk = bookingAbuseProtectionService.getNoShowRiskCountForCustomer('t_noshow_test', '');
+    assert.strictEqual(emptyNoShowRisk, 0, 'Boş telefon için no-show sayacı 0 olmalıdır');
+    const validNoShowRisk = bookingAbuseProtectionService.getNoShowRiskCountForCustomer('t_noshow_test', '0555 444 33 22');
+    assert.strictEqual(validNoShowRisk, 1, 'Eşdeğer telefon için no-show sinyali bulunmalıdır');
+
+    // 5. LocalBookingRepository: requireOtpForBooking = true iken boş telefon veya tokensız istek invalid_phone / otp_required alır
+    localStorage.setItem('lari:salon-otp-req:appointments_seeded', 'true');
+    appointmentSelfServiceService.saveBookingPolicy('salon-otp-req', { requireOtpForBooking: true });
+
+    const emptyPhoneRes = await repo.createPublicBooking({
+      slug: 'salon-otp-req',
+      serviceId: 'srv_1',
+      staffId: 'staff_1',
+      appointmentDate: '2026-12-07',
+      appointmentTime: '10:00',
+      customerName: 'Boş Tel OTP',
+      customerEmail: 'bostel@test.com',
+      customerPhone: '',
+      requiredConsent: true,
+    });
+    assert.strictEqual(emptyPhoneRes.success, false);
+    assert.strictEqual(emptyPhoneRes.reasonCode, 'invalid_phone', 'OTP zorunlu salonda boş telefon invalid_phone almalıdır');
+
+    const validPhoneNoTokRes = await repo.createPublicBooking({
+      slug: 'salon-otp-req',
+      serviceId: 'srv_1',
+      staffId: 'staff_1',
+      appointmentDate: '2026-12-07',
+      appointmentTime: '10:00',
+      customerName: 'Tokensız OTP',
+      customerEmail: 'tokensiz@test.com',
+      customerPhone: '+90 555 123 4567',
+      requiredConsent: true,
+    });
+    assert.strictEqual(validPhoneNoTokRes.success, false);
+    assert.strictEqual(validPhoneNoTokRes.reasonCode, 'otp_required', 'OTP zorunlu salonda tokensız istek otp_required almalıdır');
+  } finally {
+    restoreLS();
+  }
+});
+
+await runAsyncTest('2.17. [FINDING-ADIM010-009] spamProtectionEnabled=false iken telefon geçerliliği ve requireOtpForBooking atlanamaz', async () => {
+  const restoreLS = installNodeLocalStorageShim();
+  const { appointmentSelfServiceService } = await import('../services/appointmentSelfServiceService.ts');
+  const origGetPolicy = appointmentSelfServiceService.getBookingPolicy;
+
+  try {
+    localStorage.clear();
+    publicBookingOtpService.clearSyntheticHarness();
+
+    const tenantOtpSpamOff = 't_finding009_otp_on_spam_off';
+    appointmentSelfServiceService.saveBookingPolicy(tenantOtpSpamOff, {
+      spamProtectionEnabled: false,
+      requireOtpForBooking: true,
+    });
+
+    // Spam sayaçları dolu olsa bile önce telefon/OTP kapısı uygulanmalı; geçerli numarada yalnız spam sayacı atlanmalı
+    for (let i = 0; i < 6; i++) {
+      bookingAbuseProtectionService.recordBookingAttempt({
+        tenantId: tenantOtpSpamOff,
+        phone: '+90 555 910 0099',
+        email: `f9_${i}@test.com`,
+        clientFingerprint: 'fp_f9',
+        success: false,
+      });
+    }
+
+    const emptyWhenOtpOn = await bookingAbuseProtectionService.shouldBlockBooking({
+      tenantId: tenantOtpSpamOff,
+      phone: '',
+      email: 'empty_f9@test.com',
+      clientFingerprint: 'fp_f9',
+    });
+    assert.strictEqual(emptyWhenOtpOn.block, true);
+    assert.strictEqual(emptyWhenOtpOn.reasonCode, 'invalid_phone', 'spamProtectionEnabled=false iken requireOtpForBooking=true boş telefonu engellemelidir');
+
+    const invalidWhenOtpOn = await bookingAbuseProtectionService.shouldBlockBooking({
+      tenantId: tenantOtpSpamOff,
+      phone: '5551234567',
+      email: 'ambig_f9@test.com',
+      clientFingerprint: 'fp_f9',
+    });
+    assert.strictEqual(invalidWhenOtpOn.block, true);
+    assert.strictEqual(invalidWhenOtpOn.reasonCode, 'invalid_phone', 'spamProtectionEnabled=false iken belirsiz/geçersiz telefon invalid_phone ile reddedilmelidir');
+
+    const validWhenOtpOnSpamOff = await bookingAbuseProtectionService.shouldBlockBooking({
+      tenantId: tenantOtpSpamOff,
+      phone: '0555 910 00 99',
+      email: 'valid_f9@test.com',
+      clientFingerprint: 'fp_f9',
+    });
+    assert.strictEqual(validWhenOtpOnSpamOff.block, false, 'Geçerli telefon için spamProtectionEnabled=false yalnız spam sayaçlarını devre dışı bırakmalıdır');
+
+    // Yerel depolama (localStorage) doğrudan yazıldığında da aynı kural geçerli olmalı
+    const tenantLsOnly = 't_finding009_ls_only';
+    localStorage.setItem(
+      `lari_tenant_booking_policies_${tenantLsOnly}`,
+      JSON.stringify({ spamProtectionEnabled: false, requireOtpForBooking: true })
+    );
+    const lsEmptyBlock = await bookingAbuseProtectionService.shouldBlockBooking({
+      tenantId: tenantLsOnly,
+      phone: '',
+      email: 'ls@test.com',
+      clientFingerprint: 'fp_ls',
+    });
+    assert.strictEqual(lsEmptyBlock.block, true);
+    assert.strictEqual(lsEmptyBlock.reasonCode, 'invalid_phone');
+
+    // Bozuk politika JSON ve politika yükleme hatasında shouldBlockBooking fail-closed temporary_failure dönmeli
+    localStorage.setItem(`lari_tenant_booking_policies_${tenantLsOnly}`, '{bad_json');
+    const corruptPolicyBlock = await bookingAbuseProtectionService.shouldBlockBooking({
+      tenantId: tenantLsOnly,
+      phone: '+90 555 910 0099',
+      email: 'corrupt@test.com',
+      clientFingerprint: 'fp_ls',
+    });
+    assert.strictEqual(corruptPolicyBlock.block, true);
+    assert.strictEqual(corruptPolicyBlock.reasonCode, 'temporary_failure');
+
+    localStorage.removeItem(`lari_tenant_booking_policies_${tenantLsOnly}`);
+    appointmentSelfServiceService.getBookingPolicy = () => {
+      throw new Error('policy_service_down');
+    };
+    const loaderErrBlock = await bookingAbuseProtectionService.shouldBlockBooking({
+      tenantId: tenantLsOnly,
+      phone: '+90 555 910 0099',
+      email: 'err@test.com',
+      clientFingerprint: 'fp_ls',
+    });
+    assert.strictEqual(loaderErrBlock.block, true);
+    assert.strictEqual(loaderErrBlock.reasonCode, 'temporary_failure');
+  } finally {
+    appointmentSelfServiceService.getBookingPolicy = origGetPolicy;
+    restoreLS();
+  }
+});
+
+await runAsyncTest('2.18. [FINDING-ADIM010-010] Yerel rezervasyon bozuk/okunamayan/yüklenemeyen politikada temporary_failure ile fail-closed durur', async () => {
+  const restoreLS = installNodeLocalStorageShim();
+  const { LocalBookingRepository, DEFAULT_LOCAL_BOOKING_OTP_POLICY } = await import('../services/repositories/localBookingRepository.ts');
+  const { appointmentSelfServiceService } = await import('../services/appointmentSelfServiceService.ts');
+  const repo = new LocalBookingRepository();
+  const origGetPolicy = appointmentSelfServiceService.getBookingPolicy;
+
+  try {
+    localStorage.clear();
+    publicBookingOtpService.clearSyntheticHarness();
+    assert.strictEqual(DEFAULT_LOCAL_BOOKING_OTP_POLICY.requireOtpForBooking, false, 'Eksik politika için varsayılan açıkça false tanımlı olmalıdır');
+
+    // 1. Gerçekten eksik politika durumunda (bozulma/hata yoksa) rezervasyon açık varsayılanla çalışır
+    const missingSlug = 'salon-missing-policy-ok';
+    localStorage.setItem(`lari:${missingSlug}:appointments_seeded`, 'true');
+    const missingPolBooking = await repo.createPublicBooking({
+      slug: missingSlug,
+      serviceId: 'srv_1',
+      staffId: 'staff_1',
+      appointmentDate: '2026-12-08',
+      appointmentTime: '10:00',
+      customerName: 'Eksik Politika',
+      customerEmail: 'missing_pol@test.com',
+      customerPhone: '+90 555 777 0001',
+      requiredConsent: true,
+    });
+    assert.strictEqual(missingPolBooking.success, true, 'Eksik politika durumunda güvenli açık varsayılan ile rezervasyon tamamlanmalıdır');
+
+    // 2. Bozuk politika testleri için verified OTP token hazırla (hiçbir fail-closed hatada token tüketilmemeli)
+    const slugFail = 'salon-policy-failclosed';
+    localStorage.setItem(`lari:${slugFail}:appointments_seeded`, 'true');
+    const otpReq = await publicBookingOtpService.requestOtp({
+      slug: slugFail,
+      phone: '+90 555 777 0002',
+      syntheticOtp: '654321',
+    });
+    assert.strictEqual(otpReq.success, true);
+    const otpVer = await publicBookingOtpService.verifyOtp({
+      slug: slugFail,
+      challengeId: otpReq.challengeId,
+      otpCode: '654321',
+      phone: '+90 555 777 0002',
+    });
+    assert.strictEqual(otpVer.success, true);
+
+    const attemptBooking = (time, token = undefined) => repo.createPublicBooking({
+      slug: slugFail,
+      serviceId: 'srv_1',
+      staffId: 'staff_1',
+      appointmentDate: '2026-12-08',
+      appointmentTime: time,
+      customerName: 'Bozuk Politika',
+      customerEmail: 'corrupt_pol@test.com',
+      customerPhone: '+90 555 777 0002',
+      requiredConsent: true,
+      otpVerificationToken: token,
+    });
+
+    // A. Bozuk JSON string
+    for (const badPayload of ['{corrupt_json', '', '   ', 'null', '[]', '{"requireOtpForBooking":"yes"}']) {
+      localStorage.setItem(`lari_tenant_booking_policies_${slugFail}`, badPayload);
+      const rNoTok = await attemptBooking('11:00');
+      assert.strictEqual(rNoTok.success, false);
+      assert.strictEqual(rNoTok.reasonCode, 'temporary_failure', `Bozuk politika (${badPayload}) tokensız temporary_failure dönmelidir`);
+      const rWithTok = await attemptBooking('11:30', otpVer.verificationToken);
+      assert.strictEqual(rWithTok.success, false);
+      assert.strictEqual(rWithTok.reasonCode, 'temporary_failure', `Bozuk politika (${badPayload}) tokenlı da temporary_failure dönmelidir`);
+    }
+    localStorage.removeItem(`lari_tenant_booking_policies_${slugFail}`);
+
+    // B. localStorage.getItem okuma hatası
+    const origGetItem = localStorage.getItem.bind(localStorage);
+    localStorage.getItem = (k) => {
+      if (k === `lari_tenant_booking_policies_${slugFail}`) {
+        throw new Error('localStorage_read_denied');
+      }
+      return origGetItem(k);
+    };
+    try {
+      const rStorageErr = await attemptBooking('12:00');
+      assert.strictEqual(rStorageErr.success, false);
+      assert.strictEqual(rStorageErr.reasonCode, 'temporary_failure', 'localStorage okuma hatası temporary_failure dönmelidir');
+    } finally {
+      localStorage.getItem = origGetItem;
+    }
+
+    // C. Dinamik politika servisi (getBookingPolicy) ve dinamik module loader hatası
+    appointmentSelfServiceService.getBookingPolicy = () => {
+      throw new Error('dynamic_policy_fetch_failed');
+    };
+    const rDynGetErr = await attemptBooking('13:00');
+    assert.strictEqual(rDynGetErr.success, false);
+    assert.strictEqual(rDynGetErr.reasonCode, 'temporary_failure', 'getBookingPolicy hatası temporary_failure dönmelidir');
+    appointmentSelfServiceService.getBookingPolicy = origGetPolicy;
+
+    const origModuleLoader = repo.loadBookingPolicyModule;
+    repo.loadBookingPolicyModule = async () => {
+      throw new Error('dynamic_import_failed');
+    };
+    const rModuleErr = await attemptBooking('13:30');
+    assert.strictEqual(rModuleErr.success, false);
+    assert.strictEqual(rModuleErr.reasonCode, 'temporary_failure', 'Dinamik politika yükleyici hatası temporary_failure dönmelidir');
+    repo.loadBookingPolicyModule = origModuleLoader;
+
+    // Tüm fail-closed denemeler boyunca sıfır randevu/müşteri yazılmış ve OTP tokenı verified korunmuş olmalı
+    assert.strictEqual((await repo.listAppointments(slugFail)).length, 0, 'Fail-closed redlerde hiç randevu yazılmamalıdır');
+    assert.strictEqual((await repo.listCustomers(slugFail)).length, 0, 'Fail-closed redlerde hiç müşteri yazılmamalıdır');
+    assert.strictEqual(publicBookingOtpService.getSyntheticChallengeAudit(otpReq.challengeId).status, 'verified', 'Fail-closed hatalarda OTP verified kalmalıdır');
+
+    // 3. Politika düzeltildiğinde tokensız istek otp_required, tokenlı retry ok alır
+    appointmentSelfServiceService.saveBookingPolicy(slugFail, { requireOtpForBooking: true });
+    const blockedNoTok = await attemptBooking('14:00');
+    assert.strictEqual(blockedNoTok.success, false);
+    assert.strictEqual(blockedNoTok.reasonCode, 'otp_required');
+
+    const recovered = await attemptBooking('14:00', otpVer.verificationToken);
+    assert.strictEqual(recovered.success, true);
+    assert.strictEqual(recovered.reasonCode, 'ok');
+    assert.strictEqual(publicBookingOtpService.getSyntheticChallengeAudit(otpReq.challengeId).status, 'consumed');
+  } finally {
+    appointmentSelfServiceService.getBookingPolicy = origGetPolicy;
     restoreLS();
   }
 });
@@ -1448,8 +1774,8 @@ try {
     // İç rate-limit helper'ı anon ve authenticated için kapalı olmalı
     const privHelperRes = await db.query(`
       SELECT
-        pg_catalog.has_function_privilege('anon', 'public.evaluate_and_record_public_booking_rate_limit(uuid,text,text,uuid,date)', 'EXECUTE') AS anon_rl,
-        pg_catalog.has_function_privilege('authenticated', 'public.evaluate_and_record_public_booking_rate_limit(uuid,text,text,uuid,date)', 'EXECUTE') AS auth_rl;
+        pg_catalog.has_function_privilege('anon', 'public.evaluate_and_record_public_booking_rate_limit(uuid,text,text,uuid,date,text)', 'EXECUTE') AS anon_rl,
+        pg_catalog.has_function_privilege('authenticated', 'public.evaluate_and_record_public_booking_rate_limit(uuid,text,text,uuid,date,text)', 'EXECUTE') AS auth_rl;
     `);
     assert.strictEqual(privHelperRes.rows[0].anon_rl, false, 'anon rate_limit iç helperına erişememelidir');
     assert.strictEqual(privHelperRes.rows[0].auth_rl, false, 'authenticated rate_limit iç helperına erişememelidir');
@@ -1595,7 +1921,7 @@ try {
     assert.strictEqual(conflictRes.rows[0].res.reason_code, 'slot_conflict', 'Çakışan saatte slot_conflict dönmelidir');
 
     // Randevu oluşmadığını ve challenge status un 'verified' kaldığını doğrula
-    const aptCheck = await db.query("SELECT count(*) FROM public.appointments WHERE phone = '+90 555 444 9900'");
+    const aptCheck = await db.query("SELECT count(*) FROM public.appointments WHERE phone IN ('+90 555 444 9900', '+905554449900')");
     assert.strictEqual(parseInt(aptCheck.rows[0].count, 10), 0, 'slot_conflict durumunda randevu oluşturulmamalıdır');
     const chCheck = await db.query('SELECT status, consumed_at FROM public.public_booking_otp_challenges WHERE id = $1', [chSlotId]);
     assert.strictEqual(chCheck.rows[0].status, 'verified', 'slot_conflict sonrası challenge verified kalmalıdır');
@@ -1693,7 +2019,7 @@ try {
     }
     assert.strictEqual(diffKeyReplayRes.rows[0].res.success, false, 'Farklı idempotency anahtarıyla tüketilmiş token reddedilmelidir');
     assert.strictEqual(diffKeyReplayRes.rows[0].res.reason_code, 'otp_token_invalid_or_consumed');
-    const aptCheckFinal = await db.query("SELECT count(*) FROM public.appointments WHERE phone = '+90 555 444 9900'");
+    const aptCheckFinal = await db.query("SELECT count(*) FROM public.appointments WHERE phone IN ('+90 555 444 9900', '+905554449900')");
     assert.strictEqual(parseInt(aptCheckFinal.rows[0].count, 10), 1, 'Toplam yalnız 1 randevu bulunmalıdır');
   });
 
@@ -2314,6 +2640,716 @@ try {
     } finally {
       await closeIndependentPgConnections(crossConns);
     }
+  });
+
+  await runAsyncTest('3.15. [MAT-01] SQL ve TS Çapraz Eşdeğerlik Doğrulaması (Kanonik E.164, TR alias normalizasyonu ve geçersiz telefon reddi)', async () => {
+    const db = await getDisposablePgEngine();
+
+    const testCases = [
+      // TR Geçerli Eşdeğerler
+      { raw: '+90 555 910 0002', expected: '+905559100002' },
+      { raw: '+90-555-910-0002', expected: '+905559100002' },
+      { raw: '+90 (555) 910.00.02', expected: '+905559100002' },
+      { raw: '0555 910 00 02', expected: '+905559100002' },
+      { raw: '00905559100002', expected: '+905559100002' },
+      { raw: '905559100002', expected: '+905559100002' },
+      { raw: '0 (555) 910-00-02', expected: '+905559100002' },
+      { raw: '  05559100002  ', expected: '+905559100002' },
+      // Uluslararası Geçerli
+      { raw: '+44 20 7946 0958', expected: '+442079460958' },
+      { raw: '0044 20 7946 0958', expected: '+442079460958' },
+      { raw: '+1 555 234 5678', expected: '+15552345678' },
+      // Geçersiz / Desteklenmeyen (SQL -> NULL, TS -> '')
+      { raw: null, expected: null },
+      { raw: '', expected: null },
+      { raw: '   ', expected: null },
+      { raw: 'not-a-phone', expected: null },
+      { raw: '1234567', expected: null },
+      { raw: '5559100002', expected: null },
+      { raw: '+90 0555 123 4567', expected: null },
+      { raw: '0555123', expected: null },
+      { raw: '0555123456789', expected: null },
+      { raw: '+90 555 ABC 0002', expected: null },
+      { raw: '++905559100002', expected: null },
+      { raw: '+123456', expected: null },
+      { raw: '+90-555-910-0002#123', expected: null },
+    ];
+
+    for (const tc of testCases) {
+      const sqlRes = (await db.query('SELECT public.normalize_public_booking_phone($1) AS res', [tc.raw])).rows[0].res;
+      const tsRes = normalizePublicBookingPhone(tc.raw);
+      const tsParsed = parsePublicBookingPhone(tc.raw);
+
+      assert.strictEqual(
+        sqlRes,
+        tc.expected,
+        `SQL normalize_public_booking_phone for "${tc.raw}" expected "${tc.expected}", got "${sqlRes}"`
+      );
+      assert.strictEqual(
+        tsRes,
+        tc.expected || '',
+        `TS normalizePublicBookingPhone for "${tc.raw}" expected "${tc.expected || ''}", got "${tsRes}"`
+      );
+      if (tc.expected) {
+        assert.strictEqual(tsParsed.valid, true);
+        assert.strictEqual(tsParsed.canonical, tc.expected);
+      } else {
+        assert.strictEqual(tsParsed.valid, false);
+        assert.strictEqual(tsParsed.canonical, '');
+      }
+    }
+  });
+
+  await runAsyncTest('3.16. [MAT-02] Çoklu Bağlantı PG (OTP Alias Normalizasyonu, Eşzamanlı Cooldown Koruması ve Tenant İzolasyonu)', async () => {
+    const db = await getDisposablePgEngine();
+
+    // 6 farklı TR telefon alias'ı (hepsi +90 555 950 0001 için)
+    const phoneAliases = [
+      '+90 555 950 0001',
+      '+90-555-950-0001',
+      '0555 950 00 01',
+      '0 (555) 950-00-01',
+      '00905559500001',
+      '905559500001',
+    ];
+
+    const otpHash = crypto.createHash('sha256').update('951753', 'utf8').digest('hex');
+    const conns = await openIndependentPgConnections(7);
+    try {
+      // 6 bağlantı salon-alfa için eşzamanlı çağrı yapar
+      const promises = conns.slice(0, 6).map(async (c, idx) => {
+        await c.query('SET ROLE anon');
+        try {
+          const q = await c.query(`
+            SELECT public.request_public_booking_otp(
+              p_slug := 'salon-alfa',
+              p_customer_phone := $1,
+              p_client_fingerprint := $2
+            ) AS res;
+          `, [phoneAliases[idx], `fp_otp_alias_${idx}`]);
+          return { tenant: 'alfa', res: q.rows[0].res };
+        } finally {
+          await c.query('RESET ROLE').catch(() => {});
+        }
+      });
+
+      // 7. bağlantı salon-beta (Tenant B) için aynı numarayla çağrı yapar
+      promises.push((async () => {
+        const c = conns[6];
+        await c.query('SET ROLE anon');
+        try {
+          const q = await c.query(`
+            SELECT public.request_public_booking_otp(
+              p_slug := 'salon-beta',
+              p_customer_phone := '+90 555 950 0001',
+              p_client_fingerprint := 'fp_beta_otp'
+            ) AS res;
+          `);
+          return { tenant: 'beta', res: q.rows[0].res };
+        } finally {
+          await c.query('RESET ROLE').catch(() => {});
+        }
+      })());
+
+      const results = await Promise.all(promises);
+      const alfaResults = results.filter(r => r.tenant === 'alfa');
+      const betaResult = results.find(r => r.tenant === 'beta');
+
+      const alfaSuccesses = alfaResults.filter(r => r.res.success === true);
+      const alfaRateLimited = alfaResults.filter(r => r.res.success === false && r.res.reason_code === 'otp_rate_limited');
+
+      assert.strictEqual(alfaSuccesses.length, 1, 'Tenant A için 6 eşzamanlı alias çağrısından tam 1 tanesi başarılı olmalıdır');
+      assert.strictEqual(alfaRateLimited.length, 5, 'Kalan 5 alias çağrısı otp_rate_limited almalıdır');
+      assert.strictEqual(betaResult.res.success, true, 'Tenant B aynı numarayla izole ve başarılı olmalıdır');
+
+      // Tenant A challenge ve outbox kanonik numara ile mi kaydedildi?
+      const chalRow = await db.query(
+        "SELECT id, customer_phone, status FROM public.public_booking_otp_challenges WHERE customer_phone = '+905559500001' AND tenant_id = $1",
+        [tenantAId]
+      );
+      assert.strictEqual(chalRow.rows.length, 1, 'Kanonik telefon ile tam 1 challenge kaydedilmelidir');
+      assert.strictEqual(chalRow.rows[0].customer_phone, '+905559500001');
+
+      const outboxRow = await db.query(
+        "SELECT recipient, delivery_mode, metadata FROM public.communication_outbox WHERE recipient = '+905559500001' AND tenant_id = $1",
+        [tenantAId]
+      );
+      assert.strictEqual(outboxRow.rows.length, 1, 'Kanonik recipient ile tam 1 outbox kaydı olmalıdır');
+      assert.strictEqual(outboxRow.rows[0].delivery_mode, 'synthetic_outbox_only');
+      const generatedCode = outboxRow.rows[0].metadata?.synthetic_otp_code;
+      assert(generatedCode, 'Outbox kaydında sentetik OTP kodu bulunmalıdır');
+
+      const challengeId = alfaSuccesses[0].res.challengeId || alfaSuccesses[0].res.challenge_id;
+
+      // Farklı bir telefonla doğrulama -> phone_mismatch
+      const mismatchVer = (await db.query(`
+        SELECT public.verify_public_booking_otp('salon-alfa', $1, $2, '+90 555 950 0002') AS res;
+      `, [challengeId, generatedCode])).rows[0].res;
+      assert.strictEqual(mismatchVer.success, false);
+      assert.strictEqual(mismatchVer.reason_code, 'phone_mismatch');
+
+      // Başka bir alias biçimiyle doğrulama ('0555 950 00 01') -> başarılı olmalı!
+      const aliasVer = (await db.query(`
+        SELECT public.verify_public_booking_otp('salon-alfa', $1, $2, '0555 950 00 01') AS res;
+      `, [challengeId, generatedCode])).rows[0].res;
+      assert.strictEqual(aliasVer.success, true);
+      assert(aliasVer.verification_token, 'Doğrulama tokenı üretilmelidir');
+    } finally {
+      await closeIndependentPgConnections(conns);
+    }
+  });
+
+  await runAsyncTest('3.17. [MAT-03] Çoklu Bağlantı PG (Rate-Limit Alias Burst=5, Günlük=3 ve Duplicate Engeli)', async () => {
+    const db = await getDisposablePgEngine();
+
+    // İkinci bir servis ekleyelim (farklı hizmet için)
+    const extraSrv = (await db.query(`
+      INSERT INTO public.services (tenant_id, name, duration_minutes, active)
+      VALUES ($1, 'Masaj MAT3', 45, true)
+      RETURNING id;
+    `, [tenantConcId])).rows[0].id;
+
+    // A. Burst=5 Sınırı: 8 bağımsız bağlantı farklı alias'larla aynı anda çağırır
+    const burstAliases = [
+      '+90 555 960 0001',
+      '+90-555-960-0001',
+      '0555 960 00 01',
+      '0 (555) 960-00-01',
+      '00905559600001',
+      '905559600001',
+      '+90 555 960 0001',
+      '05559600001',
+    ];
+
+    const burstConns = await openIndependentPgConnections(8);
+    try {
+      const burstResults = await Promise.all(burstConns.map(async (c, idx) => {
+        await c.query('SET ROLE anon');
+        try {
+          const staffId = idx % 2 === 0 ? staffConc1Id : staffConc2Id;
+          const dateStr = `2027-02-${String(10 + idx).padStart(2, '0')}`;
+          const q = await c.query(`
+            SELECT public.create_public_booking(
+              'salon-conc-rl', $1::uuid, $2::uuid, $3::date, '10:00'::time,
+              $4, $5, $6, true, false, false, $7, $8::uuid, NULL, $9
+            ) AS res;
+          `, [
+            serviceConcId,
+            staffId,
+            dateStr,
+            `Alias Burst ${idx}`,
+            `ab${idx}@test.com`,
+            burstAliases[idx],
+            `idem_mat3_burst_${idx}`,
+            branchConcId,
+            `fp_mat3_${idx}`,
+          ]);
+          return q.rows[0].res;
+        } finally {
+          await c.query('RESET ROLE').catch(() => {});
+        }
+      }));
+
+      const oks = burstResults.filter(r => r.success === true);
+      const blocked = burstResults.filter(
+        r => r.success === false && r.reason_code === 'rate_limit_exceeded' && r.detail === 'phone_burst_limit_reached'
+      );
+      assert.strictEqual(oks.length, 5, 'Eşzamanlı 8 alias çağrısından tam 5 tanesi burst sınırından geçmelidir');
+      assert.strictEqual(blocked.length, 3, 'Kalan 3 alias çağrısı phone_burst_limit_reached ile engellenmelidir');
+    } finally {
+      await closeIndependentPgConnections(burstConns);
+    }
+
+    // B. Günlük Limit=3 ve Aynı Gün Duplicate Engeli
+    // 1. Randevu: '0555 960 00 02' ile 2027-03-01 tarihinde serviceConcId
+    const res1 = (await db.query(`
+      SELECT public.create_public_booking(
+        'salon-conc-rl', $1::uuid, $2::uuid, '2027-03-01'::date, '09:00'::time,
+        'Daily 1', 'd1@test.com', '0555 960 00 02', true, false, false,
+        'idem_mat3_d1', $3::uuid, NULL, 'fp_mat3_d1'
+      ) AS res;
+    `, [serviceConcId, staffConc1Id, branchConcId])).rows[0].res;
+    assert.strictEqual(res1.success, true);
+
+    // 2. Randevu (Aynı gün aynı hizmet): '+90-555-960-0002' ile aynı tarihte serviceConcId -> duplicate_booking_same_day
+    const resDup = (await db.query(`
+      SELECT public.create_public_booking(
+        'salon-conc-rl', $1::uuid, $2::uuid, '2027-03-01'::date, '11:00'::time,
+        'Daily Dup', 'ddup@test.com', '+90-555-960-0002', true, false, false,
+        'idem_mat3_ddup', $3::uuid, NULL, 'fp_mat3_ddup'
+      ) AS res;
+    `, [serviceConcId, staffConc2Id, branchConcId])).rows[0].res;
+    assert.strictEqual(resDup.success, false);
+    assert.strictEqual(resDup.reason_code, 'duplicate_booking_same_day', 'Farklı alias kullansa da aynı gün aynı hizmet engellenmelidir');
+
+    // 2. Geçerli Randevu (Aynı gün farklı hizmet): '905559600002' ile extraSrv
+    const res2 = (await db.query(`
+      SELECT public.create_public_booking(
+        'salon-conc-rl', $1::uuid, $2::uuid, '2027-03-01'::date, '12:00'::time,
+        'Daily 2', 'd2@test.com', '905559600002', true, false, false,
+        'idem_mat3_d2', $3::uuid, NULL, 'fp_mat3_d2'
+      ) AS res;
+    `, [extraSrv, staffConc1Id, branchConcId])).rows[0].res;
+    assert.strictEqual(res2.success, true);
+
+    // 3. Geçerli Randevu (Farklı tarih veya 3. randevu için başka hizmet): Başka servis oluşturalım
+    const srv3 = (await db.query(`
+      INSERT INTO public.services (tenant_id, name, duration_minutes, active)
+      VALUES ($1, 'Cilt MAT3', 45, true) RETURNING id;
+    `, [tenantConcId])).rows[0].id;
+    const res3 = (await db.query(`
+      SELECT public.create_public_booking(
+        'salon-conc-rl', $1::uuid, $2::uuid, '2027-03-01'::date, '14:00'::time,
+        'Daily 3', 'd3@test.com', '0 (555) 960-00-02', true, false, false,
+        'idem_mat3_d3', $3::uuid, NULL, 'fp_mat3_d3'
+      ) AS res;
+    `, [srv3, staffConc2Id, branchConcId])).rows[0].res;
+    assert.strictEqual(res3.success, true);
+
+    // 4. Randevu (Aynı gün 4. randevu): daily_appointment_limit_reached
+    const srv4 = (await db.query(`
+      INSERT INTO public.services (tenant_id, name, duration_minutes, active)
+      VALUES ($1, 'Makyaj MAT3', 45, true) RETURNING id;
+    `, [tenantConcId])).rows[0].id;
+    const res4 = (await db.query(`
+      SELECT public.create_public_booking(
+        'salon-conc-rl', $1::uuid, $2::uuid, '2027-03-01'::date, '16:00'::time,
+        'Daily 4', 'd4@test.com', '+90 555 960 0002', true, false, false,
+        'idem_mat3_d4', $3::uuid, NULL, 'fp_mat3_d4'
+      ) AS res;
+    `, [srv4, staffConc1Id, branchConcId])).rows[0].res;
+    assert.strictEqual(res4.success, false);
+    assert.strictEqual(res4.reason_code, 'rate_limit_exceeded');
+    assert.strictEqual(res4.detail, 'daily_appointment_limit_reached', 'Günde 3 randevu sınırı aliaslar üzerinden de korunmalıdır');
+  });
+
+  await runAsyncTest('3.18. [MAT-04] Çoklu Bağlantı PG + TS (Geçersiz Telefon Reddi: invalid_phone)', async () => {
+    const db = await getDisposablePgEngine();
+
+    const invalidPhones = [
+      'not-a-phone',
+      '5559100002',
+      '+90 0555 123 4567',
+      '0555123',
+      '++905551234567',
+    ];
+
+    // Kayıt sayılarını önceden alalım
+    const initAppts = parseInt((await db.query('SELECT count(*) FROM public.appointments')).rows[0].count, 10);
+    const initChals = parseInt((await db.query('SELECT count(*) FROM public.public_booking_otp_challenges')).rows[0].count, 10);
+    const initOutbox = parseInt((await db.query('SELECT count(*) FROM public.communication_outbox')).rows[0].count, 10);
+    const initEvents = parseInt((await db.query('SELECT count(*) FROM public.public_booking_rate_limit_events')).rows[0].count, 10);
+
+    for (const badPhone of invalidPhones) {
+      // 1. request_public_booking_otp
+      const reqRes = (await db.query(`
+        SELECT public.request_public_booking_otp('salon-alfa', $1, 'fp_bad', 'dummy_hash') AS res;
+      `, [badPhone])).rows[0].res;
+      assert.strictEqual(reqRes.success, false);
+      assert.strictEqual(reqRes.reason_code, 'invalid_phone', `request_public_booking_otp should reject "${badPhone}"`);
+
+      // 2. verify_public_booking_otp
+      const verRes = (await db.query(`
+        SELECT public.verify_public_booking_otp('salon-alfa', '00000000-0000-0000-0000-000000000000'::uuid, '123456', $1) AS res;
+      `, [badPhone])).rows[0].res;
+      assert.strictEqual(verRes.success, false);
+      assert.strictEqual(verRes.reason_code, 'invalid_phone', `verify_public_booking_otp should reject "${badPhone}"`);
+
+      // 3. create_public_booking
+      const createRes = (await db.query(`
+        SELECT public.create_public_booking(
+          'salon-conc-rl', $1::uuid, $2::uuid, '2027-06-01'::date, '10:00'::time,
+          'Bad Phone', 'bad@test.com', $3, true, false, false,
+          $4, $5::uuid, NULL, 'fp_bad'
+        ) AS res;
+      `, [serviceConcId, staffConc1Id, badPhone, `idem_bad_${badPhone}`, branchConcId])).rows[0].res;
+      assert.strictEqual(createRes.success, false);
+      assert.strictEqual(createRes.reason_code, 'invalid_phone', `create_public_booking should reject "${badPhone}"`);
+
+      // 4. evaluate_and_record_public_booking_rate_limit
+      const rlRes = (await db.query(`
+        SELECT public.evaluate_and_record_public_booking_rate_limit(
+          $1::uuid, $2, 'fp_bad', $3::uuid, '2027-06-01'::date, 'bad@test.com'
+        ) AS res;
+      `, [tenantConcId, badPhone, serviceConcId])).rows[0].res;
+      assert.strictEqual(rlRes.allowed, false);
+      assert.strictEqual(rlRes.reason_code, 'invalid_phone', `evaluate_and_record should reject "${badPhone}"`);
+
+      // 5. TS publicBookingOtpService
+      const tsReq = await publicBookingOtpService.requestOtp({ slug: 'salon-alfa', phone: badPhone, syntheticOtp: '123456' });
+      assert.strictEqual(tsReq.success, false);
+      assert.strictEqual(tsReq.reasonCode, 'invalid_phone');
+
+      const tsVer = await publicBookingOtpService.verifyOtp({
+        slug: 'salon-alfa',
+        challengeId: '00000000-0000-0000-0000-000000000000',
+        otpCode: '123456',
+        phone: badPhone,
+      });
+      assert.strictEqual(tsVer.success, false);
+      assert.strictEqual(tsVer.reasonCode, 'invalid_phone');
+
+      // 6. TS bookingAbuseProtectionService
+      const tsBlock = await bookingAbuseProtectionService.shouldBlockBooking({
+        tenantId: 't_bad',
+        phone: badPhone,
+        email: 'bad@test.com',
+        clientFingerprint: 'fp_bad',
+      });
+      assert.strictEqual(tsBlock.block, true);
+      assert.strictEqual(tsBlock.reasonCode, 'invalid_phone');
+    }
+
+    // Hiçbir kayıt eklenmemeli!
+    const postAppts = parseInt((await db.query('SELECT count(*) FROM public.appointments')).rows[0].count, 10);
+    const postChals = parseInt((await db.query('SELECT count(*) FROM public.public_booking_otp_challenges')).rows[0].count, 10);
+    const postOutbox = parseInt((await db.query('SELECT count(*) FROM public.communication_outbox')).rows[0].count, 10);
+    const postEvents = parseInt((await db.query('SELECT count(*) FROM public.public_booking_rate_limit_events')).rows[0].count, 10);
+
+    assert.strictEqual(postAppts, initAppts, 'Geçersiz telefon çağrılarında 0 randevu oluşmalıdır');
+    assert.strictEqual(postChals, initChals, 'Geçersiz telefon çağrılarında 0 challenge oluşmalıdır');
+    assert.strictEqual(postOutbox, initOutbox, 'Geçersiz telefon çağrılarında 0 outbox oluşmalıdır');
+    assert.strictEqual(postEvents, initEvents, 'Geçersiz telefon çağrılarında 0 rate limit eventi oluşmalıdır');
+  });
+
+  await runAsyncTest('3.19. [MAT-05] PG + TS (require_otp_for_booking = true İken Boş/NULL Telefon Reddi: invalid_phone)', async () => {
+    const db = await getDisposablePgEngine();
+
+    // salon-alfa kiracısında require_otp_for_booking = true yapalım
+    await db.query("UPDATE public.tenants SET require_otp_for_booking = true WHERE slug = 'salon-alfa'");
+    try {
+      // 1. Boş string telefon (15 parametre)
+      const resEmpty = (await db.query(`
+        SELECT public.create_public_booking(
+          'salon-alfa', $1::uuid, $2::uuid, '2027-07-01'::date, '10:00'::time,
+          'No Phone OTP', 'nophone@test.com', '', true, false, false,
+          'idem_mat5_empty', $3::uuid, 'dummy_token', 'fp_mat5'
+        ) AS res;
+      `, [serviceAId, staffAId, branchAId])).rows[0].res;
+      assert.strictEqual(resEmpty.success, false);
+      assert.strictEqual(resEmpty.reason_code, 'invalid_phone', 'OTP zorunlu iken boş telefon invalid_phone almalıdır');
+
+      // 2. NULL telefon (15 parametre)
+      const resNull = (await db.query(`
+        SELECT public.create_public_booking(
+          'salon-alfa', $1::uuid, $2::uuid, '2027-07-01'::date, '10:00'::time,
+          'Null Phone OTP', 'nullphone@test.com', NULL, true, false, false,
+          'idem_mat5_null', $3::uuid, 'dummy_token', 'fp_mat5'
+        ) AS res;
+      `, [serviceAId, staffAId, branchAId])).rows[0].res;
+      assert.strictEqual(resNull.success, false);
+      assert.strictEqual(resNull.reason_code, 'invalid_phone', 'OTP zorunlu iken NULL telefon invalid_phone almalıdır');
+
+      // 3. 13 parametreli eski/legacy imza ile boş telefon
+      const resLegacy = (await db.query(`
+        SELECT public.create_public_booking(
+          'salon-alfa', $1::uuid, $2::uuid, '2027-07-01'::date, '10:00'::time,
+          'Legacy No Phone', 'legacynophone@test.com', '', true, false, false,
+          'idem_mat5_legacy', $3::uuid
+        ) AS res;
+      `, [serviceAId, staffAId, branchAId])).rows[0].res;
+      assert.strictEqual(resLegacy.success, false);
+      assert.strictEqual(resLegacy.reason_code, 'invalid_phone', '13 parametreli imza da OTP zorunlu iken boş telefonu atlayamaz');
+
+      // 4. TS LocalBookingRepository doğrulaması
+      const restoreLS = installNodeLocalStorageShim();
+      try {
+        const { LocalBookingRepository } = await import('../services/repositories/localBookingRepository.ts');
+        const { appointmentSelfServiceService } = await import('../services/appointmentSelfServiceService.ts');
+        const repo = new LocalBookingRepository();
+        localStorage.setItem('lari:salon-otp-mat5:appointments_seeded', 'true');
+        appointmentSelfServiceService.saveBookingPolicy('salon-otp-mat5', { requireOtpForBooking: true });
+
+        const tsRes = await repo.createPublicBooking({
+          slug: 'salon-otp-mat5',
+          serviceId: 'srv_1',
+          staffId: 'staff_1',
+          appointmentDate: '2027-07-01',
+          appointmentTime: '10:00',
+          customerName: 'TS Boş Tel',
+          customerEmail: 'tsempty@test.com',
+          customerPhone: '',
+          requiredConsent: true,
+        });
+        assert.strictEqual(tsRes.success, false);
+        assert.strictEqual(tsRes.reasonCode, 'invalid_phone', 'TS repo OTP zorunlu iken boş telefonu invalid_phone ile reddetmelidir');
+      } finally {
+        restoreLS();
+      }
+    } finally {
+      await db.query("UPDATE public.tenants SET require_otp_for_booking = false WHERE slug = 'salon-alfa'");
+    }
+  });
+
+  await runAsyncTest('3.20. [MAT-06] Çoklu Bağlantı PG (phone="", fp=NULL, Başlıksız Fail-Closed anonymous_rate_limit_boundary_missing)', async () => {
+    const conns = await openIndependentPgConnections(5);
+    try {
+      const results = await Promise.all(conns.map(async (c, idx) => {
+        await c.query('SET ROLE anon');
+        try {
+          const staffId = idx % 2 === 0 ? staffConc1Id : staffConc2Id;
+          const dateStr = `2027-08-${String(10 + idx).padStart(2, '0')}`;
+          const q = await c.query(`
+            SELECT public.create_public_booking(
+              'salon-conc-rl', $1::uuid, $2::uuid, $3::date, '10:00'::time,
+              $4, $5, '', true, false, false, $6, $7::uuid, NULL, NULL
+            ) AS res;
+          `, [
+            serviceConcId,
+            staffId,
+            dateStr,
+            `Anon Sybil ${idx}`,
+            `anonsybil${idx}@test.com`,
+            `idem_mat6_${idx}`,
+            branchConcId,
+          ]);
+          return q.rows[0].res;
+        } finally {
+          await c.query('RESET ROLE').catch(() => {});
+        }
+      }));
+
+      assert.strictEqual(results.length, 5);
+      for (let i = 0; i < 5; i++) {
+        const r = results[i];
+        assert.strictEqual(r.success, false, `Anonim başlıksız istek ${i} başarısız olmalıdır`);
+        assert.strictEqual(r.reason_code, 'rate_limit_exceeded', `Anonim başlıksız istek ${i} rate_limit_exceeded almalıdır`);
+        assert.strictEqual(r.detail, 'anonymous_rate_limit_boundary_missing', `Anonim başlıksız istek ${i} anonymous_rate_limit_boundary_missing almalıdır`);
+      }
+    } finally {
+      await closeIndependentPgConnections(conns);
+    }
+  });
+
+  await runAsyncTest('3.21. [MAT-07] Çoklu Bağlantı PG (phone="", fp=NULL + Güvenilir IP Header + Email Burst/Rotasyon & Tenant İzolasyonu)', async () => {
+    const db = await getDisposablePgEngine();
+
+    // A. Aynı E-posta Burst=5 Sınırı + Tenant B İzolasyonu
+    const emailConns = await openIndependentPgConnections(9);
+    try {
+      const emailPromises = emailConns.slice(0, 8).map(async (c, idx) => {
+        await c.query("SET request.headers = '{\"x-real-ip\": \"203.0.113.50\"}'");
+        await c.query('SET ROLE anon');
+        try {
+          const staffId = idx % 2 === 0 ? staffConc1Id : staffConc2Id;
+          const dateStr = `2027-09-${String(10 + idx).padStart(2, '0')}`;
+          const q = await c.query(`
+            SELECT public.create_public_booking(
+              'salon-conc-rl', $1::uuid, $2::uuid, $3::date, '11:00'::time,
+              $4, 'burst_email@test.com', '', true, false, false,
+              $5, $6::uuid, NULL, NULL
+            ) AS res;
+          `, [
+            serviceConcId,
+            staffId,
+            dateStr,
+            `Email Burst ${idx}`,
+            `idem_mat7_eb_${idx}`,
+            branchConcId,
+          ]);
+          return { tenant: 'conc', res: q.rows[0].res };
+        } finally {
+          await c.query('RESET ROLE').catch(() => {});
+        }
+      });
+
+      // Tenant B aynı e-posta ve aynı IP ile çağrı yapar
+      emailPromises.push((async () => {
+        const c = emailConns[8];
+        const bFix = (await db.query(`
+          SELECT
+            (SELECT id FROM public.branches WHERE tenant_id = $1 AND is_active = true LIMIT 1) AS branch_id,
+            (SELECT id FROM public.services WHERE tenant_id = $1 AND active = true LIMIT 1) AS service_id,
+            (SELECT id FROM public.staff WHERE tenant_id = $1 AND active = true LIMIT 1) AS staff_id
+        `, [tenantBId])).rows[0];
+
+        await c.query("SET request.headers = '{\"x-real-ip\": \"203.0.113.50\"}'");
+        await c.query('SET ROLE anon');
+        try {
+          const q = await c.query(`
+            SELECT public.create_public_booking(
+              'salon-beta', $1::uuid, $2::uuid, '2027-09-25'::date, '14:00'::time,
+              'Beta Email Iso', 'burst_email@test.com', '', true, false, false,
+              'idem_mat7_b_iso', $3::uuid, NULL, NULL
+            ) AS res;
+          `, [bFix.service_id, bFix.staff_id, bFix.branch_id]);
+          return { tenant: 'beta', res: q.rows[0].res };
+        } finally {
+          await c.query('RESET ROLE').catch(() => {});
+        }
+      })());
+
+      const emailOuts = await Promise.all(emailPromises);
+      const concOks = emailOuts.filter(x => x.tenant === 'conc' && x.res.success === true);
+      const concBlocked = emailOuts.filter(
+        x => x.tenant === 'conc' && x.res.success === false && x.res.reason_code === 'rate_limit_exceeded' && x.res.detail === 'email_burst_limit_reached'
+      );
+      const betaOut = emailOuts.find(x => x.tenant === 'beta');
+
+      assert.strictEqual(concOks.length, 5, 'Eşzamanlı 8 çağrıdan tam 5 tanesi email burst sınırından geçmelidir');
+      assert.strictEqual(concBlocked.length, 3, 'Kalan 3 çağrı email_burst_limit_reached almalıdır');
+      assert.strictEqual(betaOut.res.success, true, 'Tenant B aynı e-posta ve IP ile başarılı olmalıdır (izolasyon)');
+    } finally {
+      await closeIndependentPgConnections(emailConns);
+    }
+
+    // B. E-posta Rotasyonu (Sybil) + Sahte X-Forwarded-For Enjeksiyonu (14 Bağlantı)
+    // Sol taraftaki sahte IP değişse de en sağdaki güvenilir IP 203.0.113.51 sabittir
+    const ipConns = await openIndependentPgConnections(14);
+    try {
+      const ipPromises = ipConns.map(async (c, idx) => {
+        const fakeHeader = JSON.stringify({
+          'x-forwarded-for': `198.51.100.${idx + 1}, 203.0.113.51`,
+        });
+        await c.query(`SET request.headers = '${fakeHeader}'`);
+        await c.query('SET ROLE anon');
+        try {
+          const staffId = idx % 2 === 0 ? staffConc1Id : staffConc2Id;
+          const dateStr = `2027-10-${String(10 + idx).padStart(2, '0')}`;
+          const q = await c.query(`
+            SELECT public.create_public_booking(
+              'salon-conc-rl', $1::uuid, $2::uuid, $3::date, '15:00'::time,
+              $4, $5, '', true, false, false,
+              $6, $7::uuid, NULL, NULL
+            ) AS res;
+          `, [
+            serviceConcId,
+            staffId,
+            dateStr,
+            `Sybil Rot ${idx}`,
+            `sybil_rot_${idx}@test.com`,
+            `idem_mat7_sybil_${idx}`,
+            branchConcId,
+          ]);
+          return q.rows[0].res;
+        } finally {
+          await c.query('RESET ROLE').catch(() => {});
+        }
+      });
+
+      const ipOuts = await Promise.all(ipPromises);
+      const ipOks = ipOuts.filter(r => r.success === true);
+      const ipBlocked = ipOuts.filter(
+        r => r.success === false && r.reason_code === 'rate_limit_exceeded' && r.detail === 'ip_burst_limit_reached'
+      );
+
+      assert.strictEqual(ipOks.length, 10, 'Sağdaki IP sabitken e-posta rotasyonunda tam 10 istek geçmelidir (IP burst=10)');
+      assert.strictEqual(ipBlocked.length, 4, 'Kalan 4 istek sahte XFF sol IP rotasyonuna rağmen ip_burst_limit_reached almalıdır');
+    } finally {
+      await closeIndependentPgConnections(ipConns);
+    }
+
+    // C. E-posta Günlük Limit=3 ve Aynı Gün Duplicate Engeli (phone="")
+    const cSingle = await embeddedPg.getPgClient('postgres', '127.0.0.1');
+    await cSingle.connect();
+    try {
+      await cSingle.query("SET request.headers = '{\"x-real-ip\": \"203.0.113.52\"}'");
+
+      // 1. Randevu
+      const r1 = (await cSingle.query(`
+        SELECT public.create_public_booking(
+          'salon-conc-rl', $1::uuid, $2::uuid, '2027-11-01'::date, '09:00'::time,
+          'Email Daily 1', 'email_daily_check@test.com', '', true, false, false,
+          'idem_mat7_d1', $3::uuid, NULL, NULL
+        ) AS res;
+      `, [serviceConcId, staffConc1Id, branchConcId])).rows[0].res;
+      assert.strictEqual(r1.success, true);
+
+      // 2. Randevu (Aynı gün aynı hizmet) -> duplicate_booking_same_day
+      const rDup = (await cSingle.query(`
+        SELECT public.create_public_booking(
+          'salon-conc-rl', $1::uuid, $2::uuid, '2027-11-01'::date, '11:00'::time,
+          'Email Daily Dup', 'email_daily_check@test.com', '', true, false, false,
+          'idem_mat7_ddup', $3::uuid, NULL, NULL
+        ) AS res;
+      `, [serviceConcId, staffConc2Id, branchConcId])).rows[0].res;
+      assert.strictEqual(rDup.success, false);
+      assert.strictEqual(rDup.reason_code, 'duplicate_booking_same_day');
+
+      // 2. Geçerli Randevu (Aynı gün farklı hizmet)
+      const extraSrv2 = (await db.query(`
+        INSERT INTO public.services (tenant_id, name, duration_minutes, active)
+        VALUES ($1, 'Ekstra MAT7', 30, true) RETURNING id;
+      `, [tenantConcId])).rows[0].id;
+      const r2 = (await cSingle.query(`
+        SELECT public.create_public_booking(
+          'salon-conc-rl', $1::uuid, $2::uuid, '2027-11-01'::date, '12:00'::time,
+          'Email Daily 2', 'email_daily_check@test.com', '', true, false, false,
+          'idem_mat7_d2', $3::uuid, NULL, NULL
+        ) AS res;
+      `, [extraSrv2, staffConc1Id, branchConcId])).rows[0].res;
+      assert.strictEqual(r2.success, true);
+
+      // 3. Geçerli Randevu (Aynı gün 3. hizmet)
+      const extraSrv3 = (await db.query(`
+        INSERT INTO public.services (tenant_id, name, duration_minutes, active)
+        VALUES ($1, 'Ekstra MAT7 3', 30, true) RETURNING id;
+      `, [tenantConcId])).rows[0].id;
+      const r3 = (await cSingle.query(`
+        SELECT public.create_public_booking(
+          'salon-conc-rl', $1::uuid, $2::uuid, '2027-11-01'::date, '14:00'::time,
+          'Email Daily 3', 'email_daily_check@test.com', '', true, false, false,
+          'idem_mat7_d3', $3::uuid, NULL, NULL
+        ) AS res;
+      `, [extraSrv3, staffConc2Id, branchConcId])).rows[0].res;
+      assert.strictEqual(r3.success, true);
+
+      // 4. Randevu (Aynı gün 4. randevu) -> daily_appointment_limit_reached
+      const extraSrv4 = (await db.query(`
+        INSERT INTO public.services (tenant_id, name, duration_minutes, active)
+        VALUES ($1, 'Ekstra MAT7 4', 30, true) RETURNING id;
+      `, [tenantConcId])).rows[0].id;
+      const r4 = (await cSingle.query(`
+        SELECT public.create_public_booking(
+          'salon-conc-rl', $1::uuid, $2::uuid, '2027-11-01'::date, '16:00'::time,
+          'Email Daily 4', 'email_daily_check@test.com', '', true, false, false,
+          'idem_mat7_d4', $3::uuid, NULL, NULL
+        ) AS res;
+      `, [extraSrv4, staffConc1Id, branchConcId])).rows[0].res;
+      assert.strictEqual(r4.success, false);
+      assert.strictEqual(r4.reason_code, 'rate_limit_exceeded');
+      assert.strictEqual(r4.detail, 'daily_appointment_limit_reached');
+    } finally {
+      await cSingle.end().catch(() => {});
+    }
+  });
+
+  await runAsyncTest('3.22. [MAT-08] PG (phone="", fp=geçerli): Email Burst=5 ve Günlük=3 (Başlıksız / TCP Client)', async () => {
+    const db = await getDisposablePgEngine();
+
+    // İstemci telefon vermiyor, HTTP başlığı yok ama geçerli bir client_fingerprint sağlıyor
+    const fpTest = 'fp_valid_no_phone_mat8';
+    const emailTest = 'sybil_fp_mat8@test.com';
+
+    // 1. Aynı e-posta ile 6 istek: ilk 5'i geçmeli, 6.'sı email_burst_limit_reached almalı
+    const burstOuts = [];
+    for (let i = 0; i < 6; i++) {
+      const dateStr = `2027-12-${String(10 + i).padStart(2, '0')}`;
+      const q = await db.query(`
+        SELECT public.create_public_booking(
+          'salon-conc-rl', $1::uuid, $2::uuid, $3::date, '10:00'::time,
+          $4, $5, '', true, false, false,
+          $6, $7::uuid, NULL, $8
+        ) AS res;
+      `, [
+        serviceConcId,
+        staffConc1Id,
+        dateStr,
+        `FP NoPhone ${i}`,
+        emailTest,
+        `idem_mat8_burst_${i}`,
+        branchConcId,
+        fpTest,
+      ]);
+      burstOuts.push(q.rows[0].res);
+    }
+
+    const oks = burstOuts.filter(r => r.success === true);
+    const blocked = burstOuts.filter(
+      r => r.success === false && r.reason_code === 'rate_limit_exceeded' && r.detail === 'email_burst_limit_reached'
+    );
+    assert.strictEqual(oks.length, 5, 'Geçerli fingerprint varken de aynı e-posta burst=5 sınırına uymalıdır');
+    assert.strictEqual(blocked.length, 1, '6. istek email_burst_limit_reached almalıdır');
   });
 
 } finally {

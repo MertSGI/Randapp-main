@@ -2,11 +2,70 @@ import { BookingRepository, PublicBookingResult } from './types';
 import { Appointment, CustomerProfile, CustomerMemoryNote } from '../../types';
 import { dataProvider } from '../dataProvider';
 const normalizeEmail = (email?: string): string => email ? email.trim().toLowerCase() : '';
-const normalizePhone = (phone?: string): string => phone ? phone.replace(/[\s\-\(\)\+]/g, '') : '';
 import { LocalCatalogRepository } from './localCatalogRepository';
-import { publicBookingOtpService } from '../publicBookingOtpService';
+import { publicBookingOtpService, parsePublicBookingPhone, normalizePublicBookingPhone } from '../publicBookingOtpService';
+const normalizePhone = (phone?: string): string => normalizePublicBookingPhone(phone);
 
 const tenantBookingLocks = new Map<string, Promise<void>>();
+const LOCAL_BOOKING_POLICY_KEY_PREFIX = 'lari_tenant_booking_policies_';
+
+// Explicit default used ONLY when tenant booking policy is genuinely missing (never on corrupt JSON / read / loader failure).
+export const DEFAULT_LOCAL_BOOKING_OTP_POLICY = {
+  requireOtpForBooking: false,
+} as const;
+
+export type StrictStoredPolicyReadResult =
+  | { state: 'missing' }
+  | { state: 'present'; record: Record<string, unknown> }
+  | { state: 'corrupt' };
+
+export function readStrictStoredBookingPolicy(tenantId: string): StrictStoredPolicyReadResult {
+  if (typeof localStorage === 'undefined') {
+    return { state: 'missing' };
+  }
+  const storageKey = `${LOCAL_BOOKING_POLICY_KEY_PREFIX}${tenantId}`;
+  let rawStored: string | null = null;
+  try {
+    rawStored = localStorage.getItem(storageKey);
+  } catch {
+    return { state: 'corrupt' };
+  }
+
+  if (rawStored === null) {
+    return { state: 'missing' };
+  }
+  if (!rawStored.trim()) {
+    return { state: 'corrupt' };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawStored);
+  } catch {
+    return { state: 'corrupt' };
+  }
+
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { state: 'corrupt' };
+  }
+
+  const record = parsed as Record<string, unknown>;
+  if (
+    'requireOtpForBooking' in record &&
+    record.requireOtpForBooking !== undefined &&
+    typeof record.requireOtpForBooking !== 'boolean'
+  ) {
+    return { state: 'corrupt' };
+  }
+  if (
+    'spamProtectionEnabled' in record &&
+    record.spamProtectionEnabled !== undefined &&
+    typeof record.spamProtectionEnabled !== 'boolean'
+  ) {
+    return { state: 'corrupt' };
+  }
+  return { state: 'present', record };
+}
 
 async function withTenantBookingLock<T>(tenantId: string, work: () => Promise<T>): Promise<T> {
   const prev = tenantBookingLocks.get(tenantId) ?? Promise.resolve();
@@ -28,6 +87,46 @@ async function withTenantBookingLock<T>(tenantId: string, work: () => Promise<T>
 }
 
 export class LocalBookingRepository implements BookingRepository {
+  // Protected loader seam preserves existing dynamic import path without circular static imports while allowing fault injection in tests.
+  protected loadBookingPolicyModule = async () => import('../appointmentSelfServiceService');
+
+  private async resolveLocalOtpPolicy(
+    slug: string
+  ): Promise<{ ok: true; requireOtpForBooking: boolean } | { ok: false; reasonCode: 'temporary_failure' }> {
+    const stored = readStrictStoredBookingPolicy(slug);
+    if (stored.state === 'corrupt') {
+      return { ok: false, reasonCode: 'temporary_failure' };
+    }
+    if (stored.state === 'present' && 'requireOtpForBooking' in stored.record && stored.record.requireOtpForBooking !== undefined) {
+      return { ok: true, requireOtpForBooking: stored.record.requireOtpForBooking as boolean };
+    }
+
+    // Storage policy was absent (null) or did not explicitly specify requireOtpForBooking; consult dynamic policy loader fail-closed.
+    try {
+      const mod = await this.loadBookingPolicyModule();
+      const svc = mod?.appointmentSelfServiceService;
+      if (!svc || typeof svc.getBookingPolicy !== 'function') {
+        return { ok: false, reasonCode: 'temporary_failure' };
+      }
+      const dynPolicy: unknown = svc.getBookingPolicy(slug);
+      if (dynPolicy === null || typeof dynPolicy !== 'object' || Array.isArray(dynPolicy)) {
+        return { ok: false, reasonCode: 'temporary_failure' };
+      }
+      const dynRecord = dynPolicy as Record<string, unknown>;
+      if ('requireOtpForBooking' in dynRecord && dynRecord.requireOtpForBooking !== undefined) {
+        if (typeof dynRecord.requireOtpForBooking !== 'boolean') {
+          return { ok: false, reasonCode: 'temporary_failure' };
+        }
+        return { ok: true, requireOtpForBooking: dynRecord.requireOtpForBooking };
+      }
+      return {
+        ok: true,
+        requireOtpForBooking: DEFAULT_LOCAL_BOOKING_OTP_POLICY.requireOtpForBooking,
+      };
+    } catch {
+      return { ok: false, reasonCode: 'temporary_failure' };
+    }
+  }
   private getAppointmentsKey(tenantId: string) { return `lari:${tenantId}:appointments`; }
   private getCustomersKey(tenantId: string) { return `mock_tenant_customers_${tenantId}`; }
 
@@ -342,6 +441,29 @@ export class LocalBookingRepository implements BookingRepository {
       return { success: false, reasonCode: 'invalid_customer_data' };
     }
 
+    const phoneParsed = parsePublicBookingPhone(params.customerPhone);
+    if (params.customerPhone && params.customerPhone.trim()) {
+      if (!phoneParsed.valid) {
+        return { success: false, reasonCode: 'invalid_phone' };
+      }
+    }
+
+    // Check OTP policy for tenant fail-closed (FINDING-ADIM010-010: distinguish genuine missing policy vs corrupt/unreadable policy)
+    const policyRes = await this.resolveLocalOtpPolicy(params.slug);
+    if (!policyRes.ok) {
+      return { success: false, reasonCode: 'temporary_failure' };
+    }
+    const requireOtpForBooking = policyRes.requireOtpForBooking;
+
+    if (requireOtpForBooking) {
+      if (!phoneParsed.valid) {
+        return { success: false, reasonCode: 'invalid_phone' };
+      }
+      if (!params.otpVerificationToken || !params.otpVerificationToken.trim()) {
+        return { success: false, reasonCode: 'otp_required' };
+      }
+    }
+
     // Reserve OTP token synchronously BEFORE any await / appointment write so concurrent
     // duplicate submissions fail closed immediately.
     let reservedChallengeId: string | null = null;
@@ -349,7 +471,7 @@ export class LocalBookingRepository implements BookingRepository {
       const reservation = publicBookingOtpService.reserveVerificationTokenLocal(
         params.otpVerificationToken,
         params.slug,
-        params.customerPhone
+        phoneParsed.canonical || params.customerPhone
       );
       if (!('challengeId' in reservation)) {
         return { success: false, reasonCode: reservation.reasonCode };
@@ -364,7 +486,7 @@ export class LocalBookingRepository implements BookingRepository {
           userId: `cust_${Date.now()}`,
           user_name: params.customerName.trim(),
           user_email: params.customerEmail?.trim() || '',
-          phone: params.customerPhone?.trim() || '',
+          phone: phoneParsed.valid ? phoneParsed.canonical : (params.customerPhone?.trim() || ''),
           serviceId: params.serviceId,
           staffId: params.staffId,
           branchId: params.branchId,

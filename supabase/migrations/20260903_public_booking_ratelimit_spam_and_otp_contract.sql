@@ -23,15 +23,26 @@ CREATE TABLE IF NOT EXISTS public.public_booking_rate_limit_events (
     event_type TEXT NOT NULL,
     customer_phone TEXT,
     client_fingerprint TEXT,
+    customer_email TEXT,
+    client_ip TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     metadata JSONB DEFAULT '{}'::jsonb
 );
+
+ALTER TABLE public.public_booking_rate_limit_events ADD COLUMN IF NOT EXISTS customer_email TEXT;
+ALTER TABLE public.public_booking_rate_limit_events ADD COLUMN IF NOT EXISTS client_ip TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_pbrl_tenant_phone_time 
     ON public.public_booking_rate_limit_events (tenant_id, customer_phone, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_pbrl_tenant_fp_time 
     ON public.public_booking_rate_limit_events (tenant_id, client_fingerprint, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_pbrl_tenant_email_time 
+    ON public.public_booking_rate_limit_events (tenant_id, customer_email, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_pbrl_tenant_ip_time 
+    ON public.public_booking_rate_limit_events (tenant_id, client_ip, created_at DESC);
 
 ALTER TABLE public.public_booking_rate_limit_events ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.public_booking_rate_limit_events FROM PUBLIC, anon, authenticated;
@@ -85,13 +96,213 @@ CREATE POLICY "Service role access on public_booking_otp_challenges"
     USING (true)
     WITH CHECK (true);
 
--- 4. Internal Helper: evaluate_and_record_public_booking_rate_limit
+-- 4. Canonical E.164 Phone Normalization Helper
+CREATE OR REPLACE FUNCTION public.normalize_public_booking_phone(p_raw_phone text)
+RETURNS text
+LANGUAGE plpgsql
+IMMUTABLE
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_trimmed text;
+    v_compact text;
+    v_digits  text;
+BEGIN
+    IF p_raw_phone IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    v_trimmed := trim(p_raw_phone);
+    IF v_trimmed = '' THEN
+        RETURN NULL;
+    END IF;
+
+    -- Allowed characters: ASCII digits, whitespace, -, (, ), . and optional single leading +
+    IF v_trimmed !~ '^[+]?[0-9\s().-]+$' THEN
+        RETURN NULL;
+    END IF;
+
+    -- Remove whitespace and separator punctuation: \s, -, (, ), .
+    v_compact := regexp_replace(v_trimmed, '[\s().-]+', '', 'g');
+
+    IF v_compact LIKE '+%' THEN
+        v_digits := substr(v_compact, 2);
+        IF v_digits LIKE '90%' THEN
+            -- Turkey E.164: must be exact 12 digits (+90 followed by non-zero digit and 9 digits)
+            IF v_digits ~ '^90[1-9][0-9]{9}$' THEN
+                RETURN '+' || v_digits;
+            ELSE
+                RETURN NULL;
+            END IF;
+        ELSE
+            -- International E.164: 8-15 digits total, cannot start with 0
+            IF v_digits ~ '^[1-9][0-9]{7,14}$' THEN
+                RETURN '+' || v_digits;
+            ELSE
+                RETURN NULL;
+            END IF;
+        END IF;
+    ELSIF v_compact LIKE '00%' THEN
+        v_digits := substr(v_compact, 3);
+        IF v_digits LIKE '90%' THEN
+            IF v_digits ~ '^90[1-9][0-9]{9}$' THEN
+                RETURN '+90' || substr(v_digits, 3);
+            ELSE
+                RETURN NULL;
+            END IF;
+        ELSE
+            IF v_digits ~ '^[1-9][0-9]{7,14}$' THEN
+                RETURN '+' || v_digits;
+            ELSE
+                RETURN NULL;
+            END IF;
+        END IF;
+    ELSIF v_compact LIKE '0%' THEN
+        -- Turkey national prefix: exact 11 digits (0 followed by non-zero digit and 9 digits)
+        IF v_compact ~ '^0[1-9][0-9]{9}$' THEN
+            RETURN '+90' || substr(v_compact, 2);
+        ELSE
+            RETURN NULL;
+        END IF;
+    ELSIF v_compact LIKE '90%' THEN
+        -- Turkey without leading +: exact 12 digits
+        IF v_compact ~ '^90[1-9][0-9]{9}$' THEN
+            RETURN '+' || v_compact;
+        ELSE
+            RETURN NULL;
+        END IF;
+    ELSE
+        -- Ambiguous/unsupported local strings (5559100002, 1234567, 447700900123 without prefix, etc.)
+        RETURN NULL;
+    END IF;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.normalize_public_booking_phone(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.normalize_public_booking_phone(text) TO anon, authenticated, service_role;
+
+-- 4b. Trusted Server-side IP Resolution Helper
+CREATE OR REPLACE FUNCTION public.resolve_public_booking_client_ip()
+RETURNS text
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_raw_headers text;
+    v_headers     jsonb;
+    v_hdr_map     jsonb := '{}'::jsonb;
+    v_key         text;
+    v_val         text;
+    v_candidate   text := NULL;
+    v_xff         text := NULL;
+    v_parts       text[];
+    v_ip_text     text;
+BEGIN
+    BEGIN
+        v_raw_headers := current_setting('request.headers', true);
+        IF v_raw_headers IS NULL OR trim(v_raw_headers) = '' THEN
+            RETURN NULL;
+        END IF;
+        v_headers := v_raw_headers::jsonb;
+    EXCEPTION WHEN OTHERS THEN
+        RETURN NULL;
+    END;
+
+    IF jsonb_typeof(v_headers) != 'object' THEN
+        RETURN NULL;
+    END IF;
+
+    -- Build lowercased header map
+    FOR v_key, v_val IN SELECT key, value#>>'{}' FROM jsonb_each(v_headers)
+    LOOP
+        v_hdr_map := jsonb_set(v_hdr_map, ARRAY[lower(v_key)], to_jsonb(v_val));
+    END LOOP;
+
+    -- Header priority check:
+    -- 1. cf-connecting-ip
+    v_candidate := v_hdr_map->>'cf-connecting-ip';
+    IF v_candidate IS NOT NULL AND trim(v_candidate) != '' THEN
+        BEGIN
+            v_ip_text := host(trim(v_candidate)::inet);
+            IF v_ip_text IS NOT NULL THEN
+                RETURN v_ip_text;
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+        END;
+    END IF;
+
+    -- 2. true-client-ip
+    v_candidate := v_hdr_map->>'true-client-ip';
+    IF v_candidate IS NOT NULL AND trim(v_candidate) != '' THEN
+        BEGIN
+            v_ip_text := host(trim(v_candidate)::inet);
+            IF v_ip_text IS NOT NULL THEN
+                RETURN v_ip_text;
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+        END;
+    END IF;
+
+    -- 3. fly-client-ip
+    v_candidate := v_hdr_map->>'fly-client-ip';
+    IF v_candidate IS NOT NULL AND trim(v_candidate) != '' THEN
+        BEGIN
+            v_ip_text := host(trim(v_candidate)::inet);
+            IF v_ip_text IS NOT NULL THEN
+                RETURN v_ip_text;
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+        END;
+    END IF;
+
+    -- 4. x-real-ip
+    v_candidate := v_hdr_map->>'x-real-ip';
+    IF v_candidate IS NOT NULL AND trim(v_candidate) != '' THEN
+        BEGIN
+            v_ip_text := host(trim(v_candidate)::inet);
+            IF v_ip_text IS NOT NULL THEN
+                RETURN v_ip_text;
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+        END;
+    END IF;
+
+    -- 5. x-forwarded-for: take the RIGHTMOST item (last element)
+    v_xff := v_hdr_map->>'x-forwarded-for';
+    IF v_xff IS NOT NULL AND trim(v_xff) != '' THEN
+        v_parts := string_to_array(v_xff, ',');
+        IF array_length(v_parts, 1) > 0 THEN
+            v_candidate := trim(v_parts[array_length(v_parts, 1)]);
+            BEGIN
+                v_ip_text := host(v_candidate::inet);
+                IF v_ip_text IS NOT NULL THEN
+                    RETURN v_ip_text;
+                END IF;
+            EXCEPTION WHEN OTHERS THEN
+            END;
+        END IF;
+    END IF;
+
+    RETURN NULL;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.resolve_public_booking_client_ip() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.resolve_public_booking_client_ip() TO service_role;
+
+-- 4c. Internal Helper: evaluate_and_record_public_booking_rate_limit
+DROP FUNCTION IF EXISTS public.evaluate_and_record_public_booking_rate_limit(uuid, text, text, uuid, date);
+DROP FUNCTION IF EXISTS public.evaluate_and_record_public_booking_rate_limit(uuid, text, text, uuid, date, text);
+
 CREATE OR REPLACE FUNCTION public.evaluate_and_record_public_booking_rate_limit(
     p_tenant_id          uuid,
     p_customer_phone     text,
     p_client_fingerprint text DEFAULT NULL,
     p_service_id         uuid DEFAULT NULL,
-    p_appointment_date   date DEFAULT NULL
+    p_appointment_date   date DEFAULT NULL,
+    p_customer_email     text DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -100,12 +311,16 @@ SET search_path = pg_catalog, public, extensions
 AS $$
 DECLARE
     v_clean_phone       text;
+    v_clean_email       text;
     v_clean_fp          text;
-    v_phone_lock_key    bigint := NULL;
-    v_fp_lock_key       bigint := NULL;
+    v_server_ip         text;
+    v_lock_keys         bigint[] := '{}';
+    v_lock_key          bigint;
     v_eval_ts           timestamptz;
     v_phone_burst_count integer;
+    v_email_burst_count integer;
     v_fp_burst_count    integer;
+    v_ip_burst_count    integer;
     v_daily_appts_count integer;
     v_duplicate_exists  boolean;
 BEGIN
@@ -117,37 +332,69 @@ BEGIN
         );
     END IF;
 
-    v_clean_phone := regexp_replace(COALESCE(p_customer_phone, ''), '\s+', '', 'g');
-    v_clean_fp    := NULLIF(trim(COALESCE(p_client_fingerprint, '')), '');
+    IF p_customer_phone IS NOT NULL AND trim(p_customer_phone) != '' THEN
+        v_clean_phone := public.normalize_public_booking_phone(p_customer_phone);
+        IF v_clean_phone IS NULL THEN
+            RETURN jsonb_build_object(
+                'allowed', false,
+                'reason_code', 'invalid_phone',
+                'reasonCode', 'invalid_phone',
+                'detail', 'invalid_phone_format'
+            );
+        END IF;
+    ELSE
+        v_clean_phone := NULL;
+    END IF;
 
-    IF v_clean_phone != '' THEN
-        v_phone_lock_key := hashtextextended('rl_phone:' || p_tenant_id::text || ':' || v_clean_phone, 0);
+    v_clean_email := NULLIF(lower(trim(COALESCE(p_customer_email, ''))), '');
+    v_clean_fp    := NULLIF(trim(COALESCE(p_client_fingerprint, '')), '');
+    v_server_ip   := public.resolve_public_booking_client_ip();
+
+    IF v_clean_phone IS NULL THEN
+        IF v_clean_email IS NULL OR v_clean_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' THEN
+            RETURN jsonb_build_object(
+                'allowed', false,
+                'reason_code', 'invalid_customer_data',
+                'reasonCode', 'invalid_customer_data',
+                'detail', 'valid_email_required_when_phone_missing'
+            );
+        END IF;
+
+        IF v_clean_fp IS NULL AND v_server_ip IS NULL THEN
+            RETURN jsonb_build_object(
+                'allowed', false,
+                'reason_code', 'rate_limit_exceeded',
+                'reasonCode', 'rate_limit_exceeded',
+                'detail', 'anonymous_rate_limit_boundary_missing'
+            );
+        END IF;
+    END IF;
+
+    -- Collect non-null advisory lock keys
+    IF v_clean_phone IS NOT NULL THEN
+        v_lock_keys := array_append(v_lock_keys, hashtextextended('rl_phone:' || p_tenant_id::text || ':' || v_clean_phone, 0));
+    END IF;
+    IF v_clean_phone IS NULL AND v_clean_email IS NOT NULL THEN
+        v_lock_keys := array_append(v_lock_keys, hashtextextended('rl_email:' || p_tenant_id::text || ':' || v_clean_email, 0));
     END IF;
     IF v_clean_fp IS NOT NULL THEN
-        v_fp_lock_key := hashtextextended('rl_fp:' || p_tenant_id::text || ':' || v_clean_fp, 0);
+        v_lock_keys := array_append(v_lock_keys, hashtextextended('rl_fp:' || p_tenant_id::text || ':' || v_clean_fp, 0));
+    END IF;
+    IF v_server_ip IS NOT NULL THEN
+        v_lock_keys := array_append(v_lock_keys, hashtextextended('rl_ip:' || p_tenant_id::text || ':' || v_server_ip, 0));
     END IF;
 
-    -- Deterministic ascending lock order across rate-limit buckets prevents deadlocks
-    IF v_phone_lock_key IS NOT NULL AND v_fp_lock_key IS NOT NULL THEN
-        IF v_phone_lock_key < v_fp_lock_key THEN
-            PERFORM pg_advisory_xact_lock(v_phone_lock_key);
-            PERFORM pg_advisory_xact_lock(v_fp_lock_key);
-        ELSIF v_fp_lock_key < v_phone_lock_key THEN
-            PERFORM pg_advisory_xact_lock(v_fp_lock_key);
-            PERFORM pg_advisory_xact_lock(v_phone_lock_key);
-        ELSE
-            PERFORM pg_advisory_xact_lock(v_phone_lock_key);
-        END IF;
-    ELSIF v_phone_lock_key IS NOT NULL THEN
-        PERFORM pg_advisory_xact_lock(v_phone_lock_key);
-    ELSIF v_fp_lock_key IS NOT NULL THEN
-        PERFORM pg_advisory_xact_lock(v_fp_lock_key);
-    END IF;
+    -- Strictly ascending lock acquisition guarantees deadlock-free concurrency
+    FOR v_lock_key IN
+        SELECT DISTINCT k FROM unnest(v_lock_keys) AS k ORDER BY k ASC
+    LOOP
+        PERFORM pg_advisory_xact_lock(v_lock_key);
+    END LOOP;
 
     v_eval_ts := clock_timestamp();
 
-    -- Check 1: Phone Burst Limit (max 5 booking attempts per 10 minutes per phone on this tenant)
-    IF v_clean_phone != '' THEN
+    IF v_clean_phone IS NOT NULL THEN
+        -- Check 1a: Phone Burst Limit (max 5 booking attempts per 10 minutes)
         SELECT count(*)
         INTO v_phone_burst_count
         FROM public.public_booking_rate_limit_events
@@ -164,9 +411,107 @@ BEGIN
                 'detail', 'phone_burst_limit_reached'
             );
         END IF;
+
+        -- Check 2a: Daily Booking Limit per Phone (max 3 confirmed appointments)
+        SELECT count(*)
+        INTO v_daily_appts_count
+        FROM public.appointments
+        WHERE tenant_id = p_tenant_id
+          AND (phone = v_clean_phone OR public.normalize_public_booking_phone(phone) = v_clean_phone)
+          AND appointment_date = COALESCE(p_appointment_date, CURRENT_DATE)
+          AND status = 'confirmed';
+
+        IF v_daily_appts_count >= 3 THEN
+            RETURN jsonb_build_object(
+                'allowed', false,
+                'reason_code', 'rate_limit_exceeded',
+                'reasonCode', 'rate_limit_exceeded',
+                'detail', 'daily_appointment_limit_reached'
+            );
+        END IF;
+
+        -- Check 3a: Duplicate appointment on same day for same service for same phone
+        IF p_appointment_date IS NOT NULL AND p_service_id IS NOT NULL THEN
+            SELECT EXISTS (
+                SELECT 1
+                FROM public.appointments
+                WHERE tenant_id = p_tenant_id
+                  AND (phone = v_clean_phone OR public.normalize_public_booking_phone(phone) = v_clean_phone)
+                  AND service_id = p_service_id
+                  AND appointment_date = p_appointment_date
+                  AND status = 'confirmed'
+            ) INTO v_duplicate_exists;
+
+            IF v_duplicate_exists THEN
+                RETURN jsonb_build_object(
+                    'allowed', false,
+                    'reason_code', 'duplicate_booking_same_day',
+                    'reasonCode', 'duplicate_booking_same_day',
+                    'detail', 'existing_confirmed_booking_on_same_service_and_date'
+                );
+            END IF;
+        END IF;
+    ELSE
+        -- Check 1b: Email Burst Limit (max 5 booking attempts per 10 minutes)
+        SELECT count(*)
+        INTO v_email_burst_count
+        FROM public.public_booking_rate_limit_events
+        WHERE tenant_id = p_tenant_id
+          AND customer_email = v_clean_email
+          AND event_type = 'booking_attempt'
+          AND created_at > (v_eval_ts - interval '10 minutes');
+
+        IF v_email_burst_count >= 5 THEN
+            RETURN jsonb_build_object(
+                'allowed', false,
+                'reason_code', 'rate_limit_exceeded',
+                'reasonCode', 'rate_limit_exceeded',
+                'detail', 'email_burst_limit_reached'
+            );
+        END IF;
+
+        -- Check 2b: Daily Booking Limit per Email (max 3 confirmed appointments)
+        SELECT count(*)
+        INTO v_daily_appts_count
+        FROM public.appointments
+        WHERE tenant_id = p_tenant_id
+          AND lower(trim(COALESCE(user_email, ''))) = v_clean_email
+          AND appointment_date = COALESCE(p_appointment_date, CURRENT_DATE)
+          AND status = 'confirmed';
+
+        IF v_daily_appts_count >= 3 THEN
+            RETURN jsonb_build_object(
+                'allowed', false,
+                'reason_code', 'rate_limit_exceeded',
+                'reasonCode', 'rate_limit_exceeded',
+                'detail', 'daily_appointment_limit_reached'
+            );
+        END IF;
+
+        -- Check 3b: Duplicate appointment on same day for same service for same email
+        IF p_appointment_date IS NOT NULL AND p_service_id IS NOT NULL THEN
+            SELECT EXISTS (
+                SELECT 1
+                FROM public.appointments
+                WHERE tenant_id = p_tenant_id
+                  AND lower(trim(COALESCE(user_email, ''))) = v_clean_email
+                  AND service_id = p_service_id
+                  AND appointment_date = p_appointment_date
+                  AND status = 'confirmed'
+            ) INTO v_duplicate_exists;
+
+            IF v_duplicate_exists THEN
+                RETURN jsonb_build_object(
+                    'allowed', false,
+                    'reason_code', 'duplicate_booking_same_day',
+                    'reasonCode', 'duplicate_booking_same_day',
+                    'detail', 'existing_confirmed_booking_on_same_service_and_date'
+                );
+            END IF;
+        END IF;
     END IF;
 
-    -- Check 2: Client Fingerprint Burst Limit (max 10 attempts per 10 minutes on this tenant)
+    -- Check 4: Client Fingerprint Burst Limit (max 10 attempts per 10 minutes)
     IF v_clean_fp IS NOT NULL THEN
         SELECT count(*)
         INTO v_fp_burst_count
@@ -186,44 +531,22 @@ BEGIN
         END IF;
     END IF;
 
-    -- Check 3: Daily Booking Limit per Phone (max 3 confirmed appointments per date per tenant)
-    IF v_clean_phone != '' THEN
+    -- Check 5: Server IP Burst Limit (max 10 attempts per 10 minutes)
+    IF v_server_ip IS NOT NULL THEN
         SELECT count(*)
-        INTO v_daily_appts_count
-        FROM public.appointments
+        INTO v_ip_burst_count
+        FROM public.public_booking_rate_limit_events
         WHERE tenant_id = p_tenant_id
-          AND regexp_replace(COALESCE(phone, ''), '\s+', '', 'g') = v_clean_phone
-          AND appointment_date = COALESCE(p_appointment_date, CURRENT_DATE)
-          AND status = 'confirmed';
+          AND client_ip = v_server_ip
+          AND event_type = 'booking_attempt'
+          AND created_at > (v_eval_ts - interval '10 minutes');
 
-        IF v_daily_appts_count >= 3 THEN
+        IF v_ip_burst_count >= 10 THEN
             RETURN jsonb_build_object(
                 'allowed', false,
                 'reason_code', 'rate_limit_exceeded',
                 'reasonCode', 'rate_limit_exceeded',
-                'detail', 'daily_appointment_limit_reached'
-            );
-        END IF;
-    END IF;
-
-    -- Check 4: Duplicate appointment on same day for same service for same phone
-    IF v_clean_phone != '' AND p_appointment_date IS NOT NULL AND p_service_id IS NOT NULL THEN
-        SELECT EXISTS (
-            SELECT 1
-            FROM public.appointments
-            WHERE tenant_id = p_tenant_id
-              AND regexp_replace(COALESCE(phone, ''), '\s+', '', 'g') = v_clean_phone
-              AND service_id = p_service_id
-              AND appointment_date = p_appointment_date
-              AND status = 'confirmed'
-        ) INTO v_duplicate_exists;
-
-        IF v_duplicate_exists THEN
-            RETURN jsonb_build_object(
-                'allowed', false,
-                'reason_code', 'duplicate_booking_same_day',
-                'reasonCode', 'duplicate_booking_same_day',
-                'detail', 'existing_confirmed_booking_on_same_service_and_date'
+                'detail', 'ip_burst_limit_reached'
             );
         END IF;
     END IF;
@@ -234,6 +557,8 @@ BEGIN
         event_type,
         customer_phone,
         client_fingerprint,
+        customer_email,
+        client_ip,
         created_at,
         metadata
     ) VALUES (
@@ -241,6 +566,8 @@ BEGIN
         'booking_attempt',
         v_clean_phone,
         v_clean_fp,
+        v_clean_email,
+        v_server_ip,
         v_eval_ts,
         jsonb_build_object('service_id', p_service_id, 'appointment_date', p_appointment_date)
     );
@@ -256,8 +583,8 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.evaluate_and_record_public_booking_rate_limit(uuid, text, text, uuid, date) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.evaluate_and_record_public_booking_rate_limit(uuid, text, text, uuid, date) TO service_role;
+REVOKE ALL ON FUNCTION public.evaluate_and_record_public_booking_rate_limit(uuid, text, text, uuid, date, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.evaluate_and_record_public_booking_rate_limit(uuid, text, text, uuid, date, text) TO service_role;
 
 -- 5. Public RPC: request_public_booking_otp
 CREATE OR REPLACE FUNCTION public.request_public_booking_otp(
@@ -296,8 +623,8 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_parameters', 'reasonCode', 'invalid_parameters');
     END IF;
 
-    v_clean_phone := regexp_replace(p_customer_phone, '\s+', '', 'g');
-    IF length(v_clean_phone) < 7 THEN
+    v_clean_phone := public.normalize_public_booking_phone(p_customer_phone);
+    IF v_clean_phone IS NULL THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_phone', 'reasonCode', 'invalid_phone');
     END IF;
 
@@ -515,11 +842,14 @@ DECLARE
     v_token_hash      text;
 BEGIN
     -- Validate parameters
-    IF p_slug IS NULL OR p_challenge_id IS NULL OR p_otp_code IS NULL OR p_customer_phone IS NULL THEN
+    IF p_slug IS NULL OR p_challenge_id IS NULL OR p_otp_code IS NULL OR p_customer_phone IS NULL OR trim(p_customer_phone) = '' THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_parameters', 'reasonCode', 'invalid_parameters');
     END IF;
 
-    v_clean_phone := regexp_replace(p_customer_phone, '\s+', '', 'g');
+    v_clean_phone := public.normalize_public_booking_phone(p_customer_phone);
+    IF v_clean_phone IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_phone', 'reasonCode', 'invalid_phone');
+    END IF;
 
     -- Tenant Resolution
     SELECT id INTO v_tenant_id
@@ -695,6 +1025,8 @@ DECLARE
     v_require_otp           boolean := false;
     v_challenge_to_consume_id uuid := NULL;
     v_idemp_key_trimmed     text := NULLIF(trim(COALESCE(p_idempotency_key, '')), '');
+    v_clean_phone           text;
+    v_clean_email           text;
     v_req_fingerprint       text;
     v_existing_idemp        RECORD;
 BEGIN
@@ -713,6 +1045,17 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_customer_data', 'reasonCode', 'invalid_customer_data');
     END IF;
 
+    IF p_customer_phone IS NOT NULL AND trim(p_customer_phone) != '' THEN
+        v_clean_phone := public.normalize_public_booking_phone(p_customer_phone);
+        IF v_clean_phone IS NULL THEN
+            RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_phone', 'reasonCode', 'invalid_phone');
+        END IF;
+    ELSE
+        v_clean_phone := NULL;
+    END IF;
+
+    v_clean_email := NULLIF(lower(trim(COALESCE(p_customer_email, ''))), '');
+
     -- Gate 3: Tenant Resolution
     v_stage := 'tenant_validation';
     SELECT id, status, onboarding_status, public_site_status, COALESCE(require_otp_for_booking, false)
@@ -722,6 +1065,17 @@ BEGIN
 
     IF NOT FOUND THEN
         RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_tenant', 'reasonCode', 'invalid_tenant');
+    END IF;
+
+    -- Gate 3b: If OTP policy is required, customer phone is strictly mandatory
+    IF v_require_otp AND v_clean_phone IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_phone', 'reasonCode', 'invalid_phone');
+    END IF;
+
+    IF v_clean_phone IS NULL THEN
+        IF v_clean_email IS NULL OR v_clean_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' THEN
+            RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_customer_data', 'reasonCode', 'invalid_customer_data');
+        END IF;
     END IF;
 
     IF v_tenant_status IS DISTINCT FROM 'active' AND v_tenant_status IS DISTINCT FROM 'manual_active' THEN
@@ -783,8 +1137,8 @@ BEGIN
             'appointment_date', p_appointment_date::text,
             'appointment_time', p_appointment_time::text,
             'customer_name', trim(p_customer_name),
-            'customer_email', lower(COALESCE(trim(p_customer_email), '')),
-            'customer_phone', regexp_replace(COALESCE(p_customer_phone, ''), '\s+', '', 'g'),
+            'customer_email', COALESCE(v_clean_email, ''),
+            'customer_phone', COALESCE(v_clean_phone, ''),
             'required_consent', COALESCE(p_required_consent, false),
             'marketing_consent', COALESCE(p_marketing_consent, false),
             'reminder_consent', COALESCE(p_reminder_consent, false)
@@ -856,7 +1210,8 @@ BEGIN
         p_customer_phone,
         p_client_fingerprint,
         p_service_id,
-        p_appointment_date
+        p_appointment_date,
+        p_customer_email
     );
 
     IF NOT (v_rl_res->>'allowed')::boolean THEN
@@ -900,7 +1255,7 @@ BEGIN
             RETURN jsonb_build_object('success', false, 'reason_code', 'otp_token_invalid_or_consumed', 'reasonCode', 'otp_token_invalid_or_consumed');
         END IF;
 
-        IF regexp_replace(COALESCE(v_otp_challenge.customer_phone, ''), '\s+', '', 'g') != regexp_replace(COALESCE(p_customer_phone, ''), '\s+', '', 'g') THEN
+        IF v_otp_challenge.customer_phone != v_clean_phone THEN
             RETURN jsonb_build_object('success', false, 'reason_code', 'phone_mismatch', 'reasonCode', 'phone_mismatch');
         END IF;
 
@@ -943,19 +1298,19 @@ BEGIN
 
     -- Customer Upsert
     v_stage := 'customer_upsert';
-    IF p_customer_phone IS NOT NULL AND trim(p_customer_phone) != '' THEN
+    IF v_clean_phone IS NOT NULL THEN
         SELECT id INTO v_customer_id FROM public.customers
-        WHERE tenant_id = v_tenant_id AND phone = p_customer_phone LIMIT 1;
+        WHERE tenant_id = v_tenant_id AND (phone = v_clean_phone OR public.normalize_public_booking_phone(phone) = v_clean_phone) LIMIT 1;
     END IF;
 
-    IF v_customer_id IS NULL AND p_customer_email IS NOT NULL AND trim(p_customer_email) != '' THEN
+    IF v_customer_id IS NULL AND v_clean_email IS NOT NULL THEN
         SELECT id INTO v_customer_id FROM public.customers
-        WHERE tenant_id = v_tenant_id AND email = p_customer_email LIMIT 1;
+        WHERE tenant_id = v_tenant_id AND lower(trim(COALESCE(email, ''))) = v_clean_email LIMIT 1;
     END IF;
 
     IF v_customer_id IS NULL THEN
         INSERT INTO public.customers (tenant_id, name, email, phone)
-        VALUES (v_tenant_id, trim(p_customer_name), trim(p_customer_email), trim(p_customer_phone))
+        VALUES (v_tenant_id, trim(p_customer_name), v_clean_email, v_clean_phone)
         RETURNING id INTO v_customer_id;
     END IF;
 
@@ -975,7 +1330,7 @@ BEGIN
         duration_minutes, status
     ) VALUES (
         v_tenant_id, v_effective_branch, v_customer_id, trim(p_customer_name),
-        trim(p_customer_email), trim(p_customer_phone), p_service_id, p_staff_id,
+        v_clean_email, v_clean_phone, p_service_id, p_staff_id,
         p_appointment_date, p_appointment_time, v_svc_duration, 'confirmed'
     )
     RETURNING id INTO v_appointment_id;
