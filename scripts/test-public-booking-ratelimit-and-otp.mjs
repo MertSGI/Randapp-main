@@ -1896,6 +1896,426 @@ try {
     assert.strictEqual(data.reason_code, 'invalid_tenant');
   });
 
+  async function openIndependentPgConnections(count) {
+    const clients = [];
+    for (let i = 0; i < count; i++) {
+      const c = embeddedPg.getPgClient('postgres', '127.0.0.1');
+      await c.connect();
+      clients.push(c);
+    }
+    const pids = new Set();
+    for (const c of clients) {
+      const pidRow = await c.query('SELECT pg_backend_pid() AS pid');
+      pids.add(pidRow.rows[0].pid);
+    }
+    assert.strictEqual(pids.size, count, `Tüm ${count} veritabanı bağlantısı ayrı PostgreSQL oturumu (pg_backend_pid) olmalıdır`);
+    return clients;
+  }
+
+  async function closeIndependentPgConnections(clients) {
+    await Promise.all(clients.map(c => c.end().catch(() => {})));
+  }
+
+  await runAsyncTest('3.12. [GERÇEK DB ÇOKLU BAĞLANTI OTP EŞZAMANLILIĞI] Farklı bağlantılardan aynı telefona eşzamanlı OTP taleplerinde kilit bloklar, tek challenge/outbox oluşur ve tenant/rollback güvenlidir', async () => {
+    const db = await getDisposablePgEngine();
+
+    // A. Deterministik kilit kanıtı (2 ayrı TCP bağlantısı): Conn 1 commit etmeden Conn 2 dönmemeli
+    const lockPair = await openIndependentPgConnections(2);
+    try {
+      const [c1, c2] = lockPair;
+      await c1.query('BEGIN');
+      await c1.query('SET LOCAL ROLE anon');
+      const r1 = await c1.query(`
+        SELECT public.request_public_booking_otp(
+          p_slug := 'salon-alfa',
+          p_customer_phone := '+90 555 910 0001',
+          p_client_fingerprint := 'fp_lock_otp_1'
+        ) AS res;
+      `);
+      assert.strictEqual(r1.rows[0].res.success, true);
+
+      let conn2Settled = false;
+      const p2 = (async () => {
+        await c2.query('BEGIN');
+        try {
+          await c2.query('SET LOCAL ROLE anon');
+          const res2 = await c2.query(`
+            SELECT public.request_public_booking_otp(
+              p_slug := 'salon-alfa',
+              p_customer_phone := '+90 555 910 0001',
+              p_client_fingerprint := 'fp_lock_otp_1'
+            ) AS res;
+          `);
+          await c2.query('COMMIT');
+          return res2.rows[0].res;
+        } catch (err) {
+          await c2.query('ROLLBACK').catch(() => {});
+          throw err;
+        } finally {
+          conn2Settled = true;
+        }
+      })();
+
+      await new Promise(r => setTimeout(r, 150));
+      assert.strictEqual(conn2Settled, false, 'Conn 1 commit etmeden Conn 2 advisory lock üzerinde bloklanmalıdır');
+
+      await c1.query('COMMIT');
+      const res2 = await p2;
+      assert.strictEqual(res2.success, false);
+      assert.strictEqual(res2.reason_code, 'otp_rate_limited', 'Conn 1 commit sonrası Conn 2 cooldown görmelidir');
+    } finally {
+      await closeIndependentPgConnections(lockPair);
+    }
+
+    // B. 6 ayrı TCP bağlantısından gerçek eşzamanlı OTP baskını -> tam 1 başarılı challenge + 1 outbox + Tenant B izole
+    const swarm = await openIndependentPgConnections(7);
+    try {
+      const tenantAClients = swarm.slice(0, 6);
+      const tenantBClient = swarm[6];
+
+      const results = await Promise.all([
+        ...tenantAClients.map(async (c) => {
+          await c.query('SET ROLE anon');
+          try {
+            const q = await c.query(`
+              SELECT public.request_public_booking_otp(
+                p_slug := 'salon-alfa',
+                p_customer_phone := '+90 555 910 0002',
+                p_client_fingerprint := 'fp_stampede_otp'
+              ) AS res;
+            `);
+            return { tenant: 'alfa', res: q.rows[0].res };
+          } finally {
+            await c.query('RESET ROLE').catch(() => {});
+          }
+        }),
+        (async () => {
+          await tenantBClient.query('SET ROLE anon');
+          try {
+            const q = await tenantBClient.query(`
+              SELECT public.request_public_booking_otp(
+                p_slug := 'salon-beta',
+                p_customer_phone := '+90 555 910 0002',
+                p_client_fingerprint := 'fp_stampede_otp'
+              ) AS res;
+            `);
+            return { tenant: 'beta', res: q.rows[0].res };
+          } finally {
+            await tenantBClient.query('RESET ROLE').catch(() => {});
+          }
+        })(),
+      ]);
+
+      const alfaOk = results.filter(x => x.tenant === 'alfa' && x.res.success === true);
+      const alfaLimited = results.filter(x => x.tenant === 'alfa' && x.res.reason_code === 'otp_rate_limited');
+      const betaOk = results.filter(x => x.tenant === 'beta' && x.res.success === true);
+      assert.strictEqual(alfaOk.length, 1, 'Aynı tenant+telefon eşzamanlı 6 istekten yalnız 1 tanesi başarılı olmalıdır');
+      assert.strictEqual(alfaLimited.length, 5, 'Kalan 5 eşzamanlı istek otp_rate_limited almalıdır');
+      assert.strictEqual(betaOk.length, 1, 'Farklı tenant aynı telefon kilidinden etkilenmemelidir');
+
+      const chCount = await db.query(
+        "SELECT count(*) FROM public.public_booking_otp_challenges WHERE tenant_id = $1 AND customer_phone = '+905559100002'",
+        [tenantAId]
+      );
+      assert.strictEqual(parseInt(chCount.rows[0].count, 10), 1, 'DB de yalnız 1 OTP challenge kaydı oluşmalıdır');
+      const obCount = await db.query(
+        "SELECT count(*) FROM public.communication_outbox WHERE tenant_id = $1 AND recipient = '+905559100002' AND delivery_mode = 'synthetic_outbox_only'",
+        [tenantAId]
+      );
+      assert.strictEqual(parseInt(obCount.rows[0].count, 10), 1, 'DB de yalnız 1 sentetik outbox kaydı oluşmalıdır');
+    } finally {
+      await closeIndependentPgConnections(swarm);
+    }
+
+    // C. Rollback güvenliği: ROLLBACK edilen OTP talebi cooldown bırakmamalı, retry başarılı olmalı
+    const rbPair = await openIndependentPgConnections(2);
+    try {
+      const [rbConn, okConn] = rbPair;
+      await rbConn.query('BEGIN');
+      await rbConn.query('SET LOCAL ROLE anon');
+      const rbTry = await rbConn.query(`
+        SELECT public.request_public_booking_otp('salon-alfa', '+90 555 910 0003', 'fp_rb_otp') AS res;
+      `);
+      assert.strictEqual(rbTry.rows[0].res.success, true);
+      await rbConn.query('ROLLBACK');
+
+      await okConn.query('SET ROLE anon');
+      const afterRb = await okConn.query(`
+        SELECT public.request_public_booking_otp('salon-alfa', '+90 555 910 0003', 'fp_rb_otp') AS res;
+      `);
+      await okConn.query('RESET ROLE');
+      assert.strictEqual(afterRb.rows[0].res.success, true, 'ROLLBACK sonrası tekrar deneme başarılı olmalıdır');
+    } finally {
+      await closeIndependentPgConnections(rbPair);
+    }
+  });
+
+  // Çoklu bağlantı rate-limit ve cross-staff/date testleri için izole tenant ve iki aktif personel hazırla
+  let tenantConcId, branchConcId, serviceConcId, staffConc1Id, staffConc2Id;
+
+  await runAsyncTest('3.13. [GERÇEK DB ÇOKLU BAĞLANTI PHONE BURST=5] Farklı personel/tarih seçimi ile paralel 8 bağlantıda telefon burst limiti aşılamaz ve kilit/rollback korunur', async () => {
+    const db = await getDisposablePgEngine();
+
+    const tC = await db.query(`
+      INSERT INTO public.tenants (name, slug, status, onboarding_status, public_site_status, require_otp_for_booking)
+      VALUES ('Salon Concurrency', 'salon-conc-rl', 'active', 'completed', 'published', false)
+      RETURNING id;
+    `);
+    tenantConcId = tC.rows[0].id;
+    branchConcId = (await db.query(`INSERT INTO public.branches (tenant_id, name, is_active, is_primary) VALUES ($1, 'Merkez', true, true) RETURNING id`, [tenantConcId])).rows[0].id;
+    serviceConcId = (await db.query(`INSERT INTO public.services (tenant_id, name, duration_minutes, active) VALUES ($1, 'Bakim', 30, true) RETURNING id`, [tenantConcId])).rows[0].id;
+    staffConc1Id = (await db.query(`INSERT INTO public.staff (tenant_id, name, active) VALUES ($1, 'Personel 1', true) RETURNING id`, [tenantConcId])).rows[0].id;
+    staffConc2Id = (await db.query(`INSERT INTO public.staff (tenant_id, name, active) VALUES ($1, 'Personel 2', true) RETURNING id`, [tenantConcId])).rows[0].id;
+
+    // A. Kilit kanıtı: Farklı personel (staff1 vs staff2) ve farklı tarihle aynı telefon çağrısı bile bucket kilidinde beklemeli
+    const lockConns = await openIndependentPgConnections(2);
+    try {
+      const [c1, c2] = lockConns;
+      await c1.query('BEGIN');
+      await c1.query('SET LOCAL ROLE anon');
+      const r1 = await c1.query(`
+        SELECT public.create_public_booking(
+          'salon-conc-rl', $1::uuid, $2::uuid, '2026-12-09'::date, '10:00'::time,
+          'Lock Hold 1', 'lh1@test.com', '+90 555 920 0001', true, false, false, 'idem_rl_lock_1', $3::uuid, NULL, 'fp_rl_lock_a'
+        ) AS res;
+      `, [serviceConcId, staffConc1Id, branchConcId]);
+      assert.strictEqual(r1.rows[0].res.success, true);
+
+      let c2Done = false;
+      const p2 = (async () => {
+        await c2.query('BEGIN');
+        try {
+          await c2.query('SET LOCAL ROLE anon');
+          const r2 = await c2.query(`
+            SELECT public.create_public_booking(
+              'salon-conc-rl', $1::uuid, $2::uuid, '2026-12-10'::date, '11:00'::time,
+              'Lock Hold 2', 'lh2@test.com', '+90 555 920 0001', true, false, false, 'idem_rl_lock_2', $3::uuid, NULL, 'fp_rl_lock_b'
+            ) AS res;
+          `, [serviceConcId, staffConc2Id, branchConcId]);
+          await c2.query('COMMIT');
+          return r2.rows[0].res;
+        } catch (err) {
+          await c2.query('ROLLBACK').catch(() => {});
+          throw err;
+        } finally {
+          c2Done = true;
+        }
+      })();
+
+      await new Promise(r => setTimeout(r, 150));
+      assert.strictEqual(c2Done, false, 'Farklı personel ve farklı tarih olsa da aynı telefon bucket kilidinde beklemelidir');
+      await c1.query('COMMIT');
+      const r2Out = await p2;
+      assert.strictEqual(r2Out.success, true);
+    } finally {
+      await closeIndependentPgConnections(lockConns);
+    }
+
+    // B. 8 bağımsız bağlantı: aynı telefon, 8 farklı fingerprint, farklı personel (staff1/staff2) ve 8 farklı tarih
+    const burstConns = await openIndependentPgConnections(8);
+    try {
+      const outs = await Promise.all(burstConns.map(async (c, idx) => {
+        await c.query('SET ROLE anon');
+        try {
+          const staffId = idx % 2 === 0 ? staffConc1Id : staffConc2Id;
+          const dateStr = `2026-12-${String(11 + idx).padStart(2, '0')}`;
+          const q = await c.query(`
+            SELECT public.create_public_booking(
+              'salon-conc-rl', $1::uuid, $2::uuid, $3::date, '12:00'::time,
+              $4, $5, '+90 555 920 0002', true, false, false, $6, $7::uuid, NULL, $8
+            ) AS res;
+          `, [
+            serviceConcId,
+            staffId,
+            dateStr,
+            `Burst Tel ${idx}`,
+            `bt${idx}@test.com`,
+            `idem_pburst_${idx}`,
+            branchConcId,
+            `fp_unique_phone_burst_${idx}`,
+          ]);
+          return q.rows[0].res;
+        } finally {
+          await c.query('RESET ROLE').catch(() => {});
+        }
+      }));
+
+      const okCount = outs.filter(r => r.success === true && r.reason_code === 'ok').length;
+      const blockedCount = outs.filter(
+        r => r.success === false && r.reason_code === 'rate_limit_exceeded' && r.detail === 'phone_burst_limit_reached'
+      ).length;
+      assert.strictEqual(okCount, 5, 'Eşzamanlı 8 bağlantıdan yalnız 5 tanesi telefon burst limitini geçmelidir');
+      assert.strictEqual(blockedCount, 3, 'Kalan 3 eşzamanlı bağlantı phone_burst_limit_reached ile engellenmelidir');
+
+      const evCount = await db.query(
+        "SELECT count(*) FROM public.public_booking_rate_limit_events WHERE tenant_id = $1 AND customer_phone = '+905559200002' AND event_type = 'booking_attempt'",
+        [tenantConcId]
+      );
+      assert.strictEqual(parseInt(evCount.rows[0].count, 10), 5, 'Rate-limit ledger da tam 5 deneme kaydı olmalıdır');
+    } finally {
+      await closeIndependentPgConnections(burstConns);
+    }
+
+    // C. Rollback ve DB hata fail-closed güvenliği
+    const rbConns = await openIndependentPgConnections(2);
+    try {
+      const [rbC, okC] = rbConns;
+      await rbC.query('BEGIN');
+      await rbC.query('SET LOCAL ROLE anon');
+      const tryRb = await rbC.query(`
+        SELECT public.create_public_booking(
+          'salon-conc-rl', $1::uuid, $2::uuid, '2026-12-20'::date, '10:00'::time,
+          'RB Test', 'rb@test.com', '+90 555 920 0003', true, false, false, 'idem_rb_rl_1', $3::uuid, NULL, 'fp_rb_rl_1'
+        ) AS res;
+      `, [serviceConcId, staffConc1Id, branchConcId]);
+      assert.strictEqual(tryRb.rows[0].res.success, true);
+      await rbC.query('ROLLBACK');
+
+      const rbEv = await okC.query(
+        "SELECT count(*) FROM public.public_booking_rate_limit_events WHERE tenant_id = $1 AND customer_phone = '+905559200003'",
+        [tenantConcId]
+      );
+      assert.strictEqual(parseInt(rbEv.rows[0].count, 10), 0, 'ROLLBACK edilen işlem event bırakmamalıdır');
+
+      // Direct fail-closed error test on evaluate_and_record_public_booking_rate_limit (NULL tenant_id)
+      const failClosedRl = await okC.query(`
+        SELECT public.evaluate_and_record_public_booking_rate_limit(NULL::uuid, '+90 555 920 0003', 'fp_rb_rl_1') AS res;
+      `);
+      assert.strictEqual(failClosedRl.rows[0].res.allowed, false);
+      assert.strictEqual(failClosedRl.rows[0].res.reason_code, 'invalid_tenant');
+
+      await okC.query('SET ROLE anon');
+      const retryOk = await okC.query(`
+        SELECT public.create_public_booking(
+          'salon-conc-rl', $1::uuid, $2::uuid, '2026-12-20'::date, '10:00'::time,
+          'Retry RB', 'rb2@test.com', '+90 555 920 0003', true, false, false, 'idem_rb_rl_2', $3::uuid, NULL, 'fp_rb_rl_1'
+        ) AS res;
+      `, [serviceConcId, staffConc1Id, branchConcId]);
+      await okC.query('RESET ROLE');
+      assert.strictEqual(retryOk.rows[0].res.success, true);
+    } finally {
+      await closeIndependentPgConnections(rbConns);
+    }
+  });
+
+  await runAsyncTest('3.14. [GERÇEK DB ÇOKLU BAĞLANTI FINGERPRINT BURST=10 & DEADLOCK-FREE] Farklı telefon/personel/tarihte paralel 14 bağlantıda 10 sınırının korunumu ve Tenant B izolasyonu', async () => {
+    const db = await getDisposablePgEngine();
+
+    // Tenant B hazır fixtures al
+    const bFix = (await db.query(`
+      SELECT
+        (SELECT id FROM public.branches WHERE tenant_id = $1 AND is_active = true LIMIT 1) AS branch_id,
+        (SELECT id FROM public.services WHERE tenant_id = $1 AND active = true LIMIT 1) AS service_id,
+        (SELECT id FROM public.staff WHERE tenant_id = $1 AND active = true LIMIT 1) AS staff_id
+    `, [tenantBId])).rows[0];
+
+    // 14 eşzamanlı bağlantı aynı fingerprint + 14 farklı telefon + farklı personel/tarih + 15. bağlantı Tenant B izolasyon kontrolü
+    const conns = await openIndependentPgConnections(15);
+    try {
+      const concPromises = conns.slice(0, 14).map(async (c, idx) => {
+        await c.query('SET ROLE anon');
+        try {
+          const staffId = idx % 2 === 0 ? staffConc1Id : staffConc2Id;
+          const dateStr = `2026-11-${String(10 + idx).padStart(2, '0')}`;
+          const phone = `+90 555 930 ${String(idx + 1).padStart(4, '0')}`;
+          const q = await c.query(`
+            SELECT public.create_public_booking(
+              'salon-conc-rl', $1::uuid, $2::uuid, $3::date, '14:00'::time,
+              $4, $5, $6, true, false, false, $7, $8::uuid, NULL, 'fp_conc_swarm_10'
+            ) AS res;
+          `, [
+            serviceConcId,
+            staffId,
+            dateStr,
+            `FP Swarm ${idx}`,
+            `fps${idx}@test.com`,
+            phone,
+            `idem_fpburst_${idx}`,
+            branchConcId,
+          ]);
+          return { tenant: 'conc', res: q.rows[0].res };
+        } finally {
+          await c.query('RESET ROLE').catch(() => {});
+        }
+      });
+
+      concPromises.push((async () => {
+        const c = conns[14];
+        await c.query('SET ROLE anon');
+        try {
+          const q = await c.query(`
+            SELECT public.create_public_booking(
+              'salon-beta', $1::uuid, $2::uuid, '2026-11-29'::date, '16:00'::time,
+              'Beta Swarm Iso', 'betaiso@test.com', '+90 555 930 9999', true, false, false,
+              'idem_beta_fp_iso', $3::uuid, NULL, 'fp_conc_swarm_10'
+            ) AS res;
+          `, [bFix.service_id, bFix.staff_id, bFix.branch_id]);
+          return { tenant: 'beta', res: q.rows[0].res };
+        } finally {
+          await c.query('RESET ROLE').catch(() => {});
+        }
+      })());
+
+      const allOuts = await Promise.all(concPromises);
+      const concOk = allOuts.filter(x => x.tenant === 'conc' && x.res.success === true);
+      const concBlocked = allOuts.filter(
+        x => x.tenant === 'conc' && x.res.success === false && x.res.reason_code === 'rate_limit_exceeded' && x.res.detail === 'fingerprint_burst_limit_reached'
+      );
+      const betaOut = allOuts.find(x => x.tenant === 'beta');
+
+      assert.strictEqual(concOk.length, 10, 'Eşzamanlı 14 bağlantıdan tam 10 tanesi fingerprint burst limitini geçmelidir');
+      assert.strictEqual(concBlocked.length, 4, 'Kalan 4 bağlantı fingerprint_burst_limit_reached ile reddedilmelidir');
+      assert.strictEqual(betaOut.res.success, true, 'Tenant B aynı fingerprint ile izole çalışabilmelidir');
+
+      const fpCount = await db.query(
+        "SELECT count(*) FROM public.public_booking_rate_limit_events WHERE tenant_id = $1 AND client_fingerprint = 'fp_conc_swarm_10' AND event_type = 'booking_attempt'",
+        [tenantConcId]
+      );
+      assert.strictEqual(parseInt(fpCount.rows[0].count, 10), 10, 'Fingerprint event sayısı 10 u aşmamalıdır');
+    } finally {
+      await closeIndependentPgConnections(conns);
+    }
+
+    // Çapraz/çakışan (phone, fp) çiftleriyle eşzamanlı deadlock-free doğrulaması (8 ayrı bağlantı)
+    const crossConns = await openIndependentPgConnections(8);
+    try {
+      const pairs = [
+        ['+90 555 940 0001', 'fp_cross_A'],
+        ['+90 555 940 0002', 'fp_cross_B'],
+        ['+90 555 940 0001', 'fp_cross_B'],
+        ['+90 555 940 0002', 'fp_cross_A'],
+        ['+90 555 940 0001', 'fp_cross_A'],
+        ['+90 555 940 0002', 'fp_cross_B'],
+        ['+90 555 940 0001', 'fp_cross_B'],
+        ['+90 555 940 0002', 'fp_cross_A'],
+      ];
+      const crossOuts = await Promise.all(crossConns.map(async (c, idx) => {
+        const [ph, fp] = pairs[idx];
+        await c.query('SET ROLE anon');
+        try {
+          const staffId = idx % 2 === 0 ? staffConc1Id : staffConc2Id;
+          const dateStr = `2027-01-${String(10 + idx).padStart(2, '0')}`;
+          const q = await c.query(`
+            SELECT public.create_public_booking(
+              'salon-conc-rl', $1::uuid, $2::uuid, $3::date, '15:00'::time,
+              $4, $5, $6, true, false, false, $7, $8::uuid, NULL, $9
+            ) AS res;
+          `, [serviceConcId, staffId, dateStr, `Cross ${idx}`, `c${idx}@test.com`, ph, `idem_cross_${idx}`, branchConcId, fp]);
+          return q.rows[0].res;
+        } finally {
+          await c.query('RESET ROLE').catch(() => {});
+        }
+      }));
+      // Hiçbir deadlocks/SQL istisnası olmadan 8 sonucun tamamı temiz JSON dönmelidir
+      assert.strictEqual(crossOuts.length, 8);
+      for (const r of crossOuts) {
+        assert(typeof r.success === 'boolean' && r.reason_code !== 'temporary_failure', `Deadlock veya geçici hata oluşmamalıydı: ${JSON.stringify(r)}`);
+      }
+    } finally {
+      await closeIndependentPgConnections(crossConns);
+    }
+  });
+
 } finally {
   if (pgClient) {
     try { await pgClient.end(); } catch {}

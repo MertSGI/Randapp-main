@@ -100,12 +100,51 @@ SET search_path = pg_catalog, public, extensions
 AS $$
 DECLARE
     v_clean_phone       text;
+    v_clean_fp          text;
+    v_phone_lock_key    bigint := NULL;
+    v_fp_lock_key       bigint := NULL;
+    v_eval_ts           timestamptz;
     v_phone_burst_count integer;
     v_fp_burst_count    integer;
     v_daily_appts_count integer;
     v_duplicate_exists  boolean;
 BEGIN
+    IF p_tenant_id IS NULL THEN
+        RETURN jsonb_build_object(
+            'allowed', false,
+            'reason_code', 'invalid_tenant',
+            'reasonCode', 'invalid_tenant'
+        );
+    END IF;
+
     v_clean_phone := regexp_replace(COALESCE(p_customer_phone, ''), '\s+', '', 'g');
+    v_clean_fp    := NULLIF(trim(COALESCE(p_client_fingerprint, '')), '');
+
+    IF v_clean_phone != '' THEN
+        v_phone_lock_key := hashtextextended('rl_phone:' || p_tenant_id::text || ':' || v_clean_phone, 0);
+    END IF;
+    IF v_clean_fp IS NOT NULL THEN
+        v_fp_lock_key := hashtextextended('rl_fp:' || p_tenant_id::text || ':' || v_clean_fp, 0);
+    END IF;
+
+    -- Deterministic ascending lock order across rate-limit buckets prevents deadlocks
+    IF v_phone_lock_key IS NOT NULL AND v_fp_lock_key IS NOT NULL THEN
+        IF v_phone_lock_key < v_fp_lock_key THEN
+            PERFORM pg_advisory_xact_lock(v_phone_lock_key);
+            PERFORM pg_advisory_xact_lock(v_fp_lock_key);
+        ELSIF v_fp_lock_key < v_phone_lock_key THEN
+            PERFORM pg_advisory_xact_lock(v_fp_lock_key);
+            PERFORM pg_advisory_xact_lock(v_phone_lock_key);
+        ELSE
+            PERFORM pg_advisory_xact_lock(v_phone_lock_key);
+        END IF;
+    ELSIF v_phone_lock_key IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(v_phone_lock_key);
+    ELSIF v_fp_lock_key IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(v_fp_lock_key);
+    END IF;
+
+    v_eval_ts := clock_timestamp();
 
     -- Check 1: Phone Burst Limit (max 5 booking attempts per 10 minutes per phone on this tenant)
     IF v_clean_phone != '' THEN
@@ -115,7 +154,7 @@ BEGIN
         WHERE tenant_id = p_tenant_id
           AND customer_phone = v_clean_phone
           AND event_type = 'booking_attempt'
-          AND created_at > (now() - interval '10 minutes');
+          AND created_at > (v_eval_ts - interval '10 minutes');
 
         IF v_phone_burst_count >= 5 THEN
             RETURN jsonb_build_object(
@@ -128,14 +167,14 @@ BEGIN
     END IF;
 
     -- Check 2: Client Fingerprint Burst Limit (max 10 attempts per 10 minutes on this tenant)
-    IF p_client_fingerprint IS NOT NULL AND trim(p_client_fingerprint) != '' THEN
+    IF v_clean_fp IS NOT NULL THEN
         SELECT count(*)
         INTO v_fp_burst_count
         FROM public.public_booking_rate_limit_events
         WHERE tenant_id = p_tenant_id
-          AND client_fingerprint = trim(p_client_fingerprint)
+          AND client_fingerprint = v_clean_fp
           AND event_type = 'booking_attempt'
-          AND created_at > (now() - interval '10 minutes');
+          AND created_at > (v_eval_ts - interval '10 minutes');
 
         IF v_fp_burst_count >= 10 THEN
             RETURN jsonb_build_object(
@@ -189,22 +228,31 @@ BEGIN
         END IF;
     END IF;
 
-    -- Record the attempt in the rate limit events ledger
+    -- Record the attempt inside the exact same transaction-locked critical section
     INSERT INTO public.public_booking_rate_limit_events (
         tenant_id,
         event_type,
         customer_phone,
         client_fingerprint,
+        created_at,
         metadata
     ) VALUES (
         p_tenant_id,
         'booking_attempt',
         v_clean_phone,
-        p_client_fingerprint,
+        v_clean_fp,
+        v_eval_ts,
         jsonb_build_object('service_id', p_service_id, 'appointment_date', p_appointment_date)
     );
 
     RETURN jsonb_build_object('allowed', true, 'reason_code', 'ok', 'reasonCode', 'ok');
+EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object(
+        'allowed', false,
+        'reason_code', 'temporary_failure',
+        'reasonCode', 'temporary_failure',
+        'detail', SQLERRM
+    );
 END;
 $$;
 
@@ -236,6 +284,8 @@ DECLARE
     v_challenge_id        uuid;
     v_expires_at          timestamptz;
     v_cooldown_remaining  integer;
+    v_req_ts              timestamptz;
+    v_clean_fp            text;
 BEGIN
     -- Validate parameters
     IF p_slug IS NULL OR trim(p_slug) = '' THEN
@@ -269,24 +319,34 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'booking_unavailable', 'reasonCode', 'booking_unavailable');
     END IF;
 
+    v_clean_fp := NULLIF(trim(COALESCE(p_client_fingerprint, '')), '');
+
+    -- Serialize concurrent OTP requests per (tenant, normalized phone) inside transaction
+    -- BEFORE cooldown/hourly limit checks and challenge/outbox writes.
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended('otp_req:' || v_tenant_id::text || ':' || v_clean_phone, 0)
+    );
+
+    v_req_ts := clock_timestamp();
+
     -- 60-Second Cooldown Check (Status-agnostic: applies to all challenges created within 60s)
     SELECT created_at
     INTO v_recent_challenge
     FROM public.public_booking_otp_challenges
     WHERE tenant_id = v_tenant_id
       AND customer_phone = v_clean_phone
-      AND created_at > (now() - interval '60 seconds')
+      AND created_at > (v_req_ts - interval '60 seconds')
     ORDER BY created_at DESC
     LIMIT 1;
 
     IF FOUND THEN
-        v_cooldown_remaining := 60 - EXTRACT(EPOCH FROM (now() - v_recent_challenge.created_at))::integer;
+        v_cooldown_remaining := LEAST(60, GREATEST(60 - EXTRACT(EPOCH FROM (v_req_ts - v_recent_challenge.created_at))::integer, 1));
         RETURN jsonb_build_object(
             'success', false,
             'reason_code', 'otp_rate_limited',
             'reasonCode', 'otp_rate_limited',
-            'cooldown_remaining_seconds', GREATEST(v_cooldown_remaining, 1),
-            'cooldownRemainingSeconds', GREATEST(v_cooldown_remaining, 1)
+            'cooldown_remaining_seconds', v_cooldown_remaining,
+            'cooldownRemainingSeconds', v_cooldown_remaining
         );
     END IF;
 
@@ -296,7 +356,7 @@ BEGIN
     FROM public.public_booking_otp_challenges
     WHERE tenant_id = v_tenant_id
       AND customer_phone = v_clean_phone
-      AND created_at > (now() - interval '1 hour');
+      AND created_at > (v_req_ts - interval '1 hour');
 
     IF v_hourly_count >= 5 THEN
         RETURN jsonb_build_object(
@@ -340,7 +400,7 @@ BEGIN
         v_otp_hash := encode(sha256(v_raw_code::bytea), 'hex');
     END IF;
 
-    v_expires_at := now() + interval '5 minutes';
+    v_expires_at := v_req_ts + interval '5 minutes';
 
     -- Insert Challenge (Never store raw code in table, store SHA-256 hash only)
     INSERT INTO public.public_booking_otp_challenges (
@@ -351,16 +411,20 @@ BEGIN
         status,
         attempts_count,
         max_attempts,
-        expires_at
+        expires_at,
+        created_at,
+        updated_at
     ) VALUES (
         v_tenant_id,
         v_clean_phone,
-        p_client_fingerprint,
+        v_clean_fp,
         v_otp_hash,
         'pending',
         0,
         3,
-        v_expires_at
+        v_expires_at,
+        v_req_ts,
+        v_req_ts
     ) RETURNING id INTO v_challenge_id;
 
     -- Record OTP request in rate limit events
@@ -369,12 +433,14 @@ BEGIN
         event_type,
         customer_phone,
         client_fingerprint,
+        created_at,
         metadata
     ) VALUES (
         v_tenant_id,
         'otp_request',
         v_clean_phone,
-        p_client_fingerprint,
+        v_clean_fp,
+        v_req_ts,
         jsonb_build_object('challenge_id', v_challenge_id)
     );
 
@@ -413,6 +479,13 @@ BEGIN
         'expiresInSeconds', 300,
         'reason_code', 'ok',
         'reasonCode', 'ok'
+    );
+EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object(
+        'success', false,
+        'reason_code', 'temporary_failure',
+        'reasonCode', 'temporary_failure',
+        'debug_sqlerrm', SQLERRM
     );
 END;
 $$;
@@ -718,18 +791,13 @@ BEGIN
         )::text::bytea
     ), 'hex');
 
-    -- Concurrency Advisory Locks (hierarchical: idempotency key lock -> staff/date lock)
-    v_stage := 'concurrency_lock';
+    -- Concurrency Lock Phase 1: Idempotency key lock before replay/conflict inspection
+    v_stage := 'idempotency_lock';
     IF v_idemp_key_trimmed IS NOT NULL THEN
         PERFORM pg_advisory_xact_lock(
             hashtextextended('idemp:' || v_tenant_id::text || ':' || v_idemp_key_trimmed, 0)
         );
     END IF;
-    v_lock_key := hashtextextended(
-        v_tenant_id::text || ':' || p_staff_id::text || ':' || p_appointment_date::text,
-        0
-    );
-    PERFORM pg_advisory_xact_lock(v_lock_key);
 
     -- Gate 4c: Idempotency Replay & Conflict Verification (MUST precede rate-limit & OTP token checks!)
     v_stage := 'idempotency_replay';
@@ -839,6 +907,14 @@ BEGIN
         -- Retain FOR UPDATE lock, but DEFER consumption until appointment is inserted!
         v_challenge_to_consume_id := v_otp_challenge.id;
     END IF;
+
+    -- Concurrency Lock Phase 4: Staff/date lock (monotonic after idemp -> rate_limit -> OTP FOR UPDATE)
+    v_stage := 'staff_slot_lock';
+    v_lock_key := hashtextextended(
+        v_tenant_id::text || ':' || p_staff_id::text || ':' || p_appointment_date::text,
+        0
+    );
+    PERFORM pg_advisory_xact_lock(v_lock_key);
 
     -- Monthly Appointment Quota (H1C)
     v_stage := 'appointment_quota';
