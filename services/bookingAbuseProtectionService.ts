@@ -156,7 +156,7 @@ export const bookingAbuseProtectionService = {
     let policy;
     try {
       const basePolicy = appointmentSelfServiceService.getBookingPolicy(input.tenantId);
-      if (!basePolicy || typeof basePolicy !== 'object' || typeof basePolicy.requireOtpForBooking !== 'boolean') {
+      if (!basePolicy || typeof basePolicy !== 'object') {
         return {
           block: true,
           reasonCode: 'temporary_failure',
@@ -169,6 +169,27 @@ export const bookingAbuseProtectionService = {
         block: true,
         reasonCode: 'temporary_failure',
         reason: 'Güvenlik politikası doğrulanırken bir hata oluştu. Lütfen tekrar deneyin.'
+      };
+    }
+
+    // FINDING-ADIM010-010: Strict schema and type validation for all security policy fields
+    if (
+      typeof policy.requireOtpForBooking !== 'boolean' ||
+      typeof policy.spamProtectionEnabled !== 'boolean' ||
+      typeof policy.blockRepeatedNoShowPhone !== 'boolean' ||
+      typeof policy.maxBookingsPerPhonePerDay !== 'number' ||
+      !Number.isFinite(policy.maxBookingsPerPhonePerDay) ||
+      !Number.isInteger(policy.maxBookingsPerPhonePerDay) ||
+      policy.maxBookingsPerPhonePerDay < 1 ||
+      typeof policy.noShowThreshold !== 'number' ||
+      !Number.isFinite(policy.noShowThreshold) ||
+      !Number.isInteger(policy.noShowThreshold) ||
+      policy.noShowThreshold < 1
+    ) {
+      return {
+        block: true,
+        reasonCode: 'temporary_failure',
+        reason: 'Güvenlik politikası doğrulanamadı. Lütfen tekrar deneyin.'
       };
     }
 
@@ -191,21 +212,22 @@ export const bookingAbuseProtectionService = {
       };
     }
 
-    if (!policy.spamProtectionEnabled) {
-      return { block: false };
-    }
-
     const cleanPhone = parsedPhone.canonical;
     const cleanEmail = (input.email || '').toLowerCase().trim();
     const cleanFp = (input.clientFingerprint || '').trim();
 
-    // Fail-closed when both cleanPhone and cleanFp are missing
+    // FINDING-ADIM010-011: Anonymous boundary check (!cleanPhone && !cleanFp)
+    // must fail-closed REGARDLESS of policy.spamProtectionEnabled.
     if (!cleanPhone && !cleanFp) {
       return {
         block: true,
         reasonCode: 'rate_limit_exceeded',
         reason: 'Güvenlik sınırları doğrulanamadı. Lütfen telefon numaranızı girin veya tarayıcınızı güncelleyin.'
       };
+    }
+
+    if (!policy.spamProtectionEnabled) {
+      return { block: false };
     }
 
     const attempts = this.getAllAttempts();

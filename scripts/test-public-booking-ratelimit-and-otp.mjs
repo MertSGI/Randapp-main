@@ -1005,6 +1005,39 @@ await runAsyncTest('2.17. [FINDING-ADIM010-009] spamProtectionEnabled=false iken
     });
     assert.strictEqual(validWhenOtpOnSpamOff.block, false, 'Geçerli telefon için spamProtectionEnabled=false yalnız spam sayaçlarını devre dışı bırakmalıdır');
 
+    // FINDING-ADIM010-011: { spamProtectionEnabled: false, requireOtpForBooking: false }
+    // durumunda da boş telefon + boş fingerprint fail-closed rate_limit_exceeded dönmelidir
+    const tenantBothOff = 't_finding011_both_off';
+    appointmentSelfServiceService.saveBookingPolicy(tenantBothOff, {
+      spamProtectionEnabled: false,
+      requireOtpForBooking: false,
+    });
+
+    const blockBothOffEmpty = await bookingAbuseProtectionService.shouldBlockBooking({
+      tenantId: tenantBothOff,
+      phone: '',
+      email: 'both_off@test.com',
+      clientFingerprint: '',
+    });
+    assert.strictEqual(blockBothOffEmpty.block, true);
+    assert.strictEqual(
+      blockBothOffEmpty.reasonCode,
+      'rate_limit_exceeded',
+      'spamProtectionEnabled=false ve requireOtpForBooking=false iken boş telefon + boş fingerprint fail-closed engellenmelidir'
+    );
+
+    const allowBothOffValidPhone = await bookingAbuseProtectionService.shouldBlockBooking({
+      tenantId: tenantBothOff,
+      phone: '+90 555 123 4567',
+      email: 'both_off_valid@test.com',
+      clientFingerprint: '',
+    });
+    assert.strictEqual(
+      allowBothOffValidPhone.block,
+      false,
+      'spamProtectionEnabled=false iken geçerli telefonlu istek kabul edilmelidir'
+    );
+
     // Yerel depolama (localStorage) doğrudan yazıldığında da aynı kural geçerli olmalı
     const tenantLsOnly = 't_finding009_ls_only';
     localStorage.setItem(
@@ -1107,9 +1140,40 @@ await runAsyncTest('2.18. [FINDING-ADIM010-010] Yerel rezervasyon bozuk/okunamay
       otpVerificationToken: token,
     });
 
-    // A. Bozuk JSON string
-    for (const badPayload of ['{corrupt_json', '', '   ', 'null', '[]', '{"requireOtpForBooking":"yes"}']) {
+    // A. Bozuk JSON string ve tüm güvenlik alanı şema ihlalleri (FINDING-ADIM010-010)
+    const invalidSchemaPayloads = [
+      '{corrupt_json',
+      '',
+      '   ',
+      'null',
+      '[]',
+      '{"requireOtpForBooking":"yes"}',
+      '{"spamProtectionEnabled":"false"}',
+      '{"spamProtectionEnabled":123}',
+      '{"blockRepeatedNoShowPhone":"true"}',
+      '{"blockRepeatedNoShowPhone":null}',
+      '{"maxBookingsPerPhonePerDay":"not-a-number"}',
+      '{"maxBookingsPerPhonePerDay":0}',
+      '{"maxBookingsPerPhonePerDay":-1}',
+      '{"maxBookingsPerPhonePerDay":3.14}',
+      '{"noShowThreshold":"not-a-number"}',
+      '{"noShowThreshold":0}',
+      '{"noShowThreshold":-2}',
+    ];
+
+    for (const badPayload of invalidSchemaPayloads) {
       localStorage.setItem(`lari_tenant_booking_policies_${slugFail}`, badPayload);
+
+      // shouldBlockBooking doğrudan temporary_failure dönmelidir
+      const sbbRes = await bookingAbuseProtectionService.shouldBlockBooking({
+        tenantId: slugFail,
+        phone: '+90 555 777 0002',
+        email: 'corrupt_pol@test.com',
+        clientFingerprint: 'fp_corrupt',
+      });
+      assert.strictEqual(sbbRes.block, true, `Bozuk politika (${badPayload}) shouldBlockBooking tarafından engellenmelidir`);
+      assert.strictEqual(sbbRes.reasonCode, 'temporary_failure', `Bozuk politika (${badPayload}) temporary_failure dönmelidir`);
+
       const rNoTok = await attemptBooking('11:00');
       assert.strictEqual(rNoTok.success, false);
       assert.strictEqual(rNoTok.reasonCode, 'temporary_failure', `Bozuk politika (${badPayload}) tokensız temporary_failure dönmelidir`);
@@ -3350,6 +3414,111 @@ try {
     );
     assert.strictEqual(oks.length, 5, 'Geçerli fingerprint varken de aynı e-posta burst=5 sınırına uymalıdır');
     assert.strictEqual(blocked.length, 1, '6. istek email_burst_limit_reached almalıdır');
+
+    // 2. [FINDING-ADIM010-012] Aynı geçerli fingerprint ve phone="" yolunda:
+    // (a) 3 başarılı farklı-hizmet randevusu (aynı gün)
+    // (c) Aynı gün aynı hizmet için duplicate engeli
+    // (b) 4. istekte günlük limit reddi (daily_appointment_limit_reached)
+    // (d) Aynı e-posta/fingerprint ile Tenant B üzerinde bağımsız başarı (tenant izolasyonu)
+    const emailDaily = 'daily_fp_mat8@test.com';
+    const targetDate = '2027-10-25';
+
+    // 4 farklı hizmet oluştur
+    const srvMat8_1 = (await db.query(`INSERT INTO public.services (tenant_id, name, duration_minutes, active) VALUES ($1, 'MAT8 Hizmet 1', 30, true) RETURNING id`, [tenantConcId])).rows[0].id;
+    const srvMat8_2 = (await db.query(`INSERT INTO public.services (tenant_id, name, duration_minutes, active) VALUES ($1, 'MAT8 Hizmet 2', 30, true) RETURNING id`, [tenantConcId])).rows[0].id;
+    const srvMat8_3 = (await db.query(`INSERT INTO public.services (tenant_id, name, duration_minutes, active) VALUES ($1, 'MAT8 Hizmet 3', 30, true) RETURNING id`, [tenantConcId])).rows[0].id;
+    const srvMat8_4 = (await db.query(`INSERT INTO public.services (tenant_id, name, duration_minutes, active) VALUES ($1, 'MAT8 Hizmet 4', 30, true) RETURNING id`, [tenantConcId])).rows[0].id;
+
+    // (a).1: 1. Randevu (Hizmet 1)
+    const rD1 = (await db.query(`
+      SELECT public.create_public_booking(
+        'salon-conc-rl', $1::uuid, $2::uuid, $3::date, '09:00'::time,
+        'MAT8 Daily 1', $4, '', true, false, false,
+        'idem_mat8_d1', $5::uuid, NULL, $6
+      ) AS res;
+    `, [srvMat8_1, staffConc1Id, targetDate, emailDaily, branchConcId, fpTest])).rows[0].res;
+    assert.strictEqual(rD1.success, true, '1. farklı-hizmet randevusu başarılı olmalıdır');
+    assert.strictEqual(rD1.reason_code, 'ok');
+    assert(rD1.appointment_id, '1. randevu id dönmelidir');
+
+    // (c): Aynı gün aynı hizmet (Hizmet 1) için duplicate engeli
+    const rDup = (await db.query(`
+      SELECT public.create_public_booking(
+        'salon-conc-rl', $1::uuid, $2::uuid, $3::date, '10:00'::time,
+        'MAT8 Daily Dup', $4, '', true, false, false,
+        'idem_mat8_dup', $5::uuid, NULL, $6
+      ) AS res;
+    `, [srvMat8_1, staffConc2Id, targetDate, emailDaily, branchConcId, fpTest])).rows[0].res;
+    assert.strictEqual(rDup.success, false, 'Aynı gün aynı hizmet duplicate randevu reddedilmelidir');
+    assert.strictEqual(rDup.reason_code, 'duplicate_booking_same_day', 'Duplicate hata kodu duplicate_booking_same_day olmalıdır');
+
+    // (a).2: 2. Randevu (Hizmet 2)
+    const rD2 = (await db.query(`
+      SELECT public.create_public_booking(
+        'salon-conc-rl', $1::uuid, $2::uuid, $3::date, '11:00'::time,
+        'MAT8 Daily 2', $4, '', true, false, false,
+        'idem_mat8_d2', $5::uuid, NULL, $6
+      ) AS res;
+    `, [srvMat8_2, staffConc1Id, targetDate, emailDaily, branchConcId, fpTest])).rows[0].res;
+    assert.strictEqual(rD2.success, true, '2. farklı-hizmet randevusu başarılı olmalıdır');
+    assert.strictEqual(rD2.reason_code, 'ok');
+    assert(rD2.appointment_id, '2. randevu id dönmelidir');
+
+    // (a).3: 3. Randevu (Hizmet 3)
+    const rD3 = (await db.query(`
+      SELECT public.create_public_booking(
+        'salon-conc-rl', $1::uuid, $2::uuid, $3::date, '13:00'::time,
+        'MAT8 Daily 3', $4, '', true, false, false,
+        'idem_mat8_d3', $5::uuid, NULL, $6
+      ) AS res;
+    `, [srvMat8_3, staffConc2Id, targetDate, emailDaily, branchConcId, fpTest])).rows[0].res;
+    assert.strictEqual(rD3.success, true, '3. farklı-hizmet randevusu başarılı olmalıdır');
+    assert.strictEqual(rD3.reason_code, 'ok');
+    assert(rD3.appointment_id, '3. randevu id dönmelidir');
+
+    // (b): 4. istekte günlük limit reddi (daily_appointment_limit_reached)
+    const rD4 = (await db.query(`
+      SELECT public.create_public_booking(
+        'salon-conc-rl', $1::uuid, $2::uuid, $3::date, '15:00'::time,
+        'MAT8 Daily 4 Blocked', $4, '', true, false, false,
+        'idem_mat8_d4_blocked', $5::uuid, NULL, $6
+      ) AS res;
+    `, [srvMat8_4, staffConc1Id, targetDate, emailDaily, branchConcId, fpTest])).rows[0].res;
+    assert.strictEqual(rD4.success, false, '4. randevu günlük limit nedeniyle engellenmelidir');
+    assert.strictEqual(rD4.reason_code, 'rate_limit_exceeded');
+    assert.strictEqual(rD4.detail, 'daily_appointment_limit_reached', 'Günlük limit aşım detayı daily_appointment_limit_reached olmalıdır');
+
+    // (d): Aynı e-posta/fingerprint ile Tenant B üzerinde bağımsız başarı (tenant izolasyonu)
+    const bInfo = (await db.query(`
+      SELECT
+        (SELECT id FROM public.branches WHERE tenant_id = $1 AND is_primary = true LIMIT 1) AS branch_id,
+        (SELECT id FROM public.services WHERE tenant_id = $1 AND active = true LIMIT 1) AS service_id,
+        (SELECT id FROM public.staff WHERE tenant_id = $1 AND active = true LIMIT 1) AS staff_id
+    `, [tenantBId])).rows[0];
+
+    const rTenantB = (await db.query(`
+      SELECT public.create_public_booking(
+        'salon-beta', $1::uuid, $2::uuid, $3::date, '14:00'::time,
+        'MAT8 Tenant B Customer', $4, '', true, false, false,
+        'idem_mat8_tenant_b_iso', $5::uuid, NULL, $6
+      ) AS res;
+    `, [bInfo.service_id, bInfo.staff_id, targetDate, emailDaily, bInfo.branch_id, fpTest])).rows[0].res;
+    assert.strictEqual(rTenantB.success, true, 'Tenant B de aynı e-posta/fingerprint bağımsız randevu alabilmelidir');
+    assert.strictEqual(rTenantB.reason_code, 'ok');
+    assert(rTenantB.appointment_id, 'Tenant B randevu id dönmelidir');
+
+    // DB seviyesi kanıt: Tenant A da tam 3, Tenant B de tam 1 randevu kalıcılaşmış olmalı
+    const apptsA = await db.query(`
+      SELECT count(*) FROM public.appointments
+      WHERE tenant_id = $1 AND lower(trim(user_email)) = $2 AND appointment_date = $3::date AND status = 'confirmed'
+    `, [tenantConcId, emailDaily, targetDate]);
+    assert.strictEqual(parseInt(apptsA.rows[0].count, 10), 3, 'Tenant A da tam 3 randevu kalıcılaşmış olmalıdır');
+
+    const apptsB = await db.query(`
+      SELECT count(*) FROM public.appointments
+      WHERE tenant_id = $1 AND lower(trim(user_email)) = $2 AND appointment_date = $3::date AND status = 'confirmed'
+    `, [tenantBId, emailDaily, targetDate]);
+    assert.strictEqual(parseInt(apptsB.rows[0].count, 10), 1, 'Tenant B de tam 1 randevu kalıcılaşmış olmalıdır');
   });
 
 } finally {

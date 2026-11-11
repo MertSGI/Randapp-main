@@ -50,19 +50,21 @@ export function readStrictStoredBookingPolicy(tenantId: string): StrictStoredPol
   }
 
   const record = parsed as Record<string, unknown>;
-  if (
-    'requireOtpForBooking' in record &&
-    record.requireOtpForBooking !== undefined &&
-    typeof record.requireOtpForBooking !== 'boolean'
-  ) {
-    return { state: 'corrupt' };
+  const booleanKeys = ['requireOtpForBooking', 'spamProtectionEnabled', 'blockRepeatedNoShowPhone'] as const;
+  for (const k of booleanKeys) {
+    if (k in record && record[k] !== undefined && typeof record[k] !== 'boolean') {
+      return { state: 'corrupt' };
+    }
   }
-  if (
-    'spamProtectionEnabled' in record &&
-    record.spamProtectionEnabled !== undefined &&
-    typeof record.spamProtectionEnabled !== 'boolean'
-  ) {
-    return { state: 'corrupt' };
+
+  const integerKeys = ['maxBookingsPerPhonePerDay', 'noShowThreshold'] as const;
+  for (const k of integerKeys) {
+    if (k in record && record[k] !== undefined) {
+      const v = record[k];
+      if (typeof v !== 'number' || !Number.isFinite(v) || !Number.isInteger(v) || v < 1) {
+        return { state: 'corrupt' };
+      }
+    }
   }
   return { state: 'present', record };
 }
@@ -113,11 +115,23 @@ export class LocalBookingRepository implements BookingRepository {
         return { ok: false, reasonCode: 'temporary_failure' };
       }
       const dynRecord = dynPolicy as Record<string, unknown>;
-      if ('requireOtpForBooking' in dynRecord && dynRecord.requireOtpForBooking !== undefined) {
-        if (typeof dynRecord.requireOtpForBooking !== 'boolean') {
+      const booleanKeys = ['requireOtpForBooking', 'spamProtectionEnabled', 'blockRepeatedNoShowPhone'] as const;
+      for (const k of booleanKeys) {
+        if (k in dynRecord && dynRecord[k] !== undefined && typeof dynRecord[k] !== 'boolean') {
           return { ok: false, reasonCode: 'temporary_failure' };
         }
-        return { ok: true, requireOtpForBooking: dynRecord.requireOtpForBooking };
+      }
+      const integerKeys = ['maxBookingsPerPhonePerDay', 'noShowThreshold'] as const;
+      for (const k of integerKeys) {
+        if (k in dynRecord && dynRecord[k] !== undefined) {
+          const v = dynRecord[k];
+          if (typeof v !== 'number' || !Number.isFinite(v) || !Number.isInteger(v) || v < 1) {
+            return { ok: false, reasonCode: 'temporary_failure' };
+          }
+        }
+      }
+      if ('requireOtpForBooking' in dynRecord && dynRecord.requireOtpForBooking !== undefined) {
+        return { ok: true, requireOtpForBooking: dynRecord.requireOtpForBooking as boolean };
       }
       return {
         ok: true,
