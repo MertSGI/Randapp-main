@@ -13,6 +13,8 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 ALTER TABLE public.subscriptions ADD COLUMN IF NOT EXISTS provider_token TEXT;
 ALTER TABLE public.communication_outbox ADD COLUMN IF NOT EXISTS delivery_mode TEXT DEFAULT 'synthetic_outbox_only';
 ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS require_otp_for_booking BOOLEAN DEFAULT false;
+ALTER TABLE public.public_booking_idempotency ADD COLUMN IF NOT EXISTS request_fingerprint TEXT;
+ALTER TABLE public.public_booking_idempotency ADD COLUMN IF NOT EXISTS otp_token_hash TEXT;
 
 -- 2. Server-side Rate Limit Events Ledger
 CREATE TABLE IF NOT EXISTS public.public_booking_rate_limit_events (
@@ -615,10 +617,13 @@ DECLARE
     v_period_key            text;
     v_usage_res             jsonb;
     v_rl_res                jsonb;
-    v_otp_tok_hash          text;
+    v_otp_tok_hash          text := NULL;
     v_otp_challenge         RECORD;
     v_require_otp           boolean := false;
     v_challenge_to_consume_id uuid := NULL;
+    v_idemp_key_trimmed     text := NULLIF(trim(COALESCE(p_idempotency_key, '')), '');
+    v_req_fingerprint       text;
+    v_existing_idemp        RECORD;
 BEGIN
     -- Gate 1: Consent
     v_stage := 'consent_validation';
@@ -667,6 +672,115 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'reason_code', 'booking_unavailable', 'reasonCode', 'booking_unavailable');
     END IF;
 
+    -- Branch Resolution (read-only validation)
+    v_stage := 'branch_resolution';
+    SELECT ARRAY(
+        SELECT id FROM public.branches
+        WHERE tenant_id = v_tenant_id AND is_active = true
+        ORDER BY is_primary DESC, created_at ASC
+    ) INTO v_active_branches;
+
+    IF v_effective_branch IS NULL THEN
+        IF array_length(v_active_branches, 1) = 1 THEN
+            v_effective_branch := v_active_branches[1];
+        ELSIF array_length(v_active_branches, 1) > 1 THEN
+            RETURN jsonb_build_object('success', false, 'reason_code', 'branch_required', 'reasonCode', 'branch_required');
+        ELSIF array_length(v_active_branches, 1) IS NULL OR array_length(v_active_branches, 1) = 0 THEN
+            RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_branch', 'reasonCode', 'invalid_branch');
+        END IF;
+    ELSE
+        IF NOT (v_effective_branch = ANY(v_active_branches)) THEN
+            RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_branch', 'reasonCode', 'invalid_branch');
+        END IF;
+    END IF;
+
+    -- Canonical Request & OTP Token Fingerprints for Idempotency Integrity
+    IF p_otp_verification_token IS NOT NULL AND trim(p_otp_verification_token) != '' THEN
+        v_otp_tok_hash := encode(sha256(trim(p_otp_verification_token)::bytea), 'hex');
+    END IF;
+
+    v_req_fingerprint := encode(sha256(
+        jsonb_build_object(
+            'tenant_id', v_tenant_id::text,
+            'slug', trim(p_slug),
+            'service_id', p_service_id::text,
+            'staff_id', p_staff_id::text,
+            'requested_branch_id', COALESCE(p_branch_id::text, ''),
+            'effective_branch_id', v_effective_branch::text,
+            'appointment_date', p_appointment_date::text,
+            'appointment_time', p_appointment_time::text,
+            'customer_name', trim(p_customer_name),
+            'customer_email', lower(COALESCE(trim(p_customer_email), '')),
+            'customer_phone', regexp_replace(COALESCE(p_customer_phone, ''), '\s+', '', 'g'),
+            'required_consent', COALESCE(p_required_consent, false),
+            'marketing_consent', COALESCE(p_marketing_consent, false),
+            'reminder_consent', COALESCE(p_reminder_consent, false)
+        )::text::bytea
+    ), 'hex');
+
+    -- Concurrency Advisory Locks (hierarchical: idempotency key lock -> staff/date lock)
+    v_stage := 'concurrency_lock';
+    IF v_idemp_key_trimmed IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(
+            hashtextextended('idemp:' || v_tenant_id::text || ':' || v_idemp_key_trimmed, 0)
+        );
+    END IF;
+    v_lock_key := hashtextextended(
+        v_tenant_id::text || ':' || p_staff_id::text || ':' || p_appointment_date::text,
+        0
+    );
+    PERFORM pg_advisory_xact_lock(v_lock_key);
+
+    -- Gate 4c: Idempotency Replay & Conflict Verification (MUST precede rate-limit & OTP token checks!)
+    v_stage := 'idempotency_replay';
+    DELETE FROM public.public_booking_idempotency WHERE expires_at <= now();
+
+    IF v_idemp_key_trimmed IS NOT NULL THEN
+        SELECT appointment_id, request_fingerprint, otp_token_hash
+        INTO v_existing_idemp
+        FROM public.public_booking_idempotency
+        WHERE idempotency_key = v_idemp_key_trimmed AND tenant_id = v_tenant_id
+        FOR UPDATE;
+
+        IF FOUND THEN
+            -- Reject mismatched canonical request or swapped OTP token before touching any OTP state
+            IF v_existing_idemp.request_fingerprint IS DISTINCT FROM v_req_fingerprint
+               OR v_existing_idemp.otp_token_hash IS DISTINCT FROM v_otp_tok_hash THEN
+                RETURN jsonb_build_object(
+                    'success', false,
+                    'reason_code', 'idempotency_conflict',
+                    'reasonCode', 'idempotency_conflict'
+                );
+            END IF;
+
+            UPDATE public.appointment_access_tokens
+            SET expires_at = now()
+            WHERE appointment_id = v_existing_idemp.appointment_id
+              AND tenant_id = v_tenant_id::text
+              AND expires_at > now();
+
+            v_token      := encode(sha256((gen_random_uuid()::text || '-' || clock_timestamp()::text || '-' || random()::text)::bytea), 'hex');
+            v_token_hash := encode(sha256(v_token::bytea), 'hex');
+            v_expires_at := now() + interval '30 days';
+
+            INSERT INTO public.appointment_access_tokens (
+                tenant_id, appointment_id, token_hash, expires_at
+            ) VALUES (
+                v_tenant_id::text, v_existing_idemp.appointment_id, v_token_hash, v_expires_at
+            );
+
+            RETURN jsonb_build_object(
+                'success',        true,
+                'appointment_id', v_existing_idemp.appointment_id,
+                'appointmentId',  v_existing_idemp.appointment_id,
+                'manage_token',   v_token,
+                'manageToken',    v_token,
+                'reason_code',    'ok',
+                'reasonCode',     'ok'
+            );
+        END IF;
+    END IF;
+
     -- Gate 5: Server-Side Rate-Limit & Abuse Protection (V1-WQ-07)
     v_stage := 'rate_limit_evaluation';
     v_rl_res := public.evaluate_and_record_public_booking_rate_limit(
@@ -697,9 +811,8 @@ BEGIN
         );
     END IF;
 
-    IF p_otp_verification_token IS NOT NULL AND trim(p_otp_verification_token) != '' THEN
+    IF v_otp_tok_hash IS NOT NULL THEN
         v_stage := 'otp_token_verification';
-        v_otp_tok_hash := encode(sha256(trim(p_otp_verification_token)::bytea), 'hex');
 
         SELECT id, tenant_id, customer_phone, status, expires_at
         INTO v_otp_challenge
@@ -725,71 +838,6 @@ BEGIN
 
         -- Retain FOR UPDATE lock, but DEFER consumption until appointment is inserted!
         v_challenge_to_consume_id := v_otp_challenge.id;
-    END IF;
-
-    -- Branch Resolution
-    SELECT ARRAY(
-        SELECT id FROM public.branches
-        WHERE tenant_id = v_tenant_id AND is_active = true
-        ORDER BY is_primary DESC, created_at ASC
-    ) INTO v_active_branches;
-
-    IF v_effective_branch IS NULL THEN
-        IF array_length(v_active_branches, 1) = 1 THEN
-            v_effective_branch := v_active_branches[1];
-        ELSIF array_length(v_active_branches, 1) > 1 THEN
-            RETURN jsonb_build_object('success', false, 'reason_code', 'branch_required', 'reasonCode', 'branch_required');
-        ELSIF array_length(v_active_branches, 1) IS NULL OR array_length(v_active_branches, 1) = 0 THEN
-            RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_branch', 'reasonCode', 'invalid_branch');
-        END IF;
-    ELSE
-        IF NOT (v_effective_branch = ANY(v_active_branches)) THEN
-            RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_branch', 'reasonCode', 'invalid_branch');
-        END IF;
-    END IF;
-
-    -- Concurrency Advisory Lock
-    v_stage := 'concurrency_lock';
-    v_lock_key := hashtextextended(
-        v_tenant_id::text || ':' || p_staff_id::text || ':' || p_appointment_date::text,
-        0
-    );
-    PERFORM pg_advisory_xact_lock(v_lock_key);
-
-    -- Idempotency Replay
-    v_stage := 'idempotency_replay';
-    DELETE FROM public.public_booking_idempotency WHERE expires_at <= now();
-
-    IF p_idempotency_key IS NOT NULL AND trim(p_idempotency_key) != '' THEN
-        SELECT appointment_id INTO v_existing_apt_id
-        FROM public.public_booking_idempotency
-        WHERE idempotency_key = p_idempotency_key AND tenant_id = v_tenant_id;
-
-        IF FOUND THEN
-            UPDATE public.appointment_access_tokens
-            SET expires_at = now()
-            WHERE appointment_id = v_existing_apt_id AND expires_at > now();
-
-            v_token      := encode(sha256((gen_random_uuid()::text || '-' || clock_timestamp()::text || '-' || random()::text)::bytea), 'hex');
-            v_token_hash := encode(sha256(v_token::bytea), 'hex');
-            v_expires_at := now() + interval '30 days';
-
-            INSERT INTO public.appointment_access_tokens (
-                tenant_id, appointment_id, token_hash, expires_at
-            ) VALUES (
-                v_tenant_id::text, v_existing_apt_id, v_token_hash, v_expires_at
-            );
-
-            RETURN jsonb_build_object(
-                'success',        true,
-                'appointment_id', v_existing_apt_id,
-                'appointmentId',  v_existing_apt_id,
-                'manage_token',   v_token,
-                'manageToken',    v_token,
-                'reason_code',    'ok',
-                'reasonCode',     'ok'
-            );
-        END IF;
     END IF;
 
     -- Monthly Appointment Quota (H1C)
@@ -877,12 +925,14 @@ BEGIN
         v_tenant_id::text, v_appointment_id, v_token_hash, v_expires_at
     );
 
-    -- Idempotency Record
-    IF p_idempotency_key IS NOT NULL AND trim(p_idempotency_key) != '' THEN
+    -- Idempotency Record (bound to canonical request fingerprint & OTP token hash)
+    IF v_idemp_key_trimmed IS NOT NULL THEN
         INSERT INTO public.public_booking_idempotency (
-            idempotency_key, tenant_id, appointment_id, expires_at
+            idempotency_key, tenant_id, appointment_id, expires_at,
+            request_fingerprint, otp_token_hash
         ) VALUES (
-            p_idempotency_key, v_tenant_id, v_appointment_id, now() + interval '24 hours'
+            v_idemp_key_trimmed, v_tenant_id, v_appointment_id, now() + interval '24 hours',
+            v_req_fingerprint, v_otp_tok_hash
         );
     END IF;
 

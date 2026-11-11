@@ -6,6 +6,27 @@ const normalizePhone = (phone?: string): string => phone ? phone.replace(/[\s\-\
 import { LocalCatalogRepository } from './localCatalogRepository';
 import { publicBookingOtpService } from '../publicBookingOtpService';
 
+const tenantBookingLocks = new Map<string, Promise<void>>();
+
+async function withTenantBookingLock<T>(tenantId: string, work: () => Promise<T>): Promise<T> {
+  const prev = tenantBookingLocks.get(tenantId) ?? Promise.resolve();
+  let release!: () => void;
+  const next = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const queued = prev.then(() => next, () => next);
+  tenantBookingLocks.set(tenantId, queued);
+  await prev;
+  try {
+    return await work();
+  } finally {
+    release();
+    if (tenantBookingLocks.get(tenantId) === queued) {
+      tenantBookingLocks.delete(tenantId);
+    }
+  }
+}
+
 export class LocalBookingRepository implements BookingRepository {
   private getAppointmentsKey(tenantId: string) { return `lari:${tenantId}:appointments`; }
   private getCustomersKey(tenantId: string) { return `mock_tenant_customers_${tenantId}`; }
@@ -322,7 +343,7 @@ export class LocalBookingRepository implements BookingRepository {
     }
 
     // Reserve OTP token synchronously BEFORE any await / appointment write so concurrent
-    // duplicate submissions fail closed while failed bookings keep token status verified.
+    // duplicate submissions fail closed immediately.
     let reservedChallengeId: string | null = null;
     if (params.otpVerificationToken) {
       const reservation = publicBookingOtpService.reserveVerificationTokenLocal(
@@ -336,50 +357,95 @@ export class LocalBookingRepository implements BookingRepository {
       reservedChallengeId = reservation.challengeId;
     }
 
-    try {
-      const apt = await this.createAppointment(params.slug, {
-        userId: `cust_${Date.now()}`,
-        user_name: params.customerName.trim(),
-        user_email: params.customerEmail?.trim() || '',
-        phone: params.customerPhone?.trim() || '',
-        serviceId: params.serviceId,
-        staffId: params.staffId,
-        branchId: params.branchId,
-        date: params.appointmentDate,
-        time: params.appointmentTime,
-        status: 'confirmed',
-        syncedToGoogle: false,
-      });
+    return withTenantBookingLock(params.slug, async () => {
+      let createdAptId: string | null = null;
+      try {
+        const apt = await this.createAppointment(params.slug, {
+          userId: `cust_${Date.now()}`,
+          user_name: params.customerName.trim(),
+          user_email: params.customerEmail?.trim() || '',
+          phone: params.customerPhone?.trim() || '',
+          serviceId: params.serviceId,
+          staffId: params.staffId,
+          branchId: params.branchId,
+          date: params.appointmentDate,
+          time: params.appointmentTime,
+          status: 'confirmed',
+          syncedToGoogle: false,
+        });
 
-      if (!apt?.id) {
-        throw new Error('Failed to create appointment record');
-      }
-
-      if (reservedChallengeId && params.otpVerificationToken) {
-        const committed = publicBookingOtpService.commitVerificationTokenConsumptionLocal(
-          reservedChallengeId,
-          params.otpVerificationToken
-        );
-        if (!committed) {
-          return { success: false, reasonCode: 'otp_token_invalid_or_consumed' };
+        if (!apt?.id) {
+          throw new Error('Failed to create appointment record');
         }
-      }
+        createdAptId = apt.id;
 
-      return {
-        success: true,
-        appointmentId: apt.id,
-        manageToken: `tok_mock_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-        branchId: params.branchId,
-        reasonCode: 'ok',
-      };
-    } catch (err: any) {
-      if (reservedChallengeId) {
-        publicBookingOtpService.releaseVerificationTokenReservationLocal(reservedChallengeId);
+        if (reservedChallengeId && params.otpVerificationToken) {
+          const committed = publicBookingOtpService.commitVerificationTokenConsumptionLocal(
+            reservedChallengeId,
+            params.otpVerificationToken
+          );
+          if (!committed) {
+            await this.rollbackLocalPublicBookingArtifacts(params.slug, apt.id);
+            publicBookingOtpService.releaseVerificationTokenReservationLocal(reservedChallengeId);
+            return { success: false, reasonCode: 'otp_token_invalid_or_consumed' };
+          }
+        }
+
+        return {
+          success: true,
+          appointmentId: apt.id,
+          manageToken: `tok_mock_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+          branchId: params.branchId,
+          reasonCode: 'ok',
+        };
+      } catch (err: any) {
+        if (createdAptId) {
+          try {
+            await this.rollbackLocalPublicBookingArtifacts(params.slug, createdAptId);
+          } catch {}
+        }
+        if (reservedChallengeId) {
+          publicBookingOtpService.releaseVerificationTokenReservationLocal(reservedChallengeId);
+        }
+        if (err?.message?.includes('Slot conflict')) {
+          return { success: false, reasonCode: 'slot_conflict' };
+        }
+        return { success: false, reasonCode: 'temporary_failure' };
       }
-      if (err?.message?.includes('Slot conflict')) {
-        return { success: false, reasonCode: 'slot_conflict' };
+    });
+  }
+
+  private async rollbackLocalPublicBookingArtifacts(tenantId: string, appointmentId: string): Promise<void> {
+    const aptKey = this.getAppointmentsKey(tenantId);
+    const existing = (await dataProvider.getList<Appointment>(aptKey)) || [];
+    const remaining = existing.filter(a => a.id !== appointmentId);
+    await dataProvider.set(aptKey, remaining);
+
+    if (typeof localStorage !== 'undefined') {
+      const custKey = this.getCustomersKey(tenantId);
+      const rawCustomers = localStorage.getItem(custKey);
+      if (rawCustomers) {
+        const customers: CustomerProfile[] = JSON.parse(rawCustomers);
+        const updatedCustomers = customers
+          .map(c => {
+            if (!Array.isArray(c.appointmentIds) || !c.appointmentIds.includes(appointmentId)) {
+              return c;
+            }
+            const remainingIds = c.appointmentIds.filter(id => id !== appointmentId);
+            const nextTotal = Math.max(0, (c.totalAppointments || 1) - 1);
+            if (
+              remainingIds.length === 0 &&
+              nextTotal === 0 &&
+              (!c.internalNotes || c.internalNotes.length === 0) &&
+              (!c.referencePhotos || c.referencePhotos.length === 0)
+            ) {
+              return null;
+            }
+            return { ...c, appointmentIds: remainingIds, totalAppointments: nextTotal };
+          })
+          .filter(Boolean);
+        localStorage.setItem(custKey, JSON.stringify(updatedCustomers));
       }
-      return { success: false, reasonCode: 'temporary_failure' };
     }
   }
 }
