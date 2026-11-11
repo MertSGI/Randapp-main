@@ -1,0 +1,476 @@
+name: LARI Independent Acceptance CI
+
+on:
+  push:
+    branches:
+      - 'ci/lari-*'
+      - 'work/lari-autodev-*'
+  pull_request:
+    branches:
+      - 'staging/supabase-staging-consistency'
+      - 'main'
+      - 'review/lari-*'
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 'Optional 40-char commit SHA to verify strictly (defaults to github.sha)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lari-independent-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LC_ALL: C
+  LANG: C
+  VITE_DATA_MODE: local
+  LARI_DISPOSABLE_DB: '1'
+
+jobs:
+  exact-sha-and-static-build-gate:
+    name: Exact SHA, Static Security & Vite/TS Build Gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      target_sha: ${{ steps.resolve_sha.outputs.target_sha }}
+      short_sha: ${{ steps.resolve_sha.outputs.short_sha }}
+    steps:
+      - name: Resolve immutable target SHA
+        id: resolve_sha
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          EXPECTED="${{ github.event.inputs.expected_sha }}"
+          PR_SHA="${{ github.event.pull_request.head.sha }}"
+          TARGET_SHA="${EXPECTED:-${PR_SHA:-${{ github.sha }}}}"
+          if [[ ! "$TARGET_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Invalid 40-char TARGET_SHA: '$TARGET_SHA'"
+            exit 1
+          fi
+          TARGET_SHA="$(echo "$TARGET_SHA" | tr '[:upper:]' '[:lower:]')"
+          echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${TARGET_SHA:0:8}" >> "$GITHUB_OUTPUT"
+          echo "Resolved TARGET_SHA=$TARGET_SHA"
+
+      - name: Checkout exact commit SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve_sha.outputs.target_sha }}
+          fetch-depth: 1
+
+      - name: Verify exact SHA and clean worktree
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          if [ "$ACTUAL_SHA" != "${{ steps.resolve_sha.outputs.target_sha }}" ]; then
+            echo "::error::SHA mismatch! Expected=${{ steps.resolve_sha.outputs.target_sha }} Actual=$ACTUAL_SHA"
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Worktree is not clean after checkout!"
+            git status --short
+            exit 1
+          fi
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify lockfile alignment and install dependencies (npm ci)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+            const root = (lock.packages && lock.packages['']) || {};
+            const depOk = JSON.stringify(pkg.dependencies || {}) === JSON.stringify(root.dependencies || {});
+            const devOk = JSON.stringify(pkg.devDependencies || {}) === JSON.stringify(root.devDependencies || {});
+            const hasLinuxPg = Boolean(lock.packages && lock.packages['node_modules/@embedded-postgres/linux-x64']);
+            if (!depOk || !devOk || !hasLinuxPg) {
+              console.error({ depOk, devOk, hasLinuxPg });
+              process.exit(1);
+            }
+            console.log('Lockfile verified: dependencies, devDependencies, and @embedded-postgres/linux-x64 match.');
+          "
+          npm ci
+
+      - name: Run static security, migration & consistency gates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ci-artifacts
+          npm run check:secrets
+          npm run qa:recovery-hard-gate
+          npm run qa:supabase-migration-integrity
+          npm run qa:supabase-active-migration-path
+          npm run qa:supabase-staging-consistency
+          node scripts/test-consistency-scanner-regression.mjs
+
+      - name: Run TypeScript typecheck and Vite production build
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node node_modules/typescript/bin/tsc --noEmit
+          npm run build
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const html = fs.readFileSync('dist/index.html', 'utf8');
+            if (html.includes('cdn.tailwindcss.com')) {
+              console.error('dist/index.html still references cdn.tailwindcss.com!');
+              process.exit(1);
+            }
+            const assetsDir = path.join('dist', 'assets');
+            const cssFiles = fs.existsSync(assetsDir) ? fs.readdirSync(assetsDir).filter(f => f.endsWith('.css')) : [];
+            if (cssFiles.length === 0) {
+              console.error('No compiled CSS bundle found in dist/assets!');
+              process.exit(1);
+            }
+            console.log('Verified dist/assets CSS bundle:', cssFiles);
+          "
+
+      - name: Record static gate acceptance manifest
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ci-artifacts
+          STATUS="${{ job.status }}"
+          TARGET="${{ steps.resolve_sha.outputs.target_sha }}"
+          TREE_SHA="$(git rev-parse HEAD^{tree})"
+          node -e "
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const files = [
+              'package.json',
+              'package-lock.json',
+              '.github/workflows/lari-independent-acceptance-ci.yml',
+              'scripts/verify-supabase-staging-consistency.mjs',
+              'supabase/migrations/20260901_payment_webhook_idempotency_and_replay_security.sql',
+              'supabase/migrations/20260902_subscription_sync_transaction.sql',
+              'supabase/migrations/20260903_public_booking_ratelimit_spam_and_otp_contract.sql',
+              'supabase/functions/payment-webhook/index.ts',
+              'supabase/functions/subscription-sync/index.ts',
+              'services/publicBookingOtpService.ts',
+              'services/bookingAbuseProtectionService.ts',
+              'services/repositories/localBookingRepository.ts',
+              'postcss.config.cjs'
+            ];
+            const hashes = {};
+            for (const f of files) {
+              if (fs.existsSync(f)) {
+                hashes[f] = crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+              }
+            }
+            fs.writeFileSync('ci-artifacts/acceptance-manifest-static.json', JSON.stringify({
+              job: 'exact-sha-and-static-build-gate',
+              commit_sha: '$TARGET',
+              tree_sha: '$TREE_SHA',
+              run_id: '${{ github.run_id }}',
+              run_url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}',
+              status: '$STATUS',
+              file_sha256: hashes
+            }, null, 2));
+          "
+
+      - name: Upload static gate evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-evidence-static-${{ steps.resolve_sha.outputs.short_sha }}-run-${{ github.run_id }}
+          path: ci-artifacts/
+          retention-days: 30
+
+  pilot3-pilot4-security-postgres-gate:
+    name: Pilot 3 & 4 Security, Postgres, OTP, Webhook & Subscription Gate
+    needs: exact-sha-and-static-build-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact commit SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.exact-sha-and-static-build-gate.outputs.target_sha }}
+          fetch-depth: 1
+
+      - name: Verify exact SHA and clean worktree
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          if [ "$ACTUAL_SHA" != "${{ needs.exact-sha-and-static-build-gate.outputs.target_sha }}" ]; then
+            echo "::error::SHA mismatch! Expected=${{ needs.exact-sha-and-static-build-gate.outputs.target_sha }} Actual=$ACTUAL_SHA"
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Worktree is not clean after checkout!"
+            git status --short
+            exit 1
+          fi
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies and Playwright Chromium
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run Pilot 3 & 4 deterministic contracts, PostgreSQL, Webhook, Subscription & OTP suites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ci-artifacts/postgres-security-logs
+          run_suite() {
+            local name="$1"
+            shift
+            echo "=== RUNNING: $name ==="
+            if "$@" 2>&1 | tee "ci-artifacts/postgres-security-logs/${name}.log"; then
+              echo "PASS: $name" >> ci-artifacts/postgres-security-logs/summary.txt
+            else
+              local rc=${PIPESTATUS[0]}
+              echo "FAIL($rc): $name" >> ci-artifacts/postgres-security-logs/summary.txt
+              return "$rc"
+            fi
+          }
+
+          run_suite "01-communication-provider-rehearsal" npm run qa:communication-provider-rehearsal
+          run_suite "02-synthetic-salon-onboarding" npm run qa:synthetic-salon-onboarding
+          run_suite "03-v1-truthful-client-contracts" npm run qa:v1-truthful-client-contracts
+          run_suite "04-payment-mode-safety" npm run qa:payment-mode-safety
+          run_suite "05-payment-security" npm run qa:payment-security
+          run_suite "06-iyzico-webhook-cryptography" npm run qa:iyzico-webhook-cryptography
+          run_suite "07-subscription-lifecycle-integrity" npm run qa:subscription-lifecycle-integrity
+          run_suite "08-auth-isolation" npm run qa:auth-isolation
+          run_suite "09-notifications" npm run qa:notifications
+          run_suite "10-subscription-creation-security" node node_modules/tsx/dist/cli.mjs scripts/test-subscription-creation-security.mjs
+          run_suite "11-webhook-idempotency-postgres" node node_modules/tsx/dist/cli.mjs scripts/test-webhook-idempotency.mjs
+          run_suite "12-webhook-db-errors-and-logs-postgres" node node_modules/tsx/dist/cli.mjs scripts/test-webhook-db-errors-and-logs.mjs
+          run_suite "13-subscription-sync-security-postgres" node node_modules/tsx/dist/cli.mjs scripts/test-subscription-sync-security.mjs
+          run_suite "14-public-booking-ratelimit-and-otp-postgres" node node_modules/tsx/dist/cli.mjs scripts/test-public-booking-ratelimit-and-otp.mjs
+
+      - name: Record Postgres & security manifest
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ci-artifacts
+          cat > ci-artifacts/acceptance-manifest-postgres.json <<EOF
+          {
+            "job": "pilot3-pilot4-security-postgres-gate",
+            "commit_sha": "${{ needs.exact-sha-and-static-build-gate.outputs.target_sha }}",
+            "run_id": "${{ github.run_id }}",
+            "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "status": "${{ job.status }}"
+          }
+          EOF
+
+      - name: Upload Postgres & security evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-evidence-postgres-${{ needs.exact-sha-and-static-build-gate.outputs.short_sha }}-run-${{ github.run_id }}
+          path: ci-artifacts/
+          retention-days: 30
+
+  browser-playwright-tailwind-gate:
+    name: Browser Playwright Chromium & Tailwind Build Gate
+    needs: exact-sha-and-static-build-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact commit SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.exact-sha-and-static-build-gate.outputs.target_sha }}
+          fetch-depth: 1
+
+      - name: Verify exact SHA and clean worktree
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          if [ "$ACTUAL_SHA" != "${{ needs.exact-sha-and-static-build-gate.outputs.target_sha }}" ]; then
+            echo "::error::SHA mismatch! Expected=${{ needs.exact-sha-and-static-build-gate.outputs.target_sha }} Actual=$ACTUAL_SHA"
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Worktree is not clean after checkout!"
+            git status --short
+            exit 1
+          fi
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies and Playwright Chromium
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run Tailwind local build & Phase F Chromium E2E suites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ci-artifacts/browser-logs
+          node node_modules/tsx/dist/cli.mjs scripts/test-v1-wq06-tailwind-local-build.mjs 2>&1 | tee ci-artifacts/browser-logs/tailwind-local-build.log
+          node node_modules/tsx/dist/cli.mjs scripts/test-phase-f-browser-regression.mjs 2>&1 | tee ci-artifacts/browser-logs/phase-f-browser-regression.log
+
+      - name: Record browser gate manifest
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ci-artifacts
+          cat > ci-artifacts/acceptance-manifest-browser.json <<EOF
+          {
+            "job": "browser-playwright-tailwind-gate",
+            "commit_sha": "${{ needs.exact-sha-and-static-build-gate.outputs.target_sha }}",
+            "run_id": "${{ github.run_id }}",
+            "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "status": "${{ job.status }}"
+          }
+          EOF
+
+      - name: Upload browser evidence & failure traces artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-evidence-browser-${{ needs.exact-sha-and-static-build-gate.outputs.short_sha }}-run-${{ github.run_id }}
+          path: |
+            ci-artifacts/
+            test-results/
+          retention-days: 30
+
+  independent-acceptance-verdict:
+    name: Independent Acceptance Verdict (Fail-Closed)
+    if: always()
+    needs:
+      - exact-sha-and-static-build-gate
+      - pilot3-pilot4-security-postgres-gate
+      - browser-playwright-tailwind-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Download static manifest
+        if: needs.exact-sha-and-static-build-gate.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: acceptance-evidence-static-${{ needs.exact-sha-and-static-build-gate.outputs.short_sha }}-run-${{ github.run_id }}
+          path: verdict-inputs/static
+
+      - name: Download Postgres & security manifest
+        if: needs.pilot3-pilot4-security-postgres-gate.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: acceptance-evidence-postgres-${{ needs.exact-sha-and-static-build-gate.outputs.short_sha }}-run-${{ github.run_id }}
+          path: verdict-inputs/postgres
+
+      - name: Download browser manifest
+        if: needs.browser-playwright-tailwind-gate.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: acceptance-evidence-browser-${{ needs.exact-sha-and-static-build-gate.outputs.short_sha }}-run-${{ github.run_id }}
+          path: verdict-inputs/browser
+
+      - name: Verify fail-closed verdict & exact SHA parity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          TARGET_SHA="${{ needs.exact-sha-and-static-build-gate.outputs.target_sha }}"
+          J1="${{ needs.exact-sha-and-static-build-gate.result }}"
+          J2="${{ needs.pilot3-pilot4-security-postgres-gate.result }}"
+          J3="${{ needs.browser-playwright-tailwind-gate.result }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          mkdir -p verdict-output
+          VERDICT="FAIL"
+          FAIL_REASONS=()
+
+          if [ "$J1" != "success" ]; then FAIL_REASONS+=("exact-sha-and-static-build-gate=$J1"); fi
+          if [ "$J2" != "success" ]; then FAIL_REASONS+=("pilot3-pilot4-security-postgres-gate=$J2"); fi
+          if [ "$J3" != "success" ]; then FAIL_REASONS+=("browser-playwright-tailwind-gate=$J3"); fi
+
+          if [ "$J1" = "success" ] && [ "$J2" = "success" ] && [ "$J3" = "success" ]; then
+            node -e "
+              const fs = require('fs');
+              const target = '$TARGET_SHA';
+              const paths = [
+                'verdict-inputs/static/acceptance-manifest-static.json',
+                'verdict-inputs/postgres/acceptance-manifest-postgres.json',
+                'verdict-inputs/browser/acceptance-manifest-browser.json'
+              ];
+              for (const p of paths) {
+                if (!fs.existsSync(p)) {
+                  console.error('Missing manifest:', p);
+                  process.exit(1);
+                }
+                const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+                if (data.commit_sha !== target) {
+                  console.error('SHA mismatch in', p, data.commit_sha, '!=', target);
+                  process.exit(1);
+                }
+              }
+              console.log('All 3 manifests verified for exact SHA:', target);
+            "
+            VERDICT="PASS"
+          fi
+
+          node -e "
+            const fs = require('fs');
+            fs.writeFileSync('verdict-output/acceptance-verdict.json', JSON.stringify({
+              verdict: '$VERDICT',
+              commit_sha: '$TARGET_SHA',
+              run_id: '${{ github.run_id }}',
+              run_url: '$RUN_URL',
+              ref_name: '${{ github.ref_name }}',
+              jobs: {
+                'exact-sha-and-static-build-gate': '$J1',
+                'pilot3-pilot4-security-postgres-gate': '$J2',
+                'browser-playwright-tailwind-gate': '$J3'
+              }
+            }, null, 2));
+          "
+
+          {
+            echo "## LARI Independent Acceptance Verdict: \`$VERDICT\`"
+            echo ""
+            echo "- **Exact Commit SHA:** \`$TARGET_SHA\`"
+            echo "- **Run URL:** $RUN_URL"
+            echo "- **Static & Build Gate:** \`$J1\`"
+            echo "- **Postgres & Security Gate:** \`$J2\`"
+            echo "- **Playwright & Tailwind Gate:** \`$J3\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$VERDICT" != "PASS" ]; then
+            echo "::error::Fail-closed verdict=FAIL (${FAIL_REASONS[*]})"
+            exit 1
+          fi
+
+      - name: Upload final verdict artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-verdict-${{ needs.exact-sha-and-static-build-gate.outputs.short_sha }}-run-${{ github.run_id }}
+          path: verdict-output/
+          retention-days: 30

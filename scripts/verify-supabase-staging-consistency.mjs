@@ -95,15 +95,38 @@ const CANONICAL_MIGRATIONS = [
   '20260831_p1c_public_branch_read_contract_runtime_fix.sql'
 ];
 
+const CANDIDATE_MIGRATIONS = [
+  '20260901_payment_webhook_idempotency_and_replay_security.sql',
+  '20260902_subscription_sync_transaction.sql',
+  '20260903_public_booking_ratelimit_spam_and_otp_contract.sql'
+];
+
+const ALL_EXPECTED_MIGRATIONS = [...CANONICAL_MIGRATIONS, ...CANDIDATE_MIGRATIONS].sort();
+
 // Check actual migration files on disk
 const migrationsDir = join(ROOT, 'supabase', 'migrations');
 if (existsSync(migrationsDir)) {
   const diskFiles = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
+  const diskSet = new Set(diskFiles);
   check(
-    `Migration files on disk match canonical list (${CANONICAL_MIGRATIONS.length} files)`,
-    diskFiles.length === CANONICAL_MIGRATIONS.length &&
-    diskFiles.every((f, i) => f === CANONICAL_MIGRATIONS[i]),
-    `Found: [${diskFiles.join(', ')}]`
+    `All ${CANONICAL_MIGRATIONS.length} canonical staging migrations exist on disk`,
+    CANONICAL_MIGRATIONS.every(m => diskSet.has(m)),
+    'Missing canonical: ' + CANONICAL_MIGRATIONS.filter(m => !diskSet.has(m)).join(', ')
+  );
+  check(
+    `All ${CANDIDATE_MIGRATIONS.length} candidate Pilot 3/4 migrations exist and carry CANDIDATE ONLY guard`,
+    CANDIDATE_MIGRATIONS.every(m => {
+      if (!diskSet.has(m)) return false;
+      const sql = readSafe(join('supabase', 'migrations', m)) || '';
+      return sql.includes('CANDIDATE ONLY');
+    }),
+    'Missing or unguarded candidate: ' + CANDIDATE_MIGRATIONS.filter(m => !diskSet.has(m)).join(', ')
+  );
+  check(
+    `Migration files on disk match ${CANONICAL_MIGRATIONS.length} canonical + ${CANDIDATE_MIGRATIONS.length} candidate (${ALL_EXPECTED_MIGRATIONS.length} total)`,
+    diskFiles.length === ALL_EXPECTED_MIGRATIONS.length &&
+    diskFiles.every((f, i) => f === ALL_EXPECTED_MIGRATIONS[i]),
+    `Unexpected/missing diff on disk (${diskFiles.length} files): [${diskFiles.join(', ')}]`
   );
 } else {
   check('supabase/migrations directory exists', false, 'Directory not found');
@@ -113,9 +136,9 @@ if (existsSync(migrationsDir)) {
 const manifest = readSafe('supabase/MIGRATION_APPLY_MANIFEST.md');
 if (manifest) {
   check(
-    `MIGRATION_APPLY_MANIFEST.md lists all ${CANONICAL_MIGRATIONS.length} migrations`,
-    CANONICAL_MIGRATIONS.every(m => manifest.includes(m)),
-    'Missing: ' + CANONICAL_MIGRATIONS.filter(m => !manifest.includes(m)).join(', ')
+    `MIGRATION_APPLY_MANIFEST.md lists all ${CANONICAL_MIGRATIONS.length} canonical + ${CANDIDATE_MIGRATIONS.length} candidate migrations`,
+    ALL_EXPECTED_MIGRATIONS.every(m => manifest.includes(m)),
+    'Missing: ' + ALL_EXPECTED_MIGRATIONS.filter(m => !manifest.includes(m)).join(', ')
   );
 } else {
   check('MIGRATION_APPLY_MANIFEST.md exists', false);
