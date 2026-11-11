@@ -68,6 +68,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 57. **`20260901_payment_webhook_idempotency_and_replay_security.sql`** — Database-level unique constraints, idempotency table, and transactional RPCs for payment webhook idempotency, replay safety, and out-of-order transition ordering.
 58. **`20260902_subscription_sync_transaction.sql`** — Atomic all-in-one transaction RPC for subscription sync operations, fail-closed enforcement across subscriptions, tenants, and audit_logs.
 59. **`20260903_public_booking_ratelimit_spam_and_otp_contract.sql`** — Public booking server-side rate-limiting, burst quotas, brute-force lockout, secure OTP single-use token contract, and synthetic-only outbox queueing.
+60. **`20260904_self_service_token_security_and_ratelimit.sql`** — Stage V1A-SEC-01: Self-Service Token Brute-Force Rate-Limiting, 15-Minute Lockout, SHA-256 Token Matching, Zero-PII Leak, and Tenant Isolation Contract.
 
 ---
 
@@ -118,6 +119,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 | `admin_mutation_idempotency` | `20260731_admin_appointment_status_mutation_rpc.sql`| — | `20260731_admin_appointment_status_mutation_rpc.sql` |
 | `public_booking_rate_limit_events` | `20260903_public_booking_ratelimit_spam_and_otp_contract.sql` | — | `20260903_public_booking_ratelimit_spam_and_otp_contract.sql` |
 | `public_booking_otp_challenges` | `20260903_public_booking_ratelimit_spam_and_otp_contract.sql` | — | `20260903_public_booking_ratelimit_spam_and_otp_contract.sql` |
+| `self_service_token_rate_limits` | `20260904_self_service_token_security_and_ratelimit.sql` | — | `20260904_self_service_token_security_and_ratelimit.sql` |
 
 ---
 

@@ -83,338 +83,10 @@ const repoPath = path.join(rootDir, 'services', 'repositories', 'localSelfServic
 const repoContent = fs.readFileSync(repoPath, 'utf8');
 
 // Aday Migrasyon Sözleşmesi (Candidate SQL Sözleşmesi - V1A-SEC-01)
-// Staging 56 canonical + 3 candidate bütünlüğünü korumak için SQL şeması doğrudan test suitine entegre edilmiştir.
-const migContent = `-- ==============================================================================
--- LARI PILOT 5: CANDIDATE MIGRATION (ADIM-012 / V1A-SEC-01)
--- File: 20260904_self_service_token_security_and_ratelimit.sql
--- Purpose: Self-Service Token Brute-Force Rate-Limiting, Lockout, and Token Expiry Security
--- Target: Real server-side enforcement of 5-attempt/15-minute brute-force lockout,
---         SHA-256 token matching, zero-PII leak on expired/used tokens, and tenant isolation.
--- Notice: CANDIDATE ONLY. Do NOT execute on live/remote production databases automatically.
--- ==============================================================================
-
--- 1. Self-Service Token Rate Limit and Lockout Tracking Ledger
-CREATE TABLE IF NOT EXISTS public.self_service_token_rate_limits (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    client_identifier TEXT NOT NULL,
-    identifier_type TEXT NOT NULL CHECK (identifier_type IN ('ip', 'fingerprint')),
-    failure_count INTEGER NOT NULL DEFAULT 0,
-    locked_until TIMESTAMPTZ,
-    last_failed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT uq_token_rl_identifier UNIQUE (identifier_type, client_identifier)
-);
-
-CREATE INDEX IF NOT EXISTS idx_token_rl_identifier_locked
-    ON public.self_service_token_rate_limits (identifier_type, client_identifier, locked_until);
-
-ALTER TABLE public.self_service_token_rate_limits ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON public.self_service_token_rate_limits FROM PUBLIC, anon, authenticated;
-GRANT ALL ON public.self_service_token_rate_limits TO service_role;
-
-DROP POLICY IF EXISTS "Service role access on self_service_token_rate_limits" ON public.self_service_token_rate_limits;
-CREATE POLICY "Service role access on self_service_token_rate_limits"
-    ON public.self_service_token_rate_limits
-    FOR ALL
-    TO service_role
-    USING (true)
-    WITH CHECK (true);
-
--- 2. Function to atomically record failed lookup and lock on 5 failures for 15 minutes
-CREATE OR REPLACE FUNCTION public.record_self_service_token_lookup_failure(
-    p_client_ip text DEFAULT NULL,
-    p_client_fingerprint text DEFAULT NULL
-)
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = pg_catalog, public
-AS $$
-DECLARE
-    v_clean_ip text;
-    v_clean_fp text;
-    v_locked boolean := false;
-    v_lock_until timestamptz;
-BEGIN
-    v_clean_ip := NULLIF(trim(lower(p_client_ip)), '');
-    v_clean_fp := NULLIF(trim(lower(p_client_fingerprint)), '');
-
-    IF v_clean_ip IS NOT NULL THEN
-        INSERT INTO public.self_service_token_rate_limits (client_identifier, identifier_type, failure_count, last_failed_at, updated_at)
-        VALUES (v_clean_ip, 'ip', 1, now(), now())
-        ON CONFLICT (identifier_type, client_identifier)
-        DO UPDATE SET
-            failure_count = CASE 
-                WHEN self_service_token_rate_limits.locked_until IS NOT NULL AND self_service_token_rate_limits.locked_until > now()
-                    THEN self_service_token_rate_limits.failure_count + 1
-                WHEN self_service_token_rate_limits.last_failed_at < now() - interval '15 minutes'
-                    THEN 1
-                ELSE self_service_token_rate_limits.failure_count + 1
-            END,
-            locked_until = CASE
-                WHEN (self_service_token_rate_limits.locked_until IS NOT NULL AND self_service_token_rate_limits.locked_until > now())
-                    THEN self_service_token_rate_limits.locked_until
-                WHEN (CASE 
-                    WHEN self_service_token_rate_limits.last_failed_at < now() - interval '15 minutes' THEN 1
-                    ELSE self_service_token_rate_limits.failure_count + 1
-                END) >= 5
-                    THEN now() + interval '15 minutes'
-                ELSE NULL
-            END,
-            last_failed_at = now(),
-            updated_at = now()
-        RETURNING (locked_until IS NOT NULL AND locked_until > now()), locked_until
-        INTO v_locked, v_lock_until;
-    END IF;
-
-    IF v_clean_fp IS NOT NULL THEN
-        INSERT INTO public.self_service_token_rate_limits (client_identifier, identifier_type, failure_count, last_failed_at, updated_at)
-        VALUES (v_clean_fp, 'fingerprint', 1, now(), now())
-        ON CONFLICT (identifier_type, client_identifier)
-        DO UPDATE SET
-            failure_count = CASE 
-                WHEN self_service_token_rate_limits.locked_until IS NOT NULL AND self_service_token_rate_limits.locked_until > now()
-                    THEN self_service_token_rate_limits.failure_count + 1
-                WHEN self_service_token_rate_limits.last_failed_at < now() - interval '15 minutes'
-                    THEN 1
-                ELSE self_service_token_rate_limits.failure_count + 1
-            END,
-            locked_until = CASE
-                WHEN (self_service_token_rate_limits.locked_until IS NOT NULL AND self_service_token_rate_limits.locked_until > now())
-                    THEN self_service_token_rate_limits.locked_until
-                WHEN (CASE 
-                    WHEN self_service_token_rate_limits.last_failed_at < now() - interval '15 minutes' THEN 1
-                    ELSE self_service_token_rate_limits.failure_count + 1
-                END) >= 5
-                    THEN now() + interval '15 minutes'
-                ELSE NULL
-            END,
-            last_failed_at = now(),
-            updated_at = now()
-        RETURNING (locked_until IS NOT NULL AND locked_until > now()), locked_until
-        INTO v_locked, v_lock_until;
-    END IF;
-
-    RETURN jsonb_build_object(
-        'locked', COALESCE(v_locked, false),
-        'locked_until', v_lock_until
-    );
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.record_self_service_token_lookup_failure(text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.record_self_service_token_lookup_failure(text, text) TO anon, authenticated, service_role;
-
--- 3. Function to check rate limit and lockout state
-CREATE OR REPLACE FUNCTION public.check_self_service_token_rate_limit(
-    p_client_ip text DEFAULT NULL,
-    p_client_fingerprint text DEFAULT NULL
-)
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = pg_catalog, public
-AS $$
-DECLARE
-    v_clean_ip text;
-    v_clean_fp text;
-    v_is_locked boolean := false;
-    v_lock_until timestamptz;
-BEGIN
-    v_clean_ip := NULLIF(trim(lower(p_client_ip)), '');
-    v_clean_fp := NULLIF(trim(lower(p_client_fingerprint)), '');
-
-    IF v_clean_ip IS NOT NULL THEN
-        SELECT (locked_until IS NOT NULL AND locked_until > now()), locked_until
-        INTO v_is_locked, v_lock_until
-        FROM public.self_service_token_rate_limits
-        WHERE identifier_type = 'ip' AND client_identifier = v_clean_ip;
-
-        IF v_is_locked THEN
-            RETURN jsonb_build_object(
-                'allowed', false,
-                'reason_code', 'TOKEN_LOOKUP_RATE_LIMITED',
-                'locked_until', v_lock_until
-            );
-        END IF;
-    END IF;
-
-    IF v_clean_fp IS NOT NULL THEN
-        SELECT (locked_until IS NOT NULL AND locked_until > now()), locked_until
-        INTO v_is_locked, v_lock_until
-        FROM public.self_service_token_rate_limits
-        WHERE identifier_type = 'fingerprint' AND client_identifier = v_clean_fp;
-
-        IF v_is_locked THEN
-            RETURN jsonb_build_object(
-                'allowed', false,
-                'reason_code', 'TOKEN_LOOKUP_RATE_LIMITED',
-                'locked_until', v_lock_until
-            );
-        END IF;
-    END IF;
-
-    RETURN jsonb_build_object('allowed', true, 'reason_code', 'ok');
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.check_self_service_token_rate_limit(text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.check_self_service_token_rate_limit(text, text) TO anon, authenticated, service_role;
-
--- 4. Drop legacy 1-arg function signature if present to allow signature upgrade with default arguments
-DROP FUNCTION IF EXISTS public.get_public_appointment_by_manage_token(text);
-
--- 5. Hardened get_public_appointment_by_manage_token with rate limiting, zero-PII leak and tenant isolation
-CREATE OR REPLACE FUNCTION public.get_public_appointment_by_manage_token(
-    p_token text,
-    p_client_fingerprint text DEFAULT NULL,
-    p_client_ip text DEFAULT NULL
-)
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = pg_catalog, public
-AS $$
-DECLARE
-    v_rate_check        jsonb;
-    v_token_hash        text;
-    v_token_record      record;
-    v_appointment       record;
-    v_service           record;
-    v_staff             record;
-    v_branch            record;
-    v_tenant            record;
-BEGIN
-    -- Step 1: Enforce Rate Limiting & Lockout
-    v_rate_check := public.check_self_service_token_rate_limit(p_client_ip, p_client_fingerprint);
-    IF NOT (v_rate_check->>'allowed')::boolean THEN
-        RETURN jsonb_build_object('success', false, 'reason_code', 'TOKEN_LOOKUP_RATE_LIMITED');
-    END IF;
-
-    -- Step 2: Input hygiene
-    IF p_token IS NULL OR length(trim(p_token)) < 32 OR length(trim(p_token)) > 128 THEN
-        PERFORM public.record_self_service_token_lookup_failure(p_client_ip, p_client_fingerprint);
-        RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_token');
-    END IF;
-
-    -- Step 3: Compute SHA-256 digest
-    v_token_hash := encode(sha256(trim(p_token)::bytea), 'hex');
-
-    -- Step 4: Match appointment_access_tokens
-    SELECT id, tenant_id, appointment_id, expires_at, used_at
-    INTO v_token_record
-    FROM public.appointment_access_tokens
-    WHERE token_hash = v_token_hash
-    LIMIT 1;
-
-    IF NOT FOUND THEN
-        PERFORM public.record_self_service_token_lookup_failure(p_client_ip, p_client_fingerprint);
-        RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_token');
-    END IF;
-
-    -- Step 5: Check expired or used
-    IF v_token_record.used_at IS NOT NULL OR v_token_record.expires_at <= now() THEN
-        PERFORM public.record_self_service_token_lookup_failure(p_client_ip, p_client_fingerprint);
-        RETURN jsonb_build_object('success', false, 'reason_code', 'TOKEN_EXPIRED');
-    END IF;
-
-    -- Step 6: Resolve appointment record with strict tenant isolation
-    SELECT id, tenant_id, branch_id, customer_id, service_id, staff_id,
-           user_name, user_email, phone, appointment_date, appointment_time,
-           duration_minutes, status, notes
-    INTO v_appointment
-    FROM public.appointments
-    WHERE id = v_token_record.appointment_id
-      AND tenant_id::text = v_token_record.tenant_id;
-
-    IF NOT FOUND THEN
-        PERFORM public.record_self_service_token_lookup_failure(p_client_ip, p_client_fingerprint);
-        RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_token');
-    END IF;
-
-    -- Step 7: Reset failure count on success
-    IF p_client_ip IS NOT NULL AND trim(p_client_ip) != '' THEN
-        UPDATE public.self_service_token_rate_limits
-        SET failure_count = 0, locked_until = NULL, updated_at = now()
-        WHERE identifier_type = 'ip' AND client_identifier = trim(lower(p_client_ip))
-          AND (locked_until IS NULL OR locked_until <= now());
-    END IF;
-    IF p_client_fingerprint IS NOT NULL AND trim(p_client_fingerprint) != '' THEN
-        UPDATE public.self_service_token_rate_limits
-        SET failure_count = 0, locked_until = NULL, updated_at = now()
-        WHERE identifier_type = 'fingerprint' AND client_identifier = trim(lower(p_client_fingerprint))
-          AND (locked_until IS NULL OR locked_until <= now());
-    END IF;
-
-    -- Step 8: Join service, staff, branch, tenant details
-    SELECT id, name, name_tr, duration, price
-    INTO v_service
-    FROM public.services
-    WHERE id = v_appointment.service_id;
-
-    SELECT id, name, title
-    INTO v_staff
-    FROM public.staff
-    WHERE id = v_appointment.staff_id;
-
-    SELECT id, name, timezone
-    INTO v_branch
-    FROM public.branches
-    WHERE id = v_appointment.branch_id;
-
-    SELECT id, name, official_business_name
-    INTO v_tenant
-    FROM public.tenants
-    WHERE id = v_appointment.tenant_id;
-
-    -- Step 9: Return sanitized response contract
-    RETURN jsonb_build_object(
-        'success', true,
-        'reason_code', 'ok',
-        'appointment', jsonb_build_object(
-            'id', v_appointment.id,
-            'status', v_appointment.status,
-            'appointment_date', v_appointment.appointment_date,
-            'appointment_time', v_appointment.appointment_time,
-            'duration_minutes', COALESCE(v_appointment.duration_minutes, v_service.duration, 30),
-            'customer_name', v_appointment.user_name,
-            'customer_phone', v_appointment.phone,
-            'notes', v_appointment.notes,
-            'service', CASE WHEN v_service.id IS NOT NULL THEN jsonb_build_object(
-                'id', v_service.id,
-                'name', v_service.name,
-                'name_tr', COALESCE(v_service.name_tr, v_service.name),
-                'price', v_service.price
-            ) ELSE NULL END,
-            'staff', CASE WHEN v_staff.id IS NOT NULL THEN jsonb_build_object(
-                'id', v_staff.id,
-                'name', v_staff.name,
-                'title', v_staff.title
-            ) ELSE NULL END,
-            'branch', CASE WHEN v_branch.id IS NOT NULL THEN jsonb_build_object(
-                'id', v_branch.id,
-                'name', v_branch.name,
-                'timezone', COALESCE(v_branch.timezone, 'Europe/Istanbul')
-            ) ELSE jsonb_build_object(
-                'name', COALESCE(v_tenant.official_business_name, v_tenant.name, 'Güzellik Salonu'),
-                'timezone', 'Europe/Istanbul'
-            ) END
-        ),
-        'allowed_actions', jsonb_build_object(
-            'can_cancel', false,
-            'can_reschedule', false
-        )
-    );
-
-EXCEPTION WHEN OTHERS THEN
-    RETURN jsonb_build_object('success', false, 'reason_code', 'invalid_token');
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.get_public_appointment_by_manage_token(text, text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.get_public_appointment_by_manage_token(text, text, text) TO anon, authenticated, service_role;
-`;
+// FINDING-ADIM012-001 & FINDING-ADIM012-004: Doğrudan diskteki gerçek migrasyon dosyası okunur ve uygulanır.
+const migPath = path.join(rootDir, 'supabase', 'migrations', '20260904_self_service_token_security_and_ratelimit.sql');
+assert(fs.existsSync(migPath), 'Aday migrasyon dosyası diskte bulunmalıdır: supabase/migrations/20260904_self_service_token_security_and_ratelimit.sql');
+const migContent = fs.readFileSync(migPath, 'utf8');
 
 runTest('1.1. appointmentSelfServiceService.ts içinde hiçbir Math.random() çağrısı yer alamaz (Sıfır zayıf RNG)', () => {
   const lines = serviceContent.split('\n');
@@ -453,6 +125,9 @@ runTest('1.5. Aday migrasyon SQL sözleşmesi CANDIDATE ONLY, RLS korumalı ve f
   assert(migContent.includes('ALTER TABLE public.self_service_token_rate_limits ENABLE ROW LEVEL SECURITY'), 'RLS etkinleştirilmelidir');
   assert(migContent.includes('TOKEN_LOOKUP_RATE_LIMITED'), 'Rate limit hata kodu TOKEN_LOOKUP_RATE_LIMITED olmalıdır');
   assert(migContent.includes('TOKEN_EXPIRED'), 'Süresi dolmuş veya kullanılmış tokenlar için TOKEN_EXPIRED tanımlanmalıdır');
+  assert(migContent.includes('resolve_self_service_client_ip'), 'resolve_self_service_client_ip tanımlanmalıdır');
+  assert(migContent.includes('REVOKE ALL ON FUNCTION public.record_self_service_token_lookup_failure'), 'record_self_service_token_lookup_failure REVOKE edilmelidir');
+  assert(migContent.includes('REVOKE ALL ON FUNCTION public.check_self_service_token_rate_limit'), 'check_self_service_token_rate_limit REVOKE edilmelidir');
 });
 
 runTest('1.6. İstemci taraflı servislerde service_role anahtarı geçmiyor (Guardrail 2)', () => {
@@ -639,7 +314,7 @@ await runAsyncTest('4.1. Aynı IP adresinden farklı sahte parmak izleriyle (rot
   for (let i = 1; i <= 5; i++) {
     const fakeContext = {
       clientIp: attackerIp,
-      clientFingerprint: `fake_fingerprint_variant_${i}_${Math.random()}`
+      clientFingerprint: `fake_fingerprint_variant_${i}_${crypto.randomBytes(4).toString('hex')}`
     };
     const res = await appointmentSelfServiceService.getAppointmentByManageToken('apt_tok_fake_attempt', fakeContext);
     assert.strictEqual(res.kind, 'invalid_token');
@@ -991,12 +666,13 @@ try {
       SELECT proname, prosecdef FROM pg_proc
       JOIN pg_namespace ON pg_proc.pronamespace = pg_namespace.oid
       WHERE proname IN (
+        'resolve_self_service_client_ip',
         'record_self_service_token_lookup_failure',
         'check_self_service_token_rate_limit',
         'get_public_appointment_by_manage_token'
       )
     `);
-    assert(procRes.rows.length >= 3, 'Tüm güvenlik RPC leri tanımlı olmalıdır');
+    assert(procRes.rows.length >= 4, 'Tüm güvenlik RPC leri tanımlı olmalıdır');
     for (const r of procRes.rows) {
       assert.strictEqual(r.prosecdef, true, `${r.proname} SECURITY DEFINER olmalıdır`);
     }
@@ -1214,16 +890,144 @@ try {
     assert(!JSON.stringify(res).includes('Tenant B Müşterisi'), 'Cross-tenant veri sızıntısı engellenmelidir');
   });
 
-  await runAsyncTest('8.7. [GERÇEK DB] Tek parametreli (1-arg) eski RPC çağrısı varsayılan değerlerle tam uyumlu çalışır', async () => {
+  await runAsyncTest('8.7. [GERÇEK DB - FINDING-002] Tek parametreli (1-arg) eski RPC çağrısı: 5 başarısız denemeden sonra 6. çağrı TOKEN_LOOKUP_RATE_LIMITED ile kilitlenir', async () => {
     const db = await getDisposablePgEngine();
     
-    // Call get_public_appointment_by_manage_token with only 1 parameter (p_token)
-    const rpcRes = await db.query(`
-      SELECT public.get_public_appointment_by_manage_token('apt_tok_legacy_param_test_12345678901234567890123456789012') AS result
+    // Set trusted request header for this test session to simulate consistent client connection
+    const legacyClientIp = '198.51.100.87';
+    await db.query(`SELECT set_config('request.headers', $1, false)`, [JSON.stringify({ 'x-forwarded-for': legacyClientIp })]);
+    
+    // 5 failed 1-arg calls
+    for (let i = 1; i <= 5; i++) {
+      const rpcRes = await db.query(`
+        SELECT public.get_public_appointment_by_manage_token($1) AS result
+      `, [`apt_tok_legacy_param_test_fail_${i}_12345678901234567890`]);
+      const res = rpcRes.rows[0].result;
+      assert.strictEqual(res.success, false);
+      assert.strictEqual(res.reason_code, 'invalid_token', `Deneme ${i} invalid_token dönmelidir`);
+    }
+
+    // 6th 1-arg call: MUST be blocked with TOKEN_LOOKUP_RATE_LIMITED
+    const sixth = await db.query(`
+      SELECT public.get_public_appointment_by_manage_token('apt_tok_legacy_param_test_fail_6_12345678901234567890') AS result
     `);
-    const res = rpcRes.rows[0].result;
-    assert.strictEqual(res.success, false);
-    assert.strictEqual(res.reason_code, 'invalid_token', '1-arg eski imza desteği korunmalıdır');
+    const blockedRes = sixth.rows[0].result;
+    assert.strictEqual(blockedRes.success, false, '6. çağrı başarısız olmalıdır');
+    assert.strictEqual(blockedRes.reason_code, 'TOKEN_LOOKUP_RATE_LIMITED', 'Tek parametreli 1-arg çağrılarda 6. deneme TOKEN_LOOKUP_RATE_LIMITED ile kilitlenmelidir');
+  });
+
+  await runAsyncTest('8.8. [GERÇEK DB - FINDING-002] Saldırgan her istekte sahte p_client_ip ve p_client_fingerprint değiştirse dahi sunucu IP bağlamı (request.headers) kilidi aşamaz', async () => {
+    const db = await getDisposablePgEngine();
+    const realAttackerIp = '198.51.100.88';
+    await db.query(`SELECT set_config('request.headers', $1, false)`, [JSON.stringify({ 'x-forwarded-for': realAttackerIp })]);
+    
+    // 5 failed attempts passing varying fake IPs and varying fingerprints
+    for (let i = 1; i <= 5; i++) {
+      const fakeIp = `1.2.3.${i}`;
+      const fakeFp = `fake_rotating_fp_${i}_${crypto.randomBytes(4).toString('hex')}`;
+      const rpcRes = await db.query(`
+        SELECT public.get_public_appointment_by_manage_token($1, $2, $3) AS result
+      `, [`apt_tok_spoof_bypass_${i}_123456789012345678901234567890`, fakeFp, fakeIp]);
+      const res = rpcRes.rows[0].result;
+      assert.strictEqual(res.success, false);
+      assert.strictEqual(res.reason_code, 'invalid_token');
+    }
+
+    // 6th attempt with another fresh fake IP and fingerprint
+    const sixthRes = await db.query(`
+      SELECT public.get_public_appointment_by_manage_token($1, $2, $3) AS result
+    `, ['apt_tok_spoof_bypass_6_123456789012345678901234567890', 'another_fresh_fake_fp', '9.9.9.9']);
+    const blockedRes = sixthRes.rows[0].result;
+    assert.strictEqual(blockedRes.success, false, '6. sorgu başarısız olmalıdır');
+    assert.strictEqual(blockedRes.reason_code, 'TOKEN_LOOKUP_RATE_LIMITED', 'Sahte IP ve fingerprint rotasyonu sunucu IP kilidini aşamaz');
+  });
+
+  await runAsyncTest('8.9. [GERÇEK DB - FINDING-003] Anon ve authenticated rolleri yardımcı fonksiyonları doğrudan çağıramaz (Permission Denied), ancak public RPC çalışır', async () => {
+    const db = await getDisposablePgEngine();
+    const freshClientIp = '198.51.100.201';
+    await db.query(`SELECT set_config('request.headers', $1, false)`, [JSON.stringify({ 'x-forwarded-for': freshClientIp })]);
+    
+    // 1. Test under anon role
+    await db.query(`SET ROLE anon;`);
+    
+    let recordFailureAnonBlocked = false;
+    try {
+      await db.query(`SELECT public.record_self_service_token_lookup_failure('198.51.100.99', 'fp_victim');`);
+    } catch (err) {
+      recordFailureAnonBlocked = err.message.toLowerCase().includes('permission denied');
+    }
+    assert.strictEqual(recordFailureAnonBlocked, true, 'anon rolü record_self_service_token_lookup_failure çağıramaz (permission denied)');
+
+    let checkLimitAnonBlocked = false;
+    try {
+      await db.query(`SELECT public.check_self_service_token_rate_limit('198.51.100.99', 'fp_victim');`);
+    } catch (err) {
+      checkLimitAnonBlocked = err.message.toLowerCase().includes('permission denied');
+    }
+    assert.strictEqual(checkLimitAnonBlocked, true, 'anon rolü check_self_service_token_rate_limit çağıramaz (permission denied)');
+
+    let resolveIpAnonBlocked = false;
+    try {
+      await db.query(`SELECT public.resolve_self_service_client_ip();`);
+    } catch (err) {
+      resolveIpAnonBlocked = err.message.toLowerCase().includes('permission denied');
+    }
+    assert.strictEqual(resolveIpAnonBlocked, true, 'anon rolü resolve_self_service_client_ip çağıramaz (permission denied)');
+
+    // But anon CAN call public get_public_appointment_by_manage_token which runs under SECURITY DEFINER
+    const anonLookup = await db.query(`
+      SELECT public.get_public_appointment_by_manage_token('apt_tok_anon_exec_test_123456789012345678901234567890') AS result
+    `);
+    assert.strictEqual(anonLookup.rows[0].result.reason_code, 'invalid_token', 'anon rolü get_public_appointment_by_manage_token çağırabilmelidir');
+
+    // 2. Test under authenticated role
+    await db.query(`SET ROLE authenticated;`);
+
+    let recordFailureAuthBlocked = false;
+    try {
+      await db.query(`SELECT public.record_self_service_token_lookup_failure('198.51.100.99', 'fp_victim');`);
+    } catch (err) {
+      recordFailureAuthBlocked = err.message.toLowerCase().includes('permission denied');
+    }
+    assert.strictEqual(recordFailureAuthBlocked, true, 'authenticated rolü record_self_service_token_lookup_failure çağıramaz (permission denied)');
+
+    let checkLimitAuthBlocked = false;
+    try {
+      await db.query(`SELECT public.check_self_service_token_rate_limit('198.51.100.99', 'fp_victim');`);
+    } catch (err) {
+      checkLimitAuthBlocked = err.message.toLowerCase().includes('permission denied');
+    }
+    assert.strictEqual(checkLimitAuthBlocked, true, 'authenticated rolü check_self_service_token_rate_limit çağıramaz (permission denied)');
+
+    const authLookup = await db.query(`
+      SELECT public.get_public_appointment_by_manage_token('apt_tok_auth_exec_test_123456789012345678901234567890') AS result
+    `);
+    assert.strictEqual(authLookup.rows[0].result.reason_code, 'invalid_token', 'authenticated rolü get_public_appointment_by_manage_token çağırabilmelidir');
+
+    // Reset role back to postgres
+    await db.query(`RESET ROLE;`);
+  });
+
+  await runAsyncTest('8.10. [GERÇEK DB - FINDING-004] Paralel sorgu yarış durumunda (concurrency) veritabanı kilit mekanizması fail-closed çalışır', async () => {
+    const db = await getDisposablePgEngine();
+    const concurrentIp = '198.51.100.77';
+    await db.query(`SELECT set_config('request.headers', $1, false)`, [JSON.stringify({ 'x-forwarded-for': concurrentIp })]);
+    
+    const promises = [];
+    for (let i = 0; i < 10; i++) {
+      promises.push(db.query(`
+        SELECT public.get_public_appointment_by_manage_token($1) AS result
+      `, [`apt_tok_concurrent_db_${i}_123456789012345678901234567890`]));
+    }
+    const dbResults = await Promise.all(promises);
+    assert.strictEqual(dbResults.length, 10, 'Tüm 10 paralel sorgu tamamlandı');
+    
+    // Follow-up query MUST be firmly locked
+    const followUpDb = await db.query(`
+      SELECT public.get_public_appointment_by_manage_token('apt_tok_concurrent_followup_12345678901234567890') AS result
+    `);
+    assert.strictEqual(followUpDb.rows[0].result.success, false);
+    assert.strictEqual(followUpDb.rows[0].result.reason_code, 'TOKEN_LOOKUP_RATE_LIMITED', 'Paralel yarış sonrası veritabanı TOKEN_LOOKUP_RATE_LIMITED ile kilitli olmalıdır');
   });
 
 } finally {

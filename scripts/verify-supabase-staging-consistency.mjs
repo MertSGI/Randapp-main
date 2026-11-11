@@ -98,7 +98,8 @@ const CANONICAL_MIGRATIONS = [
 const CANDIDATE_MIGRATIONS = [
   '20260901_payment_webhook_idempotency_and_replay_security.sql',
   '20260902_subscription_sync_transaction.sql',
-  '20260903_public_booking_ratelimit_spam_and_otp_contract.sql'
+  '20260903_public_booking_ratelimit_spam_and_otp_contract.sql',
+  '20260904_self_service_token_security_and_ratelimit.sql'
 ];
 
 const ALL_EXPECTED_MIGRATIONS = [...CANONICAL_MIGRATIONS, ...CANDIDATE_MIGRATIONS].sort();
@@ -114,7 +115,7 @@ if (existsSync(migrationsDir)) {
     'Missing canonical: ' + CANONICAL_MIGRATIONS.filter(m => !diskSet.has(m)).join(', ')
   );
   check(
-    `All ${CANDIDATE_MIGRATIONS.length} candidate Pilot 3/4 migrations exist and carry CANDIDATE ONLY guard`,
+    `All ${CANDIDATE_MIGRATIONS.length} candidate Pilot 3/4/5 migrations exist and carry CANDIDATE ONLY guard`,
     CANDIDATE_MIGRATIONS.every(m => {
       if (!diskSet.has(m)) return false;
       const sql = readSafe(join('supabase', 'migrations', m)) || '';
