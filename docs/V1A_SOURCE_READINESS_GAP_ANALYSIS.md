@@ -353,6 +353,7 @@ Bu rapor (`docs/V1A_SOURCE_READINESS_GAP_ANALYSIS.md`);
 - Veritabanı ve migrasyon envanterini 56 kanonik ve 3 candidate (toplam 59 dosya) olarak doğrulamış; aday migrasyonların yerel hazırlık durumu ile canlı/staging dağıtım durumunu açıkça ayrıştırmıştır (FINDING-ADIM011-002 çözüldü).
 - Açık GitHub issue'ları ve PR'ları için madde bazlı gereksinim, mevcut durum, kaynak/test kanıtı, sınıflandırma ve sonuç eylemini içeren eksiksiz bir parite matrisi eklemiştir (FINDING-ADIM011-003 çözüldü).
 - Desteksiz istemci taraflı anti-tamper paketini kaldırarak yerine `services/appointmentSelfServiceService.ts` odaklı, somut sunucu/servis açığına ve negatif teste dayalı `V1A-SEC-01` P0 güvenlik paketini tanımlamıştır (FINDING-ADIM011-004 çözüldü).
+- CI ortamındaki geçici Ubuntu ayna/DNS çözümleme hatasına (FINDING-ADIM011-005) karşı sözleşme kapsam sınırları korunmuş; workflow dosyası değiştirilmeden dış altyapı kaynaklı DNS durumu gözlemlenmiştir.
 - P0 Güvenlik -> V1-A İşlevsel Eksikler -> Regresyon -> Teknik Borç hiyerarşisine dayalı, sıfır harcamalı 5 somut iş paketini tanımlamıştır.
 - V1-B ve V2 sınırlarını korumuş, gereksiz kapsam genişletmelerini reddetmiştir.
 
