@@ -96,10 +96,10 @@ await runAsyncStep('5. Accepts deterministic HMAC-SHA256 signature for subscript
     customerReferenceCode: 'tenant_nexus_01'
   };
 
-  // Node crypto reference computation
+  // Node crypto reference computation (official iyzico Node.js V3 subscription order)
   const message = [
-    SYNTHETIC_SECRET,
     payload.merchantId,
+    SYNTHETIC_SECRET,
     payload.eventType,
     payload.subscriptionReferenceCode,
     payload.orderReferenceCode,
@@ -132,8 +132,8 @@ await runAsyncStep('6. Rejects payload tampering (modified customerReferenceCode
   };
 
   const message = [
-    SYNTHETIC_SECRET,
     originalPayload.merchantId,
+    SYNTHETIC_SECRET,
     originalPayload.eventType,
     originalPayload.subscriptionReferenceCode,
     originalPayload.orderReferenceCode,
@@ -141,6 +141,11 @@ await runAsyncStep('6. Rejects payload tampering (modified customerReferenceCode
   ].join('');
 
   const validSignature = crypto.createHmac('sha256', SYNTHETIC_SECRET).update(message).digest('hex');
+
+  const baselineRes = await iyzicoClient.verifyIyzicoSignatureV3({ 'x-iyz-signature-v3': validSignature }, originalPayload, SYNTHETIC_SECRET);
+  if (!baselineRes.isValid) {
+    throw new Error(`Expected baseline signature to verify before tampering test, got ${JSON.stringify(baselineRes)}`);
+  }
 
   // Tamper with customerReferenceCode (e.g. attacker attempts to credit another tenant)
   const tamperedPayload = {
@@ -166,8 +171,8 @@ await runAsyncStep('7. Rejects tampered signature (invalid hex or wrong characte
   };
 
   const message = [
-    SYNTHETIC_SECRET,
     payload.merchantId,
+    SYNTHETIC_SECRET,
     payload.eventType,
     payload.subscriptionReferenceCode,
     payload.orderReferenceCode,
@@ -175,6 +180,11 @@ await runAsyncStep('7. Rejects tampered signature (invalid hex or wrong characte
   ].join('');
 
   const validSignature = crypto.createHmac('sha256', SYNTHETIC_SECRET).update(message).digest('hex');
+
+  const baselineRes = await iyzicoClient.verifyIyzicoSignatureV3({ 'x-iyz-signature-v3': validSignature }, payload, SYNTHETIC_SECRET);
+  if (!baselineRes.isValid) {
+    throw new Error(`Expected baseline signature to verify before tampering test, got ${JSON.stringify(baselineRes)}`);
+  }
   // Mutate last character
   const tamperedSignature = validSignature.slice(0, -1) + (validSignature.slice(-1) === 'a' ? 'b' : 'a');
 
