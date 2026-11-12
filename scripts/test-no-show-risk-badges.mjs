@@ -17,7 +17,10 @@ const mockLocalStorage = {
   key: (i) => Array.from(storageMap.keys())[i] || null
 };
 globalThis.localStorage = mockLocalStorage;
-globalThis.window = { localStorage: mockLocalStorage };
+globalThis.window = {
+  localStorage: mockLocalStorage,
+  location: { href: '', hash: '', search: '', pathname: '/' }
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,7 +78,7 @@ runTest('1.2. bookingAbuseProtectionService.ts içinde NoShowRiskBadge tipi ve g
   assert(content.includes('⚠️ No-Show Riski'), 'Kanonik ⚠️ No-Show Riski rozet metni eksik');
 });
 
-runTest('1.3. FINDING-ADIM014-001 Statik Denetim: executeStatusMutation ve handleNoShow mutasyon sonucuna bağlı', () => {
+runTest('1.3. FINDING-ADIM014-001 & FINDING-ADIM014-003 Statik Denetim: handlePostMutationNoShowSignal ve handleNoShow mutasyon sonucuna bağlı', () => {
   const content = fs.readFileSync(adminPagePath, 'utf8');
   assert(
     content.includes('executeStatusMutation = async (') &&
@@ -83,8 +86,16 @@ runTest('1.3. FINDING-ADIM014-001 Statik Denetim: executeStatusMutation ve handl
     'executeStatusMutation açıkça Promise<{ success: boolean; changed: boolean }> dönmelidir'
   );
   assert(
+    content.includes('export function handlePostMutationNoShowSignal'),
+    'AdminPage.tsx içinde handlePostMutationNoShowSignal açıkça export edilmelidir'
+  );
+  assert(
+    content.includes('handlePostMutationNoShowSignal(mutationResult'),
+    'handleNoShow mutasyon sonucunu handlePostMutationNoShowSignal yardımcısına devretmelidir'
+  );
+  assert(
     content.includes('mutationResult.success && mutationResult.changed'),
-    'handleNoShow yalnızca mutationResult.success && mutationResult.changed durumunda recordNoShowSignal çağırmalıdır'
+    'handlePostMutationNoShowSignal yalnızca mutationResult.success && mutationResult.changed durumunda recordNoShowSignal çağırmalıdır'
   );
 });
 
@@ -134,6 +145,22 @@ const tempAbusePath = path.join(rootDir, 'scripts', '.temp_abuse_for_qa.mjs');
 fs.writeFileSync(tempAbusePath, abuseBundle.outputFiles[0].text);
 const { bookingAbuseProtectionService } = await import('./.temp_abuse_for_qa.mjs');
 fs.unlinkSync(tempAbusePath);
+
+// esbuild ile AdminPage bileşenindeki handlePostMutationNoShowSignal üretim mantığını yükle
+const adminBundle = esbuild.buildSync({
+  entryPoints: [adminPagePath],
+  bundle: true,
+  packages: 'external',
+  format: 'esm',
+  write: false,
+  define: {
+    'import.meta.env': JSON.stringify({ VITE_DATA_MODE: 'mock', VITE_AI_MODE: 'mock' }),
+  },
+});
+const tempAdminPath = path.join(rootDir, 'scripts', '.temp_admin_for_qa.mjs');
+fs.writeFileSync(tempAdminPath, adminBundle.outputFiles[0].text);
+const { handlePostMutationNoShowSignal } = await import('./.temp_admin_for_qa.mjs');
+fs.unlinkSync(tempAdminPath);
 
 runTest('2.1. Geçmişi temiz müşteride (0 no-show) rozet sade kalıyor (hasRisk: false)', () => {
   bookingAbuseProtectionService.clearAllNoShowSignals();
@@ -304,26 +331,17 @@ runTest('3.3. [FINDING-002] Karışık-tenant appointment dizisinde diğer kirac
 });
 
 // -----------------------------------------------------------------------------
-// SECTION 4: FINDING-ADIM014-001 MUTASYON SONUCU VE SİNYAL SENKRONİZASYONU
+// SECTION 4: FINDING-ADIM014-001 & FINDING-ADIM014-003 GERÇEK MUTASYON VE SİNYAL MANTIĞI
 // -----------------------------------------------------------------------------
-runTest('4.1. [FINDING-001] Başarısız mutasyonda (service_error, invalid_transition, forbidden) no-show sinyali kaydedilmez', () => {
+runTest('4.1. [FINDING-001 & 003] Başarısız mutasyonda (service_error, invalid_transition, forbidden) handlePostMutationNoShowSignal sıfır sinyal üretir', () => {
   bookingAbuseProtectionService.clearAllNoShowSignals();
   const testPhone = '+90 542 111 00 22';
   const tenantId = 't_mutation_test';
 
-  // AdminPage handleNoShow mantığı simülasyonu:
-  // const mutationResult = await executeStatusMutation(id, 'no_show');
-  // if (mutationResult?.success && mutationResult?.changed && targetApt?.phone && tenantId) { ... }
-  const simulateAdminHandleNoShow = (mutationResult, targetApt, tid) => {
-    if (mutationResult?.success && mutationResult?.changed && targetApt?.phone && tid) {
-      bookingAbuseProtectionService.recordNoShowSignal(tid, targetApt.phone);
-    }
-  };
-
-  const targetApt = { id: 'apt_1', phone: testPhone, status: 'confirmed' };
-
+  // Gerçek AdminPage ortak üretim fonksiyonu handlePostMutationNoShowSignal doğrudan çalıştırılır
   // 1. Senaryo: RPC hatası (service_error / forbidden)
-  simulateAdminHandleNoShow({ success: false, changed: false }, targetApt, tenantId);
+  const res1 = handlePostMutationNoShowSignal({ success: false, changed: false }, testPhone, tenantId);
+  assert.strictEqual(res1, false, 'Başarısız mutasyonda handlePostMutationNoShowSignal false dönmelidir');
   assert.strictEqual(
     bookingAbuseProtectionService.getNoShowRiskCountForCustomer(tenantId, testPhone),
     0,
@@ -331,7 +349,8 @@ runTest('4.1. [FINDING-001] Başarısız mutasyonda (service_error, invalid_tran
   );
 
   // 2. Senaryo: Geçersiz geçiş (invalid_transition)
-  simulateAdminHandleNoShow({ success: false, changed: false }, targetApt, tenantId);
+  const res2 = handlePostMutationNoShowSignal({ success: false, changed: false }, testPhone, tenantId);
+  assert.strictEqual(res2, false, 'invalid_transition durumunda handlePostMutationNoShowSignal false dönmelidir');
   assert.strictEqual(
     bookingAbuseProtectionService.getNoShowRiskCountForCustomer(tenantId, testPhone),
     0,
@@ -342,21 +361,14 @@ runTest('4.1. [FINDING-001] Başarısız mutasyonda (service_error, invalid_tran
   assert.strictEqual(badgeAfterFailures.hasRisk, false, 'Hatalı mutasyonlar sonrası müşteride risk rozeti oluşmamalı');
 });
 
-runTest('4.2. [FINDING-001] no_change mutasyonunda (değişiklik yaratmayan) no-show sinyali kaydedilmez', () => {
+runTest('4.2. [FINDING-001 & 003] no_change mutasyonunda (değişiklik yaratmayan) handlePostMutationNoShowSignal sıfır sinyal üretir', () => {
   bookingAbuseProtectionService.clearAllNoShowSignals();
   const testPhone = '+90 542 333 44 55';
   const tenantId = 't_mutation_test';
 
-  const simulateAdminHandleNoShow = (mutationResult, targetApt, tid) => {
-    if (mutationResult?.success && mutationResult?.changed && targetApt?.phone && tid) {
-      bookingAbuseProtectionService.recordNoShowSignal(tid, targetApt.phone);
-    }
-  };
-
-  const targetApt = { id: 'apt_2', phone: testPhone, status: 'no_show' };
-
-  // Durum zaten no_show idi (no_change)
-  simulateAdminHandleNoShow({ success: true, changed: false }, targetApt, tenantId);
+  // Durum zaten no_show idi (changed: false)
+  const res = handlePostMutationNoShowSignal({ success: true, changed: false }, testPhone, tenantId);
+  assert.strictEqual(res, false, 'changed: false mutasyonunda handlePostMutationNoShowSignal false dönmelidir');
   assert.strictEqual(
     bookingAbuseProtectionService.getNoShowRiskCountForCustomer(tenantId, testPhone),
     0,
@@ -367,21 +379,14 @@ runTest('4.2. [FINDING-001] no_change mutasyonunda (değişiklik yaratmayan) no-
   assert.strictEqual(badge.hasRisk, false);
 });
 
-runTest('4.3. [FINDING-001] Başarılı ve değişiklik yaratan mutasyonda (success: true && changed: true) tam bir sinyal eklenir', () => {
+runTest('4.3. [FINDING-001 & 003] Başarılı ve değişiklik yaratan mutasyonda (success: true && changed: true) tam bir sinyal eklenir', () => {
   bookingAbuseProtectionService.clearAllNoShowSignals();
   const testPhone = '+90 542 777 88 99';
   const tenantId = 't_mutation_test';
 
-  const simulateAdminHandleNoShow = (mutationResult, targetApt, tid) => {
-    if (mutationResult?.success && mutationResult?.changed && targetApt?.phone && tid) {
-      bookingAbuseProtectionService.recordNoShowSignal(tid, targetApt.phone);
-    }
-  };
-
-  const targetApt = { id: 'apt_3', phone: testPhone, status: 'confirmed' };
-
-  // Başarılı no_show mutasyonu
-  simulateAdminHandleNoShow({ success: true, changed: true }, targetApt, tenantId);
+  // Başarılı no_show mutasyonu (success: true && changed: true)
+  const res = handlePostMutationNoShowSignal({ success: true, changed: true }, testPhone, tenantId);
+  assert.strictEqual(res, true, 'Başarılı changed mutasyonunda handlePostMutationNoShowSignal true dönmelidir');
   assert.strictEqual(
     bookingAbuseProtectionService.getNoShowRiskCountForCustomer(tenantId, testPhone),
     1,
@@ -392,6 +397,27 @@ runTest('4.3. [FINDING-001] Başarılı ve değişiklik yaratan mutasyonda (succ
   assert.strictEqual(badge.hasRisk, true);
   assert.strictEqual(badge.count, 1);
   assert.strictEqual(badge.badgeText, '⚠️ No-Show Riski (1 kez)');
+});
+
+runTest('4.4. [FINDING-001 & 003] Eksik telefon, eksik tenantId veya null mutasyonda fail-safe sıfır sinyal üretir', () => {
+  bookingAbuseProtectionService.clearAllNoShowSignals();
+  const tenantId = 't_mutation_test';
+  const testPhone = '+90 542 555 66 77';
+
+  // Boş telefon
+  assert.strictEqual(handlePostMutationNoShowSignal({ success: true, changed: true }, '', tenantId), false);
+  // Tanımsız telefon
+  assert.strictEqual(handlePostMutationNoShowSignal({ success: true, changed: true }, undefined, tenantId), false);
+  // Boş tenantId
+  assert.strictEqual(handlePostMutationNoShowSignal({ success: true, changed: true }, testPhone, ''), false);
+  // Tanımsız tenantId
+  assert.strictEqual(handlePostMutationNoShowSignal({ success: true, changed: true }, testPhone, undefined), false);
+  // Null mutationResult
+  assert.strictEqual(handlePostMutationNoShowSignal(null, testPhone, tenantId), false);
+  // Undefined mutationResult
+  assert.strictEqual(handlePostMutationNoShowSignal(undefined, testPhone, tenantId), false);
+
+  assert.strictEqual(bookingAbuseProtectionService.getAllNoShowSignals().length, 0);
 });
 
 // -----------------------------------------------------------------------------

@@ -43,6 +43,24 @@ const getInitialsAvatar = (name: string): string => {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 };
 
+/**
+ * V1A-FUNC-02 / FINDING-ADIM014-001 & FINDING-ADIM014-003:
+ * Evaluates the status mutation result and records a customer no-show anti-abuse signal
+ * strictly when the mutation succeeded AND produced an actual state change.
+ * Returns true if a signal was recorded, false otherwise.
+ */
+export function handlePostMutationNoShowSignal(
+  mutationResult: { success?: boolean; changed?: boolean } | null | undefined,
+  phone: string | null | undefined,
+  tenantId: string | null | undefined
+): boolean {
+  if (mutationResult && mutationResult.success && mutationResult.changed && phone && tenantId) {
+    bookingAbuseProtectionService.recordNoShowSignal(tenantId, phone);
+    return true;
+  }
+  return false;
+}
+
 const AdminPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -357,9 +375,7 @@ const AdminPage: React.FC = () => {
     if (!isOwner || mutatingAppointments.has(id)) return;
     const targetApt = appointments.find(a => a.id === id);
     const mutationResult = await executeStatusMutation(id, 'no_show');
-    if (mutationResult.success && mutationResult.changed && targetApt?.phone && tenantId) {
-      bookingAbuseProtectionService.recordNoShowSignal(tenantId, targetApt.phone);
-    }
+    handlePostMutationNoShowSignal(mutationResult, targetApt?.phone, tenantId);
   };
 
   const handleCallConfirm = async (apt: Appointment, badge: NoShowRiskBadge) => {
