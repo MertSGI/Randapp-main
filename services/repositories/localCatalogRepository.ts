@@ -1,6 +1,7 @@
 import { AvailabilityRule, CatalogRepository } from './types';
 import { Service, Staff, SERVICES as DEMO_SERVICES } from '../../types';
 import { dataProvider } from '../dataProvider';
+import { DYNAMIC_STORAGE_KEYS } from '../storageKeys';
 
 const DEMO_STAFF: Staff[] = [
   {
@@ -27,22 +28,22 @@ const DEMO_STAFF: Staff[] = [
 ];
 
 export class LocalCatalogRepository implements CatalogRepository {
-  private getServicesKey(tenantId: string) { return `lari:${tenantId}:services`; }
-  private getStaffKey(tenantId: string) { return `lari:${tenantId}:staff`; }
+  private getServicesKey(tenantId: string) { return DYNAMIC_STORAGE_KEYS.tenantServices(tenantId); }
+  private getStaffKey(tenantId: string) { return DYNAMIC_STORAGE_KEYS.tenantStaff(tenantId); }
   // We'll store simple mappings as "staffId_serviceId" -> bool
-  private getStaffServiceMappingKey(tenantId: string) { return `lari:${tenantId}:staff_services`; }
+  private getStaffServiceMappingKey(tenantId: string) { return DYNAMIC_STORAGE_KEYS.tenantStaffServices(tenantId); }
 
   async listServices(tenantId: string, options?: { activeOnly?: boolean }): Promise<Service[]> {
     const key = this.getServicesKey(tenantId);
     const existing = await dataProvider.getList<Service>(key);
     
     if (!existing || existing.length === 0) {
-      const isSeeded = localStorage.getItem(`lari:${tenantId}:is_seeded_services`) === 'true';
+      const isSeeded = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantIsSeededServices(tenantId)) === 'true';
       if (isSeeded) return [];
       
       const seededServices = DEMO_SERVICES.map(s => ({ ...s, tenantId }));
       await dataProvider.set(key, seededServices);
-      localStorage.setItem(`lari:${tenantId}:is_seeded_services`, 'true');
+      localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantIsSeededServices(tenantId), 'true');
       return options?.activeOnly ? seededServices.filter(s => s.active !== false) : seededServices;
     }
     return options?.activeOnly ? existing.filter(s => s.active !== false) : existing;
@@ -95,12 +96,12 @@ export class LocalCatalogRepository implements CatalogRepository {
     const existing = await dataProvider.getList<Staff>(key);
     
     if (!existing || existing.length === 0) {
-      const isSeeded = localStorage.getItem(`lari:${tenantId}:is_seeded_staff`) === 'true';
+      const isSeeded = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantIsSeededStaff(tenantId)) === 'true';
       if (isSeeded) return [];
       
       const seededStaff = DEMO_STAFF.map(s => ({ ...s, tenantId }));
       await dataProvider.set(key, seededStaff);
-      localStorage.setItem(`lari:${tenantId}:is_seeded_staff`, 'true');
+      localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantIsSeededStaff(tenantId), 'true');
       return options?.activeOnly ? seededStaff.filter(s => s.active !== false) : seededStaff;
     }
     return options?.activeOnly ? existing.filter(s => s.active !== false) : existing;
@@ -218,7 +219,7 @@ export class LocalCatalogRepository implements CatalogRepository {
   }
 
   async listAvailabilityRules(tenantId: string, staffId?: string): Promise<AvailabilityRule[]> {
-    const localData = localStorage.getItem(`lari:${tenantId}:availability_rules`);
+    const localData = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantAvailabilityRules(tenantId));
     let rules = (localData ? JSON.parse(localData) : []).map((rule: any) => this.normalizeAvailabilityRule(tenantId, rule));
     if (rules.length === 0) {
       const seeded: AvailabilityRule[] = [];
@@ -237,7 +238,7 @@ export class LocalCatalogRepository implements CatalogRepository {
         }
       }
       rules = seeded;
-      localStorage.setItem(`lari:${tenantId}:availability_rules`, JSON.stringify(rules));
+      localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantAvailabilityRules(tenantId), JSON.stringify(rules));
     }
     if (staffId) {
       return rules.filter((r: AvailabilityRule) => r.staffId === staffId || r.staffId == null);
@@ -285,7 +286,7 @@ export class LocalCatalogRepository implements CatalogRepository {
       rules.push(nextRule);
     }
 
-    localStorage.setItem(`lari:${tenantId}:availability_rules`, JSON.stringify(rules));
+    localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantAvailabilityRules(tenantId), JSON.stringify(rules));
     return nextRule;
   }
 
@@ -320,7 +321,7 @@ export class LocalCatalogRepository implements CatalogRepository {
       const updated = { ...firstRule, ...input };
       const index = rules.findIndex((r: any) => r.id === firstRule.id);
       rules[index] = updated;
-      localStorage.setItem(`lari:${tenantId}:availability_rules`, JSON.stringify(rules));
+      localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantAvailabilityRules(tenantId), JSON.stringify(rules));
       return updated;
     } else {
       return this.createAvailabilityRule(tenantId, input);

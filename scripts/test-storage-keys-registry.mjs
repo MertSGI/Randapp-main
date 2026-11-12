@@ -16,7 +16,7 @@ import assert from 'node:assert';
 import esbuild from 'esbuild';
 
 console.log('='.repeat(80));
-console.log('🧪 [ADIM-016] V1A-TECH-01: İstemci Depolama Anahtarları Registry Testi Başlatılıyor');
+console.log('🧪 [ADIM-017 / ADIM-016] V1A-TECH-01 / V1A-TECH-01B: İstemci Depolama Anahtarları Registry Testi Başlatılıyor');
 console.log('='.repeat(80));
 
 let passedChecks = 0;
@@ -66,6 +66,14 @@ check('DYNAMIC_STORAGE_KEYS fonksiyonları export edilmelidir', () => {
   assert.ok(storageKeysContent.includes('tenantCustomerProfile:'), 'tenantCustomerProfile fonksiyonu eksik');
   assert.ok(storageKeysContent.includes('tenantAppointments:'), 'tenantAppointments fonksiyonu eksik');
   assert.ok(storageKeysContent.includes('tenantAppointmentsSeeded:'), 'tenantAppointmentsSeeded fonksiyonu eksik');
+  assert.ok(storageKeysContent.includes('tenantServices:'), 'tenantServices fonksiyonu eksik');
+  assert.ok(storageKeysContent.includes('tenantStaff:'), 'tenantStaff fonksiyonu eksik');
+  assert.ok(storageKeysContent.includes('tenantStaffServices:'), 'tenantStaffServices fonksiyonu eksik');
+  assert.ok(storageKeysContent.includes('tenantAvailabilityRules:'), 'tenantAvailabilityRules fonksiyonu eksik');
+  assert.ok(storageKeysContent.includes('tenantSubscription:'), 'tenantSubscription fonksiyonu eksik');
+  assert.ok(storageKeysContent.includes('tenantProvisioningStatus:'), 'tenantProvisioningStatus fonksiyonu eksik');
+  assert.ok(storageKeysContent.includes('tenantGoLiveStatus:'), 'tenantGoLiveStatus fonksiyonu eksik');
+  assert.ok(storageKeysContent.includes('tenantBackupFile:'), 'tenantBackupFile fonksiyonu eksik');
 });
 
 check('StoragePurgeError ve ilgili tipler export edilmelidir', () => {
@@ -296,8 +304,9 @@ check('localBookingRepository.ts (FINDING-ADIM016-004): seeded appointment demo 
   assert.ok(!content.includes("'İşim çıktı'"), 'İşim çıktı demo payload sapması tespit edildi');
 });
 
-check('ADIM-016 kapsamında göç ettirilen servislerde (storageKeys.ts hariç) doğrudan lari_ veya lari: storage-key üretimi bulunmamalıdır', () => {
+check('ADIM-016 ve ADIM-017 kapsamında göç ettirilen tüm servis ve depolarda (storageKeys.ts hariç) doğrudan lari_ veya lari: storage-key üretimi bulunmamalıdır', () => {
   const migratedFiles = [
+    // ADIM-016 Kapsamı (22 Dosya)
     'services/bookingAbuseProtectionService.ts',
     'services/appointmentSelfServiceService.ts',
     'services/auditLogService.ts',
@@ -319,7 +328,36 @@ check('ADIM-016 kapsamında göç ettirilen servislerde (storageKeys.ts hariç) 
     'services/repositories/localSupportTicketRepository.ts',
     'services/repositories/localTenantRepository.ts',
     'services/supportTicketService.ts',
-    'services/tenantService.ts'
+    'services/tenantService.ts',
+
+    // ADIM-017 Kapsamı: Kalan 28 Legacy Servis ve Depo Dosyası (V1A-TECH-01B)
+    'services/appointmentService.ts',
+    'services/backgroundJobService.ts',
+    'services/brandingService.ts',
+    'services/businessVerificationService.ts',
+    'services/consentService.ts',
+    'services/customerCampaignService.ts',
+    'services/dataExportService.ts',
+    'services/goLiveService.ts',
+    'services/manualProvisioningService.ts',
+    'services/mediaAssetService.ts',
+    'services/onboardingChecklistService.ts',
+    'services/pilotCustomerOnboardingService.ts',
+    'services/pilotDemoService.ts',
+    'services/planService.ts',
+    'services/provisioningService.ts',
+    'services/referralProgramService.ts',
+    'services/referralService.ts',
+    'services/repositoryFactory.ts',
+    'services/shareToolkitService.ts',
+    'services/subscriptionService.ts',
+    'services/superAdminService.ts',
+    'services/syntheticSalonFixtureService.ts',
+    'services/tenantRegistrationService.ts',
+    'services/repositories/index.ts',
+    'services/repositories/localCampaignRepository.ts',
+    'services/repositories/localCatalogRepository.ts',
+    'services/repositories/supabaseTenantRepository.ts'
   ];
 
   const violations = [];
@@ -379,10 +417,27 @@ check('Canlı runtime: DYNAMIC_STORAGE_KEYS fonksiyonları doğru formatta anaht
   assert.strictEqual(dyn.tenantBookingPolicy('t_1'), 'lari_tenant_booking_policies_t_1');
   assert.strictEqual(dyn.tenantBranches('t_1'), 'lari_branches_t_1');
   assert.strictEqual(dyn.tenantCustomerConsents('t_1'), 'lari_customer_consents_by_tenant_t_1');
+  assert.strictEqual(dyn.tenantCustomerDataRequests('t_1'), 'lari_customer_data_requests_by_tenant_t_1');
+  assert.strictEqual(dyn.tenantShareChecklist('t_1'), 'lari_share_checklist_t_1');
   assert.strictEqual(dyn.tenantCustomerProfile('t_1'), 'lari_customer_profile_t_1');
+  assert.strictEqual(dyn.tenantAvailabilityConfigured('t_1'), 'lari_availability_t_1_configured');
   assert.strictEqual(dyn.tenantBrandingColon('t_1'), 'lari:t_1:branding');
   assert.strictEqual(dyn.tenantAppointments('t_1'), 'lari:t_1:appointments');
   assert.strictEqual(dyn.tenantAppointmentsSeeded('t_1'), 'lari:t_1:appointments_seeded');
+  assert.strictEqual(dyn.tenantServices('t_1'), 'lari:t_1:services');
+  assert.strictEqual(dyn.tenantStaff('t_1'), 'lari:t_1:staff');
+  assert.strictEqual(dyn.tenantStaffServices('t_1'), 'lari:t_1:staff_services');
+  assert.strictEqual(dyn.tenantServiceStaffMapping('t_1'), 'lari:t_1:service_staff_mapping');
+  assert.strictEqual(dyn.tenantAvailabilityRules('t_1'), 'lari:t_1:availability_rules');
+  assert.strictEqual(dyn.tenantCustomers('t_1'), 'lari:t_1:customers');
+  assert.strictEqual(dyn.tenantSubscription('t_1'), 'lari:t_1:subscription');
+  assert.strictEqual(dyn.tenantProfile('t_1'), 'lari:t_1:profile');
+  assert.strictEqual(dyn.tenantProvisioningStatus('t_1'), 'lari:t_1:provisioning_status');
+  assert.strictEqual(dyn.tenantGoLiveStatus('t_1'), 'lari:t_1:go_live_status');
+  assert.strictEqual(dyn.tenantIsSeeded('t_1'), 'lari:t_1:is_seeded');
+  assert.strictEqual(dyn.tenantIsSeededServices('t_1'), 'lari:t_1:is_seeded_services');
+  assert.strictEqual(dyn.tenantIsSeededStaff('t_1'), 'lari:t_1:is_seeded_staff');
+  assert.strictEqual(dyn.tenantBackupFile('t_1', '2026-11-12'), 'lari_backup_t_1_2026-11-12.json');
 });
 
 check('Canlı runtime: isLariStorageKey doğru filtreleme yapar', () => {
@@ -497,7 +552,7 @@ check('Canlı runtime: purgeLariStorage ve resetStorage referans eşitliği sağ
 // Sonuç ve Özet
 // ----------------------------------------------------------------------------
 console.log('\n' + '='.repeat(80));
-console.log(`🏁 [ADIM-016] TEST SONUCU: ${passedChecks}/${totalChecks} Kontrol Başarılı!`);
+console.log(`🏁 [ADIM-017 / ADIM-016] TEST SONUCU: ${passedChecks}/${totalChecks} Kontrol Başarılı!`);
 console.log('='.repeat(80));
 
 if (passedChecks === totalChecks) {

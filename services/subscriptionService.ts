@@ -2,6 +2,7 @@ import { supabase } from './supabaseClient';
 import { dataProvider } from './dataProvider';
 import { planService, PricingPlan } from './planService';
 import { communicationEventService } from './communicationEventService';
+import { DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
 
 export type SubscriptionStatus =
@@ -97,7 +98,7 @@ export const subscriptionService = {
         paymentProvider: 'local_dry_run'
       };
     }
-    const dataProvSaved = await dataProvider.get<any>(`lari:${tenantId}:subscription`);
+    const dataProvSaved = await dataProvider.get<any>(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId));
     if (dataProvSaved) {
       return dataProvSaved;
     }
@@ -159,8 +160,8 @@ export const subscriptionService = {
     }
 
     // Mock Mode
-    const staffList = (await dataProvider.get<any[]>(`lari:${tenantId}:staff`)) || [];
-    const servicesList = (await dataProvider.get<any[]>(`lari:${tenantId}:services`)) || [];
+    const staffList = (await dataProvider.get<any[]>(DYNAMIC_STORAGE_KEYS.tenantStaff(tenantId))) || [];
+    const servicesList = (await dataProvider.get<any[]>(DYNAMIC_STORAGE_KEYS.tenantServices(tenantId))) || [];
     const aiUsage = parseInt(localStorage.getItem('mock_ai_usage') || '0', 10);
 
     return {
@@ -228,7 +229,7 @@ export const subscriptionService = {
           paymentProvider: 'local_dry_run'
         };
         localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(mockSub));
-        await dataProvider.set(`lari:${tenantId}:subscription`, mockSub);
+        await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), mockSub);
       }
 
       return simUrl;
@@ -395,7 +396,7 @@ export const subscriptionService = {
     sub.currentPeriodStart = new Date().toISOString();
     sub.currentPeriodEnd = sub.trialEnd;
     localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-    await dataProvider.set(`lari:${tenantId}:subscription`, sub);
+    await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), sub);
 
     // Queue Trial Started communication event
     try {
@@ -433,7 +434,7 @@ export const subscriptionService = {
       referralCredits: options.referralCredits
     };
     localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-    await dataProvider.set(`lari:${tenantId}:subscription`, sub);
+    await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), sub);
 
     // Queue Manual Subscriber communication event
     try {
@@ -464,7 +465,7 @@ export const subscriptionService = {
       currentEnd.setMonth(currentEnd.getMonth() + months);
       sub.currentPeriodEnd = currentEnd.toISOString();
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), sub);
 
       // Queue Credit Awarded communication event
       try {
@@ -492,7 +493,7 @@ export const subscriptionService = {
       sub.discountType = discount.type;
       sub.discountValue = discount.value;
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), sub);
       return sub;
     }
     throw new Error('Subscription not found');
@@ -513,7 +514,7 @@ export const subscriptionService = {
       sub.planChangeStatus = 'none';
       sub.scheduledPlanId = undefined;
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), sub);
 
       // Queue Upgrade Success event
       try {
@@ -543,7 +544,7 @@ export const subscriptionService = {
       sub.planChangeStatus = 'downgrade_scheduled';
       sub.scheduledPlanId = targetPlanId;
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), sub);
 
       // Queue Downgrade Scheduled event
       try {
@@ -572,7 +573,7 @@ export const subscriptionService = {
       sub.cancelAtPeriodEnd = true;
       sub.planChangeStatus = 'cancelled_at_period_end';
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), sub);
 
       // Queue Period End Cancellation event
       try {
@@ -602,7 +603,7 @@ export const subscriptionService = {
       sub.cancelAtPeriodEnd = false;
       sub.planChangeStatus = 'none';
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), sub);
 
       // Queue Immediate Deactivation event
       try {
@@ -629,7 +630,7 @@ export const subscriptionService = {
       sub.status = 'paused';
       sub.setupNotes = reason || 'User paused';
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), sub);
 
       // Queue Suspend Paused event
       try {
@@ -657,7 +658,7 @@ export const subscriptionService = {
     if (sub) {
       sub.status = 'active';
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), sub);
 
       // Queue Re-activated active subscription event
       try {
@@ -685,7 +686,7 @@ export const subscriptionService = {
     if (sub) {
       sub.status = 'past_due';
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), sub);
 
       // Queue Past Due invoice retry alert
       try {
@@ -714,7 +715,7 @@ export const subscriptionService = {
     if (sub) {
       sub.status = 'expired';
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(sub));
-      await dataProvider.set(`lari:${tenantId}:subscription`, sub);
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), sub);
       return sub;
     }
     throw new Error('Subscription not found');

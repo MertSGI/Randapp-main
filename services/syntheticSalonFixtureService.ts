@@ -5,6 +5,8 @@
  * Zero real external communications, zero real publications, zero staging writes.
  */
 
+import { STORAGE_KEYS, DYNAMIC_STORAGE_KEYS } from './storageKeys';
+
 export interface SyntheticBranch {
   id: string;
   tenantId: string;
@@ -447,26 +449,26 @@ export class SyntheticSalonFixtureService {
     }
 
     return {
-      'lari_registered_tenants': JSON.stringify([registeredTenant]),
+      [STORAGE_KEYS.REGISTERED_TENANTS]: JSON.stringify([registeredTenant]),
       [`mock_subscription_${fixture.tenantId}`]: JSON.stringify(subscription),
-      [`lari:${fixture.tenantId}:subscription`]: JSON.stringify(subscription),
+      [DYNAMIC_STORAGE_KEYS.tenantSubscription(fixture.tenantId)]: JSON.stringify(subscription),
       [`mock_business_profile_${fixture.tenantId}`]: JSON.stringify(businessProfile),
-      [`lari:${fixture.tenantId}:profile`]: JSON.stringify(businessProfile),
-      [`lari_branches_${fixture.tenantId}`]: JSON.stringify(branches),
-      [`lari:${fixture.tenantId}:services`]: JSON.stringify(services),
-      [`lari:${fixture.tenantId}:staff`]: JSON.stringify(staff),
-      [`lari:${fixture.tenantId}:staff_services`]: JSON.stringify(staffServices),
-      [`lari:${fixture.tenantId}:availability_rules`]: JSON.stringify(availabilityRules),
-      [`lari:${fixture.tenantId}:appointments`]: JSON.stringify(fixture.bookings),
-      [`lari:${fixture.tenantId}:go_live_status`]: 'DEMO_REHEARSAL_APPROVED'
+      [DYNAMIC_STORAGE_KEYS.tenantProfile(fixture.tenantId)]: JSON.stringify(businessProfile),
+      [DYNAMIC_STORAGE_KEYS.tenantBranches(fixture.tenantId)]: JSON.stringify(branches),
+      [DYNAMIC_STORAGE_KEYS.tenantServices(fixture.tenantId)]: JSON.stringify(services),
+      [DYNAMIC_STORAGE_KEYS.tenantStaff(fixture.tenantId)]: JSON.stringify(staff),
+      [DYNAMIC_STORAGE_KEYS.tenantStaffServices(fixture.tenantId)]: JSON.stringify(staffServices),
+      [DYNAMIC_STORAGE_KEYS.tenantAvailabilityRules(fixture.tenantId)]: JSON.stringify(availabilityRules),
+      [DYNAMIC_STORAGE_KEYS.tenantAppointments(fixture.tenantId)]: JSON.stringify(fixture.bookings),
+      [DYNAMIC_STORAGE_KEYS.tenantGoLiveStatus(fixture.tenantId)]: 'DEMO_REHEARSAL_APPROVED'
     };
   }
 
   static seedBrowserStorage(storage: Storage = localStorage): void {
     const snapshot = this.getBrowserStorageSnapshot();
     for (const [k, v] of Object.entries(snapshot)) {
-      if (k === 'lari_registered_tenants') {
-        const existing = JSON.parse(storage.getItem('lari_registered_tenants') || '[]');
+      if (k === STORAGE_KEYS.REGISTERED_TENANTS) {
+        const existing = JSON.parse(storage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
         const updated = existing.filter((t: any) => t.id !== SYNTHETIC_SALON_AURA.tenantId);
         updated.push(...JSON.parse(v));
         storage.setItem(k, JSON.stringify(updated));

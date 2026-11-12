@@ -3,6 +3,7 @@ import { tenantService } from './tenantService';
 import { authService } from './authService';
 import { dataProvider } from './dataProvider';
 import { TRIAL_CONFIG } from './trialConfigService';
+import { STORAGE_KEYS, DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
 export const DEMO_PILOT_TENANT_ID = 'tenant_pilot_demo';
 
@@ -130,12 +131,12 @@ export const pilotDemoService = {
   
   async seedDemoDataOnly() {
     // Seed Data into dataprovider explicitly for `tenant_pilot_demo`
-    await dataProvider.set(`lari:${DEMO_PILOT_TENANT_ID}:branding`, PILOT_TENANT.branding);
-    await dataProvider.set(`lari:${DEMO_PILOT_TENANT_ID}:profile`, PILOT_BUSINESS_PROFILE);
-    await dataProvider.set(`lari:${DEMO_PILOT_TENANT_ID}:services`, PILOT_SERVICES);
-    await dataProvider.set(`lari:${DEMO_PILOT_TENANT_ID}:staff`, PILOT_STAFF);
-    await dataProvider.set(`lari:${DEMO_PILOT_TENANT_ID}:appointments`, PILOT_APPOINTMENTS);
-    await dataProvider.set(`lari:${DEMO_PILOT_TENANT_ID}:customers`, PILOT_CUSTOMERS);
+    await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantBrandingColon(DEMO_PILOT_TENANT_ID), PILOT_TENANT.branding);
+    await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantProfile(DEMO_PILOT_TENANT_ID), PILOT_BUSINESS_PROFILE);
+    await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantServices(DEMO_PILOT_TENANT_ID), PILOT_SERVICES);
+    await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantStaff(DEMO_PILOT_TENANT_ID), PILOT_STAFF);
+    await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantAppointments(DEMO_PILOT_TENANT_ID), PILOT_APPOINTMENTS);
+    await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantCustomers(DEMO_PILOT_TENANT_ID), PILOT_CUSTOMERS);
     
     // Seed campaign data
     const mockCampaigns = [{
@@ -199,12 +200,12 @@ export const pilotDemoService = {
       }
     ];
 
-    localStorage.setItem('lari_customer_campaigns_by_tenant', JSON.stringify(mockCampaigns));
-    localStorage.setItem('lari_customer_referrals_by_tenant', JSON.stringify(mockReferrals));
-    localStorage.setItem('lari_customer_campaign_rewards_by_tenant', JSON.stringify(mockRewards));
+    localStorage.setItem(STORAGE_KEYS.CUSTOMER_CAMPAIGNS_BY_TENANT, JSON.stringify(mockCampaigns));
+    localStorage.setItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT, JSON.stringify(mockReferrals));
+    localStorage.setItem(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT, JSON.stringify(mockRewards));
     // Also use the lari keys for compatibility
-    localStorage.setItem(`lari_business_campaigns`, JSON.stringify(mockCampaigns));
-    localStorage.setItem(`lari_business_referrals`, JSON.stringify(mockReferrals));
+    localStorage.setItem(STORAGE_KEYS.BUSINESS_CAMPAIGNS, JSON.stringify(mockCampaigns));
+    localStorage.setItem(STORAGE_KEYS.BUSINESS_REFERRALS, JSON.stringify(mockReferrals));
     
     // Seed billing status to pass admin gates
     const mockSub = {
@@ -218,12 +219,12 @@ export const pilotDemoService = {
         cancelAtPeriodEnd: false,
         paymentProvider: 'local_dry_run'
     };
-    await dataProvider.set(`lari:${DEMO_PILOT_TENANT_ID}:subscription`, mockSub);
+    await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(DEMO_PILOT_TENANT_ID), mockSub);
     localStorage.setItem(`mock_subscription_${DEMO_PILOT_TENANT_ID}`, JSON.stringify(mockSub));
     
     // Set allowed client-facing keys
-    localStorage.setItem('lari_demo_context', 'true');
-    localStorage.setItem('lari_active_demo_tenant_id', DEMO_PILOT_TENANT_ID);
+    localStorage.setItem(STORAGE_KEYS.DEMO_CONTEXT, 'true');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_DEMO_TENANT_ID, DEMO_PILOT_TENANT_ID);
   },
 
   async enterDemoContext() {
@@ -235,24 +236,24 @@ export const pilotDemoService = {
     await this.seedDemoDataOnly();
 
     // Save previous state to restore later if needed
-    const prevTenant = localStorage.getItem('lari_active_tenant_id');
-    const prevSession = localStorage.getItem('lari_active_owner_session');
+    const prevTenant = localStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT_ID);
+    const prevSession = localStorage.getItem(STORAGE_KEYS.ACTIVE_OWNER_SESSION);
     
     // We do NOT overwrite lari_registered_tenants array, just the active one for the session
     if (prevTenant && prevTenant !== DEMO_PILOT_TENANT_ID) {
-       localStorage.setItem('lari_saved_real_tenant_id', prevTenant);
+       localStorage.setItem(STORAGE_KEYS.SAVED_REAL_TENANT_ID, prevTenant);
     }
     if (prevSession && !prevSession.includes('user_pilot_owner')) {
-       localStorage.setItem('lari_saved_real_session', prevSession);
+       localStorage.setItem(STORAGE_KEYS.SAVED_REAL_SESSION, prevSession);
     }
     
     // Auth and tenant active for OWNER
-    localStorage.setItem('lari_active_tenant_id', DEMO_PILOT_TENANT_ID);
-    localStorage.setItem('lari_active_owner_session', JSON.stringify(PILOT_USER));
-    localStorage.setItem('lari_in_pilot_demo', 'true');
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT_ID, DEMO_PILOT_TENANT_ID);
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_OWNER_SESSION, JSON.stringify(PILOT_USER));
+    localStorage.setItem(STORAGE_KEYS.IN_PILOT_DEMO, 'true');
     
     // Append to registered tenants list only if not exists, but we can also just let it be loaded from session
-    const regArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+    const regArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
     if (!regArr.some((t: any) => t.id === DEMO_PILOT_TENANT_ID)) {
        regArr.push({
            id: DEMO_PILOT_TENANT_ID,
@@ -264,7 +265,7 @@ export const pilotDemoService = {
            verificationStatus: 'approved',
            created_at: new Date().toISOString()
        });
-       localStorage.setItem('lari_registered_tenants', JSON.stringify(regArr));
+       localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(regArr));
      }
   },
 
@@ -273,34 +274,34 @@ export const pilotDemoService = {
   },
 
   async exitDemoContext() {
-     localStorage.removeItem('lari_in_pilot_demo');
-     localStorage.removeItem('lari_demo_context');
-     localStorage.removeItem('lari_active_demo_tenant_id');
+     localStorage.removeItem(STORAGE_KEYS.IN_PILOT_DEMO);
+     localStorage.removeItem(STORAGE_KEYS.DEMO_CONTEXT);
+     localStorage.removeItem(STORAGE_KEYS.ACTIVE_DEMO_TENANT_ID);
      
-     const savedTenant = localStorage.getItem('lari_saved_real_tenant_id');
+     const savedTenant = localStorage.getItem(STORAGE_KEYS.SAVED_REAL_TENANT_ID);
      if (savedTenant) {
-         localStorage.setItem('lari_active_tenant_id', savedTenant);
-         localStorage.removeItem('lari_saved_real_tenant_id');
+         localStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT_ID, savedTenant);
+         localStorage.removeItem(STORAGE_KEYS.SAVED_REAL_TENANT_ID);
      } else {
-         localStorage.removeItem('lari_active_tenant_id');
+         localStorage.removeItem(STORAGE_KEYS.ACTIVE_TENANT_ID);
      }
      
-     const savedSession = localStorage.getItem('lari_saved_real_session');
+     const savedSession = localStorage.getItem(STORAGE_KEYS.SAVED_REAL_SESSION);
      if (savedSession) {
-         localStorage.setItem('lari_active_owner_session', savedSession);
-         localStorage.removeItem('lari_saved_real_session');
+         localStorage.setItem(STORAGE_KEYS.ACTIVE_OWNER_SESSION, savedSession);
+         localStorage.removeItem(STORAGE_KEYS.SAVED_REAL_SESSION);
      } else {
-         localStorage.removeItem('lari_active_owner_session');
+         localStorage.removeItem(STORAGE_KEYS.ACTIVE_OWNER_SESSION);
      }
   },
   
   isPilotDemoActive() {
-      return localStorage.getItem('lari_in_pilot_demo') === 'true';
+      return localStorage.getItem(STORAGE_KEYS.IN_PILOT_DEMO) === 'true';
   },
 
   isDemoContextReady(): boolean {
-      return localStorage.getItem('lari_in_pilot_demo') === 'true' &&
-             localStorage.getItem('lari_active_tenant_id') === DEMO_PILOT_TENANT_ID &&
-             localStorage.getItem('lari_demo_context') === 'true';
+      return localStorage.getItem(STORAGE_KEYS.IN_PILOT_DEMO) === 'true' &&
+             localStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT_ID) === DEMO_PILOT_TENANT_ID &&
+             localStorage.getItem(STORAGE_KEYS.DEMO_CONTEXT) === 'true';
   }
 };

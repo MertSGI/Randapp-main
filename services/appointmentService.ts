@@ -7,8 +7,9 @@ import { tenantService } from './tenantService';
 import { appointmentSelfServiceService } from './appointmentSelfServiceService';
 import { bookingAbuseProtectionService } from './bookingAbuseProtectionService';
 import { auditLogService } from './auditLogService';
+import { DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
-export const getAppointmentsKey = (tenantId: string) => `lari:${tenantId}:appointments`;
+export const getAppointmentsKey = (tenantId: string) => DYNAMIC_STORAGE_KEYS.tenantAppointments(tenantId);
 
 export const getAppointments = async (tenantId: string): Promise<Appointment[]> => {
   return getBookingRepository().listAppointments(tenantId);

@@ -2,8 +2,9 @@
 import { supabase } from './supabaseClient';
 import { TenantBranding } from '../types';
 import { tenantService } from './tenantService';
+import { DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
-const getBrandingKey = (tenantId: string) => `lari:${tenantId}:branding`;
+const getBrandingKey = (tenantId: string) => DYNAMIC_STORAGE_KEYS.tenantBrandingColon(tenantId);
 
 const isSupabaseMode = () => {
   const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';

@@ -7,6 +7,7 @@ import { getServices } from './serviceCatalogService';
 import { getStaffList } from './staffService';
 import { businessVerificationService } from './businessVerificationService';
 import { getDataSourceMode } from './dataSourceConfig';
+import { STORAGE_KEYS } from './storageKeys';
 
 export interface GoLiveReadiness {
   canGoLive: boolean;
@@ -177,11 +178,11 @@ export const goLiveService = {
       await supabase.from('tenants').update({ public_site_status: 'pending_review' }).eq('id', tenantId);
       await provisioningService.markTenantProvisioningStatus(tenantId, 'ready_for_review');
     } else {
-      const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+      const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
       const index = registeredArr.findIndex((t: any) => t.id === tenantId);
       if (index !== -1) {
          registeredArr[index].publicSiteStatus = 'pending_review';
-         localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+         localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(registeredArr));
       }
       await provisioningService.markTenantProvisioningStatus(tenantId, 'ready_for_review');
     }
@@ -193,12 +194,12 @@ export const goLiveService = {
       await supabase.from('tenants').update({ public_site_status: 'published' }).eq('id', tenantId);
       await provisioningService.markTenantProvisioningStatus(tenantId, 'live');
     } else {
-      const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+      const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
       const index = registeredArr.findIndex((t: any) => t.id === tenantId);
       if (index !== -1) {
          registeredArr[index].publicSiteStatus = 'published';
          registeredArr[index].verificationStatus = 'approved';
-         localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+         localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(registeredArr));
       }
       await provisioningService.markTenantProvisioningStatus(tenantId, 'live');
     }
@@ -209,11 +210,11 @@ export const goLiveService = {
     if (mode.startsWith('supabase')) {
       await supabase.from('tenants').update({ public_site_status: 'paused' }).eq('id', tenantId);
     } else {
-      const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+      const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
       const index = registeredArr.findIndex((t: any) => t.id === tenantId);
       if (index !== -1) {
          registeredArr[index].publicSiteStatus = 'paused';
-         localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+         localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(registeredArr));
       }
     }
   },
@@ -224,12 +225,12 @@ export const goLiveService = {
       await supabase.from('tenants').update({ public_site_status: 'preview_ready', verification_status: 'rejected' }).eq('id', tenantId);
       await provisioningService.markTenantProvisioningStatus(tenantId, 'setup_in_progress');
     } else {
-      const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+      const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
       const index = registeredArr.findIndex((t: any) => t.id === tenantId);
       if (index !== -1) {
          registeredArr[index].publicSiteStatus = 'preview_ready';
          registeredArr[index].verificationStatus = 'rejected';
-         localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+         localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(registeredArr));
       }
       await provisioningService.markTenantProvisioningStatus(tenantId, 'setup_in_progress');
     }

@@ -92,6 +92,20 @@ export const DYNAMIC_STORAGE_KEYS = {
   tenantBrandingColon: (tenantId: string) => `lari:${tenantId}:branding` as const,
   tenantAppointments: (tenantId: string) => `lari:${tenantId}:appointments` as const,
   tenantAppointmentsSeeded: (tenantId: string) => `lari:${tenantId}:appointments_seeded` as const,
+  tenantServices: (tenantId: string) => `lari:${tenantId}:services` as const,
+  tenantStaff: (tenantId: string) => `lari:${tenantId}:staff` as const,
+  tenantStaffServices: (tenantId: string) => `lari:${tenantId}:staff_services` as const,
+  tenantServiceStaffMapping: (tenantId: string) => `lari:${tenantId}:service_staff_mapping` as const,
+  tenantAvailabilityRules: (tenantId: string) => `lari:${tenantId}:availability_rules` as const,
+  tenantCustomers: (tenantId: string) => `lari:${tenantId}:customers` as const,
+  tenantSubscription: (tenantId: string) => `lari:${tenantId}:subscription` as const,
+  tenantProfile: (tenantId: string) => `lari:${tenantId}:profile` as const,
+  tenantProvisioningStatus: (tenantId: string) => `lari:${tenantId}:provisioning_status` as const,
+  tenantGoLiveStatus: (tenantId: string) => `lari:${tenantId}:go_live_status` as const,
+  tenantIsSeeded: (tenantId: string) => `lari:${tenantId}:is_seeded` as const,
+  tenantIsSeededServices: (tenantId: string) => `lari:${tenantId}:is_seeded_services` as const,
+  tenantIsSeededStaff: (tenantId: string) => `lari:${tenantId}:is_seeded_staff` as const,
+  tenantBackupFile: (tenantId: string, timestamp: number | string) => `lari_backup_${tenantId}_${timestamp}.json` as const,
 };
 
 /**

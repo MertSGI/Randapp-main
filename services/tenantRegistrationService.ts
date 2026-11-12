@@ -4,6 +4,7 @@ import { businessProfileService } from './businessProfileService';
 import { tenantService } from './tenantService';
 import { planService } from './planService';
 import { TRIAL_CONFIG } from './trialConfigService';
+import { STORAGE_KEYS, DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
 export interface RegistrationData {
   ownerName: string;
@@ -31,7 +32,7 @@ export const tenantRegistrationService = {
       
       // 2. Initialize a local tenant profile (or via Supabase if active)
       // Since we don't have full database setup guaranteed, store metadata securely in data provider
-      await dataProvider.set(`lari:${tenantId}:is_seeded`, 'false');
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantIsSeeded(tenantId), 'false');
       
       if (data.referralCode) {
         const { referralProgramService } = await import('./referralProgramService');
@@ -52,7 +53,7 @@ export const tenantRegistrationService = {
         email: data.ownerEmail,
         website_url: ''
       };
-      await dataProvider.set(`lari:${tenantId}:branding`, {
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantBrandingColon(tenantId), {
         theme_color: '#4f46e5',
         business_name: data.businessDisplayName,
         logo_url: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80&w=200&h=200',
@@ -64,7 +65,7 @@ export const tenantRegistrationService = {
       const plans = planService.getActivePlans();
       const plan = plans.find(p => p.id === data.planId) || plans[0];
       
-      await dataProvider.set(`lari:${tenantId}:subscription`, {
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), {
         planId: data.planId,
         billingPeriod: data.billingPeriod,
         status: 'pending_checkout',
@@ -84,17 +85,17 @@ export const tenantRegistrationService = {
       };
       
       // Save for login simulation (mock store)
-      localStorage.setItem('lari_active_owner_session', JSON.stringify(authPayload));
-      localStorage.setItem('lari_active_tenant_id', tenantId);
-      localStorage.setItem('lari_selected_plan', data.planId);
-      localStorage.setItem('lari_registration_context', JSON.stringify(data));
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_OWNER_SESSION, JSON.stringify(authPayload));
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT_ID, tenantId);
+      localStorage.setItem(STORAGE_KEYS.SELECTED_PLAN, data.planId);
+      localStorage.setItem(STORAGE_KEYS.REGISTRATION_CONTEXT, JSON.stringify(data));
       // Fallback
-      localStorage.setItem('lari_mock_user', JSON.stringify(authPayload));
+      localStorage.setItem(STORAGE_KEYS.MOCK_USER, JSON.stringify(authPayload));
       
       const { publicLinkService } = await import('./publicLinkService');
       const initialSlug = publicLinkService.generateTenantSlug(data.businessDisplayName);
 
-      const registered = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+      const registered = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
       registered.push({
          id: tenantId,
          slug: initialSlug,
@@ -107,10 +108,10 @@ export const tenantRegistrationService = {
          publicSiteStatus: 'draft',
          businessRiskStatus: 'normal'
       });
-      localStorage.setItem('lari_registered_tenants', JSON.stringify(registered));
+      localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(registered));
       
-      await dataProvider.set(`lari:${tenantId}:provisioning_status`, 'setup_in_progress');
-      await dataProvider.set(`lari:${tenantId}:go_live_status`, 'paused');
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantProvisioningStatus(tenantId), 'setup_in_progress');
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantGoLiveStatus(tenantId), 'paused');
 
       return { success: true, tenantId };
     } catch (err: any) {

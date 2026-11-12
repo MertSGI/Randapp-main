@@ -1,5 +1,6 @@
 ﻿import { SalonBusinessProfile, Appointment, BusinessBranch, CustomerConsentFlags, CustomerDataRequest } from '../types';
 import { mediaAssetService } from './mediaAssetService';
+import { STORAGE_KEYS, DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
 export interface TenantSnapshot {
   snapshotVersion: string;
@@ -33,22 +34,22 @@ export const dataExportService = {
   getTenantStorageKeys(tenantId: string) {
     return {
       profile: `mock_business_profile_${tenantId}`,
-      services: `lari:${tenantId}:services`,
-      staff: `lari:${tenantId}:staff`,
-      mappings: `lari:${tenantId}:service_staff_mapping`,
-      availability: `lari:${tenantId}:availability_rules`,
-      appointments: `lari:${tenantId}:appointments`,
-      customers: `lari:${tenantId}:customers`, // if handled separately
-      branches: `lari_branches_${tenantId}`,
-      consents: `lari_customer_consents_by_tenant_${tenantId}`,
-      dataRequests: `lari_customer_data_requests_by_tenant_${tenantId}`,
-      shareChecklist: `lari_share_checklist_${tenantId}`,
+      services: DYNAMIC_STORAGE_KEYS.tenantServices(tenantId),
+      staff: DYNAMIC_STORAGE_KEYS.tenantStaff(tenantId),
+      mappings: DYNAMIC_STORAGE_KEYS.tenantServiceStaffMapping(tenantId),
+      availability: DYNAMIC_STORAGE_KEYS.tenantAvailabilityRules(tenantId),
+      appointments: DYNAMIC_STORAGE_KEYS.tenantAppointments(tenantId),
+      customers: DYNAMIC_STORAGE_KEYS.tenantCustomers(tenantId), // if handled separately
+      branches: DYNAMIC_STORAGE_KEYS.tenantBranches(tenantId),
+      consents: DYNAMIC_STORAGE_KEYS.tenantCustomerConsents(tenantId),
+      dataRequests: DYNAMIC_STORAGE_KEYS.tenantCustomerDataRequests(tenantId),
+      shareChecklist: DYNAMIC_STORAGE_KEYS.tenantShareChecklist(tenantId),
     };
   },
 
   getAllLocalTenants(): any[] {
     try {
-      const raw = localStorage.getItem('lari_registered_tenants') || localStorage.getItem('lari_registered_tenants');
+      const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS);
       return raw ? JSON.parse(raw) : [];
     } catch {
       return [];
@@ -65,9 +66,9 @@ export const dataExportService = {
       }
     };
     
-    const campaigns = safeParse('lari_customer_campaigns_by_tenant').filter((x: any) => x.tenantId === tenantId);
-    const rewards = safeParse('lari_customer_campaign_rewards_by_tenant').filter((x: any) => x.tenantId === tenantId);
-    const referrals = safeParse('lari_customer_referrals_by_tenant').filter((x: any) => x.tenantId === tenantId);
+    const campaigns = safeParse(STORAGE_KEYS.CUSTOMER_CAMPAIGNS_BY_TENANT).filter((x: any) => x.tenantId === tenantId);
+    const rewards = safeParse(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT).filter((x: any) => x.tenantId === tenantId);
+    const referrals = safeParse(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT).filter((x: any) => x.tenantId === tenantId);
     
     return { campaigns, rewards, referrals };
   },
@@ -156,7 +157,7 @@ export const dataExportService = {
     } else {
       tenants.push(importedAccount);
     }
-    localStorage.setItem('lari_registered_tenants', JSON.stringify(tenants));
+    localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(tenants));
 
     // 2. Set tenant specific keys
     const keys = this.getTenantStorageKeys(targetTenantId);
@@ -192,13 +193,13 @@ export const dataExportService = {
       localStorage.setItem(key, JSON.stringify(existing));
     };
 
-    saveGlobal('lari_customer_campaigns_by_tenant', snapshot.campaigns);
-    saveGlobal('lari_customer_campaign_rewards_by_tenant', snapshot.campaignRewards);
-    saveGlobal('lari_customer_referrals_by_tenant', snapshot.referrals);
+    saveGlobal(STORAGE_KEYS.CUSTOMER_CAMPAIGNS_BY_TENANT, snapshot.campaigns);
+    saveGlobal(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT, snapshot.campaignRewards);
+    saveGlobal(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT, snapshot.referrals);
 
     // 4. Restore Media Asset Records (Safe metadata references, excluding large base64 data payloads)
     if (snapshot.mediaAssets && snapshot.mediaAssets.length > 0) {
-      const existingMedia = JSON.parse(localStorage.getItem('lari_media_assets') || '[]');
+      const existingMedia = JSON.parse(localStorage.getItem(STORAGE_KEYS.MEDIA_ASSETS) || '[]');
       snapshot.mediaAssets.forEach((asset: any) => {
         asset.tenantId = targetTenantId; 
         const mIdx = existingMedia.findIndex((m: any) => m.id === asset.id);
@@ -208,7 +209,7 @@ export const dataExportService = {
           existingMedia.push(asset);
         }
       });
-      localStorage.setItem('lari_media_assets', JSON.stringify(existingMedia));
+      localStorage.setItem(STORAGE_KEYS.MEDIA_ASSETS, JSON.stringify(existingMedia));
     }
 
     return true;
@@ -216,7 +217,7 @@ export const dataExportService = {
   
   createBackupFileName(tenantId: string) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0,19);
-    return `lari_backup_${tenantId}_${timestamp}.json`;
+    return DYNAMIC_STORAGE_KEYS.tenantBackupFile(tenantId, timestamp);
   },
   
   getSnapshotSummary(snapshot: TenantSnapshot) {

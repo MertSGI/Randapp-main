@@ -1,5 +1,6 @@
 import { createSuccess, createError, MutationResult } from '../utils/mutationResult';
 import { TRIAL_CONFIG } from './trialConfigService';
+import { STORAGE_KEYS } from './storageKeys';
 
 export interface PricingPlan {
   id: string;
@@ -201,7 +202,7 @@ export const DEFAULT_PLANS: Record<string, PricingPlan> = {
 
 export const planService = {
   getStoredPlans(): Record<string, PricingPlan> {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('lari_plans') : null;
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.PLANS) : null;
     if (raw) {
       try {
         return JSON.parse(raw);
@@ -210,7 +211,7 @@ export const planService = {
     return JSON.parse(JSON.stringify(DEFAULT_PLANS));
   },
   savePlanInfos(plans: Record<string, PricingPlan>) {
-    if (typeof localStorage !== 'undefined') { localStorage.setItem('lari_plans', JSON.stringify(plans)); }
+    if (typeof localStorage !== 'undefined') { localStorage.setItem(STORAGE_KEYS.PLANS, JSON.stringify(plans)); }
   },
   getAllPlans(): PricingPlan[] {
     return Object.values(this.getStoredPlans());

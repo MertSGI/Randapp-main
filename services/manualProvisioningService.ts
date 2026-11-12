@@ -3,6 +3,7 @@ import { tenantService } from './tenantService';
 import { siteProvisioningService } from './siteProvisioningService';
 import { dataProvider } from './dataProvider';
 import { communicationEventService } from './communicationEventService';
+import { DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
 export interface ManualProvisioningPayload {
   businessName: string;
@@ -70,7 +71,7 @@ export const manualProvisioningService = {
 
       // Set in both local storage and dataProvider to ensure perfect retrieval
       localStorage.setItem(`mock_subscription_${tenantId}`, JSON.stringify(subscriptionRecord));
-      await dataProvider.set(`lari:${tenantId}:subscription`, subscriptionRecord);
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(tenantId), subscriptionRecord);
 
       // Queue administrative outbox notifications
       try {

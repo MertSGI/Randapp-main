@@ -1,8 +1,15 @@
 import { TenantRepository, Tenant } from './types';
 import { fetchSupabase } from './supabaseClient';
+import { STORAGE_KEYS, registerMemoryResetHook } from '../storageKeys';
 
 export class SupabaseTenantRepository implements TenantRepository {
   activeTenantId: string | null = null;
+
+  constructor() {
+    registerMemoryResetHook(() => {
+      this.activeTenantId = null;
+    });
+  }
 
   async listTenants(): Promise<Tenant[]> {
     try {
@@ -162,12 +169,12 @@ export class SupabaseTenantRepository implements TenantRepository {
 
   setActiveTenant(id: string): void {
     this.activeTenantId = id;
-    localStorage.setItem('lari_active_tenant_id', id);
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT_ID, id);
   }
 
   getActiveTenantId(): string | null {
     if (!this.activeTenantId) {
-      this.activeTenantId = localStorage.getItem('lari_active_tenant_id');
+      this.activeTenantId = localStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT_ID);
     }
     return this.activeTenantId;
   }

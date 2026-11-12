@@ -27,6 +27,7 @@ import { LocalCommunicationOutboxRepository } from './repositories/localCommunic
 import { LocalAuditEventRepository } from './repositories/localAuditEventRepository';
 import { LocalSupportTicketRepository } from './repositories/localSupportTicketRepository';
 import { LocalPolicyAndConsentRepository } from './repositories/localPolicyAndConsentRepository';
+import { STORAGE_KEYS } from './storageKeys';
 
 import { SupabaseBusinessProfileRepository } from './repositories/supabaseBusinessProfileRepository';
 import { SupabaseCatalogRepository } from './repositories/supabaseCatalogRepository';
@@ -77,8 +78,8 @@ const createPilotBypassProxy = <T extends object>(supabaseImpl: T, localImpl: ob
         return function(this: any, ...args: any[]) {
           let isPilot = false;
           try {
-            const activeTenantId = typeof localStorage !== 'undefined' ? localStorage.getItem('lari_active_tenant_id') : null;
-            const inPilotDemo = typeof localStorage !== 'undefined' && localStorage.getItem('lari_in_pilot_demo') === 'true';
+            const activeTenantId = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT_ID) : null;
+            const inPilotDemo = typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEYS.IN_PILOT_DEMO) === 'true';
             const hash = typeof window !== 'undefined' && window.location?.hash ? window.location.hash : '';
             const pathname = typeof window !== 'undefined' && window.location?.pathname ? window.location.pathname : '';
             

@@ -1,4 +1,5 @@
 import { CustomerConsentFlags, CustomerDataRequest, BusinessOwnerTermsAcceptance } from '../types';
+import { STORAGE_KEYS, DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
 const LARI_CONSENT_VERSION = '1.0';
 
@@ -45,7 +46,7 @@ export const consentService = {
     };
 
     if (typeof window !== 'undefined') {
-      const allConsentsStr = localStorage.getItem(`lari_customer_consents_by_tenant_${tenantId}`) || '{}';
+      const allConsentsStr = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantCustomerConsents(tenantId)) || '{}';
       let allConsents;
       try {
         allConsents = JSON.parse(allConsentsStr);
@@ -54,7 +55,7 @@ export const consentService = {
       }
       
       allConsents[customerInput.id] = flags;
-      localStorage.setItem(`lari_customer_consents_by_tenant_${tenantId}`, JSON.stringify(allConsents));
+      localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantCustomerConsents(tenantId), JSON.stringify(allConsents));
     }
 
     return flags;
@@ -62,7 +63,7 @@ export const consentService = {
 
   getCustomerConsent(tenantId: string, customerId: string): CustomerConsentFlags | null {
     if (typeof window !== 'undefined') {
-      const allConsentsStr = localStorage.getItem(`lari_customer_consents_by_tenant_${tenantId}`);
+      const allConsentsStr = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantCustomerConsents(tenantId));
       if (allConsentsStr) {
         try {
           const allConsents = JSON.parse(allConsentsStr);
@@ -83,7 +84,7 @@ export const consentService = {
     };
 
     if (typeof window !== 'undefined') {
-      const allConsentsStr = localStorage.getItem(`lari_customer_consents_by_tenant_${tenantId}`) || '{}';
+      const allConsentsStr = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantCustomerConsents(tenantId)) || '{}';
       let allConsents;
       try {
          allConsents = JSON.parse(allConsentsStr);
@@ -91,7 +92,7 @@ export const consentService = {
          allConsents = {};
       }
       allConsents[customerId] = updated;
-      localStorage.setItem(`lari_customer_consents_by_tenant_${tenantId}`, JSON.stringify(allConsents));
+      localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantCustomerConsents(tenantId), JSON.stringify(allConsents));
     }
     return updated;
   },
@@ -122,7 +123,7 @@ export const consentService = {
     };
 
     if (typeof window !== 'undefined') {
-      const allStr = localStorage.getItem(`lari_customer_data_requests_by_tenant_${tenantId}`) || '[]';
+      const allStr = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantCustomerDataRequests(tenantId)) || '[]';
       let allReqs;
       try {
         allReqs = JSON.parse(allStr);
@@ -130,14 +131,14 @@ export const consentService = {
         allReqs = [];
       }
       allReqs.push(req);
-      localStorage.setItem(`lari_customer_data_requests_by_tenant_${tenantId}`, JSON.stringify(allReqs));
+      localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantCustomerDataRequests(tenantId), JSON.stringify(allReqs));
     }
     return req;
   },
 
   listCustomerDataRequests(tenantId: string): CustomerDataRequest[] {
     if (typeof window !== 'undefined') {
-      const allStr = localStorage.getItem(`lari_customer_data_requests_by_tenant_${tenantId}`);
+      const allStr = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantCustomerDataRequests(tenantId));
       if (allStr) {
         try {
           return JSON.parse(allStr);
@@ -149,7 +150,7 @@ export const consentService = {
 
   markDataRequestCompleted(tenantId: string, requestId: string, notes?: string): void {
      if (typeof window !== 'undefined') {
-      const allStr = localStorage.getItem(`lari_customer_data_requests_by_tenant_${tenantId}`) || '[]';
+      const allStr = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantCustomerDataRequests(tenantId)) || '[]';
       let allReqs;
       try {
         allReqs = JSON.parse(allStr);
@@ -160,7 +161,7 @@ export const consentService = {
          req.status = 'completed';
          req.completedAt = new Date().toISOString();
          if (notes) req.notes = notes;
-         localStorage.setItem(`lari_customer_data_requests_by_tenant_${tenantId}`, JSON.stringify(allReqs));
+         localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantCustomerDataRequests(tenantId), JSON.stringify(allReqs));
       }
     }
   },
@@ -175,13 +176,13 @@ export const consentService = {
        source: 'registration'
     };
     if (typeof window !== 'undefined') {
-        const str = localStorage.getItem(`lari_owner_terms_acceptance`) || '[]';
+        const str = localStorage.getItem(STORAGE_KEYS.OWNER_TERMS_ACCEPTANCE) || '[]';
         let all;
         try {
            all = JSON.parse(str);
         } catch(e) { all = []; }
         all.push(act);
-        localStorage.setItem(`lari_owner_terms_acceptance`, JSON.stringify(all));
+        localStorage.setItem(STORAGE_KEYS.OWNER_TERMS_ACCEPTANCE, JSON.stringify(all));
     }
     return act;
   }

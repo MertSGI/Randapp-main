@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { dataProvider } from './dataProvider';
+import { DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
 export type ProvisioningStatus = 
   | 'pending_payment'
@@ -73,7 +74,7 @@ export const provisioningService = {
       return;
     }
     console.log(`[Mock Provisioning] Marking tenant ${tenantId} as ${status}`);
-    await dataProvider.set(`lari:${tenantId}:provisioning_status`, status);
+    await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantProvisioningStatus(tenantId), status);
   },
 
   async getProvisioningStatus(tenantId: string): Promise<ProvisioningStatus> {
@@ -89,7 +90,7 @@ export const provisioningService = {
       return (data?.onboarding_status as ProvisioningStatus) || 'setup_in_progress';
     }
 
-    const status = await dataProvider.get<ProvisioningStatus>(`lari:${tenantId}:provisioning_status`);
+    const status = await dataProvider.get<ProvisioningStatus>(DYNAMIC_STORAGE_KEYS.tenantProvisioningStatus(tenantId));
     return status || 'onboarding_required';
   }
 };

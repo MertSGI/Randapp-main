@@ -8,8 +8,9 @@ import {
 import { businessProfileService } from './businessProfileService';
 import { getStaffList, updateStaff } from './staffService';
 import { getServices, updateService } from './serviceCatalogService';
+import { STORAGE_KEYS } from './storageKeys';
 
-const MEDIA_STORAGE_KEY = 'lari_media_assets';
+const MEDIA_STORAGE_KEY = STORAGE_KEYS.MEDIA_ASSETS;
 
 // Static seed media items representing current theme and existing mock assets
 const DEFAULT_ASSETS: MediaAsset[] = [

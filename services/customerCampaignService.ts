@@ -2,6 +2,7 @@ import { getCampaignRepository } from './repositories';
 import { entitlementService } from './entitlementService';
 import { BusinessCustomerCampaign, BusinessCustomerReferral, CustomerCampaignReward } from '../types';
 import { notifyReferralBooked, notifyReferralCompleted, notifyReferralRewarded, notifyCustomerRewardAvailable, notifyCustomerRewardUsed, notifyCustomerRewardExpiring } from './notificationService';
+import { STORAGE_KEYS } from './storageKeys';
 
 // Helper to resolve tenant's plan from localStorage
 function getTenantPlan(tenantId: string): string {
@@ -9,7 +10,7 @@ function getTenantPlan(tenantId: string): string {
     return 'premium'; // Pilot has premium features
   }
   try {
-    const raw = localStorage.getItem('lari_registered_tenants');
+    const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS);
     if (raw) {
       const tenants = JSON.parse(raw);
       const tenant = tenants.find((t: any) => t.id === tenantId);
@@ -21,9 +22,9 @@ function getTenantPlan(tenantId: string): string {
     // Fallback
   }
   // Check active tenant fallback in localStorage
-  const activeTenantId = localStorage.getItem('lari_active_tenant_id');
+  const activeTenantId = localStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT_ID);
   if (activeTenantId === tenantId) {
-    const currentPlan = localStorage.getItem('lari_active_plan_id');
+    const currentPlan = localStorage.getItem(STORAGE_KEYS.ACTIVE_PLAN_ID);
     if (currentPlan) return currentPlan;
   }
   return 'baslangic';
@@ -77,7 +78,7 @@ export const customerCampaignService = {
     let foundCampaign: BusinessCustomerCampaign | null = null;
     
     // We can list from the active tenant id
-    const activeTenantId = localStorage.getItem('lari_active_tenant_id') || 'global';
+    const activeTenantId = localStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT_ID) || 'global';
     const activePlan = getTenantPlan(activeTenantId);
     const campaigns = await repo.listCampaigns(activeTenantId);
     let matched = campaigns.find(c => c.id === campaignId);
@@ -85,7 +86,7 @@ export const customerCampaignService = {
     if (!matched) {
       // Look globally in storage as backup
       try {
-        const raw = localStorage.getItem('lari_customer_campaigns_by_tenant');
+        const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_CAMPAIGNS_BY_TENANT);
         const list = raw ? JSON.parse(raw) : [];
         matched = list.find((c: any) => c.id === campaignId);
       } catch (e) {}
@@ -157,17 +158,17 @@ export const customerCampaignService = {
     const repo = getCampaignRepository();
     // Find globally or in local
     try {
-      const raw = localStorage.getItem('lari_customer_referrals_by_tenant');
+      const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT);
       const referrals: BusinessCustomerReferral[] = raw ? JSON.parse(raw) : [];
       const index = referrals.findIndex(r => r.id === referralId);
       if (index > -1) {
         referrals[index].appointmentId = appointmentId;
         referrals[index].status = 'booked';
         referrals[index].updatedAt = new Date().toISOString();
-        localStorage.setItem('lari_customer_referrals_by_tenant', JSON.stringify(referrals));
+        localStorage.setItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT, JSON.stringify(referrals));
         
         // Also sync lari key
-        localStorage.setItem('lari_business_referrals', JSON.stringify(referrals));
+        localStorage.setItem(STORAGE_KEYS.BUSINESS_REFERRALS, JSON.stringify(referrals));
         return referrals[index];
       }
     } catch {}
@@ -180,15 +181,15 @@ export const customerCampaignService = {
 
   async markReferralCompleted(referralId: string): Promise<BusinessCustomerReferral | null> {
     try {
-      const raw = localStorage.getItem('lari_customer_referrals_by_tenant');
+      const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT);
       const referrals: BusinessCustomerReferral[] = raw ? JSON.parse(raw) : [];
       const index = referrals.findIndex(r => r.id === referralId);
       if (index > -1) {
         verifyEntitlement(referrals[index].tenantId);
         referrals[index].status = 'completed';
         referrals[index].updatedAt = new Date().toISOString();
-        localStorage.setItem('lari_customer_referrals_by_tenant', JSON.stringify(referrals));
-        localStorage.setItem('lari_business_referrals', JSON.stringify(referrals));
+        localStorage.setItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT, JSON.stringify(referrals));
+        localStorage.setItem(STORAGE_KEYS.BUSINESS_REFERRALS, JSON.stringify(referrals));
         
         notifyReferralCompleted(referrals[index].referrerCustomerId, referrals[index].referredCustomerName, 'İndirim Kuponu');
         
@@ -205,15 +206,15 @@ export const customerCampaignService = {
 
   async markReferralRewarded(referralId: string): Promise<BusinessCustomerReferral | null> {
     try {
-      const raw = localStorage.getItem('lari_customer_referrals_by_tenant');
+      const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT);
       const referrals: BusinessCustomerReferral[] = raw ? JSON.parse(raw) : [];
       const index = referrals.findIndex(r => r.id === referralId);
       if (index > -1) {
         verifyEntitlement(referrals[index].tenantId);
         referrals[index].status = 'rewarded';
         referrals[index].updatedAt = new Date().toISOString();
-        localStorage.setItem('lari_customer_referrals_by_tenant', JSON.stringify(referrals));
-        localStorage.setItem('lari_business_referrals', JSON.stringify(referrals));
+        localStorage.setItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT, JSON.stringify(referrals));
+        localStorage.setItem(STORAGE_KEYS.BUSINESS_REFERRALS, JSON.stringify(referrals));
         
         notifyReferralRewarded(referrals[index].referrerCustomerId, 'Bir sonraki randevuda %15 indirim');
         
@@ -230,15 +231,15 @@ export const customerCampaignService = {
 
   async rejectReferral(referralId: string, reason?: string): Promise<BusinessCustomerReferral | null> {
     try {
-      const raw = localStorage.getItem('lari_customer_referrals_by_tenant');
+      const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT);
       const referrals: BusinessCustomerReferral[] = raw ? JSON.parse(raw) : [];
       const index = referrals.findIndex(r => r.id === referralId);
       if (index > -1) {
         verifyEntitlement(referrals[index].tenantId);
         referrals[index].status = 'rejected';
         referrals[index].updatedAt = new Date().toISOString();
-        localStorage.setItem('lari_customer_referrals_by_tenant', JSON.stringify(referrals));
-        localStorage.setItem('lari_business_referrals', JSON.stringify(referrals));
+        localStorage.setItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT, JSON.stringify(referrals));
+        localStorage.setItem(STORAGE_KEYS.BUSINESS_REFERRALS, JSON.stringify(referrals));
         return referrals[index];
       }
     } catch (e: any) {
@@ -267,7 +268,7 @@ export const customerCampaignService = {
 
   async createRewardFromReferral(referralId: string): Promise<CustomerCampaignReward[]> {
     const repo = getCampaignRepository();
-    const rawRefs = localStorage.getItem('lari_customer_referrals_by_tenant');
+    const rawRefs = localStorage.getItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT);
     const referrals: BusinessCustomerReferral[] = rawRefs ? JSON.parse(rawRefs) : [];
     const referral = referrals.find(r => r.id === referralId);
     if (!referral) return [];
@@ -358,7 +359,7 @@ export const customerCampaignService = {
   async markRewardAvailable(rewardId: string): Promise<CustomerCampaignReward | null> {
     const repo = getCampaignRepository();
     try {
-      const raw = localStorage.getItem('lari_customer_campaign_rewards_by_tenant');
+      const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT);
       const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
       const index = rewards.findIndex(r => r.id === rewardId);
       if (index > -1) {
@@ -376,7 +377,7 @@ export const customerCampaignService = {
   async reserveRewardForAppointment(rewardId: string, appointmentId: string): Promise<CustomerCampaignReward | null> {
     const repo = getCampaignRepository();
     try {
-      const raw = localStorage.getItem('lari_customer_campaign_rewards_by_tenant');
+      const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT);
       const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
       const index = rewards.findIndex(r => r.id === rewardId);
       if (index > -1) {
@@ -398,7 +399,7 @@ export const customerCampaignService = {
   async markRewardUsed(rewardId: string, appointmentId?: string): Promise<CustomerCampaignReward | null> {
     const repo = getCampaignRepository();
     try {
-      const raw = localStorage.getItem('lari_customer_campaign_rewards_by_tenant');
+      const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT);
       const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
       const index = rewards.findIndex(r => r.id === rewardId);
       if (index > -1) {
@@ -431,7 +432,7 @@ export const customerCampaignService = {
   async cancelReward(rewardId: string, reason?: string): Promise<CustomerCampaignReward | null> {
     const repo = getCampaignRepository();
     try {
-      const raw = localStorage.getItem('lari_customer_campaign_rewards_by_tenant');
+      const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT);
       const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
       const index = rewards.findIndex(r => r.id === rewardId);
       if (index > -1) {
@@ -450,7 +451,7 @@ export const customerCampaignService = {
   async expireReward(rewardId: string): Promise<CustomerCampaignReward | null> {
     const repo = getCampaignRepository();
     try {
-      const raw = localStorage.getItem('lari_customer_campaign_rewards_by_tenant');
+      const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT);
       const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
       const index = rewards.findIndex(r => r.id === rewardId);
       if (index > -1) {

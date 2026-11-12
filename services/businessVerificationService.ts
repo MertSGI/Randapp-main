@@ -1,4 +1,5 @@
 import { Tenant } from '../types';
+import { STORAGE_KEYS } from './storageKeys';
 
 export const PROHIBITED_CATEGORIES = [
   'adult',
@@ -72,7 +73,7 @@ export const businessVerificationService = {
         businessData.description || ''
      );
 
-     const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+     const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
      const index = registeredArr.findIndex((t: any) => t.id === tenantId);
      
      if (index !== -1) {
@@ -82,14 +83,14 @@ export const businessVerificationService = {
         } else {
            registeredArr[index].verificationStatus = 'under_review';
         }
-        localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+        localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(registeredArr));
      }
 
      return { success: analysis.riskStatus !== 'prohibited', result: analysis };
   },
   
   publishSite(tenantId: string): boolean {
-     const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+     const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
      const index = registeredArr.findIndex((t: any) => t.id === tenantId);
      
      if (index !== -1) {
@@ -98,7 +99,7 @@ export const businessVerificationService = {
         if (tenant.verificationStatus === 'approved' || tenant.verificationStatus === 'not_submitted') {
            registeredArr[index].verificationStatus = 'approved';
            registeredArr[index].publicSiteStatus = 'published';
-           localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+           localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(registeredArr));
            return true;
         }
      }

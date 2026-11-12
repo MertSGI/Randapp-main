@@ -1,4 +1,4 @@
-import {
+ï»¿import {
   BackgroundJobType,
   BackgroundJobStatus,
   BackgroundJobRun
@@ -7,8 +7,9 @@ import { tenantService } from './tenantService';
 import { subscriptionService } from './subscriptionService';
 import { communicationEventService } from './communicationEventService';
 import { siteProvisioningService } from './siteProvisioningService';
+import { STORAGE_KEYS } from './storageKeys';
 
-const RUNS_STORAGE_KEY = 'lari_background_job_runs';
+const RUNS_STORAGE_KEY = STORAGE_KEYS.BACKGROUND_JOB_RUNS;
 
 export interface BackgroundJobDefinition {
   jobType: BackgroundJobType;
@@ -41,9 +42,9 @@ const DEFAULT_JOBS: BackgroundJobDefinition[] = [
   },
   {
     jobType: 'subscription_past_due_sweep',
-    nameTr: 'Ödeme Gecikmesi Taramasý',
+    nameTr: 'ï¿½deme Gecikmesi Taramasï¿½',
     nameEn: 'Past Due Subscription Sweep',
-    descriptionTr: 'Tahsilatý baþarýsýz olan faturalandýrýlmýþ abonelikleri dunning kurallarýna göre askýya alýr.',
+    descriptionTr: 'Tahsilatï¿½ baï¿½arï¿½sï¿½z olan faturalandï¿½rï¿½lmï¿½ï¿½ abonelikleri dunning kurallarï¿½na gï¿½re askï¿½ya alï¿½r.',
     descriptionEn: 'Identifies past due subscriptions and manages dunning or suspension rules.',
     schedule: '0 2 * * * (Her gÃ¼n 02:00)',
     enabled: true
@@ -144,7 +145,7 @@ export const backgroundJobService = {
   // Local storage lists of job definitions (allows toggling enabled/disabled in UI)
   getRegisteredJobs(): BackgroundJobDefinition[] {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('lari_registered_jobs');
+      const stored = localStorage.getItem(STORAGE_KEYS.REGISTERED_JOBS);
       if (stored) {
         try {
           return JSON.parse(stored);
@@ -165,7 +166,7 @@ export const backgroundJobService = {
       jobs.push(job);
     }
     if (typeof window !== 'undefined') {
-      localStorage.setItem('lari_registered_jobs', JSON.stringify(jobs));
+      localStorage.setItem(STORAGE_KEYS.REGISTERED_JOBS, JSON.stringify(jobs));
     }
   },
 
@@ -558,7 +559,7 @@ export const backgroundJobService = {
 
   async handleCustomDomainVerificationPoll() {
     // Collect simulated domain requests from local review state
-    const requestedDomainsRaw = localStorage.getItem('lari_custom_domain_requests') || '[]';
+    const requestedDomainsRaw = localStorage.getItem(STORAGE_KEYS.CUSTOM_DOMAIN_REQUESTS) || '[]';
     let requests: any[] = [];
     try {
       requests = JSON.parse(requestedDomainsRaw);
@@ -584,7 +585,7 @@ export const backgroundJobService = {
       }
     }
 
-    localStorage.setItem('lari_custom_domain_requests', JSON.stringify(requests));
+    localStorage.setItem(STORAGE_KEYS.CUSTOM_DOMAIN_REQUESTS, JSON.stringify(requests));
 
     return {
       affectedTenantIds,
@@ -659,7 +660,7 @@ export const backgroundJobService = {
         { label: 'Background Model ve Servis AltyapÄ±sÄ±', completed: true },
         { label: 'Abonelik Deneme SÃ¼resi Sonu & Ä°ptal Sweepleri', completed: true },
         { label: 'Outbox Yeniden GÃ¶nderim ve Hata Retraing MekanizmasÄ±', completed: true },
-        { label: 'Super Admin Yönetim Konsolu Paneli', completed: true },
+        { label: 'Super Admin Yï¿½netim Konsolu Paneli', completed: true },
         { label: 'Supabase Edge Functions / Scheduled Cron Entegrasyonu', completed: false, comment: 'SÃ¼rekli Ã§alÄ±ÅŸan bir server cron veya Supabase Scheduled Function tetikleyicisi kurulmalÄ±dÄ±r.' },
         { label: 'CanlÄ± E-Posta / SMS / WhatsApp SaÄŸlayÄ±cÄ± API Key BaÄŸlantÄ±sÄ±', completed: false, comment: 'Resend API key, Netgsm ÅŸifreleri ve Meta Token baÄŸlantÄ±larÄ± girilmelidir.' }
       ]
@@ -676,7 +677,7 @@ function newEventRunPlaceholder(run: BackgroundJobRun): BackgroundJobRun {
 async function getMockAndRegisteredTenantIds(): Promise<string[]> {
   const list: string[] = ['tenant_demo', 'tenant_pilot_demo', 'tenant_active_demo'];
   try {
-    const raw = localStorage.getItem('lari_registered_tenants') || localStorage.getItem('lari_registered_tenants');
+    const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS);
     if (raw) {
       const parsed = JSON.parse(raw);
       for (const p of parsed) {

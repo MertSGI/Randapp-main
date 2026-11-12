@@ -1,6 +1,7 @@
 import { tenantService } from './tenantService';
 import { publicLinkService } from './publicLinkService';
 import { Tenant, BusinessBranch } from '../types';
+import { DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
 export const shareToolkitService = {
   getShareTrackingUrl(tenant: Tenant, source: string, branchId?: string): string {
@@ -54,7 +55,7 @@ export const shareToolkitService = {
   },
   
   getShareChecklist(tenantId: string): Record<string, boolean> {
-    const key = `lari_share_checklist_${tenantId}`;
+    const key = DYNAMIC_STORAGE_KEYS.tenantShareChecklist(tenantId);
     const raw = typeof window !== 'undefined' ? localStorage.getItem(key) : null;
     if (raw) {
       try {
@@ -75,7 +76,7 @@ export const shareToolkitService = {
     const current = this.getShareChecklist(tenantId);
     const updated = { ...current, ...updates };
     if (typeof window !== 'undefined') {
-       localStorage.setItem(`lari_share_checklist_${tenantId}`, JSON.stringify(updated));
+       localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantShareChecklist(tenantId), JSON.stringify(updated));
     }
     return updated;
   }
