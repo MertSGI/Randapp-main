@@ -5,6 +5,29 @@ import { getDataSourceMode } from './dataSourceConfig';
 import { shouldUsePilotLocalBypass } from './pilotBypassPolicy';
 import { STORAGE_KEYS, DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
+export interface TenantAccessValidationResult {
+  allowed: boolean;
+  status: number;
+  reason: 'same_tenant_authorized' | 'super_admin_authorized' | 'cross_tenant_access_forbidden' | 'unauthenticated_or_missing_tenant';
+  message: string;
+}
+
+export class CrossTenantAccessError extends Error {
+  readonly status: number;
+  readonly reason: string;
+  readonly callerTenantId?: string | null;
+  readonly targetTenantId?: string | null;
+
+  constructor(reason: string, status = 403, callerTenantId?: string | null, targetTenantId?: string | null) {
+    super(`[CrossTenantAccessError] 403 Forbidden: Caller tenant '${callerTenantId || 'none'}' attempted unauthorized cross-tenant access to target tenant '${targetTenantId || 'none'}' (${reason})`);
+    this.name = 'CrossTenantAccessError';
+    this.status = status;
+    this.reason = reason;
+    this.callerTenantId = callerTenantId;
+    this.targetTenantId = targetTenantId;
+  }
+}
+
 const DEMO_TENANT: Tenant = {
   id: 'tenant_demo',
   slug: 'demo',
@@ -22,28 +45,95 @@ const DEMO_TENANT: Tenant = {
 };
 
 export const tenantService = {
+  /**
+   * Kiracılar arası (cross-tenant) erişim girişimini denetler.
+   * Farklı iki kiracı arasındaki erişim taleplerini HTTP 403 ile engeller.
+   */
+  validateCrossTenantAccess(
+    callerTenantId: string | null | undefined,
+    targetTenantId: string | null | undefined,
+    role?: string
+  ): TenantAccessValidationResult {
+    if (role === 'super_admin') {
+      return {
+        allowed: true,
+        status: 200,
+        reason: 'super_admin_authorized',
+        message: 'Super Admin platform çapında yetkilidir.',
+      };
+    }
+
+    if (!callerTenantId || !targetTenantId) {
+      return {
+        allowed: false,
+        status: 401,
+        reason: 'unauthenticated_or_missing_tenant',
+        message: 'Kimlik doğrulama bağlamı veya hedef kiracı kimliği eksik.',
+      };
+    }
+
+    if (callerTenantId !== targetTenantId) {
+      return {
+        allowed: false,
+        status: 403,
+        reason: 'cross_tenant_access_forbidden',
+        message: `Çapraz kiracı erişimi engellendi: '${callerTenantId}' kiracısı '${targetTenantId}' kiracısının verilerine erişemez.`,
+      };
+    }
+
+    return {
+      allowed: true,
+      status: 200,
+      reason: 'same_tenant_authorized',
+      message: 'Aynı kiracı bağlamı doğrulandı.',
+    };
+  },
+
+  /**
+   * Kiracılar arası yetkisiz erişimi doğrular; ihlal durumunda CrossTenantAccessError (HTTP 403) fırlatır.
+   */
+  assertTenantAccess(
+    callerTenantId: string | null | undefined,
+    targetTenantId: string | null | undefined,
+    role?: string
+  ): void {
+    const res = this.validateCrossTenantAccess(callerTenantId, targetTenantId, role);
+    if (!res.allowed) {
+      throw new CrossTenantAccessError(res.reason, res.status, callerTenantId, targetTenantId);
+    }
+  },
+
   async resolveTenantFromHost(hostname: string): Promise<Tenant | null> {
+    if (!hostname) return null;
+
     const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
+    const baseDomain = import.meta.env?.VITE_APP_BASE_DOMAIN || 'randevulari.com';
+    let querySlug = '';
+    let isSubdomain = false;
+    
+    const cleanHost = hostname.split(':')[0].toLowerCase();
+    if (baseDomain && cleanHost.endsWith(`.${baseDomain.toLowerCase()}`)) {
+      querySlug = cleanHost.replace(`.${baseDomain.toLowerCase()}`, '');
+      isSubdomain = true;
+    } else if (cleanHost.includes('.') && !cleanHost.startsWith('127.') && cleanHost !== 'localhost') {
+      const parts = cleanHost.split('.');
+      if (parts.length >= 2 && parts[0] && parts[0] !== 'www') {
+        querySlug = parts[0];
+        isSubdomain = true;
+      }
+    }
+
     if (mode.startsWith('supabase')) {
       // In supabase mode (including staging), always resolve from DB regardless of hostname.
       // Localhost is a valid dev environment for real supabase testing.
-      if (hostname === 'localhost' || hostname.startsWith('127.0.0.1')) {
+      if (cleanHost === 'localhost' || cleanHost.startsWith('127.0.0.1')) {
         console.info('Supabase staging mode on localhost — resolving tenant from authenticated user profile.');
         // Fall through to DB resolution
       }
 
-      const baseDomain = import.meta.env?.VITE_APP_BASE_DOMAIN;
-      let querySlug = '';
-      let isSubdomain = false;
-      
-      if (baseDomain && hostname.endsWith(`.${baseDomain}`)) {
-        querySlug = hostname.replace(`.${baseDomain}`, '');
-        isSubdomain = true;
-      }
-
       const queryParams = isSubdomain 
         ? `slug.eq.${querySlug}` 
-        : `custom_domain.eq.${hostname},slug.eq.${hostname.split('.')[0]}`; // Fallback to splitting host if no base domain logic matched
+        : `custom_domain.eq.${cleanHost},slug.eq.${cleanHost.split('.')[0]}`; // Fallback to splitting host if no base domain logic matched
 
       const { data: tenant, error } = await supabase
         .from('tenants')
@@ -66,7 +156,15 @@ export const tenantService = {
       return null;
     }
     
-    // Fallback or mock behavior
+    // In mock or local mode: resolve by slug if subdomain was detected
+    if (querySlug) {
+      const resolved = await this.getTenantBySlug(querySlug);
+      if (resolved) return resolved;
+      // If a specific subdomain was queried but not found in registered tenants, return null (fail-closed)
+      return null;
+    }
+
+    // Fallback or mock behavior for localhost / root demo
     return DEMO_TENANT;
   },
 
@@ -98,7 +196,7 @@ export const tenantService = {
   },
 
   async getTenantBySlug(slug: string): Promise<Tenant | null> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
       const { data, error } = await supabase
         .from('tenants')
@@ -181,7 +279,7 @@ export const tenantService = {
       // e.g. #, booking, melis-guzellik
       if (parts.length >= 3 && parts[1] === 'booking') {
         urlSlug = parts[2].split('?')[0];
-      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment' && parts[1] !== 'ai-visualizer' && parts[1] !== 'admin-preview') {
+      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'booking' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment' && parts[1] !== 'ai-visualizer' && parts[1] !== 'admin-preview') {
         urlSlug = parts[1].split('?')[0];
       }
     }
@@ -191,7 +289,7 @@ export const tenantService = {
       const parts = path.split('/');
       if (parts.length >= 3 && parts[1] === 'booking') {
         urlSlug = parts[2];
-      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment' && parts[1] !== 'ai-visualizer' && parts[1] !== 'admin-preview') {
+      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'booking' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment' && parts[1] !== 'ai-visualizer' && parts[1] !== 'admin-preview') {
         urlSlug = parts[1];
       }
     }
@@ -245,11 +343,23 @@ export const tenantService = {
     }
 
     const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
-    if (mode === 'mock') {
+    if (mode === 'mock' || mode === 'local') {
        if (activeTenantId && activeTenantId !== 'tenant_pilot_demo') {
           const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
           const tenantRecord = registeredArr.find((t: any) => t.id === activeTenantId);
           if (tenantRecord) {
+             const isAdminRoute = hash.includes('/admin') || path.includes('/admin');
+             if (hostname && hostname !== 'localhost' && !hostname.startsWith('127.')) {
+               const hostTenant = await this.resolveTenantFromHost(hostname);
+               if (hostTenant && hostTenant.id !== tenantRecord.id) {
+                 if (isAdminRoute) {
+                   console.warn(`[SECURITY] Cross-tenant admin access blocked: User belongs to ${tenantRecord.id} but host is ${hostTenant.id}`);
+                   return null;
+                 }
+                 return hostTenant;
+               }
+             }
+
              return {
                 id: tenantRecord.id,
                 slug: tenantRecord.slug || tenantRecord.id,
@@ -288,6 +398,18 @@ export const tenantService = {
             
             console.log('getCurrentTenant: tenants result:', { tenantRow, tenantError });
             if (tenantRow) {
+              const isAdminRoute = hash.includes('/admin') || path.includes('/admin');
+              if (hostname && hostname !== 'localhost' && !hostname.startsWith('127.')) {
+                const hostTenant = await this.resolveTenantFromHost(hostname);
+                if (hostTenant && hostTenant.id !== tenantRow.id) {
+                  if (isAdminRoute) {
+                    console.warn(`[SECURITY] Cross-tenant admin access blocked: User belongs to ${tenantRow.id} but host is ${hostTenant.id}`);
+                    return null;
+                  }
+                  return hostTenant;
+                }
+              }
+
               return {
                 id: tenantRow.id,
                 slug: tenantRow.slug,
