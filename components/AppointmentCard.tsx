@@ -5,6 +5,7 @@ import { isTerminalStatus } from '../services/adminAppointmentService';
 
 export interface AppointmentCardProps {
   appointment: Appointment;
+  tenantId?: string;
   assignedStaff?: Staff;
   assignedService?: Service;
   branchName?: string;
@@ -22,6 +23,7 @@ export interface AppointmentCardProps {
 
 export const AppointmentCard: React.FC<AppointmentCardProps> = ({
   appointment,
+  tenantId,
   assignedStaff,
   assignedService,
   branchName,
@@ -37,9 +39,10 @@ export const AppointmentCard: React.FC<AppointmentCardProps> = ({
   language = 'tr',
 }) => {
   // Query customer's no-show risk signals and badge
+  const resolvedTenantId = appointment.tenantId || tenantId;
   const riskBadge: NoShowRiskBadge = bookingAbuseProtectionService.getNoShowRiskBadge(
     appointment.phone,
-    appointment.tenantId,
+    resolvedTenantId,
     allAppointments
   );
 

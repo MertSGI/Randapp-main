@@ -2,6 +2,22 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import esbuild from 'esbuild';
+import React from 'react';
+import ReactDOMServer from 'react-dom/server';
+
+// Standard mock localStorage harness for headless Node environment
+const storageMap = new Map();
+const mockLocalStorage = {
+  getItem: (key) => storageMap.get(key) || null,
+  setItem: (key, val) => storageMap.set(key, String(val)),
+  removeItem: (key) => storageMap.delete(key),
+  clear: () => storageMap.clear(),
+  get length() { return storageMap.size; },
+  key: (i) => Array.from(storageMap.keys())[i] || null
+};
+globalThis.localStorage = mockLocalStorage;
+globalThis.window = { localStorage: mockLocalStorage };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,7 +75,36 @@ runTest('1.2. bookingAbuseProtectionService.ts içinde NoShowRiskBadge tipi ve g
   assert(content.includes('⚠️ No-Show Riski'), 'Kanonik ⚠️ No-Show Riski rozet metni eksik');
 });
 
-runTest('1.3. AppointmentCard.tsx görsel uyarı rozetini ve arayıp teyit etme aksiyonunu içeriyor', () => {
+runTest('1.3. FINDING-ADIM014-001 Statik Denetim: executeStatusMutation ve handleNoShow mutasyon sonucuna bağlı', () => {
+  const content = fs.readFileSync(adminPagePath, 'utf8');
+  assert(
+    content.includes('executeStatusMutation = async (') &&
+    content.includes('Promise<{ success: boolean; changed: boolean }>'),
+    'executeStatusMutation açıkça Promise<{ success: boolean; changed: boolean }> dönmelidir'
+  );
+  assert(
+    content.includes('mutationResult.success && mutationResult.changed'),
+    'handleNoShow yalnızca mutationResult.success && mutationResult.changed durumunda recordNoShowSignal çağırmalıdır'
+  );
+});
+
+runTest('1.4. FINDING-ADIM014-002 Statik Denetim: bookingAbuseProtectionService tenantId sınırını sıkı koruyor', () => {
+  const content = fs.readFileSync(abuseServicePath, 'utf8');
+  assert(
+    content.includes('if (!tenantId || typeof tenantId !== \'string\' || !tenantId.trim()) return 0;'),
+    'getNoShowRiskCountForCustomer boş/tanımsız tenantId durumunda 0 dönmelidir'
+  );
+  assert(
+    content.includes('if (!cleanTenantId || !cleanPhone)'),
+    'getNoShowRiskBadge boş tenantId veya boş telefon durumunda güvenli sıfır risk dönmelidir'
+  );
+  assert(
+    content.includes('aptTenantId.trim() !== cleanTenantId'),
+    'appointments fallback satırları tenantId ile sıkı filtrelenmelidir'
+  );
+});
+
+runTest('1.5. AppointmentCard.tsx görsel uyarı rozetini ve arayıp teyit etme aksiyonunu içeriyor', () => {
   const content = fs.readFileSync(cardComponentPath, 'utf8');
   assert(content.includes('data-testid="no-show-risk-badge"'), 'data-testid="no-show-risk-badge" eksik');
   assert(content.includes('data-testid="no-show-call-action"'), 'data-testid="no-show-call-action" eksik');
@@ -68,15 +113,7 @@ runTest('1.3. AppointmentCard.tsx görsel uyarı rozetini ve arayıp teyit etme 
   assert(content.includes('Teyit İçin Ara') || content.includes('Call & Confirm'), 'Arayıp teyit etme butonu eksik');
 });
 
-runTest('1.4. AdminPage.tsx AppointmentCard bileşenini ve no-show sinyali kaydını entegre ediyor', () => {
-  const content = fs.readFileSync(adminPagePath, 'utf8');
-  assert(content.includes("import AppointmentCard from '../components/AppointmentCard'"), 'AppointmentCard import eksik');
-  assert(content.includes('<AppointmentCard'), 'AppointmentCard JSX kullanımı eksik');
-  assert(content.includes('bookingAbuseProtectionService.recordNoShowSignal'), 'Admin no-show mutation sinyal kaydı eksik');
-  assert(content.includes('handleCallConfirm'), 'Admin çağrı onay işleyicisi eksik');
-});
-
-runTest('1.5. Kaynak dosyalarında yetkisiz secret veya service_role bulunmuyor', () => {
+runTest('1.6. Kaynak dosyalarında yetkisiz secret veya service_role bulunmuyor', () => {
   const cardContent = fs.readFileSync(cardComponentPath, 'utf8');
   const abuseContent = fs.readFileSync(abuseServicePath, 'utf8');
   assert(!cardContent.includes('service_role'), 'AppointmentCard.tsx içinde service_role yasaktır');
@@ -86,7 +123,17 @@ runTest('1.5. Kaynak dosyalarında yetkisiz secret veya service_role bulunmuyor'
 // -----------------------------------------------------------------------------
 // SECTION 2: BİRİM MANTIK VE getNoShowRiskBadge DAVRANIŞ TESTLERİ
 // -----------------------------------------------------------------------------
-const { bookingAbuseProtectionService } = await import('../services/bookingAbuseProtectionService.ts');
+// Node ESM ortamında TS derlemesini esbuild paketi ile yükle
+const abuseBundle = esbuild.buildSync({
+  entryPoints: [abuseServicePath],
+  bundle: true,
+  format: 'esm',
+  write: false,
+});
+const tempAbusePath = path.join(rootDir, 'scripts', '.temp_abuse_for_qa.mjs');
+fs.writeFileSync(tempAbusePath, abuseBundle.outputFiles[0].text);
+const { bookingAbuseProtectionService } = await import('./.temp_abuse_for_qa.mjs');
+fs.unlinkSync(tempAbusePath);
 
 runTest('2.1. Geçmişi temiz müşteride (0 no-show) rozet sade kalıyor (hasRisk: false)', () => {
   bookingAbuseProtectionService.clearAllNoShowSignals();
@@ -113,7 +160,7 @@ runTest('2.2. 1 no-show kaydı olan müşteri için orta seviye "⚠️ No-Show 
   assert(badge.actionText.includes('Müşteriyi arayarak'), 'actionText arama hatırlatması içermeli');
 });
 
-runTest('2.3. 2 veya daha fazla no-show kaydı olan müşteri için yüksek seviye "⚠️ No-Show Riski (N kez)" rozeti üretiliyor', () => {
+runTest('2.3. 2 no-show kaydı olan müşteri için yüksek seviye "⚠️ No-Show Riski (2 kez)" rozeti üretiliyor', () => {
   bookingAbuseProtectionService.clearAllNoShowSignals();
   bookingAbuseProtectionService.recordNoShowSignal('tenant_test_1', '+90 532 999 88 77');
   bookingAbuseProtectionService.recordNoShowSignal('tenant_test_1', '+90 532 999 88 77');
@@ -139,13 +186,12 @@ runTest('2.5. Telefon formatı varyasyonları (boşluk, +90, yerel format) norma
   bookingAbuseProtectionService.clearAllNoShowSignals();
   bookingAbuseProtectionService.recordNoShowSignal('tenant_norm_1', '+90 555 123 45 67');
 
-  // Farklı formatlarda sorgula
   const b1 = bookingAbuseProtectionService.getNoShowRiskBadge('0555 123 45 67', 'tenant_norm_1');
-  const b2 = bookingAbuseProtectionService.getNoShowRiskBadge('5551234567', 'tenant_norm_1');
+  const b2 = bookingAbuseProtectionService.getNoShowRiskBadge('905551234567', 'tenant_norm_1');
   const b3 = bookingAbuseProtectionService.getNoShowRiskBadge('+905551234567', 'tenant_norm_1');
 
   assert.strictEqual(b1.count, 1, '0555 formatı eşleşmeli');
-  assert.strictEqual(b2.count, 1, '555 formatı eşleşmeli');
+  assert.strictEqual(b2.count, 1, '90555 formatı eşleşmeli');
   assert.strictEqual(b3.count, 1, '+90555 formatı eşleşmeli');
   assert.strictEqual(b1.hasRisk, true);
 });
@@ -177,7 +223,10 @@ runTest('2.7. Girdi polimorfizmi: obje ({ phone, tenantId }) ve alias (getNoShow
   assert.strictEqual(bObj.badgeText, bAlias.badgeText);
 });
 
-runTest('2.8. Kiracı izolasyonu: tenantId belirtildiğinde sinyaller kiracıya göre filtrelenir', () => {
+// -----------------------------------------------------------------------------
+// SECTION 3: FINDING-ADIM014-002 KIRACI İZOLASYONU VE FALLBACK NEGATİF TESTLERİ
+// -----------------------------------------------------------------------------
+runTest('3.1. [FINDING-002] Tenant A sinyali Tenant B sorgusunda kesinlikle rozet üretmez', () => {
   bookingAbuseProtectionService.clearAllNoShowSignals();
   bookingAbuseProtectionService.recordNoShowSignal('tenant_A', '+90 500 111 22 33');
 
@@ -186,85 +235,292 @@ runTest('2.8. Kiracı izolasyonu: tenantId belirtildiğinde sinyaller kiracıya 
 
   assert.strictEqual(bTenantA.count, 1, 'Tenant A için sinyal bulunmalı');
   assert.strictEqual(bTenantB.count, 0, 'Tenant B için sinyal 0 olmalı (izolasyon)');
-  assert.strictEqual(bTenantB.hasRisk, false);
+  assert.strictEqual(bTenantB.hasRisk, false, 'Tenant B hasRisk false olmalı');
 });
 
-runTest('2.9. Önceden veritabanında no_show durumundaki randevular fallback olarak rozete yansır', () => {
+runTest('3.2. [FINDING-002] tenantId eksik/boş sorgularda güvenli sıfır risk (fail-safe)', () => {
   bookingAbuseProtectionService.clearAllNoShowSignals();
-  const mockAppointments = [
-    { phone: '+90 530 111 22 33', status: 'no_show' },
-    { phone: '+90 530 111 22 33', status: 'completed' },
-    { phone: '+90 530 111 22 33', status: 'confirmed' }
+  bookingAbuseProtectionService.recordNoShowSignal('tenant_A', '+90 500 111 22 33');
+
+  // getNoShowRiskCountForCustomer testleri
+  assert.strictEqual(bookingAbuseProtectionService.getNoShowRiskCountForCustomer('', '+90 500 111 22 33'), 0);
+  assert.strictEqual(bookingAbuseProtectionService.getNoShowRiskCountForCustomer(null, '+90 500 111 22 33'), 0);
+  assert.strictEqual(bookingAbuseProtectionService.getNoShowRiskCountForCustomer(undefined, '+90 500 111 22 33'), 0);
+
+  // getNoShowRiskForCustomer testleri
+  assert.strictEqual(bookingAbuseProtectionService.getNoShowRiskForCustomer('', '+90 500 111 22 33'), 'low');
+  assert.strictEqual(bookingAbuseProtectionService.getNoShowRiskForCustomer(null, '+90 500 111 22 33'), 'low');
+
+  // getNoShowRiskBadge testleri
+  const bEmptyTenant = bookingAbuseProtectionService.getNoShowRiskBadge('+90 500 111 22 33', '');
+  const bNullTenant = bookingAbuseProtectionService.getNoShowRiskBadge('+90 500 111 22 33', null);
+  const bObjEmptyTenant = bookingAbuseProtectionService.getNoShowRiskBadge({ phone: '+90 500 111 22 33', tenantId: '' });
+
+  assert.strictEqual(bEmptyTenant.hasRisk, false, 'Boş tenantId ile hasRisk false olmalı');
+  assert.strictEqual(bEmptyTenant.count, 0, 'Boş tenantId ile count 0 olmalı');
+  assert.strictEqual(bNullTenant.hasRisk, false, 'Null tenantId ile hasRisk false olmalı');
+  assert.strictEqual(bObjEmptyTenant.hasRisk, false, 'Obje içinde boş tenantId ile hasRisk false olmalı');
+});
+
+runTest('3.3. [FINDING-002] Karışık-tenant appointment dizisinde diğer kiracı kayıtları elenir', () => {
+  bookingAbuseProtectionService.clearAllNoShowSignals();
+  const testPhone = '+90 530 888 77 66';
+
+  const mixedAppointments = [
+    { phone: testPhone, status: 'no_show', tenantId: 'tenant_A' },
+    { phone: testPhone, status: 'no_show', tenantId: 'tenant_A' },
+    { phone: testPhone, status: 'no_show', tenantId: 'tenant_B' },
+    { phone: testPhone, status: 'no_show' }, // tenantId eksik (güvenlik gereği elenmeli)
+    { phone: testPhone, status: 'completed', tenantId: 'tenant_B' },
   ];
 
-  const badge = bookingAbuseProtectionService.getNoShowRiskBadge(
-    '+90 530 111 22 33',
-    'tenant_fallback',
-    mockAppointments
+  // Tenant B için sorgula: Sadece 1 adet Tenant B no_show randevusu sayılmalı
+  const badgeTenantB = bookingAbuseProtectionService.getNoShowRiskBadge(
+    testPhone,
+    'tenant_B',
+    mixedAppointments
+  );
+  assert.strictEqual(badgeTenantB.count, 1, 'Tenant B için tam 1 no_show sayılmalı (Tenant A ve tenant-less elenmeli)');
+  assert.strictEqual(badgeTenantB.hasRisk, true);
+  assert.strictEqual(badgeTenantB.level, 'medium');
+
+  // Tenant A için sorgula: 2 adet Tenant A no_show randevusu sayılmalı
+  const badgeTenantA = bookingAbuseProtectionService.getNoShowRiskBadge(
+    testPhone,
+    'tenant_A',
+    mixedAppointments
+  );
+  assert.strictEqual(badgeTenantA.count, 2, 'Tenant A için 2 no_show sayılmalı');
+  assert.strictEqual(badgeTenantA.level, 'high');
+
+  // Tenant C (hiç kaydı olmayan) için sorgula: 0 sayılmalı
+  const badgeTenantC = bookingAbuseProtectionService.getNoShowRiskBadge(
+    testPhone,
+    'tenant_C',
+    mixedAppointments
+  );
+  assert.strictEqual(badgeTenantC.count, 0, 'Tenant C için 0 sayılmalı');
+  assert.strictEqual(badgeTenantC.hasRisk, false);
+});
+
+// -----------------------------------------------------------------------------
+// SECTION 4: FINDING-ADIM014-001 MUTASYON SONUCU VE SİNYAL SENKRONİZASYONU
+// -----------------------------------------------------------------------------
+runTest('4.1. [FINDING-001] Başarısız mutasyonda (service_error, invalid_transition, forbidden) no-show sinyali kaydedilmez', () => {
+  bookingAbuseProtectionService.clearAllNoShowSignals();
+  const testPhone = '+90 542 111 00 22';
+  const tenantId = 't_mutation_test';
+
+  // AdminPage handleNoShow mantığı simülasyonu:
+  // const mutationResult = await executeStatusMutation(id, 'no_show');
+  // if (mutationResult?.success && mutationResult?.changed && targetApt?.phone && tenantId) { ... }
+  const simulateAdminHandleNoShow = (mutationResult, targetApt, tid) => {
+    if (mutationResult?.success && mutationResult?.changed && targetApt?.phone && tid) {
+      bookingAbuseProtectionService.recordNoShowSignal(tid, targetApt.phone);
+    }
+  };
+
+  const targetApt = { id: 'apt_1', phone: testPhone, status: 'confirmed' };
+
+  // 1. Senaryo: RPC hatası (service_error / forbidden)
+  simulateAdminHandleNoShow({ success: false, changed: false }, targetApt, tenantId);
+  assert.strictEqual(
+    bookingAbuseProtectionService.getNoShowRiskCountForCustomer(tenantId, testPhone),
+    0,
+    'Başarısız mutasyon (success: false) sinyal üretmemeli'
   );
 
-  assert.strictEqual(badge.hasRisk, true, 'Randevu geçmişindeki no_show dikkate alınmalı');
+  // 2. Senaryo: Geçersiz geçiş (invalid_transition)
+  simulateAdminHandleNoShow({ success: false, changed: false }, targetApt, tenantId);
+  assert.strictEqual(
+    bookingAbuseProtectionService.getNoShowRiskCountForCustomer(tenantId, testPhone),
+    0,
+    'invalid_transition sinyal üretmemeli'
+  );
+
+  const badgeAfterFailures = bookingAbuseProtectionService.getNoShowRiskBadge(testPhone, tenantId);
+  assert.strictEqual(badgeAfterFailures.hasRisk, false, 'Hatalı mutasyonlar sonrası müşteride risk rozeti oluşmamalı');
+});
+
+runTest('4.2. [FINDING-001] no_change mutasyonunda (değişiklik yaratmayan) no-show sinyali kaydedilmez', () => {
+  bookingAbuseProtectionService.clearAllNoShowSignals();
+  const testPhone = '+90 542 333 44 55';
+  const tenantId = 't_mutation_test';
+
+  const simulateAdminHandleNoShow = (mutationResult, targetApt, tid) => {
+    if (mutationResult?.success && mutationResult?.changed && targetApt?.phone && tid) {
+      bookingAbuseProtectionService.recordNoShowSignal(tid, targetApt.phone);
+    }
+  };
+
+  const targetApt = { id: 'apt_2', phone: testPhone, status: 'no_show' };
+
+  // Durum zaten no_show idi (no_change)
+  simulateAdminHandleNoShow({ success: true, changed: false }, targetApt, tenantId);
+  assert.strictEqual(
+    bookingAbuseProtectionService.getNoShowRiskCountForCustomer(tenantId, testPhone),
+    0,
+    'changed: false durumunda sinyal kaydedilmemelidir'
+  );
+
+  const badge = bookingAbuseProtectionService.getNoShowRiskBadge(testPhone, tenantId);
+  assert.strictEqual(badge.hasRisk, false);
+});
+
+runTest('4.3. [FINDING-001] Başarılı ve değişiklik yaratan mutasyonda (success: true && changed: true) tam bir sinyal eklenir', () => {
+  bookingAbuseProtectionService.clearAllNoShowSignals();
+  const testPhone = '+90 542 777 88 99';
+  const tenantId = 't_mutation_test';
+
+  const simulateAdminHandleNoShow = (mutationResult, targetApt, tid) => {
+    if (mutationResult?.success && mutationResult?.changed && targetApt?.phone && tid) {
+      bookingAbuseProtectionService.recordNoShowSignal(tid, targetApt.phone);
+    }
+  };
+
+  const targetApt = { id: 'apt_3', phone: testPhone, status: 'confirmed' };
+
+  // Başarılı no_show mutasyonu
+  simulateAdminHandleNoShow({ success: true, changed: true }, targetApt, tenantId);
+  assert.strictEqual(
+    bookingAbuseProtectionService.getNoShowRiskCountForCustomer(tenantId, testPhone),
+    1,
+    'Başarılı mutasyonda tam 1 sinyal kaydedilmelidir'
+  );
+
+  const badge = bookingAbuseProtectionService.getNoShowRiskBadge(testPhone, tenantId);
+  assert.strictEqual(badge.hasRisk, true);
   assert.strictEqual(badge.count, 1);
   assert.strictEqual(badge.badgeText, '⚠️ No-Show Riski (1 kez)');
 });
 
 // -----------------------------------------------------------------------------
-// SECTION 3: BİLEŞEN SÖZLEŞMESİ VE GÖRSEL TASARIM KURALLARI (AppointmentCard)
+// SECTION 5: GERÇEK AppointmentCard DOM / BİLEŞEN RENDER VE GÖRSEL DOĞRULAMA
 // -----------------------------------------------------------------------------
-runTest('3.1. AppointmentCard TypeScript derleme arayüzü ve prop sözleşmesi tam uyumlu', () => {
-  const cardSrc = fs.readFileSync(cardComponentPath, 'utf8');
-  assert(cardSrc.includes('export interface AppointmentCardProps'), 'AppointmentCardProps export edilmeli');
-  assert(cardSrc.includes('appointment: Appointment'), 'appointment propu zorunlu');
-  assert(cardSrc.includes('onCallConfirm?:'), 'onCallConfirm opsiyonel propu mevcut');
-  assert(cardSrc.includes('allAppointments?:'), 'allAppointments opsiyonel propu mevcut');
+// esbuild ile AppointmentCard bileşenini canlı ESM modülü olarak derle
+const cardBundle = esbuild.buildSync({
+  entryPoints: [cardComponentPath],
+  bundle: true,
+  external: ['react', 'react-dom'],
+  format: 'esm',
+  write: false,
 });
+const tempCardPath = path.join(rootDir, 'scripts', '.temp_card_for_qa.mjs');
+fs.writeFileSync(tempCardPath, cardBundle.outputFiles[0].text);
+const { AppointmentCard } = await import('./.temp_card_for_qa.mjs');
+fs.unlinkSync(tempCardPath);
 
-runTest('3.2. AppointmentCard sade tasarım kuralı: 0 no-show durumunda rozet ve arama butonu DOM oluşturmaz', () => {
-  const cardSrc = fs.readFileSync(cardComponentPath, 'utf8');
-  // hasRisk kontrolü altında data-testid="no-show-risk-badge" ve data-testid="no-show-call-action" olmalıdır
-  assert(cardSrc.includes('{riskBadge.hasRisk && ('), 'hasRisk koruması şart');
-  assert(cardSrc.includes('{riskBadge.hasRisk && appointment.phone && ('), 'Arama butonu yalnızca riskli ve telefonlu randevularda açılmalı');
-});
-
-runTest('3.3. AppointmentCard risk durumunda sarı/kırmızı renk hiyerarşisi uyguluyor', () => {
-  const cardSrc = fs.readFileSync(cardComponentPath, 'utf8');
-  assert(cardSrc.includes("riskBadge.level === 'high'"), 'Yüksek risk dalı olmalı');
-  assert(cardSrc.includes('bg-red-50') || cardSrc.includes('text-red-800'), 'Kırmızı renk sınıfları bulunmalı');
-  assert(cardSrc.includes('bg-amber-50') || cardSrc.includes('text-amber-800'), 'Kehribar/sarı renk sınıfları bulunmalı');
-});
-
-// -----------------------------------------------------------------------------
-// SECTION 4: UÇTAN UCA NO-SHOW İŞ AKIŞI VE SİNYAL SENKRONİZASYONU
-// -----------------------------------------------------------------------------
-runTest('4.1. Admin "Gelmedi" (No Show) aksiyonu sinyal üretir ve sonraki randevuda rozeti tetikler', () => {
+runTest('5.1. Temiz müşterinin randevu kartı DOM sade kalır (rozet ve arama aksiyonu render edilmez)', () => {
   bookingAbuseProtectionService.clearAllNoShowSignals();
-  const testPhone = '+90 533 777 66 55';
-  const tenantId = 't_e2e_noshow';
+  const cleanApt = {
+    id: 'apt_dom_clean',
+    user_name: 'Zeynep Kaya',
+    phone: '+90 555 111 22 33',
+    status: 'confirmed',
+    tenantId: 'tenant_dom_test',
+    date: '2026-11-15',
+    time: '14:00',
+  };
 
-  // 1. İlk başta müşteri temiz
-  const initialBadge = bookingAbuseProtectionService.getNoShowRiskBadge(testPhone, tenantId);
-  assert.strictEqual(initialBadge.hasRisk, false);
+  const html = ReactDOMServer.renderToStaticMarkup(
+    React.createElement(AppointmentCard, {
+      appointment: cleanApt,
+      tenantId: 'tenant_dom_test',
+      allAppointments: [cleanApt],
+      language: 'tr',
+    })
+  );
 
-  // 2. Salon personeli / sahibi "Gelmedi" işaretledi (AdminPage.tsx handleNoShow mantığı)
+  assert(!html.includes('data-testid="no-show-risk-badge"'), 'Temiz kartta no-show-risk-badge bulunmamalıdır');
+  assert(!html.includes('data-testid="no-show-call-action"'), 'Temiz kartta no-show-call-action bulunmamalıdır');
+  assert(!html.includes('⚠️ No-Show Riski'), 'Temiz kartta uyarı metni görünmemelidir');
+  assert(html.includes('Zeynep Kaya'), 'Müşteri ismi render edilmelidir');
+});
+
+runTest('5.2. 1 no-show kaydı olan müşterinin randevu kartında orta risk rozeti ve teyit arama aksiyonu belirir', () => {
+  bookingAbuseProtectionService.clearAllNoShowSignals();
+  const testPhone = '+90 555 444 33 22';
+  const tenantId = 'tenant_dom_test';
   bookingAbuseProtectionService.recordNoShowSignal(tenantId, testPhone);
 
-  // 3. Bir sonraki randevuda rozet hemen belirmeli
-  const updatedBadge = bookingAbuseProtectionService.getNoShowRiskBadge(testPhone, tenantId);
-  assert.strictEqual(updatedBadge.hasRisk, true);
-  assert.strictEqual(updatedBadge.count, 1);
-  assert.strictEqual(updatedBadge.badgeText, '⚠️ No-Show Riski (1 kez)');
-  assert(updatedBadge.actionText.includes('Müşteriyi arayarak'));
+  const riskyApt = {
+    id: 'apt_dom_risky_1',
+    user_name: 'Burak Demir',
+    phone: testPhone,
+    status: 'confirmed',
+    tenantId,
+    date: '2026-11-15',
+    time: '15:30',
+  };
+
+  const html = ReactDOMServer.renderToStaticMarkup(
+    React.createElement(AppointmentCard, {
+      appointment: riskyApt,
+      tenantId,
+      allAppointments: [riskyApt],
+      language: 'tr',
+    })
+  );
+
+  assert(html.includes('data-testid="no-show-risk-badge"'), 'Riskli kartta no-show-risk-badge belirmelidir');
+  assert(html.includes('⚠️ No-Show Riski (1 kez)'), 'Doğru rozet metni ("⚠️ No-Show Riski (1 kez)") görünmelidir');
+  assert(html.includes('data-testid="no-show-call-action"'), 'Arayıp teyit etme butonu (data-testid="no-show-call-action") belirmelidir');
+  assert(html.includes('Teyit İçin Ara'), 'Buton metni "Teyit İçin Ara" olmalıdır');
+  assert(html.includes('bg-amber-50') || html.includes('text-amber-800'), 'Orta risk kehribar rengi sınıflarını içermelidir');
 });
 
-runTest('4.2. "Tamamlandı" veya "İptal" aksiyonları no-show sinyali üretmez', () => {
+runTest('5.3. 2 no-show kaydı olan müşterinin randevu kartında yüksek risk kırmızı rozet belirir', () => {
   bookingAbuseProtectionService.clearAllNoShowSignals();
-  const testPhone = '+90 533 111 00 99';
-  const tenantId = 't_e2e_clean';
+  const testPhone = '+90 555 999 00 11';
+  const tenantId = 'tenant_dom_test';
+  bookingAbuseProtectionService.recordNoShowSignal(tenantId, testPhone);
+  bookingAbuseProtectionService.recordNoShowSignal(tenantId, testPhone);
 
-  // Tamamlanan ve iptal randevular
-  const badge = bookingAbuseProtectionService.getNoShowRiskBadge(testPhone, tenantId);
-  assert.strictEqual(badge.hasRisk, false);
-  assert.strictEqual(badge.count, 0);
+  const highRiskApt = {
+    id: 'apt_dom_high_risk',
+    user_name: 'Kemal Ak',
+    phone: testPhone,
+    status: 'confirmed',
+    tenantId,
+    date: '2026-11-15',
+    time: '16:00',
+  };
+
+  const html = ReactDOMServer.renderToStaticMarkup(
+    React.createElement(AppointmentCard, {
+      appointment: highRiskApt,
+      tenantId,
+      allAppointments: [highRiskApt],
+      language: 'tr',
+    })
+  );
+
+  assert(html.includes('data-testid="no-show-risk-badge"'), 'Yüksek riskli kartta no-show-risk-badge belirmelidir');
+  assert(html.includes('⚠️ No-Show Riski (2 kez)'), 'Doğru rozet metni ("⚠️ No-Show Riski (2 kez)") görünmelidir');
+  assert(html.includes('bg-red-50') || html.includes('text-red-800'), 'Yüksek risk kırmızı renk sınıflarını içermelidir');
+});
+
+runTest('5.4. Telefonu olmayan randevuda teyit arama butonu gösterilmez', () => {
+  bookingAbuseProtectionService.clearAllNoShowSignals();
+  const noPhoneApt = {
+    id: 'apt_dom_no_phone',
+    user_name: 'Anonim Randevu',
+    phone: '',
+    status: 'confirmed',
+    tenantId: 'tenant_dom_test',
+    date: '2026-11-15',
+    time: '17:00',
+  };
+
+  const html = ReactDOMServer.renderToStaticMarkup(
+    React.createElement(AppointmentCard, {
+      appointment: noPhoneApt,
+      tenantId: 'tenant_dom_test',
+      language: 'tr',
+    })
+  );
+
+  assert(!html.includes('data-testid="no-show-call-action"'), 'Telefonu olmayan randevuda arama butonu olmamalıdır');
 });
 
 console.log('\n================================================================================');

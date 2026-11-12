@@ -1,4 +1,4 @@
-import { getBookingRepository } from './repositories';
+import { getBookingRepository } from './repositories/index';
 import { appointmentSelfServiceService } from './appointmentSelfServiceService';
 import { auditLogService } from './auditLogService';
 import { supportTicketService } from './supportTicketService';
@@ -432,12 +432,13 @@ export const bookingAbuseProtectionService = {
 
   // Part 8: recordNoShowSignal
   recordNoShowSignal(tenantId: string, customerPhone: string): void {
+    const cleanTenantId = typeof tenantId === 'string' ? tenantId.trim() : '';
     const cleanPhone = normalizePublicBookingPhone(customerPhone);
-    if (!cleanPhone) return;
+    if (!cleanTenantId || !cleanPhone) return;
     const signals = this.getAllNoShowSignals();
     
     const newSignal: NoShowSignal = {
-      tenantId,
+      tenantId: cleanTenantId,
       phone: cleanPhone,
       timestamp: new Date().toISOString()
     };
@@ -447,7 +448,7 @@ export const bookingAbuseProtectionService = {
 
     try {
       auditLogService.logAuditEvent({
-        tenantId,
+        tenantId: cleanTenantId,
         actorType: 'staff',
         category: 'anti_abuse',
         severity: 'notice',
@@ -462,14 +463,17 @@ export const bookingAbuseProtectionService = {
 
   // Helper inside risk calculation
   getNoShowRiskCountForCustomer(tenantId?: string | null, customerPhone?: string | null): number {
+    if (!tenantId || typeof tenantId !== 'string' || !tenantId.trim()) return 0;
+    const cleanTenantId = tenantId.trim();
     const cleanPhone = normalizePublicBookingPhone(customerPhone || '');
     if (!cleanPhone) return 0;
     const signals = this.getAllNoShowSignals();
-    return signals.filter(s => (!tenantId || s.tenantId === tenantId) && s.phone === cleanPhone).length;
+    return signals.filter(s => s.tenantId === cleanTenantId && s.phone === cleanPhone).length;
   },
 
   // Part 8: getNoShowRiskForCustomer
   getNoShowRiskForCustomer(tenantId?: string | null, customerPhone?: string | null): 'high' | 'medium' | 'low' {
+    if (!tenantId || typeof tenantId !== 'string' || !tenantId.trim()) return 'low';
     const count = this.getNoShowRiskCountForCustomer(tenantId, customerPhone);
     if (count >= 2) return 'high';
     if (count === 1) return 'medium';
@@ -478,18 +482,18 @@ export const bookingAbuseProtectionService = {
 
   // V1A-FUNC-02: getNoShowRiskBadge
   getNoShowRiskBadge(
-    phoneOrInput?: string | { phone?: string; tenantId?: string; appointments?: Array<{ phone?: string; status?: string }> } | null,
-    tenantIdParam?: string,
-    appointmentsParam?: Array<{ phone?: string; status?: string }>
+    phoneOrInput?: string | { phone?: string; tenantId?: string; appointments?: Array<{ phone?: string; status?: string; tenantId?: string; tenant_id?: string }> } | null,
+    tenantIdParam?: string | null,
+    appointmentsParam?: Array<{ phone?: string; status?: string; tenantId?: string; tenant_id?: string }>
   ): NoShowRiskBadge {
     let rawPhone = '';
-    let tenantId = tenantIdParam;
+    let rawTenantId = tenantIdParam || '';
     let appointments = appointmentsParam;
 
     if (phoneOrInput && typeof phoneOrInput === 'object') {
       rawPhone = phoneOrInput.phone || '';
       if (phoneOrInput.tenantId) {
-        tenantId = phoneOrInput.tenantId;
+        rawTenantId = phoneOrInput.tenantId;
       }
       if (phoneOrInput.appointments) {
         appointments = phoneOrInput.appointments;
@@ -498,8 +502,11 @@ export const bookingAbuseProtectionService = {
       rawPhone = phoneOrInput;
     }
 
+    const cleanTenantId = typeof rawTenantId === 'string' ? rawTenantId.trim() : '';
     const cleanPhone = normalizePublicBookingPhone(rawPhone);
-    if (!cleanPhone) {
+
+    // Fail-safe: A non-empty tenantId and valid phone are strictly required
+    if (!cleanTenantId || !cleanPhone) {
       return {
         hasRisk: false,
         count: 0,
@@ -508,16 +515,21 @@ export const bookingAbuseProtectionService = {
         badgeText: '',
         actionText: '',
         actionRecommended: '',
-        phone: '',
+        phone: cleanPhone || '',
         severityColor: 'none',
       };
     }
 
-    const signalsCount = this.getNoShowRiskCountForCustomer(tenantId, cleanPhone);
+    const signalsCount = this.getNoShowRiskCountForCustomer(cleanTenantId, cleanPhone);
     let aptCount = 0;
     if (Array.isArray(appointments)) {
       aptCount = appointments.filter(a => {
-        if (a.status !== 'no_show') return false;
+        if (!a || a.status !== 'no_show') return false;
+        // Tenant boundary invariant: appointment must explicitly match the requested tenantId
+        const aptTenantId = (a as any).tenantId || (a as any).tenant_id;
+        if (!aptTenantId || typeof aptTenantId !== 'string' || aptTenantId.trim() !== cleanTenantId) {
+          return false;
+        }
         const p = normalizePublicBookingPhone(a.phone || '');
         return p === cleanPhone;
       }).length;
@@ -567,9 +579,9 @@ export const bookingAbuseProtectionService = {
 
   // Alias for V1A-FUNC-02
   getNoShowBadge(
-    phoneOrInput?: string | { phone?: string; tenantId?: string; appointments?: Array<{ phone?: string; status?: string }> } | null,
-    tenantIdParam?: string,
-    appointmentsParam?: Array<{ phone?: string; status?: string }>
+    phoneOrInput?: string | { phone?: string; tenantId?: string; appointments?: Array<{ phone?: string; status?: string; tenantId?: string; tenant_id?: string }> } | null,
+    tenantIdParam?: string | null,
+    appointmentsParam?: Array<{ phone?: string; status?: string; tenantId?: string; tenant_id?: string }>
   ): NoShowRiskBadge {
     return this.getNoShowRiskBadge(phoneOrInput, tenantIdParam, appointmentsParam);
   },

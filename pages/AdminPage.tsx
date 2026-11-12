@@ -251,9 +251,9 @@ const AdminPage: React.FC = () => {
     appointmentId: string,
     targetStatus: 'confirmed' | 'completed' | 'no_show' | 'cancelled',
     reason?: string | null
-  ) => {
+  ): Promise<{ success: boolean; changed: boolean }> => {
     // Double-click guard: if this appointment is already mutating, abort
-    if (mutatingAppointments.has(appointmentId)) return;
+    if (mutatingAppointments.has(appointmentId)) return { success: false, changed: false };
 
     // Generate or reuse idempotency key
     const retryMapKey = `${appointmentId}:${targetStatus}`;
@@ -291,11 +291,14 @@ const AdminPage: React.FC = () => {
           setAppointmentRetryNonce(n => n + 1);
           // Invalidate bootstrap dashboard data
           bootstrap.invalidateAfterMutation();
+          return { success: true, changed: true };
         } else if (result.reason_code === 'no_change') {
           // Same status — safe no-op, just sync UI silently
           aptLoadedKeyRef.current = '';
           setAppointmentRetryNonce(n => n + 1);
+          return { success: true, changed: false };
         }
+        return { success: true, changed: false };
       } else {
         // Failure — show safe Turkish error
         const errorMsg = getAdminStatusReasonMessage(result.reason_code);
@@ -318,6 +321,7 @@ const AdminPage: React.FC = () => {
           // Other failures (forbidden, unauthenticated, etc.): clear key
           pendingRetryKeys.current.delete(retryMapKey);
         }
+        return { success: false, changed: false };
       }
     } catch (err) {
       // Unexpected error — retain key for retry
@@ -326,6 +330,7 @@ const AdminPage: React.FC = () => {
           ? 'İşlem şu anda tamamlanamadı. Lütfen tekrar deneyin.'
           : 'Operation could not be completed. Please try again.'
       );
+      return { success: false, changed: false };
     } finally {
       setMutatingAppointments(prev => {
         const next = new Set(prev);
@@ -351,8 +356,8 @@ const AdminPage: React.FC = () => {
   const handleNoShow = async (id: string) => {
     if (!isOwner || mutatingAppointments.has(id)) return;
     const targetApt = appointments.find(a => a.id === id);
-    await executeStatusMutation(id, 'no_show');
-    if (targetApt?.phone && tenantId) {
+    const mutationResult = await executeStatusMutation(id, 'no_show');
+    if (mutationResult.success && mutationResult.changed && targetApt?.phone && tenantId) {
       bookingAbuseProtectionService.recordNoShowSignal(tenantId, targetApt.phone);
     }
   };
@@ -1022,6 +1027,7 @@ const AdminPage: React.FC = () => {
                     <AppointmentCard
                       key={apt.id}
                       appointment={apt}
+                      tenantId={tenantId}
                       assignedStaff={assignedStaff}
                       assignedService={assignedService}
                       branchName={branchName}
