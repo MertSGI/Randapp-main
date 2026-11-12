@@ -128,6 +128,7 @@ runTest('1.5. Aday migrasyon SQL sözleşmesi CANDIDATE ONLY, RLS korumalı ve f
   assert(migContent.includes('resolve_self_service_client_ip'), 'resolve_self_service_client_ip tanımlanmalıdır');
   assert(migContent.includes('REVOKE ALL ON FUNCTION public.record_self_service_token_lookup_failure'), 'record_self_service_token_lookup_failure REVOKE edilmelidir');
   assert(migContent.includes('REVOKE ALL ON FUNCTION public.check_self_service_token_rate_limit'), 'check_self_service_token_rate_limit REVOKE edilmelidir');
+  assert(migContent.includes('tenant_id = v_appointment.tenant_id'), 'service/staff/branch sorgularında tenant_id kontrolü bulunmalıdır (FINDING-ADIM012-006)');
 });
 
 runTest('1.6. İstemci taraflı servislerde service_role anahtarı geçmiyor (Guardrail 2)', () => {
@@ -1049,6 +1050,121 @@ try {
     } finally {
       await Promise.all(swarm.map(c => c.end().catch(() => {})));
     }
+  });
+
+  await runAsyncTest('8.11. [GERÇEK DB - FINDING-006] Tenant A randevusuna Tenant B ye ait yabancı service_id, staff_id veya branch_id bağlansa dahi Tenant B verisi sızdırılmaz (tenant izolasyonu)', async () => {
+    const db = await getDisposablePgEngine();
+
+    // 1. Tenant A (Meşru kiracı) ve Tenant B (Yabancı/Kurban kiracı) oluştur
+    const tA = await db.query(`
+      INSERT INTO public.tenants (name, official_business_name, slug)
+      VALUES ('Tenant A Salonu', 'Tenant A Güzellik Hizmetleri', 'tenant-a-iso-join')
+      RETURNING id
+    `);
+    const tenantAId = tA.rows[0].id;
+
+    const tB = await db.query(`
+      INSERT INTO public.tenants (name, official_business_name, slug)
+      VALUES ('Tenant B Salonu', 'Tenant B Gizli VIP A.Ş.', 'tenant-b-iso-join')
+      RETURNING id
+    `);
+    const tenantBId = tB.rows[0].id;
+
+    // 2. Tenant B altına şube, hizmet ve personel ekle
+    const bB = await db.query(`
+      INSERT INTO public.branches (tenant_id, name, timezone)
+      VALUES ($1, 'Tenant B Çok Gizli Şube', 'America/New_York')
+      RETURNING id
+    `, [tenantBId]);
+    const branchBId = bB.rows[0].id;
+
+    const sB = await db.query(`
+      INSERT INTO public.services (tenant_id, name, name_tr, duration, price)
+      VALUES ($1, 'Tenant B Özel VIP Bakım', 'Tenant B Özel VIP Bakım', 60, 9999.00)
+      RETURNING id
+    `, [tenantBId]);
+    const serviceBId = sB.rows[0].id;
+
+    const stB = await db.query(`
+      INSERT INTO public.staff (tenant_id, name, title)
+      VALUES ($1, 'Tenant B Özel Doktoru', 'VIP Doktor')
+      RETURNING id
+    `, [tenantBId]);
+    const staffBId = stB.rows[0].id;
+
+    // 3. Tenant A altında bir randevu oluştur, ancak service_id, staff_id, branch_id alanları Tenant B'yi göstersin
+    const aptA = await db.query(`
+      INSERT INTO public.appointments (
+        tenant_id, branch_id, service_id, staff_id,
+        user_name, user_email, phone, appointment_date, appointment_time, duration_minutes, status, notes
+      ) VALUES (
+        $1, $2, $3, $4,
+        'Ayşe Tenant A', 'ayse@example.com', '+905330001122', '2026-12-05', '11:00', 30, 'confirmed', 'Aynı kiracı randevusu'
+      ) RETURNING id
+    `, [tenantAId, branchBId, serviceBId, staffBId]);
+    const appointmentAId = aptA.rows[0].id;
+
+    // 4. Meşru token üret (Tenant A ve Appointment A için)
+    const rawToken = generateSecureToken();
+    const tokenHash = crypto.createHash('sha256').update(rawToken.trim()).digest('hex');
+    await db.query(`
+      INSERT INTO public.appointment_access_tokens (tenant_id, appointment_id, token_hash, expires_at)
+      VALUES ($1, $2, $3, now() + interval '7 days')
+    `, [tenantAId, appointmentAId, tokenHash]);
+
+    // 5. RPC sorgusunu çalıştır
+    const rpcRes = await db.query(`
+      SELECT public.get_public_appointment_by_manage_token($1, $2, $3) AS result
+    `, [rawToken, 'fp_iso_join_client', '10.99.9.99']);
+
+    const res = rpcRes.rows[0].result;
+    assert.strictEqual(res.success, true, 'Randevu Tenant A ya ait olduğu için success=true dönmelidir');
+    assert.strictEqual(res.reason_code, 'ok', 'reason_code=ok olmalıdır');
+    assert.strictEqual(res.appointment.id, appointmentAId);
+    assert.strictEqual(res.appointment.customer_name, 'Ayşe Tenant A');
+
+    // Tenant B verilerinin sızdırılmadığını doğrula:
+    // a) service Tenant B ye ait olduğu için null dönmelidir
+    assert.strictEqual(res.appointment.service, null, 'Tenant B ye ait service nesnesi null dönmelidir');
+    // b) staff Tenant B ye ait olduğu için null dönmelidir
+    assert.strictEqual(res.appointment.staff, null, 'Tenant B ye ait staff nesnesi null dönmelidir');
+    // c) branch Tenant B ye ait olduğu için Tenant B şube bilgisi sızdırılmamalı, Tenant A işletme adına fallback yapmalıdır
+    assert.strictEqual(res.appointment.branch.name, 'Tenant A Güzellik Hizmetleri', 'Şube bilgisi Tenant B yi değil Tenant A fallback ini döndürmelidir');
+    assert.strictEqual(res.appointment.branch.id, undefined, 'Tenant B şube id si sızdırılamaz');
+
+    // JSON payload içinde hiçbir Tenant B PII veya ticari verisi bulunmamalıdır
+    const payloadStr = JSON.stringify(res);
+    assert(!payloadStr.includes('Tenant B Çok Gizli Şube'), 'Tenant B şube adı sızdırılamaz');
+    assert(!payloadStr.includes('Tenant B Özel VIP Bakım'), 'Tenant B hizmet adı sızdırılamaz');
+    assert(!payloadStr.includes('9999.00'), 'Tenant B hizmet fiyatı sızdırılamaz');
+    assert(!payloadStr.includes('Tenant B Özel Doktoru'), 'Tenant B personel adı sızdırılamaz');
+    assert(!payloadStr.includes('VIP Doktor'), 'Tenant B personel unvanı sızdırılamaz');
+    assert(!payloadStr.includes('America/New_York'), 'Tenant B şube saat dilimi sızdırılamaz');
+
+    // 6. Aynı tenant'a ait meşru hizmet/personel/şube eklendiğinde normal döndüğünü teyit et
+    const sA = await db.query(`
+      INSERT INTO public.services (tenant_id, name, duration, price)
+      VALUES ($1, 'Tenant A Normal Saç Yıkama', 15, 100.00) RETURNING id
+    `, [tenantAId]);
+    const bA = await db.query(`
+      INSERT INTO public.branches (tenant_id, name)
+      VALUES ($1, 'Tenant A Normal Şube') RETURNING id
+    `, [tenantAId]);
+
+    await db.query(`
+      UPDATE public.appointments
+      SET service_id = $1, branch_id = $2, staff_id = NULL
+      WHERE id = $3
+    `, [sA.rows[0].id, bA.rows[0].id, appointmentAId]);
+
+    const rpcResSameTenant = await db.query(`
+      SELECT public.get_public_appointment_by_manage_token($1, $2, $3) AS result
+    `, [rawToken, 'fp_iso_join_client_same', '10.99.9.100']);
+
+    const resSame = rpcResSameTenant.rows[0].result;
+    assert.strictEqual(resSame.success, true);
+    assert.strictEqual(resSame.appointment.service.name, 'Tenant A Normal Saç Yıkama');
+    assert.strictEqual(resSame.appointment.branch.name, 'Tenant A Normal Şube');
   });
 
 } finally {

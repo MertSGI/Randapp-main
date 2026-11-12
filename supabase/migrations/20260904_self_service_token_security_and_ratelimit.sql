@@ -387,21 +387,24 @@ BEGIN
           AND (locked_until IS NULL OR locked_until <= now());
     END IF;
 
-    -- Step 9: Join service, staff, branch, tenant details
+    -- Step 9: Join service, staff, branch, tenant details (strictly tenant-isolated)
     SELECT id, name, name_tr, duration, price
     INTO v_service
     FROM public.services
-    WHERE id = v_appointment.service_id;
+    WHERE id = v_appointment.service_id
+      AND tenant_id = v_appointment.tenant_id;
 
     SELECT id, name, title
     INTO v_staff
     FROM public.staff
-    WHERE id = v_appointment.staff_id;
+    WHERE id = v_appointment.staff_id
+      AND tenant_id = v_appointment.tenant_id;
 
     SELECT id, name, timezone
     INTO v_branch
     FROM public.branches
-    WHERE id = v_appointment.branch_id;
+    WHERE id = v_appointment.branch_id
+      AND tenant_id = v_appointment.tenant_id;
 
     SELECT id, name, official_business_name
     INTO v_tenant
