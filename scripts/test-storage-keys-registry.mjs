@@ -278,6 +278,24 @@ check('localBookingRepository.ts içinde hardcoded lari: appointments stringi ka
   assert.ok(!content.includes('`lari:${tenantId}:appointments_seeded`'), 'Hardcoded lari appointments_seeded literal tespit edildi!');
 });
 
+check('localBookingRepository.ts (FINDING-ADIM016-004): seeded appointment demo payload alanları byte-for-byte korunmalı ve yalnız storage anahtarı registry üzerinden değişmelidir', () => {
+  const content = fs.readFileSync(localBookingRepoPath, 'utf8');
+  assert.ok(content.includes('DYNAMIC_STORAGE_KEYS.tenantAppointmentsSeeded(tenantId)'), 'DYNAMIC_STORAGE_KEYS.tenantAppointmentsSeeded kullanılmalıdır');
+  assert.ok(content.includes('DYNAMIC_STORAGE_KEYS.tenantAppointments(tenantId)'), 'DYNAMIC_STORAGE_KEYS.tenantAppointments kullanılmalıdır');
+
+  // Base-commit seeded appointment payload alanlarının byte-for-byte korunduğu doğrulanır
+  assert.ok(content.includes("'Ahmet YÄ±lmaz'"), 'Base-commit seeded user_name Ahmet YÄ±lmaz korunmalıdır');
+  assert.ok(content.includes("'AyÅŸe Kaya'"), 'Base-commit seeded user_name AyÅŸe Kaya korunmalıdır');
+  assert.ok(content.includes("'Fatma Ã‡elik'"), 'Base-commit seeded user_name Fatma Ã‡elik korunmalıdır');
+  assert.ok(content.includes("'Ä°ÅŸim Ã§Ä±ktÄ±'"), 'Base-commit seeded cancelReason Ä°ÅŸim Ã§Ä±ktÄ± korunmalıdır');
+
+  // Negatif test: Yetkisiz payload sapmaları veya sessiz normalizasyonlar reddedilir
+  assert.ok(!content.includes("'Ahmet Yılmaz'"), 'Ahmet Yılmaz demo payload sapması tespit edildi');
+  assert.ok(!content.includes("'Ayşe Kaya'"), 'Ayşe Kaya demo payload sapması tespit edildi');
+  assert.ok(!content.includes("'Fatma Çelik'"), 'Fatma Çelik demo payload sapması tespit edildi');
+  assert.ok(!content.includes("'İşim çıktı'"), 'İşim çıktı demo payload sapması tespit edildi');
+});
+
 check('ADIM-016 kapsamında göç ettirilen servislerde (storageKeys.ts hariç) doğrudan lari_ veya lari: storage-key üretimi bulunmamalıdır', () => {
   const migratedFiles = [
     'services/bookingAbuseProtectionService.ts',

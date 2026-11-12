@@ -162,7 +162,7 @@ export class LocalBookingRepository implements BookingRepository {
   
         const seededAppointments: Appointment[] = [
           {
-            id: 'apt_demo_1', tenantId, customerId: 'cust_demo_1', user_name: 'Ahmet Yılmaz', user_email: 'ahmet@example.com', phone: '+90 555 123 4567',
+            id: 'apt_demo_1', tenantId, customerId: 'cust_demo_1', user_name: 'Ahmet YÄ±lmaz', user_email: 'ahmet@example.com', phone: '+90 555 123 4567',
             serviceId: 'srv_1', staffId: 'staff_1', date: toISODate(today), time: '10:00', status: 'confirmed', createdAt: yesterday.toISOString(), syncedToGoogle: false
           },
           {
@@ -170,16 +170,16 @@ export class LocalBookingRepository implements BookingRepository {
             serviceId: 'srv_2', staffId: 'staff_2', date: toISODate(today), time: '14:30', status: 'confirmed', createdAt: yesterday.toISOString(), syncedToGoogle: false
           },
           {
-            id: 'apt_demo_3', tenantId, customerId: 'cust_demo_3', user_name: 'Ayşe Kaya', user_email: 'ayse@example.com', phone: '+90 555 333 2211',
+            id: 'apt_demo_3', tenantId, customerId: 'cust_demo_3', user_name: 'AyÅŸe Kaya', user_email: 'ayse@example.com', phone: '+90 555 333 2211',
             serviceId: 'srv_3', staffId: 'staff_1', date: toISODate(tomorrow), time: '11:00', status: 'confirmed', createdAt: today.toISOString(), syncedToGoogle: false
           },
           {
-            id: 'apt_demo_4', tenantId, customerId: 'cust_demo_4', user_name: 'Fatma Çelik', user_email: 'fatma@example.com', phone: '+90 555 444 5566',
+            id: 'apt_demo_4', tenantId, customerId: 'cust_demo_4', user_name: 'Fatma Ã‡elik', user_email: 'fatma@example.com', phone: '+90 555 444 5566',
             serviceId: 'srv_5', staffId: 'staff_1', date: toISODate(yesterday), time: '15:00', status: 'completed', createdAt: today.toISOString(), syncedToGoogle: false
           },
            {
             id: 'apt_demo_5', tenantId, customerId: 'cust_demo_5', user_name: 'Ali Vefa', user_email: 'ali@example.com', phone: '+90 555 111 2222',
-            serviceId: 'srv_4', staffId: 'staff_3', date: toISODate(tomorrow), time: '16:00', status: 'cancelled_by_customer', cancelReason: 'İşim çıktı', cancelledAt: today.toISOString(), cancelledBy: 'customer', createdAt: yesterday.toISOString(), syncedToGoogle: false
+            serviceId: 'srv_4', staffId: 'staff_3', date: toISODate(tomorrow), time: '16:00', status: 'cancelled_by_customer', cancelReason: 'Ä°ÅŸim Ã§Ä±ktÄ±', cancelledAt: today.toISOString(), cancelledBy: 'customer', createdAt: yesterday.toISOString(), syncedToGoogle: false
           }
         ];
         await dataProvider.set(key, seededAppointments);
