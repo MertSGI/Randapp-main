@@ -107,65 +107,121 @@ export const tenantService = {
     if (!hostname) return null;
 
     const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
-    const baseDomain = import.meta.env?.VITE_APP_BASE_DOMAIN || 'randevulari.com';
-    let querySlug = '';
-    let isSubdomain = false;
+    const baseDomain = (import.meta.env?.VITE_APP_BASE_DOMAIN || 'randevulari.com').trim().toLowerCase();
     
-    const cleanHost = hostname.split(':')[0].toLowerCase();
-    if (baseDomain && cleanHost.endsWith(`.${baseDomain.toLowerCase()}`)) {
-      querySlug = cleanHost.replace(`.${baseDomain.toLowerCase()}`, '');
-      isSubdomain = true;
-    } else if (cleanHost.includes('.') && !cleanHost.startsWith('127.') && cleanHost !== 'localhost') {
-      const parts = cleanHost.split('.');
-      if (parts.length >= 2 && parts[0] && parts[0] !== 'www') {
-        querySlug = parts[0];
-        isSubdomain = true;
+    // Port stripping and normalization (e.g., 'salon-a.randevulari.com:3000' -> 'salon-a.randevulari.com')
+    const cleanHost = hostname.split(':')[0].trim().toLowerCase();
+    if (!cleanHost) return null;
+
+    const isLoopback = cleanHost === 'localhost' || cleanHost.startsWith('127.') || cleanHost === '0.0.0.0';
+    const isRootDomain = cleanHost === baseDomain || cleanHost === `www.${baseDomain}`;
+
+    let isTenantSubdomain = false;
+    let querySlug = '';
+
+    // Only hosts strictly ending in .<baseDomain> are candidate subdomains (FINDING-ADIM018-005)
+    if (baseDomain && cleanHost.endsWith(`.${baseDomain}`)) {
+      const candidateSlug = cleanHost.slice(0, -(baseDomain.length + 1)).trim();
+      if (candidateSlug && candidateSlug !== 'www') {
+        isTenantSubdomain = true;
+        querySlug = candidateSlug;
       }
     }
+
+    // Other dotted hosts that are not loopback and not root domain are exact custom domains
+    const isCustomDomain = !isLoopback && !isRootDomain && !isTenantSubdomain && cleanHost.includes('.');
 
     if (mode.startsWith('supabase')) {
-      // In supabase mode (including staging), always resolve from DB regardless of hostname.
-      // Localhost is a valid dev environment for real supabase testing.
-      if (cleanHost === 'localhost' || cleanHost.startsWith('127.0.0.1')) {
-        console.info('Supabase staging mode on localhost — resolving tenant from authenticated user profile.');
-        // Fall through to DB resolution
+      if (isTenantSubdomain && querySlug) {
+        const { data: tenant } = await supabase
+          .from('tenants')
+          .select('*')
+          .eq('slug', querySlug)
+          .maybeSingle();
+
+        if (tenant) {
+          return {
+            id: tenant.id,
+            slug: tenant.slug,
+            name: tenant.name,
+            status: tenant.status,
+            createdAt: tenant.created_at || new Date().toISOString(),
+            updatedAt: tenant.updated_at || new Date().toISOString(),
+          } as Tenant;
+        }
+
+        console.warn('Supabase tenant resolution failed for subdomain:', cleanHost);
+        return null;
       }
 
-      const queryParams = isSubdomain 
-        ? `slug.eq.${querySlug}` 
-        : `custom_domain.eq.${cleanHost},slug.eq.${cleanHost.split('.')[0]}`; // Fallback to splitting host if no base domain logic matched
+      if (isCustomDomain) {
+        const { data: tenant } = await supabase
+          .from('tenants')
+          .select('*')
+          .eq('custom_domain', cleanHost)
+          .maybeSingle();
 
-      const { data: tenant, error } = await supabase
-        .from('tenants')
-        .select('*')
-        .or(queryParams)
-        .single();
-        
-      if (tenant) {
-        return {
-          id: tenant.id,
-          slug: tenant.slug,
-          name: tenant.name,
-          status: tenant.status,
-          createdAt: tenant.created_at || new Date().toISOString(),
-          updatedAt: tenant.updated_at || new Date().toISOString(),
-        } as Tenant;
+        if (tenant) {
+          return {
+            id: tenant.id,
+            slug: tenant.slug,
+            name: tenant.name,
+            status: tenant.status,
+            createdAt: tenant.created_at || new Date().toISOString(),
+            updatedAt: tenant.updated_at || new Date().toISOString(),
+          } as Tenant;
+        }
+
+        console.warn('Supabase tenant resolution failed for custom domain:', cleanHost);
+        return null;
       }
-      
-      console.warn('Supabase tenant resolution failed. Tenant not found for host:', hostname);
+
+      if (isLoopback || isRootDomain) {
+        return DEMO_TENANT;
+      }
+
       return null;
     }
-    
-    // In mock or local mode: resolve by slug if subdomain was detected
-    if (querySlug) {
+
+    // In mock or local mode:
+    if (isTenantSubdomain && querySlug) {
       const resolved = await this.getTenantBySlug(querySlug);
       if (resolved) return resolved;
-      // If a specific subdomain was queried but not found in registered tenants, return null (fail-closed)
-      return null;
+      return null; // Fail-closed for unknown subdomain
     }
 
-    // Fallback or mock behavior for localhost / root demo
-    return DEMO_TENANT;
+    if (isCustomDomain) {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) : null;
+      if (raw) {
+        try {
+          const tenants = JSON.parse(raw);
+          const matched = tenants.find((t: any) => 
+            (t.customDomain && String(t.customDomain).trim().toLowerCase() === cleanHost) ||
+            (t.custom_domain && String(t.custom_domain).trim().toLowerCase() === cleanHost)
+          );
+          if (matched) {
+            return {
+              id: matched.id,
+              slug: matched.slug || matched.id,
+              name: matched.businessName || matched.name,
+              status: matched.status || 'active',
+              createdAt: matched.created_at || new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              verificationStatus: matched.verificationStatus || 'approved',
+              publicSiteStatus: matched.publicSiteStatus || 'published',
+              businessRiskStatus: matched.businessRiskStatus || 'normal',
+            } as Tenant;
+          }
+        } catch (e) {}
+      }
+      return null; // Fail-closed for unknown custom domain
+    }
+
+    if (isLoopback || isRootDomain) {
+      return DEMO_TENANT;
+    }
+
+    return null;
   },
 
   async getTenantById(tenantId: string): Promise<Tenant | null> {
@@ -351,11 +407,13 @@ export const tenantService = {
              const isAdminRoute = hash.includes('/admin') || path.includes('/admin');
              if (hostname && hostname !== 'localhost' && !hostname.startsWith('127.')) {
                const hostTenant = await this.resolveTenantFromHost(hostname);
-               if (hostTenant && hostTenant.id !== tenantRecord.id) {
-                 if (isAdminRoute) {
-                   console.warn(`[SECURITY] Cross-tenant admin access blocked: User belongs to ${tenantRecord.id} but host is ${hostTenant.id}`);
+               if (isAdminRoute) {
+                 // In admin route, require every non-local host to resolve successfully AND equal authenticated tenant (FINDING-ADIM018-004)
+                 if (!hostTenant || hostTenant.id !== tenantRecord.id) {
+                   console.warn(`[SECURITY] Cross-tenant or unresolved admin access blocked: User belongs to ${tenantRecord.id} but host resolved to ${hostTenant?.id || 'null'}`);
                    return null;
                  }
+               } else if (hostTenant && hostTenant.id !== tenantRecord.id) {
                  return hostTenant;
                }
              }
@@ -401,11 +459,13 @@ export const tenantService = {
               const isAdminRoute = hash.includes('/admin') || path.includes('/admin');
               if (hostname && hostname !== 'localhost' && !hostname.startsWith('127.')) {
                 const hostTenant = await this.resolveTenantFromHost(hostname);
-                if (hostTenant && hostTenant.id !== tenantRow.id) {
-                  if (isAdminRoute) {
-                    console.warn(`[SECURITY] Cross-tenant admin access blocked: User belongs to ${tenantRow.id} but host is ${hostTenant.id}`);
+                if (isAdminRoute) {
+                  // In admin route, require every non-local host to resolve successfully AND equal authenticated tenant (FINDING-ADIM018-004)
+                  if (!hostTenant || hostTenant.id !== tenantRow.id) {
+                    console.warn(`[SECURITY] Cross-tenant or unresolved admin access blocked: User belongs to ${tenantRow.id} but host resolved to ${hostTenant?.id || 'null'}`);
                     return null;
                   }
+                } else if (hostTenant && hostTenant.id !== tenantRow.id) {
                   return hostTenant;
                 }
               }

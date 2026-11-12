@@ -121,27 +121,6 @@ export function isLariStorageKey(key: string): boolean {
  */
 const STATIC_STORAGE_KEYS_SET = new Set<string>(Object.values(STORAGE_KEYS));
 
-/**
- * Bir depolama anahtarının belirli bir kiracıya (tenantId) ait olup olmadığını doğrular.
- * Global platform anahtarlarını (STORAGE_KEYS) hariç tutarak tenant izolasyonunu sağlar.
- */
-export function isTenantStorageKey(key: string, tenantId: string): boolean {
-  if (typeof key !== 'string' || !tenantId || !isLariStorageKey(key)) return false;
-  if (STATIC_STORAGE_KEYS_SET.has(key)) return false;
-
-  // 1. Colon namespace format: lari:<tenantId>:...
-  if (key.startsWith(`lari:${tenantId}:`)) return true;
-
-  // 2. Underscore suffix format: lari_*_<tenantId>
-  if (key.endsWith(`_${tenantId}`)) return true;
-
-  // 3. Middle-token format: lari_availability_<tenantId>_configured or lari_backup_<tenantId>_<timestamp>.json
-  if (key.startsWith(`lari_availability_${tenantId}_configured`)) return true;
-  if (key.startsWith(`lari_backup_${tenantId}_`)) return true;
-
-  return false;
-}
-
 const TENANT_PREFIXES_WITH_UNDERSCORE = [
   'lari_branches_',
   'lari_customer_consents_by_tenant_',
@@ -193,6 +172,20 @@ export function extractTenantFromStorageKey(key: string): string | null {
   }
 
   return null;
+}
+
+/**
+ * Bir depolama anahtarının belirli bir kiracıya (tenantId) ait olup olmadığını doğrular.
+ * Global platform anahtarlarını (STORAGE_KEYS) hariç tutarak ve extractTenantFromStorageKey
+ * kanonik gramerini kullanarak tam sahip eşleşmesini garanti eder (FINDING-ADIM018-001).
+ * Önek / sonek çakışmalı kiracı kimliklerinde (örn. alpha vs beta_alpha vs alpha_evil)
+ * sızıntı ve hatalı silinmeyi kesin olarak önler.
+ */
+export function isTenantStorageKey(key: string, tenantId: string): boolean {
+  if (typeof key !== 'string' || !tenantId || !isLariStorageKey(key)) return false;
+  if (STATIC_STORAGE_KEYS_SET.has(key)) return false;
+
+  return extractTenantFromStorageKey(key) === tenantId;
 }
 
 /**
