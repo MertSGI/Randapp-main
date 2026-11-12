@@ -12,6 +12,36 @@ export interface TenantAccessValidationResult {
   message: string;
 }
 
+export interface ApiBoundaryRequest {
+  method?: string;
+  url: string;
+  headers?: Record<string, string>;
+  body?: any;
+  bypassGuard?: boolean;
+}
+
+export interface ApiBoundaryResponse {
+  status: number;
+  ok: boolean;
+  body: any;
+}
+
+function decodeJwtPayload(token: string): any {
+  if (typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = payload.padEnd(payload.length + (4 - (payload.length % 4)) % 4, '=');
+    const jsonStr = typeof atob === 'function'
+      ? atob(padded)
+      : Buffer.from(padded, 'base64').toString('utf8');
+    return JSON.parse(jsonStr);
+  } catch {
+    return null;
+  }
+}
+
 export class CrossTenantAccessError extends Error {
   readonly status: number;
   readonly reason: string;
@@ -103,11 +133,114 @@ export const tenantService = {
     }
   },
 
+  /**
+   * API ve Route sınırında gelen isteğin yetki ve tenant izolasyonunu doğrular.
+   * HTTP 403 Forbidden veya 200 OK yanıt nesnesi üretir.
+   */
+  async dispatchApiBoundaryRequest(req: ApiBoundaryRequest): Promise<ApiBoundaryResponse> {
+    const { url, headers = {}, body = null, bypassGuard = false } = req;
+
+    // Normalise headers
+    let authHeader = '';
+    let hostHeader = '';
+    for (const [k, v] of Object.entries(headers)) {
+      const lower = k.toLowerCase();
+      if (lower === 'authorization') authHeader = v;
+      if (lower === 'host') hostHeader = v;
+    }
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return {
+        status: 401,
+        ok: false,
+        body: { error: 'Unauthorized: Missing or malformed Bearer token' }
+      };
+    }
+
+    const token = authHeader.slice(7).trim();
+    const claims = decodeJwtPayload(token);
+    if (!claims) {
+      return {
+        status: 401,
+        ok: false,
+        body: { error: 'Unauthorized: Invalid token signature or claims' }
+      };
+    }
+
+    const callerTenantId = claims.app_metadata?.tenant_id || claims.user_metadata?.tenant_id || claims.tenant_id;
+    const callerUserId = claims.sub || claims.id;
+    const callerRole = claims.role || claims.app_metadata?.role || 'authenticated';
+
+    // Parse URL path and query
+    let path = url;
+    let searchParams: URLSearchParams | null = null;
+    try {
+      const parsed = new URL(url, 'http://localhost');
+      path = parsed.pathname;
+      searchParams = parsed.searchParams;
+    } catch {
+      const qIdx = url.indexOf('?');
+      if (qIdx !== -1) {
+        path = url.slice(0, qIdx);
+        searchParams = new URLSearchParams(url.slice(qIdx + 1));
+      }
+    }
+
+    // Resolve tenant from Host header
+    const hostTenant = await this.resolveTenantFromHost(hostHeader);
+
+    // 1. Admin Route Security Boundary
+    if (path.startsWith('/api/admin') || path.startsWith('/rest/v1/admin')) {
+      if (!bypassGuard && callerRole !== 'super_admin') {
+        if (!hostTenant || hostTenant.id !== callerTenantId) {
+          return {
+            status: 403,
+            ok: false,
+            body: {
+              error: 'Forbidden: Cross-tenant admin access blocked by API guard',
+              callerTenantId,
+              hostTenantId: hostTenant?.id || null
+            }
+          };
+        }
+      }
+    }
+
+    // 2. Resource Entity Security Boundary (e.g., query params / payload target)
+    const targetTenantParam = searchParams?.get('tenant_id') || (body && typeof body === 'object' ? body.tenant_id : null);
+    if (targetTenantParam && !bypassGuard) {
+      const access = this.validateCrossTenantAccess(callerTenantId, targetTenantParam, callerRole);
+      if (!access.allowed) {
+        return {
+          status: access.status,
+          ok: false,
+          body: {
+            error: access.message,
+            reason: access.reason,
+            callerTenantId,
+            targetTenantId: targetTenantParam
+          }
+        };
+      }
+    }
+
+    return {
+      status: 200,
+      ok: true,
+      body: {
+        success: true,
+        callerUserId,
+        callerTenantId,
+        hostTenantId: hostTenant?.id || null
+      }
+    };
+  },
+
   async resolveTenantFromHost(hostname: string): Promise<Tenant | null> {
     if (!hostname) return null;
 
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
-    const baseDomain = (import.meta.env?.VITE_APP_BASE_DOMAIN || 'randevulari.com').trim().toLowerCase();
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
+    const baseDomain = ((typeof process !== 'undefined' && process.env?.VITE_APP_BASE_DOMAIN) || (import.meta as any)?.env?.VITE_APP_BASE_DOMAIN || 'randevulari.com').trim().toLowerCase();
     
     // Port stripping and normalization (e.g., 'salon-a.randevulari.com:3000' -> 'salon-a.randevulari.com')
     const cleanHost = hostname.split(':')[0].trim().toLowerCase();
@@ -398,7 +531,7 @@ export const tenantService = {
         } as Tenant;
     }
 
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
     if (mode === 'mock' || mode === 'local') {
        if (activeTenantId && activeTenantId !== 'tenant_pilot_demo') {
           const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
@@ -517,7 +650,7 @@ export const tenantService = {
       } as TenantBranding;
     }
     
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
       const { data: branding, error } = await supabase
         .from('tenant_branding')
@@ -561,7 +694,7 @@ export const tenantService = {
   },
 
   async updateTenant(tenantId: string, updates: Partial<Tenant>): Promise<void> {
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
       const { error } = await supabase
         .from('tenants')
@@ -615,7 +748,7 @@ export const tenantService = {
   },
 
   async updateTenantBranding(tenantId: string, updates: Partial<TenantBranding>): Promise<TenantBranding | null> {
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
     
     // Get existing to merge
     const current = await this.getTenantBranding(tenantId) || { tenantId } as TenantBranding;

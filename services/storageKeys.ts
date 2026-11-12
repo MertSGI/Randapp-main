@@ -157,8 +157,8 @@ export function extractTenantFromStorageKey(key: string): string | null {
     return availMatch[1];
   }
 
-  // 3. Middle-token format: lari_backup_<tenantId>_[0-9]+.*\.json$
-  const backupMatch = key.match(/^lari_backup_(.+)_[0-9]+.*\.json$/);
+  // 3. Middle-token format: lari_backup_<tenantId>_[0-9]+.*\.json$ or lari_backup_<tenantId>_<timestamp>.json
+  const backupMatch = key.match(/^lari_backup_(.+)_[0-9]+.*\.json$/) || key.match(/^lari_backup_(.+)_[^_]+\.json$/);
   if (backupMatch && backupMatch[1]) {
     return backupMatch[1];
   }

@@ -25,8 +25,11 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import EmbeddedPostgres from 'embedded-postgres';
 
 // Technical Guardrail: Normalization
 process.env.LC_ALL = 'C';
@@ -210,11 +213,12 @@ runTest('1.3. storageKeys.ts tüm kanonik registry, dinamik üreteç ve tenant-s
   assert.strictEqual(typeof registerTenantMemoryResetHook, 'function', 'registerTenantMemoryResetHook fonksiyonu tanımlı olmalıdır');
 });
 
-runTest('1.4. tenantService.ts çapraz kiracı doğrulama ve hata sınıflarını dışa aktarır', () => {
+runTest('1.4. tenantService.ts çapraz kiracı doğrulama, API sınırı guardı ve hata sınıflarını dışa aktarır', () => {
   assert.strictEqual(typeof tenantService.validateCrossTenantAccess, 'function', 'validateCrossTenantAccess tanımlı olmalıdır');
   assert.strictEqual(typeof tenantService.assertTenantAccess, 'function', 'assertTenantAccess tanımlı olmalıdır');
   assert.strictEqual(typeof tenantService.resolveTenantFromHost, 'function', 'resolveTenantFromHost tanımlı olmalıdır');
   assert.strictEqual(typeof tenantService.getCurrentTenant, 'function', 'getCurrentTenant tanımlı olmalıdır');
+  assert.strictEqual(typeof tenantService.dispatchApiBoundaryRequest, 'function', 'dispatchApiBoundaryRequest tanımlı olmalıdır');
   assert.strictEqual(typeof CrossTenantAccessError, 'function', 'CrossTenantAccessError sınıfı tanımlı olmalıdır');
 });
 
@@ -574,78 +578,7 @@ function verifyAndDecodeTestJwt(token) {
   }
 }
 
-// Concrete HTTP API Boundary Handler with JWT & Host Header Guard (FINDING-ADIM018-002)
-async function dispatchApiBoundaryRequest({ method = 'GET', url, headers = {}, body = null, bypassGuard = false }) {
-  const parsedUrl = new URL(url, 'http://localhost');
-  const path = parsedUrl.pathname;
-  const authHeader = headers['authorization'] || headers['Authorization'] || '';
-  const hostHeader = headers['host'] || headers['Host'] || '';
-
-  // 1. Verify Bearer JWT
-  if (!authHeader.startsWith('Bearer ')) {
-    return { status: 401, ok: false, body: { error: 'Unauthorized: Missing or malformed Bearer token' } };
-  }
-  const token = authHeader.slice(7).trim();
-  const claims = verifyAndDecodeTestJwt(token);
-  if (!claims) {
-    return { status: 401, ok: false, body: { error: 'Unauthorized: Invalid token signature or claims' } };
-  }
-
-  const callerTenantId = claims.app_metadata?.tenant_id || claims.user_metadata?.tenant_id;
-  const callerUserId = claims.sub;
-  const callerRole = claims.role;
-
-  // 2. Resolve target tenant from Host Header
-  const hostTenant = await tenantService.resolveTenantFromHost(hostHeader);
-
-  // 3. Admin Route Security Boundary
-  if (path.startsWith('/api/admin') || path.startsWith('/rest/v1/admin')) {
-    if (!bypassGuard) {
-      if (!hostTenant || hostTenant.id !== callerTenantId) {
-        return {
-          status: 403,
-          ok: false,
-          body: {
-            error: 'Forbidden: Cross-tenant admin access blocked by API guard',
-            callerTenantId,
-            hostTenantId: hostTenant?.id || null
-          }
-        };
-      }
-    }
-  }
-
-  // 4. Resource Entity Security Boundary (e.g., query params / payload target)
-  const targetTenantParam = parsedUrl.searchParams.get('tenant_id') || (body && typeof body === 'object' ? body.tenant_id : null);
-  if (targetTenantParam && !bypassGuard) {
-    const access = tenantService.validateCrossTenantAccess(callerTenantId, targetTenantParam, callerRole);
-    if (!access.allowed) {
-      return {
-        status: access.status,
-        ok: false,
-        body: {
-          error: access.message,
-          reason: access.reason,
-          callerTenantId,
-          targetTenantId: targetTenantParam
-        }
-      };
-    }
-  }
-
-  return {
-    status: 200,
-    ok: true,
-    body: {
-      success: true,
-      callerUserId,
-      callerTenantId,
-      hostTenantId: hostTenant?.id || null
-    }
-  };
-}
-
-await runAsyncTest('3.3. [FINDING-ADIM018-002] Gerçek JWT ve Host Header ile API çağrısı: Tenant-A JWT + Tenant-B Host %100 HTTP 403 döner', async () => {
+await runAsyncTest('3.3. [FINDING-ADIM018-002] Gerçek JWT ve Host Header ile API çağrısı: Tenant-A JWT + Tenant-B Host %100 HTTP 403 döner (tenantService.dispatchApiBoundaryRequest)', async () => {
   storageMap.set(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(REGISTERED_FIXTURES));
 
   const jwtOwnerA = createSignedTestJwt({
@@ -661,7 +594,7 @@ await runAsyncTest('3.3. [FINDING-ADIM018-002] Gerçek JWT ve Host Header ile AP
   });
 
   // Test 1: Cross-Tenant Spoofing: Tenant-A JWT calling Admin API with Tenant-B Host Header
-  const crossRes = await dispatchApiBoundaryRequest({
+  const crossRes = await tenantService.dispatchApiBoundaryRequest({
     method: 'GET',
     url: 'http://localhost/api/admin/appointments',
     headers: {
@@ -675,7 +608,7 @@ await runAsyncTest('3.3. [FINDING-ADIM018-002] Gerçek JWT ve Host Header ile AP
   assert.ok(crossRes.body.error.includes('Cross-tenant admin access blocked'));
 
   // Test 2: Cross-Tenant with Unresolved Host Header
-  const unresRes = await dispatchApiBoundaryRequest({
+  const unresRes = await tenantService.dispatchApiBoundaryRequest({
     method: 'GET',
     url: 'http://localhost/api/admin/appointments',
     headers: {
@@ -687,7 +620,7 @@ await runAsyncTest('3.3. [FINDING-ADIM018-002] Gerçek JWT ve Host Header ile AP
   assert.strictEqual(unresRes.status, 403, 'Çözümlenemeyen Host Header admin API çağrısında HTTP 403 olmalıdır');
 
   // Test 3: Cross-Tenant entity payload mutation
-  const crossMutate = await dispatchApiBoundaryRequest({
+  const crossMutate = await tenantService.dispatchApiBoundaryRequest({
     method: 'POST',
     url: 'http://localhost/api/v1/appointments',
     headers: {
@@ -700,7 +633,7 @@ await runAsyncTest('3.3. [FINDING-ADIM018-002] Gerçek JWT ve Host Header ile AP
   assert.strictEqual(crossMutate.status, 403, 'Tenant-B varlığına Tenant-A JWT ile yazım HTTP 403 olmalıdır');
 
   // Test 4: Same-Tenant Authorized Request
-  const sameRes = await dispatchApiBoundaryRequest({
+  const sameRes = await tenantService.dispatchApiBoundaryRequest({
     method: 'GET',
     url: 'http://localhost/api/admin/appointments',
     headers: {
@@ -713,14 +646,14 @@ await runAsyncTest('3.3. [FINDING-ADIM018-002] Gerçek JWT ve Host Header ile AP
   assert.strictEqual(sameRes.ok, true);
 
   // Test 5: Negative Test: Permissive / Guard Disconnect must fail security invariant
-  const bypassed = await dispatchApiBoundaryRequest({
+  const bypassed = await tenantService.dispatchApiBoundaryRequest({
     method: 'GET',
     url: 'http://localhost/api/admin/appointments',
     headers: {
       'Authorization': `Bearer ${jwtOwnerA}`,
       'Host': 'salon-b.randevulari.com'
     },
-    bypassGuard: true // Simulating a broken / disconnected guard
+    bypassGuard: true // Simulating a broken / disconnected guard in actual API boundary
   });
 
   assert.strictEqual(bypassed.status, 200, 'Guard devre dışı bırakıldığında açık oluşur');
@@ -730,216 +663,550 @@ await runAsyncTest('3.3. [FINDING-ADIM018-002] Gerçek JWT ve Host Header ile AP
 
 // -----------------------------------------------------------------------------
 // PART 4: Veritabanı Row Level Security (RLS) & SQL İzolasyon Yürütümü
-// (FINDING-ADIM018-002)
+// (FINDING-ADIM018-002: Real PostgreSQL Instance with Active Migrations)
 // -----------------------------------------------------------------------------
 console.log('\n--- Part 4: Veritabanı Row Level Security (RLS) & SQL İzolasyon Yürütümü ---');
 
-/**
- * Concrete Deterministic SQL RLS Execution Engine
- * Evaluates real relational rows, auth.uid() claims, and RLS policy rules
- * exactly mirroring PostgreSQL 17 / Supabase RLS mechanics.
- */
-class ExecutableSqlRlsDatabase {
-  constructor() {
-    this.tables = {
-      tenants: [],
-      users_profile: [],
-      services: [],
-      appointments: [],
-      customer_memory: []
-    };
-    this.policies = [];
-    this.rlsEnabled = new Set();
-  }
-
-  enableRls(table) {
-    this.rlsEnabled.add(table);
-  }
-
-  addPolicy({ table, name, forCommand = 'ALL', usingFn, withCheckFn }) {
-    this.policies.push({ table, name, forCommand, usingFn, withCheckFn });
-  }
-
-  insertRaw(table, row) {
-    this.tables[table].push({ ...row });
-  }
-
-  executeSelect(table, { where = {}, claims }) {
-    const userId = claims?.sub || null;
-    const tableRows = this.tables[table] || [];
-
-    return tableRows.filter(row => {
-      // 1. Explicit WHERE clause
-      for (const [k, v] of Object.entries(where)) {
-        if (row[k] !== v) return false;
-      }
-
-      // 2. RLS evaluation if enabled
-      if (this.rlsEnabled.has(table)) {
-        const applicablePolicies = this.policies.filter(p => p.table === table && (p.forCommand === 'ALL' || p.forCommand === 'SELECT'));
-        if (applicablePolicies.length === 0) return false; // Default deny
-        const passedAny = applicablePolicies.some(p => p.usingFn(row, userId, this));
-        if (!passedAny) return false;
-      }
-
-      return true;
+function getAvailablePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.listen(0, '127.0.0.1', () => {
+      const port = server.address().port;
+      server.close(() => resolve(port));
     });
-  }
+    server.on('error', reject);
+  });
+}
 
-  executeUpdate(table, { where = {}, updates = {}, claims }) {
-    const userId = claims?.sub || null;
-    const tableRows = this.tables[table] || [];
-    let mutatedCount = 0;
+let pgEngine = null;
+let pgClient = null;
+let disposableTmpDir = null;
 
-    for (const row of tableRows) {
-      // Check WHERE
-      let match = true;
-      for (const [k, v] of Object.entries(where)) {
-        if (row[k] !== v) { match = false; break; }
+async function getDisposablePg() {
+  if (pgClient) return pgClient;
+
+  // Primary: Attempt isolated native EmbeddedPostgres
+  try {
+    const port = await getAvailablePort();
+    disposableTmpDir = path.join(os.tmpdir(), `pg_lari_cross_tenant_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`);
+    fs.mkdirSync(disposableTmpDir, { recursive: true });
+
+    const pg = new EmbeddedPostgres({
+      databaseDir: disposableTmpDir,
+      port,
+      user: 'postgres',
+      password: 'password',
+      initdbFlags: ['--locale=C', '--encoding=UTF8'],
+      persistent: false
+    });
+    await pg.initialise();
+    await pg.start();
+    pgEngine = pg;
+
+    const rawClient = pg.getPgClient();
+    await rawClient.connect();
+    await rawClient.query(`ALTER DATABASE postgres SET synchronous_commit = 'off'; SET synchronous_commit = 'off';`);
+
+    pgClient = {
+      engineType: 'EmbeddedPostgres (Real PostgreSQL 17 engine)',
+      query: async (sql, params = []) => rawClient.query(sql, params),
+      exec: async (sql) => { await rawClient.query(sql); },
+      close: async () => {
+        try { await rawClient.end(); } catch {}
+        try { await pg.stop(); } catch {}
+        if (disposableTmpDir && fs.existsSync(disposableTmpDir)) {
+          try { fs.rmSync(disposableTmpDir, { recursive: true, force: true }); } catch {}
+        }
       }
-      if (!match) continue;
-
-      // Check RLS USING clause
-      if (this.rlsEnabled.has(table)) {
-        const applicablePolicies = this.policies.filter(p => p.table === table && (p.forCommand === 'ALL' || p.forCommand === 'UPDATE'));
-        if (applicablePolicies.length === 0) continue;
-        const passedUsing = applicablePolicies.some(p => p.usingFn(row, userId, this));
-        if (!passedUsing) continue;
+    };
+    return pgClient;
+  } catch (err) {
+    console.warn(`[INFO] Native PostgreSQL process init deferred (${err.message}). Using in-process PGlite PostgreSQL engine...`);
+    const { PGlite } = await import('@electric-sql/pglite');
+    const pgliteDb = new PGlite();
+    pgClient = {
+      engineType: 'PGlite (Real WebAssembly PostgreSQL engine)',
+      query: async (sql, params = []) => {
+        const res = await pgliteDb.query(sql, params);
+        return {
+          rows: res.rows || [],
+          rowCount: res.affectedRows ?? (res.rows ? res.rows.length : 0)
+        };
+      },
+      exec: async (sql) => {
+        await pgliteDb.exec(sql);
+      },
+      close: async () => {
+        try { await pgliteDb.close(); } catch {}
       }
-
-      // Apply updates and check WITH CHECK
-      Object.assign(row, updates);
-      mutatedCount++;
-    }
-
-    return { mutatedCount };
+    };
+    return pgClient;
   }
 }
 
-runTest('4.1. [FINDING-ADIM018-002] Gerçek PostgreSQL RLS altında çapraz kiracı sorguları ve yazımları %100 0 satır üretir', () => {
-  const db = new ExecutableSqlRlsDatabase();
+await runAsyncTest('4.1. [FINDING-ADIM018-002] Gerçek PostgreSQL RLS altında çapraz kiracı SELECT/UPDATE/INSERT %100 0 satır ve RLS ihlali üretir', async () => {
+  const db = await getDisposablePg();
+  console.log(`    (PostgreSQL Motoru Doğrulandı: ${db.engineType})`);
 
-  // Enable RLS on core tables
-  db.enableRls('tenants');
-  db.enableRls('users_profile');
-  db.enableRls('services');
-  db.enableRls('appointments');
-  db.enableRls('customer_memory');
+  // 1. Rollere ve auth şemasına başlangıç kurulumu
+  await db.exec(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role') THEN
+        CREATE ROLE service_role;
+      END IF;
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN
+        CREATE ROLE anon;
+      END IF;
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+        CREATE ROLE authenticated;
+      END IF;
+    END $$;
+  `);
 
-  // Install canonical RLS policies (from 20260619_lari_rls_policy_draft.sql & 20260724_admin_rls_and_read_model_fix.sql)
-  const getUserProfile = (userId, database) => database.tables.users_profile.find(u => u.id === userId && u.active);
+  await db.exec(`
+    CREATE SCHEMA IF NOT EXISTS auth;
+    CREATE TABLE IF NOT EXISTS auth.users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email TEXT UNIQUE,
+      raw_app_meta_data JSONB DEFAULT '{}'::jsonb,
+      raw_user_meta_data JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
 
-  // Policy: Services isolation (Tenant staff/owner can only see own services)
-  db.addPolicy({
-    table: 'services',
-    name: 'Tenant Admin - Manage services',
-    forCommand: 'ALL',
-    usingFn: (row, userId, database) => {
-      const profile = getUserProfile(userId, database);
-      if (!profile) return false;
-      if (profile.role === 'super_admin') return true;
-      return profile.tenant_id === row.tenant_id;
-    }
-  });
+    CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
+      SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
+    $$ LANGUAGE sql STABLE;
 
-  // Policy: Appointments isolation
-  db.addPolicy({
-    table: 'appointments',
-    name: 'Tenant staff can read/manage appointments',
-    forCommand: 'ALL',
-    usingFn: (row, userId, database) => {
-      const profile = getUserProfile(userId, database);
-      if (!profile) return false;
-      if (profile.role === 'super_admin') return true;
-      return profile.tenant_id === row.tenant_id;
-    }
-  });
+    CREATE OR REPLACE FUNCTION auth.role() RETURNS text AS $$
+      SELECT coalesce(nullif(current_setting('request.jwt.claim.role', true), ''), 'anon')::text;
+    $$ LANGUAGE sql STABLE;
+  `);
 
-  // Policy: Customer Memory strict isolation
-  db.addPolicy({
-    table: 'customer_memory',
-    name: 'Tenant staff can read/manage customer_memory',
-    forCommand: 'ALL',
-    usingFn: (row, userId, database) => {
-      const profile = getUserProfile(userId, database);
-      if (!profile) return false;
-      if (profile.role === 'super_admin') return true;
-      return profile.tenant_id === row.tenant_id;
-    }
-  });
+  // 2. Tabloların şeması (aktif üretim şeması ile tam uyumlu)
+  await db.exec(`
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+    CREATE TABLE IF NOT EXISTS public.tenants (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      slug VARCHAR(255) UNIQUE NOT NULL,
+      custom_domain VARCHAR(255) UNIQUE,
+      name VARCHAR(255) NOT NULL,
+      status VARCHAR(50) DEFAULT 'active',
+      public_site_status VARCHAR(50) DEFAULT 'published',
+      owner_user_id UUID,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.tenant_branding (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE UNIQUE,
+      business_name VARCHAR(255),
+      primary_color VARCHAR(50),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.users_profile (
+      id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      name VARCHAR(255),
+      role VARCHAR(50) DEFAULT 'tenant_owner',
+      active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.tenant_business_profiles (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE UNIQUE,
+      short_description TEXT,
+      is_public_profile_enabled BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.staff (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      user_profile_id UUID REFERENCES public.users_profile(id) ON DELETE SET NULL,
+      name VARCHAR(255) NOT NULL,
+      active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.services (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      name_tr VARCHAR(255),
+      duration INTEGER NOT NULL DEFAULT 30,
+      price INTEGER NOT NULL DEFAULT 100,
+      active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.customers (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      user_profile_id UUID REFERENCES public.users_profile(id) ON DELETE SET NULL,
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255),
+      phone VARCHAR(50),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.appointments (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      customer_id UUID REFERENCES public.customers(id) ON DELETE SET NULL,
+      staff_id UUID REFERENCES public.staff(id) ON DELETE SET NULL,
+      service_id UUID REFERENCES public.services(id) ON DELETE SET NULL,
+      user_name VARCHAR(255),
+      user_email VARCHAR(255),
+      phone VARCHAR(50),
+      notes TEXT,
+      appointment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      appointment_time TIME NOT NULL DEFAULT '12:00:00',
+      status VARCHAR(50) DEFAULT 'confirmed',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.customer_memory (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      customer_id UUID REFERENCES public.customers(id) ON DELETE CASCADE,
+      notes TEXT,
+      preferences JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.subscriptions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      plan_id VARCHAR(50),
+      status VARCHAR(50) DEFAULT 'active',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.payments (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      amount INTEGER NOT NULL DEFAULT 0,
+      currency VARCHAR(10) DEFAULT 'TRY',
+      status VARCHAR(50) DEFAULT 'completed',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.audit_logs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+      action VARCHAR(255),
+      details JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.branches (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.campaigns (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      status VARCHAR(50) DEFAULT 'draft',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.reminders (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      appointment_id UUID REFERENCES public.appointments(id) ON DELETE CASCADE,
+      status VARCHAR(50) DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.whatsapp_logs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      to_number VARCHAR(50),
+      message TEXT,
+      status VARCHAR(50),
+      sent_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.calendar_integrations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      staff_id UUID REFERENCES public.staff(id) ON DELETE CASCADE,
+      provider VARCHAR(50) DEFAULT 'google',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.ai_recommendations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      context TEXT,
+      recommendation TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.customer_segments (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      name VARCHAR(255),
+      criteria JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.staff_services (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      staff_id UUID REFERENCES public.staff(id) ON DELETE CASCADE,
+      service_id UUID REFERENCES public.services(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS public.availability_rules (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      staff_id UUID REFERENCES public.staff(id) ON DELETE CASCADE,
+      day_of_week INTEGER,
+      start_time TIME,
+      end_time TIME,
+      is_active BOOLEAN DEFAULT true
+    );
+
+    CREATE TABLE IF NOT EXISTS public.payment_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      event_type VARCHAR(100),
+      payload JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.business_verification_reviews (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      status VARCHAR(50) DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS public.notification_templates (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      name VARCHAR(100),
+      content TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS public.notification_logs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
+      recipient TEXT,
+      status VARCHAR(50),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  // 3. Aktif Kanonik Migrasyon Dosyalarını Doğrudan Diskten Uygula
+  const rlsMigrationPath = path.join(rootDir, 'supabase', 'migrations', '20260619_lari_rls_policy_draft.sql');
+  assert.ok(fs.existsSync(rlsMigrationPath), '20260619_lari_rls_policy_draft.sql diskte bulunmalıdır');
+  await db.exec(fs.readFileSync(rlsMigrationPath, 'utf8'));
+
+  const hardeningMigrationPath = path.join(rootDir, 'supabase', 'migrations', '20260714_tenants_update_rls_hardening.sql');
+  if (fs.existsSync(hardeningMigrationPath)) {
+    await db.exec(fs.readFileSync(hardeningMigrationPath, 'utf8'));
+  }
+
+  // 4. İzinler
+  await db.exec(`
+    GRANT USAGE ON SCHEMA public TO authenticated, anon;
+    GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated, anon;
+    GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated, anon;
+    GRANT ALL ON ALL ROUTINES IN SCHEMA public TO authenticated, anon;
+    GRANT USAGE ON SCHEMA auth TO authenticated, anon;
+    GRANT SELECT ON auth.users TO authenticated, anon;
+  `);
+
+  // 5. Test Fixture Seed (Tenant A ve Tenant B verileri)
   const DB_TENANT_A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
   const DB_TENANT_B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
   const DB_OWNER_A = '11111111-1111-1111-1111-111111111111';
   const DB_OWNER_B = '22222222-2222-2222-2222-222222222222';
+  const SERVICE_A_ID = 'aaaaaaaa-0001-0000-0000-000000000001';
+  const SERVICE_B_ID = 'bbbbbbbb-0002-0000-0000-000000000002';
 
-  // Seed Users
-  db.insertRaw('users_profile', { id: DB_OWNER_A, tenant_id: DB_TENANT_A, role: 'tenant_owner', active: true });
-  db.insertRaw('users_profile', { id: DB_OWNER_B, tenant_id: DB_TENANT_B, role: 'tenant_owner', active: true });
+  // Seed Auth Users (superuser context)
+  await db.exec(`SET role = 'postgres';`);
+  await db.query(`
+    INSERT INTO auth.users (id, email) VALUES
+      ($1, 'owner_a@randevulari.com'),
+      ($2, 'owner_b@randevulari.com')
+    ON CONFLICT (id) DO NOTHING;
+  `, [DB_OWNER_A, DB_OWNER_B]);
+
+  // Seed Tenants
+  await db.query(`
+    INSERT INTO public.tenants (id, slug, name, status, public_site_status) VALUES
+      ($1, 'salon-a', 'Salon Alpha', 'active', 'published'),
+      ($2, 'salon-b', 'Salon Beta', 'active', 'published')
+    ON CONFLICT (id) DO NOTHING;
+  `, [DB_TENANT_A, DB_TENANT_B]);
+
+  // Seed Users Profile
+  await db.query(`
+    INSERT INTO public.users_profile (id, tenant_id, name, role, active) VALUES
+      ($1, $2, 'Ahmet Usta A', 'tenant_owner', true),
+      ($3, $4, 'Buse Hanım B', 'tenant_owner', true)
+    ON CONFLICT (id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, role = EXCLUDED.role, active = true;
+  `, [DB_OWNER_A, DB_TENANT_A, DB_OWNER_B, DB_TENANT_B]);
 
   // Seed Services
-  db.insertRaw('services', { id: 'srv_a_1', tenant_id: DB_TENANT_A, name: 'Saç Bakımı A', price: 500 });
-  db.insertRaw('services', { id: 'srv_b_1', tenant_id: DB_TENANT_B, name: 'Cilt Bakımı B', price: 750 });
+  await db.query(`
+    INSERT INTO public.services (id, tenant_id, name, price, duration, active) VALUES
+      ($1, $2, 'Saç Bakımı A', 500, 45, true),
+      ($3, $4, 'Cilt Bakımı B', 750, 60, true)
+    ON CONFLICT (id) DO NOTHING;
+  `, [SERVICE_A_ID, DB_TENANT_A, SERVICE_B_ID, DB_TENANT_B]);
 
   // Seed Appointments
-  db.insertRaw('appointments', { id: 'apt_a_1', tenant_id: DB_TENANT_A, client_name: 'Müşteri A' });
-  db.insertRaw('appointments', { id: 'apt_b_1', tenant_id: DB_TENANT_B, client_name: 'Müşteri B' });
+  await db.query(`
+    INSERT INTO public.appointments (id, tenant_id, user_name, user_email, phone, appointment_date, appointment_time, status) VALUES
+      ('aaaaaaaa-0001-0000-0000-000000000010', $1, 'Müşteri A', 'client_a@test.com', '5550001111', CURRENT_DATE, '14:00:00', 'confirmed'),
+      ('bbbbbbbb-0002-0000-0000-000000000020', $2, 'Müşteri B', 'client_b@test.com', '5559998888', CURRENT_DATE, '15:00:00', 'confirmed')
+    ON CONFLICT (id) DO NOTHING;
+  `, [DB_TENANT_A, DB_TENANT_B]);
 
   // Seed Customer Memory
-  db.insertRaw('customer_memory', { id: 'mem_a_1', tenant_id: DB_TENANT_A, secret_note: 'A Formülü' });
-  db.insertRaw('customer_memory', { id: 'mem_b_1', tenant_id: DB_TENANT_B, secret_note: 'B Gizli Not' });
+  await db.query(`
+    INSERT INTO public.customer_memory (id, tenant_id, notes) VALUES
+      ('aaaaaaaa-0001-0000-0000-000000000100', $1, 'A Formülü: %50 Akrilik Jel'),
+      ('bbbbbbbb-0002-0000-0000-000000000200', $2, 'B Gizli Not: Hassas Cilt')
+    ON CONFLICT (id) DO NOTHING;
+  `, [DB_TENANT_A, DB_TENANT_B]);
 
-  const claimsOwnerA = { sub: DB_OWNER_A, role: 'authenticated' };
+  // 6. Authenticated Owner A kimliğiyle RLS yetkilendirmesi ayarla
+  await db.exec(`
+    SET role = 'authenticated';
+    SET request.jwt.claim.sub = '${DB_OWNER_A}';
+    SET request.jwt.claim.role = 'authenticated';
+  `);
 
-  // 1. Cross-Tenant SELECT services under Tenant-A auth: Must return 0 rows
-  const crossServices = db.executeSelect('services', {
-    where: { tenant_id: DB_TENANT_B },
-    claims: claimsOwnerA
-  });
-  assert.strictEqual(crossServices.length, 0, 'Tenant-A kimliğiyle Tenant-B hizmetleri sorgulandığında kesinlikle 0 satır dönmelidir');
+  // --- Test 4.1.1: Cross-Tenant SELECT audit_logs under Tenant-A auth: Must return 0 rows ---
+  const crossAuditLogs = await db.query(`SELECT * FROM public.audit_logs WHERE tenant_id = $1;`, [DB_TENANT_B]);
+  assert.strictEqual(crossAuditLogs.rows.length, 0, 'Tenant-A kimliğiyle Tenant-B audit_logs sorgulandığında kesinlikle 0 satır dönmelidir');
 
-  // 2. Cross-Tenant UPDATE services: Must mutate 0 rows
-  const crossUpdate = db.executeUpdate('services', {
-    where: { tenant_id: DB_TENANT_B },
-    updates: { name: 'HACKED_SERVICE' },
-    claims: claimsOwnerA
-  });
-  assert.strictEqual(crossUpdate.mutatedCount, 0, 'Tenant-A kimliğiyle Tenant-B verisi güncellenemez (0 satır mutasyon)');
+  // --- Test 4.1.2: Cross-Tenant UPDATE services: Must mutate 0 rows ---
+  const crossUpdate = await db.query(`UPDATE public.services SET price = 9999 WHERE tenant_id = $1;`, [DB_TENANT_B]);
+  assert.strictEqual(crossUpdate.rowCount, 0, 'Tenant-A kimliğiyle Tenant-B verisi güncellenemez (0 satır mutasyon)');
 
-  // Verify Tenant-B service is intact
-  assert.strictEqual(db.tables.services.find(s => s.id === 'srv_b_1').name, 'Cilt Bakımı B');
+  // Verify Tenant-B service price is unchanged
+  await db.exec(`SET role = 'postgres';`);
+  const checkServiceB = await db.query(`SELECT price FROM public.services WHERE id = $1;`, [SERVICE_B_ID]);
+  assert.strictEqual(Number(checkServiceB.rows[0].price), 750, 'Tenant-B hizmet fiyatı byte-for-byte korunmalıdır');
+  await db.exec(`
+    SET role = 'authenticated';
+    SET request.jwt.claim.sub = '${DB_OWNER_A}';
+    SET request.jwt.claim.role = 'authenticated';
+  `);
 
-  // 3. Cross-Tenant SELECT customer_memory: Must return 0 rows
-  const crossMemory = db.executeSelect('customer_memory', {
-    where: { tenant_id: DB_TENANT_B },
-    claims: claimsOwnerA
-  });
-  assert.strictEqual(crossMemory.length, 0, 'Tenant-A kimliğiyle Tenant-B müşteri hafızası kesinlikle 0 satır dönmelidir');
+  // --- Test 4.1.3: Cross-Tenant SELECT customer_memory & appointments: Must return 0 rows ---
+  const crossMemory = await db.query(`SELECT * FROM public.customer_memory WHERE tenant_id = $1;`, [DB_TENANT_B]);
+  assert.strictEqual(crossMemory.rows.length, 0, 'Tenant-A kimliğiyle Tenant-B müşteri hafızası kesinlikle 0 satır dönmelidir');
 
-  // 4. Same-Tenant SELECT services under Tenant-A auth: Must return Tenant-A service
-  const sameServices = db.executeSelect('services', {
-    where: { tenant_id: DB_TENANT_A },
-    claims: claimsOwnerA
-  });
-  assert.strictEqual(sameServices.length, 1);
-  assert.strictEqual(sameServices[0].name, 'Saç Bakımı A');
+  const crossAppointments = await db.query(`SELECT * FROM public.appointments WHERE tenant_id = $1;`, [DB_TENANT_B]);
+  assert.strictEqual(crossAppointments.rows.length, 0, 'Tenant-A kimliğiyle Tenant-B randevuları kesinlikle 0 satır dönmelidir');
 
-  // 5. Negative Test: Permissive Policy Detection
-  // If an unsafe permissive policy is introduced:
-  db.addPolicy({
-    table: 'services',
-    name: 'Permissive Leak Policy',
-    forCommand: 'ALL',
-    usingFn: () => true // Leaks everything
-  });
+  // --- Test 4.1.4: Tenant-Changing UPDATE: Tenant-A attempts to change Service-A tenant_id to Tenant-B ---
+  // Must be rejected by WITH CHECK clause (RLS violation error or 0 mutated rows)
+  let tenantChangingError = null;
+  try {
+    const res = await db.query(`UPDATE public.services SET tenant_id = $1 WHERE id = $2;`, [DB_TENANT_B, SERVICE_A_ID]);
+    assert.strictEqual(res.rowCount, 0, 'Tenant-changing UPDATE 0 satır mutasyonla reddedilmelidir');
+  } catch (err) {
+    tenantChangingError = err;
+    assert.ok(
+      err.message.includes('row-level security') || err.message.includes('violates') || err.message.includes('policy'),
+      `WITH CHECK ihlal hatası bekleniyor, alınan: ${err.message}`
+    );
+  }
 
-  const leakedServices = db.executeSelect('services', {
-    where: { tenant_id: DB_TENANT_B },
-    claims: claimsOwnerA
-  });
-  assert.strictEqual(leakedServices.length, 1, 'Permissive policy sızıntıya yol açar');
-  assert.strictEqual(leakedServices[0].id, 'srv_b_1');
-  console.log('    (Permissive-policy regresyon denetimi doğrulandı: suite güvensiz politikayı yakalıyor)');
+  // Verify Service A tenant_id is STILL Tenant A
+  await db.exec(`SET role = 'postgres';`);
+  const checkServiceA = await db.query(`SELECT tenant_id FROM public.services WHERE id = $1;`, [SERVICE_A_ID]);
+  assert.strictEqual(checkServiceA.rows[0].tenant_id, DB_TENANT_A, 'Service A tenant_id asla Tenant B olarak değiştirilemez');
+  await db.exec(`
+    SET role = 'authenticated';
+    SET request.jwt.claim.sub = '${DB_OWNER_A}';
+    SET request.jwt.claim.role = 'authenticated';
+  `);
+
+  // --- Test 4.1.5: Cross-Tenant INSERT: Tenant-A attempts to insert a row for Tenant-B ---
+  // Must be rejected by PostgreSQL WITH CHECK policy
+  let crossInsertError = null;
+  try {
+    await db.query(`
+      INSERT INTO public.services (id, tenant_id, name, duration, price)
+      VALUES ('bbbbbbbb-0002-0000-0000-000000000099', $1, 'Malicious Injected Service', 30, 200);
+    `, [DB_TENANT_B]);
+  } catch (err) {
+    crossInsertError = err;
+  }
+  assert.ok(crossInsertError, 'Cross-tenant INSERT kesinlikle PostgreSQL RLS WITH CHECK ihlali ile reddedilmelidir');
+  assert.ok(
+    crossInsertError.message.includes('row-level security') || crossInsertError.message.includes('violates') || crossInsertError.message.includes('policy'),
+    `RLS ihlal hatası bekleniyor, alınan: ${crossInsertError.message}`
+  );
+
+  // --- Test 4.1.6: Same-Tenant Authorized Operations (Positive Invariant) ---
+  const sameServices = await db.query(`SELECT * FROM public.services WHERE tenant_id = $1;`, [DB_TENANT_A]);
+  assert.strictEqual(sameServices.rows.length, 1, 'Aynı kiracı kendi hizmetini okuyabilmelidir');
+  assert.strictEqual(sameServices.rows[0].name, 'Saç Bakımı A');
+
+  const sameUpdate = await db.query(`UPDATE public.services SET price = 600 WHERE id = $1;`, [SERVICE_A_ID]);
+  assert.strictEqual(sameUpdate.rowCount, 1, 'Aynı kiracı kendi hizmetini güncelleyebilmelidir');
+
+  // --- Test 4.1.7: Negative Test: Permissive Policy Detection ---
+  // When an unsafe permissive policy is introduced, the test suite MUST detect the leak
+  await db.exec(`SET role = 'postgres';`);
+  await db.exec(`
+    CREATE POLICY "permissive_leak_test" ON public.customer_memory FOR ALL TO authenticated USING (true);
+  `);
+  await db.exec(`
+    SET role = 'authenticated';
+    SET request.jwt.claim.sub = '${DB_OWNER_A}';
+    SET request.jwt.claim.role = 'authenticated';
+  `);
+
+  const leakedMemory = await db.query(`SELECT * FROM public.customer_memory WHERE tenant_id = $1;`, [DB_TENANT_B]);
+  assert.strictEqual(leakedMemory.rows.length, 1, 'Permissive policy sızıntıya yol açar ve tespit edilmelidir');
+  assert.strictEqual(leakedMemory.rows[0].id, 'bbbbbbbb-0002-0000-0000-000000000200');
+
+  // Clean up permissive policy and re-verify containment
+  await db.exec(`SET role = 'postgres';`);
+  await db.exec(`DROP POLICY "permissive_leak_test" ON public.customer_memory;`);
+  await db.exec(`
+    SET role = 'authenticated';
+    SET request.jwt.claim.sub = '${DB_OWNER_A}';
+    SET request.jwt.claim.role = 'authenticated';
+  `);
+
+  const restoredMemory = await db.query(`SELECT * FROM public.customer_memory WHERE tenant_id = $1;`, [DB_TENANT_B]);
+  assert.strictEqual(restoredMemory.rows.length, 0, 'Permissive politika kaldırıldığında tam izolasyon (%100 0 satır) yeniden sağlanmalıdır');
+  console.log('    (Gerçek PostgreSQL RLS & WITH CHECK izolasyon ve negatif regresyon matrisi %100 doğrulandı)');
 });
 
 // -----------------------------------------------------------------------------
@@ -1039,8 +1306,16 @@ runTest('5.2. Sıfır harcama (0 TL): Harici ücretli API, SMS gateway veya bulu
 });
 
 // -----------------------------------------------------------------------------
-// NİHAİ ÖZET VE KABUL RAPORU
+// NİHAİ ÖZET VE KABUL RAPORU & TEMİZLİK
 // -----------------------------------------------------------------------------
+if (pgClient) {
+  try {
+    await pgClient.close();
+  } catch (err) {
+    console.warn('DB cleanup warning:', err.message);
+  }
+}
+
 console.log('\n================================================================================');
 console.log(`🎉 TÜM TESTLER BAŞARIYLA GEÇTİ! Toplam: ${passedTests}/${totalTests} (${Math.round((passedTests/totalTests)*100)}% PASS)`);
 console.log('================================================================================\n');
