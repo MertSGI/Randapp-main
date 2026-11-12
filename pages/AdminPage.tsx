@@ -26,6 +26,8 @@ import { ImageUpload } from '../components/ImageUpload';
 import { onboardingChecklistService, OnboardingReport } from '../services/onboardingChecklistService';
 import { AdminFeatureAvailability } from '../services/adminFeatureAvailabilityService';
 import { appointmentSelfServiceService } from '../services/appointmentSelfServiceService';
+import AppointmentCard from '../components/AppointmentCard';
+import { bookingAbuseProtectionService, NoShowRiskBadge } from '../services/bookingAbuseProtectionService';
 
 // Local initials avatar —  generates an SVG data-URI (no external network request, no personal data leaves the app)
 const getInitialsAvatar = (name: string): string => {
@@ -348,7 +350,26 @@ const AdminPage: React.FC = () => {
 
   const handleNoShow = async (id: string) => {
     if (!isOwner || mutatingAppointments.has(id)) return;
+    const targetApt = appointments.find(a => a.id === id);
     await executeStatusMutation(id, 'no_show');
+    if (targetApt?.phone && tenantId) {
+      bookingAbuseProtectionService.recordNoShowSignal(tenantId, targetApt.phone);
+    }
+  };
+
+  const handleCallConfirm = async (apt: Appointment, badge: NoShowRiskBadge) => {
+    if (!apt.phone) return;
+    const confirmed = await showConfirm({
+      title: language === 'tr' ? 'No-Show Teyit Araması' : 'No-Show Confirmation Call',
+      message: language === 'tr'
+        ? `${apt.user_name} adlı müşterinin geçmişte ${badge.count} adet no-show kaydı bulunmaktadır.\n\nRandevuya katılıp katılmayacağını teyit etmek için ${apt.phone} numarasını aramak istiyor musunuz?`
+        : `Customer ${apt.user_name} has ${badge.count} past no-show record(s).\n\nWould you like to call ${apt.phone} to confirm attendance?`,
+      confirmText: language === 'tr' ? 'Aramayı Başlat' : 'Call Now',
+      cancelText: language === 'tr' ? 'Vazgeç' : 'Cancel',
+    });
+    if (confirmed && typeof window !== 'undefined') {
+      window.location.href = `tel:${apt.phone}`;
+    }
   };
 
   const runAnalysis = async () => {
@@ -998,82 +1019,27 @@ const AdminPage: React.FC = () => {
                   const branchName = branches.find(b => b.id === apt.branchId)?.name;
                   const serviceName = language === 'tr' ? (assignedService?.name_tr || assignedService?.name) : assignedService?.name;
                   return (
-                    <li key={apt.id} className="p-4 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors duration-300">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-0">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-accent dark:text-blue-400 truncate transition-colors duration-300">
-                            {apt.user_name}
-                          </p>
-                          <p className="text-sm text-gray-500 dark:text-gray-400 transition-colors duration-300 mt-0.5">
-                            {apt.date} at {apt.time} • {serviceName || t.admin.unknown_service} {assignedStaff && `(${t.admin.with} ${assignedStaff.name})`} {branchName && `• [${branchName}]`}
-                          </p>
-                          <div className="mt-1 flex flex-wrap items-center text-xs text-gray-400 dark:text-gray-500 gap-x-2 gap-y-1 transition-colors duration-300">
-                              <span>{apt.user_email}</span>
-                              <span className="hidden sm:inline">⬢</span>
-                              <span>{apt.phone || t.admin.no_phone}</span>
-                          </div>
-                        </div>
-                        <div className="flex-shrink-0 flex items-center gap-3 sm:gap-4 justify-between sm:justify-end w-full sm:w-auto mt-2 sm:mt-0">
-                          <button 
-                            onClick={() => {
-                              setTargetAppointmentId(apt.id);
-                              setActiveTab('customers');
-                            }}
-                            className="text-accent hover:text-blue-700 text-sm font-medium"
-                          >
-                            {t.admin.view_profile || 'View Profile'}
-                          </button>
-                          <div className="flex flex-col items-end gap-1">
-                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                              apt.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 
-                              apt.status === 'completed' ? 'bg-green-100 text-green-800' : 
-                              apt.status.includes('cancel') ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
-                            }`}>
-                              {t.customer_portal?.[`status_${apt.status}`] || apt.status}
-                            </span>
-                            {apt.status.includes('cancel') && apt.cancelReason && (
-                              <span className="text-[10px] text-red-500 max-w-[150px] truncate block text-right" title={apt.cancelReason}>
-                                {apt.cancelReason}
-                              </span>
-                            )}
-                          </div>
-                          {isOwner && apt.status === 'confirmed' && !isTerminalStatus(apt.status) && (
-                            <div className="flex flex-col sm:flex-row items-center gap-2">
-                              {mutatingAppointments.has(apt.id) ? (
-                                <span className="text-xs text-gray-500 dark:text-gray-400 animate-pulse">
-                                  {language === 'tr' ? 'İşleniyor...' : 'Processing...'}
-                                </span>
-                              ) : (
-                                <>
-                                  <button
-                                    onClick={() => handleComplete(apt.id)}
-                                    disabled={mutatingAppointments.has(apt.id)}
-                                    className="text-green-600 hover:text-green-900 text-xs font-semibold px-2 py-1 bg-green-50 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                                  >
-                                    {language === 'tr' ? 'Tamamlandı' : 'Complete'}
-                                  </button>
-                                  <button
-                                    onClick={() => handleNoShow(apt.id)}
-                                    disabled={mutatingAppointments.has(apt.id)}
-                                    className="text-orange-600 hover:text-orange-900 text-xs font-semibold px-2 py-1 bg-orange-50 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                                  >
-                                    {language === 'tr' ? 'Gelmedi' : 'No Show'}
-                                  </button>
-                                  <button
-                                    onClick={() => handleCancel(apt.id)}
-                                    disabled={mutatingAppointments.has(apt.id)}
-                                    className="text-red-600 hover:text-red-900 text-xs font-semibold px-2 py-1 bg-red-50 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                                  >
-                                    {t.admin.cancel}
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </li>
-                  )
+                    <AppointmentCard
+                      key={apt.id}
+                      appointment={apt}
+                      assignedStaff={assignedStaff}
+                      assignedService={assignedService}
+                      branchName={branchName}
+                      serviceName={serviceName}
+                      isOwner={isOwner}
+                      isMutating={mutatingAppointments.has(apt.id)}
+                      onViewProfile={(id) => {
+                        setTargetAppointmentId(id);
+                        setActiveTab('customers');
+                      }}
+                      onComplete={handleComplete}
+                      onNoShow={handleNoShow}
+                      onCancel={handleCancel}
+                      onCallConfirm={handleCallConfirm}
+                      allAppointments={appointments}
+                      language={language}
+                    />
+                  );
                 })
               )}
             </ul>

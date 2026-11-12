@@ -28,6 +28,18 @@ export interface NoShowSignal {
   timestamp: string;
 }
 
+export interface NoShowRiskBadge {
+  hasRisk: boolean;
+  count: number;
+  level: 'none' | 'medium' | 'high';
+  label: string;
+  badgeText: string;
+  actionText: string;
+  actionRecommended: string;
+  phone: string;
+  severityColor: 'none' | 'amber' | 'red';
+}
+
 export const bookingAbuseProtectionService = {
   // Helper to load booking attempts
   getAllAttempts(): BookingAttempt[] {
@@ -449,18 +461,126 @@ export const bookingAbuseProtectionService = {
   },
 
   // Helper inside risk calculation
-  getNoShowRiskCountForCustomer(tenantId: string, customerPhone: string): number {
-    const cleanPhone = normalizePublicBookingPhone(customerPhone);
+  getNoShowRiskCountForCustomer(tenantId?: string | null, customerPhone?: string | null): number {
+    const cleanPhone = normalizePublicBookingPhone(customerPhone || '');
     if (!cleanPhone) return 0;
     const signals = this.getAllNoShowSignals();
-    return signals.filter(s => s.tenantId === tenantId && s.phone === cleanPhone).length;
+    return signals.filter(s => (!tenantId || s.tenantId === tenantId) && s.phone === cleanPhone).length;
   },
 
   // Part 8: getNoShowRiskForCustomer
-  getNoShowRiskForCustomer(tenantId: string, customerPhone: string): 'high' | 'medium' | 'low' {
+  getNoShowRiskForCustomer(tenantId?: string | null, customerPhone?: string | null): 'high' | 'medium' | 'low' {
     const count = this.getNoShowRiskCountForCustomer(tenantId, customerPhone);
     if (count >= 2) return 'high';
     if (count === 1) return 'medium';
     return 'low';
+  },
+
+  // V1A-FUNC-02: getNoShowRiskBadge
+  getNoShowRiskBadge(
+    phoneOrInput?: string | { phone?: string; tenantId?: string; appointments?: Array<{ phone?: string; status?: string }> } | null,
+    tenantIdParam?: string,
+    appointmentsParam?: Array<{ phone?: string; status?: string }>
+  ): NoShowRiskBadge {
+    let rawPhone = '';
+    let tenantId = tenantIdParam;
+    let appointments = appointmentsParam;
+
+    if (phoneOrInput && typeof phoneOrInput === 'object') {
+      rawPhone = phoneOrInput.phone || '';
+      if (phoneOrInput.tenantId) {
+        tenantId = phoneOrInput.tenantId;
+      }
+      if (phoneOrInput.appointments) {
+        appointments = phoneOrInput.appointments;
+      }
+    } else if (typeof phoneOrInput === 'string') {
+      rawPhone = phoneOrInput;
+    }
+
+    const cleanPhone = normalizePublicBookingPhone(rawPhone);
+    if (!cleanPhone) {
+      return {
+        hasRisk: false,
+        count: 0,
+        level: 'none',
+        label: '',
+        badgeText: '',
+        actionText: '',
+        actionRecommended: '',
+        phone: '',
+        severityColor: 'none',
+      };
+    }
+
+    const signalsCount = this.getNoShowRiskCountForCustomer(tenantId, cleanPhone);
+    let aptCount = 0;
+    if (Array.isArray(appointments)) {
+      aptCount = appointments.filter(a => {
+        if (a.status !== 'no_show') return false;
+        const p = normalizePublicBookingPhone(a.phone || '');
+        return p === cleanPhone;
+      }).length;
+    }
+    const count = Math.max(signalsCount, aptCount);
+
+    if (count === 0) {
+      return {
+        hasRisk: false,
+        count: 0,
+        level: 'none',
+        label: '',
+        badgeText: '',
+        actionText: '',
+        actionRecommended: '',
+        phone: cleanPhone,
+        severityColor: 'none',
+      };
+    }
+
+    if (count === 1) {
+      return {
+        hasRisk: true,
+        count: 1,
+        level: 'medium',
+        label: '⚠️ No-Show Riski',
+        badgeText: '⚠️ No-Show Riski (1 kez)',
+        actionText: 'Müşteriyi arayarak randevuyu teyit edin',
+        actionRecommended: 'Müşteriyi arayarak randevuyu teyit edin',
+        phone: cleanPhone,
+        severityColor: 'amber',
+      };
+    }
+
+    return {
+      hasRisk: true,
+      count,
+      level: 'high',
+      label: '⚠️ No-Show Riski',
+      badgeText: `⚠️ No-Show Riski (${count} kez)`,
+      actionText: 'Müşteriyi arayarak randevuyu teyit edin (Yüksek Risk)',
+      actionRecommended: 'Müşteriyi arayarak randevuyu teyit edin (Yüksek Risk)',
+      phone: cleanPhone,
+      severityColor: 'red',
+    };
+  },
+
+  // Alias for V1A-FUNC-02
+  getNoShowBadge(
+    phoneOrInput?: string | { phone?: string; tenantId?: string; appointments?: Array<{ phone?: string; status?: string }> } | null,
+    tenantIdParam?: string,
+    appointmentsParam?: Array<{ phone?: string; status?: string }>
+  ): NoShowRiskBadge {
+    return this.getNoShowRiskBadge(phoneOrInput, tenantIdParam, appointmentsParam);
+  },
+
+  // Helper to clear no-show signals (tests/fixtures)
+  clearAllNoShowSignals(): void {
+    memoryNoShowSignals = [];
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(NOSHOW_STORAGE_KEY);
+      } catch {}
+    }
   }
 };
