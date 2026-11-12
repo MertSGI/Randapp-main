@@ -1,4 +1,5 @@
 import { SelfServiceRepository } from './types';
+import { STORAGE_KEYS, registerMemoryResetHook } from '../storageKeys';
 
 function getSecureRandomBytes(byteCount: number): Uint8Array {
   if (typeof globalThis !== 'undefined' && typeof globalThis.crypto?.getRandomValues === 'function') {
@@ -35,16 +36,23 @@ export function resetLocalSelfServiceState() {
   memoryRequests = [];
   memoryIdempotency = {};
   if (typeof localStorage !== 'undefined') {
-    localStorage.removeItem('lari_appointment_access_tokens');
-    localStorage.removeItem('lari_appointment_change_requests');
-    localStorage.removeItem('lari_admin_reschedule_decision_idempotency');
+    localStorage.removeItem(STORAGE_KEYS.APPOINTMENT_ACCESS_TOKENS);
+    localStorage.removeItem(STORAGE_KEYS.APPOINTMENT_CHANGE_REQUESTS);
+    localStorage.removeItem(STORAGE_KEYS.ADMIN_RESCHEDULE_DECISION_IDEMPOTENCY);
   }
 }
+
+// Register memory reset hook for centralized purge / reset (V1A-TECH-01)
+registerMemoryResetHook(() => {
+  memoryTokens = [];
+  memoryRequests = [];
+  memoryIdempotency = {};
+});
 
 export class LocalSelfServiceRepository implements SelfServiceRepository {
   private getStoredTokens(): any[] {
     if (typeof localStorage === 'undefined') return memoryTokens;
-    const raw = localStorage.getItem('lari_appointment_access_tokens');
+    const raw = localStorage.getItem(STORAGE_KEYS.APPOINTMENT_ACCESS_TOKENS);
     return raw ? JSON.parse(raw) : [];
   }
 
@@ -53,12 +61,12 @@ export class LocalSelfServiceRepository implements SelfServiceRepository {
       memoryTokens = tokens;
       return;
     }
-    localStorage.setItem('lari_appointment_access_tokens', JSON.stringify(tokens));
+    localStorage.setItem(STORAGE_KEYS.APPOINTMENT_ACCESS_TOKENS, JSON.stringify(tokens));
   }
 
   private getStoredChangeRequests(): any[] {
     if (typeof localStorage === 'undefined') return memoryRequests;
-    const raw = localStorage.getItem('lari_appointment_change_requests');
+    const raw = localStorage.getItem(STORAGE_KEYS.APPOINTMENT_CHANGE_REQUESTS);
     return raw ? JSON.parse(raw) : [];
   }
 
@@ -67,12 +75,12 @@ export class LocalSelfServiceRepository implements SelfServiceRepository {
       memoryRequests = requests;
       return;
     }
-    localStorage.setItem('lari_appointment_change_requests', JSON.stringify(requests));
+    localStorage.setItem(STORAGE_KEYS.APPOINTMENT_CHANGE_REQUESTS, JSON.stringify(requests));
   }
 
   private getStoredIdempotency(): Record<string, { decision: string; payload: any }> {
     if (typeof localStorage === 'undefined') return memoryIdempotency;
-    const raw = localStorage.getItem('lari_admin_reschedule_decision_idempotency');
+    const raw = localStorage.getItem(STORAGE_KEYS.ADMIN_RESCHEDULE_DECISION_IDEMPOTENCY);
     return raw ? JSON.parse(raw) : {};
   }
 
@@ -81,7 +89,7 @@ export class LocalSelfServiceRepository implements SelfServiceRepository {
       memoryIdempotency = data;
       return;
     }
-    localStorage.setItem('lari_admin_reschedule_decision_idempotency', JSON.stringify(data));
+    localStorage.setItem(STORAGE_KEYS.ADMIN_RESCHEDULE_DECISION_IDEMPOTENCY, JSON.stringify(data));
   }
 
   async listTokens(tenantId: string): Promise<any[]> {

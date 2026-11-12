@@ -1,7 +1,8 @@
 import { SupportTicket, SupportTicketStatus, SupportTicketPriority, SupportTicketSource, SupportTicketCategory } from '../types';
 import { auditLogService } from './auditLogService';
+import { STORAGE_KEYS } from './storageKeys';
 
-const SUPPORT_TICKET_STORAGE_KEY = 'lari_support_tickets_v1';
+const SUPPORT_TICKET_STORAGE_KEY = STORAGE_KEYS.SUPPORT_TICKETS;
 
 export const supportTicketService = {
   createSupportTicket(input: {

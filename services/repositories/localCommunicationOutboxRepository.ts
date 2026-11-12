@@ -1,4 +1,5 @@
 import { CommunicationOutboxRepository } from './types';
+import { STORAGE_KEYS } from '../storageKeys';
 
 export class LocalCommunicationOutboxRepository implements CommunicationOutboxRepository {
   private readonly providerOnlyStatuses = new Set(['sent', 'delivered', 'accepted_by_provider']);
@@ -15,7 +16,7 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
     }
     let raw: string | null;
     try {
-      raw = localStorage.getItem('lari_communication_events');
+      raw = localStorage.getItem(STORAGE_KEYS.COMMUNICATION_EVENTS);
     } catch {
       throw new Error('Local outbox persistence read failed');
     }
@@ -38,7 +39,7 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
       throw new Error('Local outbox persistence is unavailable in this runtime');
     }
     try {
-      localStorage.setItem('lari_communication_events', JSON.stringify(events));
+      localStorage.setItem(STORAGE_KEYS.COMMUNICATION_EVENTS, JSON.stringify(events));
     } catch {
       throw new Error('Local outbox persistence failed');
     }

@@ -8,8 +8,9 @@ import {
 import { messageTemplateService } from './messageTemplateService';
 import { consentService } from './consentService';
 import { communicationProviderConfigService } from './communicationProviderConfigService';
+import { STORAGE_KEYS } from './storageKeys';
 
-const STORAGE_KEY = 'lari_communication_events';
+const STORAGE_KEY = STORAGE_KEYS.COMMUNICATION_EVENTS;
 
 export interface CreateEventInput {
   tenantId: string;

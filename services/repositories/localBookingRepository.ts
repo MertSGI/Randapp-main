@@ -4,10 +4,11 @@ import { dataProvider } from '../dataProvider';
 const normalizeEmail = (email?: string): string => email ? email.trim().toLowerCase() : '';
 import { LocalCatalogRepository } from './localCatalogRepository';
 import { publicBookingOtpService, parsePublicBookingPhone, normalizePublicBookingPhone } from '../publicBookingOtpService';
+import { STORAGE_KEYS, DYNAMIC_STORAGE_KEYS, isLariStorageKey } from '../storageKeys';
 const normalizePhone = (phone?: string): string => normalizePublicBookingPhone(phone);
 
 const tenantBookingLocks = new Map<string, Promise<void>>();
-const LOCAL_BOOKING_POLICY_KEY_PREFIX = 'lari_tenant_booking_policies_';
+const LOCAL_BOOKING_POLICY_KEY_PREFIX = `${STORAGE_KEYS.TENANT_BOOKING_POLICIES}_`;
 
 // Explicit default used ONLY when tenant booking policy is genuinely missing (never on corrupt JSON / read / loader failure).
 export const DEFAULT_LOCAL_BOOKING_OTP_POLICY = {
@@ -23,7 +24,7 @@ export function readStrictStoredBookingPolicy(tenantId: string): StrictStoredPol
   if (typeof localStorage === 'undefined') {
     return { state: 'missing' };
   }
-  const storageKey = `${LOCAL_BOOKING_POLICY_KEY_PREFIX}${tenantId}`;
+  const storageKey = DYNAMIC_STORAGE_KEYS.tenantBookingPolicy(tenantId);
   let rawStored: string | null = null;
   try {
     rawStored = localStorage.getItem(storageKey);
@@ -141,7 +142,7 @@ export class LocalBookingRepository implements BookingRepository {
       return { ok: false, reasonCode: 'temporary_failure' };
     }
   }
-  private getAppointmentsKey(tenantId: string) { return `lari:${tenantId}:appointments`; }
+  private getAppointmentsKey(tenantId: string) { return DYNAMIC_STORAGE_KEYS.tenantAppointments(tenantId); }
   private getCustomersKey(tenantId: string) { return `mock_tenant_customers_${tenantId}`; }
 
   async listAppointments(tenantId: string, filter?: { date?: string, upcomingOnly?: boolean }): Promise<Appointment[]> {
@@ -149,7 +150,7 @@ export class LocalBookingRepository implements BookingRepository {
     let existing = await dataProvider.getList<Appointment>(key) || [];
     
     if (!existing || existing.length === 0) {
-      const isSeeded = localStorage.getItem(`lari:${tenantId}:appointments_seeded`) === 'true';
+      const isSeeded = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantAppointmentsSeeded(tenantId)) === 'true';
       if (!isSeeded) {
         const today = new Date();
         const yesterday = new Date(today);
@@ -161,7 +162,7 @@ export class LocalBookingRepository implements BookingRepository {
   
         const seededAppointments: Appointment[] = [
           {
-            id: 'apt_demo_1', tenantId, customerId: 'cust_demo_1', user_name: 'Ahmet YÄ±lmaz', user_email: 'ahmet@example.com', phone: '+90 555 123 4567',
+            id: 'apt_demo_1', tenantId, customerId: 'cust_demo_1', user_name: 'Ahmet Yılmaz', user_email: 'ahmet@example.com', phone: '+90 555 123 4567',
             serviceId: 'srv_1', staffId: 'staff_1', date: toISODate(today), time: '10:00', status: 'confirmed', createdAt: yesterday.toISOString(), syncedToGoogle: false
           },
           {
@@ -169,20 +170,20 @@ export class LocalBookingRepository implements BookingRepository {
             serviceId: 'srv_2', staffId: 'staff_2', date: toISODate(today), time: '14:30', status: 'confirmed', createdAt: yesterday.toISOString(), syncedToGoogle: false
           },
           {
-            id: 'apt_demo_3', tenantId, customerId: 'cust_demo_3', user_name: 'AyÅŸe Kaya', user_email: 'ayse@example.com', phone: '+90 555 333 2211',
+            id: 'apt_demo_3', tenantId, customerId: 'cust_demo_3', user_name: 'Ayşe Kaya', user_email: 'ayse@example.com', phone: '+90 555 333 2211',
             serviceId: 'srv_3', staffId: 'staff_1', date: toISODate(tomorrow), time: '11:00', status: 'confirmed', createdAt: today.toISOString(), syncedToGoogle: false
           },
           {
-            id: 'apt_demo_4', tenantId, customerId: 'cust_demo_4', user_name: 'Fatma Ã‡elik', user_email: 'fatma@example.com', phone: '+90 555 444 5566',
+            id: 'apt_demo_4', tenantId, customerId: 'cust_demo_4', user_name: 'Fatma Çelik', user_email: 'fatma@example.com', phone: '+90 555 444 5566',
             serviceId: 'srv_5', staffId: 'staff_1', date: toISODate(yesterday), time: '15:00', status: 'completed', createdAt: today.toISOString(), syncedToGoogle: false
           },
            {
             id: 'apt_demo_5', tenantId, customerId: 'cust_demo_5', user_name: 'Ali Vefa', user_email: 'ali@example.com', phone: '+90 555 111 2222',
-            serviceId: 'srv_4', staffId: 'staff_3', date: toISODate(tomorrow), time: '16:00', status: 'cancelled_by_customer', cancelReason: 'Ä°ÅŸim Ã§Ä±ktÄ±', cancelledAt: today.toISOString(), cancelledBy: 'customer', createdAt: yesterday.toISOString(), syncedToGoogle: false
+            serviceId: 'srv_4', staffId: 'staff_3', date: toISODate(tomorrow), time: '16:00', status: 'cancelled_by_customer', cancelReason: 'İşim çıktı', cancelledAt: today.toISOString(), cancelledBy: 'customer', createdAt: yesterday.toISOString(), syncedToGoogle: false
           }
         ];
         await dataProvider.set(key, seededAppointments);
-        localStorage.setItem(`lari:${tenantId}:appointments_seeded`, 'true');
+        localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantAppointmentsSeeded(tenantId), 'true');
         existing = seededAppointments;
       }
     }
@@ -201,7 +202,7 @@ export class LocalBookingRepository implements BookingRepository {
   async getAppointmentById(appointmentId: string): Promise<Appointment | null> {
     for (let i = 0; i < localStorage.length; i++) {
        const key = localStorage.key(i);
-       if (key && key.endsWith(':appointments')) {
+       if (key && isLariStorageKey(key) && key.endsWith(':appointments')) {
           const raw = localStorage.getItem(key);
           try {
             const list = raw ? JSON.parse(raw) : [];
