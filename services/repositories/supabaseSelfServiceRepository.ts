@@ -174,4 +174,66 @@ export class SupabaseSelfServiceRepository implements SelfServiceRepository {
       console.error(err);
     }
   }
+
+  async listPendingRescheduleRequests(tenantId?: string): Promise<any[]> {
+    try {
+      const query = tenantId ? `?tenant_id=eq.${tenantId}&request_type=eq.reschedule&status=in.(requested,pending)&select=*` : `?request_type=eq.reschedule&status=in.(requested,pending)&select=*`;
+      const res = await fetchSupabase(`/rest/v1/appointment_change_requests${query}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data || []).map((r: any) => ({
+        change_request_id: r.id,
+        appointment_id: r.appointment_id,
+        tenant_id: r.tenant_id,
+        request_type: r.request_type,
+        requested_by: r.requested_by,
+        requested_date: r.proposed_date,
+        requested_time: r.proposed_time,
+        reason: r.reason,
+        status: r.status,
+        created_at: r.created_at,
+        customer_name: r.customer_name || 'Customer',
+        customer_phone: r.customer_phone || '',
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  async decideRescheduleRequest(params: {
+    tenantId?: string;
+    changeRequestId: string;
+    decision: 'approved' | 'rejected';
+    reason?: string;
+    actorId?: string;
+    idempotencyKey?: string;
+  }): Promise<{
+    success: boolean;
+    reasonCode: string;
+    changed?: boolean;
+    decision?: string;
+    changeRequestId?: string;
+    appointmentId?: string;
+    message?: string;
+  }> {
+    try {
+      const res = await fetchSupabase('/rest/v1/rpc/admin_decide_reschedule_request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          p_change_request_id: params.changeRequestId,
+          p_decision: params.decision,
+          p_reason: params.reason || null,
+          p_idempotency_key: params.idempotencyKey || null,
+        }),
+      });
+      if (!res.ok) {
+        return { success: false, reasonCode: 'rpc_error', message: 'Failed to decide reschedule request' };
+      }
+      const data = await res.json();
+      return data || { success: true, reasonCode: 'ok', changed: true, decision: params.decision, changeRequestId: params.changeRequestId };
+    } catch (e: any) {
+      return { success: false, reasonCode: 'network_error', message: e?.message || 'Network error' };
+    }
+  }
 }

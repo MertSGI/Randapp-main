@@ -77,16 +77,16 @@ const createPilotBypassProxy = <T extends object>(supabaseImpl: T, localImpl: ob
         return function(this: any, ...args: any[]) {
           let isPilot = false;
           try {
-            const activeTenantId = localStorage.getItem('lari_active_tenant_id');
-            const inPilotDemo = localStorage.getItem('lari_in_pilot_demo') === 'true';
-            const hashPilot = window.location.hash.includes('tenant_pilot_demo') || window.location.hash.includes('pilot/customer');
-            const pathPilot = window.location.pathname.includes('tenant_pilot_demo') || window.location.pathname.includes('pilot/customer');
+            const activeTenantId = typeof localStorage !== 'undefined' ? localStorage.getItem('lari_active_tenant_id') : null;
+            const inPilotDemo = typeof localStorage !== 'undefined' && localStorage.getItem('lari_in_pilot_demo') === 'true';
+            const hash = typeof window !== 'undefined' && window.location?.hash ? window.location.hash : '';
+            const pathname = typeof window !== 'undefined' && window.location?.pathname ? window.location.pathname : '';
             
             isPilot = shouldUsePilotLocalBypass(getDataSourceMode(), {
               activeTenantId,
               inPilotDemo,
-              hash: window.location.hash,
-              pathname: window.location.pathname,
+              hash,
+              pathname,
               args,
             });
           } catch (e) {
@@ -119,44 +119,50 @@ const proxiedSupabaseAuditEvent = createPilotBypassProxy(supabaseAuditEvent, loc
 const proxiedSupabaseSupportTicket = createPilotBypassProxy(supabaseSupportTicket, localSupportTicket);
 const proxiedSupabasePolicyAndConsent = createPilotBypassProxy(supabasePolicyAndConsent, localPolicyAndConsent);
 
-export const repositoryFactory = {
-  getBusinessProfileRepository(): BusinessProfileRepository {
-    const launchMode = launchModeService.getCurrentLaunchMode();
-    const dataMode = getDataSourceMode();
+function selectRepository<T>(localRepo: any, supabaseRepo: any, domainName: string): T {
+  const launchMode = launchModeService.getCurrentLaunchMode();
+  const dataMode = getDataSourceMode();
 
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
-      if (dataMode !== 'supabase') {
-        throw new Error('Supabase repository required for paymentless production: businessProfile');
-      }
-      return proxiedSupabaseBusinessProfile;
+  if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
+    if (dataMode !== 'supabase') {
+      throw new Error(`Supabase repository required for paymentless production: ${domainName}`);
     }
-    return localBusinessProfile;
+    return supabaseRepo as T;
+  }
+  return localRepo as T;
+}
+
+export const repositoryFactory = {
+  getActiveDataMode() {
+    return getDataSourceMode();
+  },
+
+  getLaunchMode() {
+    return launchModeService.getCurrentLaunchMode();
+  },
+
+  isSupabaseMode(): boolean {
+    return getDataSourceMode() === 'supabase';
+  },
+
+  isLocalMode(): boolean {
+    return getDataSourceMode() === 'local';
+  },
+
+  isPersistentDatabaseRequired(): boolean {
+    return launchModeService.requiresPersistentDatabase(launchModeService.getCurrentLaunchMode());
+  },
+
+  getBusinessProfileRepository(): BusinessProfileRepository {
+    return selectRepository(localBusinessProfile, proxiedSupabaseBusinessProfile, 'businessProfile');
   },
 
   getCatalogRepository(): CatalogRepository {
-    const launchMode = launchModeService.getCurrentLaunchMode();
-    const dataMode = getDataSourceMode();
-
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
-      if (dataMode !== 'supabase') {
-        throw new Error('Supabase repository required for paymentless production: catalog');
-      }
-      return proxiedSupabaseCatalog;
-    }
-    return localCatalog;
+    return selectRepository(localCatalog, proxiedSupabaseCatalog, 'catalog');
   },
 
   getBookingRepository(): BookingRepository {
-    const launchMode = launchModeService.getCurrentLaunchMode();
-    const dataMode = getDataSourceMode();
-
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
-      if (dataMode !== 'supabase') {
-        throw new Error('Supabase repository required for paymentless production: booking');
-      }
-      return proxiedSupabaseBooking;
-    }
-    return localBooking;
+    return selectRepository(localBooking, proxiedSupabaseBooking, 'booking');
   },
 
   getServiceCatalogRepository(): CatalogRepository {
@@ -176,119 +182,72 @@ export const repositoryFactory = {
   },
 
   getCampaignRepository(): CampaignRepository {
-    const launchMode = launchModeService.getCurrentLaunchMode();
-    const dataMode = getDataSourceMode();
-
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
-      if (dataMode !== 'supabase') {
-        throw new Error('Supabase repository required for paymentless production: campaign');
-      }
-      return proxiedSupabaseCampaign;
-    }
-    return localCampaign;
+    return selectRepository(localCampaign, proxiedSupabaseCampaign, 'campaign');
   },
 
   getTenantRepository(): TenantRepository {
-    const launchMode = launchModeService.getCurrentLaunchMode();
-    const dataMode = getDataSourceMode();
-
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
-      if (dataMode !== 'supabase') {
-        throw new Error('Supabase repository required for paymentless production: tenant');
-      }
-      return proxiedSupabaseTenant;
-    }
-    return localTenant;
+    return selectRepository(localTenant, proxiedSupabaseTenant, 'tenant');
   },
 
   getSubscriptionRepository(): SubscriptionRepository {
-    const launchMode = launchModeService.getCurrentLaunchMode();
-    const dataMode = getDataSourceMode();
-
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
-      if (dataMode !== 'supabase') {
-        throw new Error('Supabase repository required for paymentless production: subscription');
-      }
-      return proxiedSupabaseSubscription;
-    }
-    return localSubscription;
+    return selectRepository(localSubscription, proxiedSupabaseSubscription, 'subscription');
   },
 
   getManualProvisioningRepository(): ManualProvisioningRepository {
-    const launchMode = launchModeService.getCurrentLaunchMode();
-    const dataMode = getDataSourceMode();
-
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
-      if (dataMode !== 'supabase') {
-        throw new Error('Supabase repository required for paymentless production: manualProvisioning');
-      }
-      return proxiedSupabaseManualProvisioning;
-    }
-    return localManualProvisioning;
+    return selectRepository(localManualProvisioning, proxiedSupabaseManualProvisioning, 'manualProvisioning');
   },
 
   getSelfServiceRepository(): SelfServiceRepository {
-    const launchMode = launchModeService.getCurrentLaunchMode();
-    const dataMode = getDataSourceMode();
-
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
-      if (dataMode !== 'supabase') {
-        throw new Error('Supabase repository required for paymentless production: selfService');
-      }
-      return proxiedSupabaseSelfService;
-    }
-    return localSelfService;
+    return selectRepository(localSelfService, proxiedSupabaseSelfService, 'selfService');
   },
 
   getCommunicationOutboxRepository(): CommunicationOutboxRepository {
-    const launchMode = launchModeService.getCurrentLaunchMode();
-    const dataMode = getDataSourceMode();
-
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
-      if (dataMode !== 'supabase') {
-        throw new Error('Supabase repository required for paymentless production: communicationOutbox');
-      }
-      return proxiedSupabaseCommunicationOutbox;
-    }
-    return localCommunicationOutbox;
+    return selectRepository(localCommunicationOutbox, proxiedSupabaseCommunicationOutbox, 'communicationOutbox');
   },
 
   getAuditEventRepository(): AuditEventRepository {
-    const launchMode = launchModeService.getCurrentLaunchMode();
-    const dataMode = getDataSourceMode();
-
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
-      if (dataMode !== 'supabase') {
-        throw new Error('Supabase repository required for paymentless production: auditEvent');
-      }
-      return proxiedSupabaseAuditEvent;
-    }
-    return localAuditEvent;
+    return selectRepository(localAuditEvent, proxiedSupabaseAuditEvent, 'auditEvent');
   },
 
   getSupportTicketRepository(): SupportTicketRepository {
-    const launchMode = launchModeService.getCurrentLaunchMode();
-    const dataMode = getDataSourceMode();
-
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
-      if (dataMode !== 'supabase') {
-        throw new Error('Supabase repository required for paymentless production: supportTicket');
-      }
-      return proxiedSupabaseSupportTicket;
-    }
-    return localSupportTicket;
+    return selectRepository(localSupportTicket, proxiedSupabaseSupportTicket, 'supportTicket');
   },
 
   getPolicyAndConsentRepository(): PolicyAndConsentRepository {
-    const launchMode = launchModeService.getCurrentLaunchMode();
-    const dataMode = getDataSourceMode();
+    return selectRepository(localPolicyAndConsent, proxiedSupabasePolicyAndConsent, 'policyAndConsent');
+  },
 
-    if (launchModeService.requiresPersistentDatabase(launchMode) || dataMode.startsWith('supabase')) {
-      if (dataMode !== 'supabase') {
-        throw new Error('Supabase repository required for paymentless production: policyAndConsent');
-      }
-      return proxiedSupabasePolicyAndConsent;
-    }
-    return localPolicyAndConsent;
+  getRawLocalRepositories() {
+    return {
+      businessProfile: localBusinessProfile,
+      catalog: localCatalog,
+      booking: localBooking,
+      campaign: localCampaign,
+      tenant: localTenant,
+      subscription: localSubscription,
+      manualProvisioning: localManualProvisioning,
+      selfService: localSelfService,
+      communicationOutbox: localCommunicationOutbox,
+      auditEvent: localAuditEvent,
+      supportTicket: localSupportTicket,
+      policyAndConsent: localPolicyAndConsent,
+    };
+  },
+
+  getRawSupabaseRepositories() {
+    return {
+      businessProfile: supabaseBusinessProfile,
+      catalog: supabaseCatalog,
+      booking: supabaseBooking,
+      campaign: supabaseCampaign,
+      tenant: supabaseTenant,
+      subscription: supabaseSubscription,
+      manualProvisioning: supabaseManualProvisioning,
+      selfService: supabaseSelfService,
+      communicationOutbox: supabaseCommunicationOutbox,
+      auditEvent: supabaseAuditEvent,
+      supportTicket: supabaseSupportTicket,
+      policyAndConsent: supabasePolicyAndConsent,
+    };
   }
 };
