@@ -22,7 +22,12 @@ const runIsolationTests = () => {
             passed = false;
         }
 
-        if (content.includes("localStorage.setItem('lari_demo_context', 'true')") && content.includes("localStorage.setItem('lari_active_demo_tenant_id'")) {
+        const usesDemoContextKey = content.includes("localStorage.setItem('lari_demo_context', 'true')") || 
+            (content.includes("STORAGE_KEYS.DEMO_CONTEXT") && content.includes("localStorage.setItem"));
+        const usesActiveDemoTenantKey = content.includes("localStorage.setItem('lari_active_demo_tenant_id'") || 
+            (content.includes("STORAGE_KEYS.ACTIVE_DEMO_TENANT_ID") && content.includes("localStorage.setItem"));
+
+        if (usesDemoContextKey && usesActiveDemoTenantKey) {
             output += `- ✅ pilotDemoService correctly uses safe demo context keys (lari_demo_context, lari_active_demo_tenant_id).\n`;
         } else {
             output += `- ❌ pilotDemoService is missing allowed public keys.\n`;
@@ -30,7 +35,9 @@ const runIsolationTests = () => {
         }
 
         const seedDemoDataContent = content.substring(content.indexOf('seedDemoDataOnly()'), content.indexOf('seedAndEnterDemoContext()'));
-        if (content.includes("lari_active_owner_session") && !seedDemoDataContent.includes('lari_active_owner_session')) {
+        const hasOwnerSessionKey = content.includes("lari_active_owner_session") || content.includes("STORAGE_KEYS.ACTIVE_OWNER_SESSION");
+        const seedHasOwnerSessionKey = seedDemoDataContent.includes('lari_active_owner_session') || seedDemoDataContent.includes('STORAGE_KEYS.ACTIVE_OWNER_SESSION');
+        if (hasOwnerSessionKey && !seedHasOwnerSessionKey) {
             output += `- ✅ pilotDemoService does not set lari_active_owner_session inside seedDemoDataOnly.\n`;
         } else {
             output += `- ❌ pilotDemoService incorrectly sets lari_active_owner_session inside seedDemoDataOnly.\n`;

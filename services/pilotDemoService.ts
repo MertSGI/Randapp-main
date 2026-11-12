@@ -222,7 +222,7 @@ export const pilotDemoService = {
     await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantSubscription(DEMO_PILOT_TENANT_ID), mockSub);
     localStorage.setItem(`mock_subscription_${DEMO_PILOT_TENANT_ID}`, JSON.stringify(mockSub));
     
-    // Set allowed client-facing keys
+    // Set allowed client-facing keys (safe demo context keys: lari_demo_context, lari_active_demo_tenant_id)
     localStorage.setItem(STORAGE_KEYS.DEMO_CONTEXT, 'true');
     localStorage.setItem(STORAGE_KEYS.ACTIVE_DEMO_TENANT_ID, DEMO_PILOT_TENANT_ID);
   },
@@ -247,7 +247,7 @@ export const pilotDemoService = {
        localStorage.setItem(STORAGE_KEYS.SAVED_REAL_SESSION, prevSession);
     }
     
-    // Auth and tenant active for OWNER
+    // Auth and tenant active for OWNER (sets lari_active_owner_session via registry, isolated outside seedDemoDataOnly)
     localStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT_ID, DEMO_PILOT_TENANT_ID);
     localStorage.setItem(STORAGE_KEYS.ACTIVE_OWNER_SESSION, JSON.stringify(PILOT_USER));
     localStorage.setItem(STORAGE_KEYS.IN_PILOT_DEMO, 'true');
