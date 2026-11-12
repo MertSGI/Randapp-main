@@ -1,10 +1,11 @@
 import { TenantRepository, Tenant } from './types';
+import { STORAGE_KEYS } from '../storageKeys';
 
 export class LocalTenantRepository implements TenantRepository {
   activeTenantId: string | null = null;
 
   async listTenants(): Promise<Tenant[]> {
-    const raw = localStorage.getItem('lari_registered_tenants');
+    const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS);
     return raw ? JSON.parse(raw) : [];
   }
 
@@ -32,7 +33,7 @@ export class LocalTenantRepository implements TenantRepository {
       ...input
     } as Tenant;
     tenants.push(newTenant);
-    localStorage.setItem('lari_registered_tenants', JSON.stringify(tenants));
+    localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(tenants));
     return newTenant;
   }
 
@@ -41,18 +42,18 @@ export class LocalTenantRepository implements TenantRepository {
     const idx = tenants.findIndex(t => t.id === id);
     if (idx !== -1) {
       tenants[idx] = { ...tenants[idx], ...patch, updatedAt: new Date().toISOString() };
-      localStorage.setItem('lari_registered_tenants', JSON.stringify(tenants));
+      localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(tenants));
     }
   }
 
   setActiveTenant(id: string): void {
     this.activeTenantId = id;
-    localStorage.setItem('lari_active_tenant_id', id);
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_TENANT_ID, id);
   }
 
   getActiveTenantId(): string | null {
     if (!this.activeTenantId) {
-      this.activeTenantId = localStorage.getItem('lari_active_tenant_id');
+      this.activeTenantId = localStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT_ID);
     }
     return this.activeTenantId;
   }

@@ -4,10 +4,11 @@ import { dataProvider } from '../dataProvider';
 const normalizeEmail = (email?: string): string => email ? email.trim().toLowerCase() : '';
 import { LocalCatalogRepository } from './localCatalogRepository';
 import { publicBookingOtpService, parsePublicBookingPhone, normalizePublicBookingPhone } from '../publicBookingOtpService';
+import { STORAGE_KEYS, DYNAMIC_STORAGE_KEYS } from '../storageKeys';
 const normalizePhone = (phone?: string): string => normalizePublicBookingPhone(phone);
 
 const tenantBookingLocks = new Map<string, Promise<void>>();
-const LOCAL_BOOKING_POLICY_KEY_PREFIX = 'lari_tenant_booking_policies_';
+const LOCAL_BOOKING_POLICY_KEY_PREFIX = `${STORAGE_KEYS.TENANT_BOOKING_POLICIES}_`;
 
 // Explicit default used ONLY when tenant booking policy is genuinely missing (never on corrupt JSON / read / loader failure).
 export const DEFAULT_LOCAL_BOOKING_OTP_POLICY = {
@@ -23,7 +24,7 @@ export function readStrictStoredBookingPolicy(tenantId: string): StrictStoredPol
   if (typeof localStorage === 'undefined') {
     return { state: 'missing' };
   }
-  const storageKey = `${LOCAL_BOOKING_POLICY_KEY_PREFIX}${tenantId}`;
+  const storageKey = DYNAMIC_STORAGE_KEYS.tenantBookingPolicy(tenantId);
   let rawStored: string | null = null;
   try {
     rawStored = localStorage.getItem(storageKey);

@@ -1,10 +1,11 @@
 import { BusinessBranch } from '../types';
 import { getBusinessProfileRepository } from './repositories';
 import { tenantService } from './tenantService';
+import { DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
 export const branchService = {
   getStoredBranches(tenantId: string): BusinessBranch[] {
-    const raw = localStorage.getItem(`lari_branches_${tenantId}`);
+    const raw = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantBranches(tenantId));
     if (raw) {
       try {
         return JSON.parse(raw);
@@ -14,7 +15,7 @@ export const branchService = {
   },
 
   saveStoredBranches(tenantId: string, branches: BusinessBranch[]) {
-    localStorage.setItem(`lari_branches_${tenantId}`, JSON.stringify(branches));
+    localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantBranches(tenantId), JSON.stringify(branches));
   },
 
   async ensurePrimaryBranchForTenant(tenantId: string): Promise<BusinessBranch> {

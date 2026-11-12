@@ -1,22 +1,23 @@
 import { PolicyAndConsentRepository } from './types';
+import { STORAGE_KEYS } from '../storageKeys';
 
 export class LocalPolicyAndConsentRepository implements PolicyAndConsentRepository {
   private getStoredAcceptances(): any[] {
-    const raw = localStorage.getItem('lari_policy_acceptances_v1');
+    const raw = localStorage.getItem(STORAGE_KEYS.POLICY_ACCEPTANCES);
     return raw ? JSON.parse(raw) : [];
   }
 
   private saveStoredAcceptances(list: any[]) {
-    localStorage.setItem('lari_policy_acceptances_v1', JSON.stringify(list));
+    localStorage.setItem(STORAGE_KEYS.POLICY_ACCEPTANCES, JSON.stringify(list));
   }
 
   private getStoredConsents(): any[] {
-    const raw = localStorage.getItem('lari_consent_ledger_v1');
+    const raw = localStorage.getItem(STORAGE_KEYS.CONSENT_LEDGER);
     return raw ? JSON.parse(raw) : [];
   }
 
   private saveStoredConsents(list: any[]) {
-    localStorage.setItem('lari_consent_ledger_v1', JSON.stringify(list));
+    localStorage.setItem(STORAGE_KEYS.CONSENT_LEDGER, JSON.stringify(list));
   }
 
   async listAcceptances(tenantId?: string): Promise<any[]> {

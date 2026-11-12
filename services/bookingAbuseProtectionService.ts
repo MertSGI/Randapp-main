@@ -4,13 +4,20 @@ import { auditLogService } from './auditLogService';
 import { supportTicketService } from './supportTicketService';
 import { parsePublicBookingPhone, normalizePublicBookingPhone } from './publicBookingOtpService';
 import { readStrictStoredBookingPolicy } from './repositories/localBookingRepository';
+import { STORAGE_KEYS, registerMemoryResetHook } from './storageKeys';
 
-const ATTEMPTS_STORAGE_KEY = 'lari_booking_attempts';
-const NOSHOW_STORAGE_KEY = 'lari_noshow_signals';
+const ATTEMPTS_STORAGE_KEY = STORAGE_KEYS.BOOKING_ATTEMPTS;
+const NOSHOW_STORAGE_KEY = STORAGE_KEYS.NOSHOW_SIGNALS;
 
 // In-memory fallback for environments without localStorage (Node.js tests, SSR)
 let memoryAttempts: BookingAttempt[] = [];
 let memoryNoShowSignals: NoShowSignal[] = [];
+
+// Register in-memory reset hook for centralized purge / reset (V1A-TECH-01)
+registerMemoryResetHook(() => {
+  memoryAttempts = [];
+  memoryNoShowSignals = [];
+});
 
 export interface BookingAttempt {
   id: string;

@@ -8,8 +8,9 @@ import { getBookingRepository, getSelfServiceRepository } from './repositories';
 import { communicationEventService } from './communicationEventService';
 import { tenantService } from './tenantService';
 import { auditLogService } from './auditLogService';
+import { STORAGE_KEYS, DYNAMIC_STORAGE_KEYS, registerMemoryResetHook } from './storageKeys';
 
-const POLICY_STORAGE_KEY = 'lari_tenant_booking_policies';
+const POLICY_STORAGE_KEY = STORAGE_KEYS.TENANT_BOOKING_POLICIES;
 const memoryPolicies = new Map<string, BookingPolicy>();
 
 // ============================================================================
@@ -31,11 +32,17 @@ export interface TokenLookupFailureRecord {
   lastFailedAt: number; // epoch ms
 }
 
-const TOKEN_LOOKUP_FAILURES_KEY = 'lari_self_service_token_failures';
+const TOKEN_LOOKUP_FAILURES_KEY = STORAGE_KEYS.SELF_SERVICE_TOKEN_FAILURES;
 const MAX_CONSECUTIVE_FAILED_LOOKUPS = 5;
 const LOOKUP_LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes fail-closed lockout
 
 let memoryTokenLookupFailures = new Map<string, TokenLookupFailureRecord>();
+
+// Register in-memory reset hook for centralized purge / reset (V1A-TECH-01)
+registerMemoryResetHook(() => {
+  memoryPolicies.clear();
+  memoryTokenLookupFailures.clear();
+});
 
 export function getSecureRandomBytes(byteCount: number): Uint8Array {
   if (typeof globalThis !== 'undefined' && typeof globalThis.crypto?.getRandomValues === 'function') {
@@ -153,7 +160,7 @@ export const appointmentSelfServiceService = {
       return memoryPolicies.get(tenantId) || DEFAULT_BOOKING_POLICY;
     }
     try {
-      const stored = localStorage.getItem(`${POLICY_STORAGE_KEY}_${tenantId}`);
+      const stored = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantBookingPolicy(tenantId));
       if (stored) {
         return { ...DEFAULT_BOOKING_POLICY, ...JSON.parse(stored) };
       }
@@ -170,7 +177,7 @@ export const appointmentSelfServiceService = {
     memoryPolicies.set(tenantId, updated);
     if (typeof window !== 'undefined') {
       try {
-        localStorage.setItem(`${POLICY_STORAGE_KEY}_${tenantId}`, JSON.stringify(updated));
+        localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantBookingPolicy(tenantId), JSON.stringify(updated));
       } catch {}
     }
     return updated;
@@ -218,10 +225,10 @@ export const appointmentSelfServiceService = {
     if (keys.length === 0) {
       if (typeof window !== 'undefined') {
         try {
-          let deviceFp = localStorage.getItem('lari_client_device_fingerprint');
+          let deviceFp = localStorage.getItem(STORAGE_KEYS.CLIENT_DEVICE_FINGERPRINT);
           if (!deviceFp) {
             deviceFp = `dev_${bytesToHex(getSecureRandomBytes(16))}`;
-            localStorage.setItem('lari_client_device_fingerprint', deviceFp);
+            localStorage.setItem(STORAGE_KEYS.CLIENT_DEVICE_FINGERPRINT, deviceFp);
           }
           keys.push(`fp:${deviceFp}`);
         } catch {

@@ -1,8 +1,9 @@
 import { LegalDocumentType } from '../types';
 import { auditLogService } from './auditLogService';
 import { legalDocumentService } from './legalDocumentService';
+import { STORAGE_KEYS } from './storageKeys';
 
-const LEDGER_STORAGE_KEY = 'lari_consent_ledger_v1';
+const LEDGER_STORAGE_KEY = STORAGE_KEYS.CONSENT_LEDGER;
 const CONSENT_STATUS_VALUES: ConsentStatusType[] = ['granted', 'denied', 'withdrawn', 'expired'];
 
 export type ConsentStatusType = 'granted' | 'denied' | 'withdrawn' | 'expired';

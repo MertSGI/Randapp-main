@@ -3,6 +3,7 @@ import { dataProvider } from './dataProvider';
 import { supabase } from './supabaseClient';
 import { getDataSourceMode } from './dataSourceConfig';
 import { shouldUsePilotLocalBypass } from './pilotBypassPolicy';
+import { STORAGE_KEYS, DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
 const DEMO_TENANT: Tenant = {
   id: 'tenant_demo',
@@ -70,7 +71,7 @@ export const tenantService = {
   },
 
   async getTenantById(tenantId: string): Promise<Tenant | null> {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem('lari_registered_tenants') : null;
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) : null;
     if (raw) {
       try {
         const tenants = JSON.parse(raw);
@@ -118,7 +119,7 @@ export const tenantService = {
     }
     
     // local mock
-    const raw = localStorage.getItem('lari_registered_tenants');
+    const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS);
     if (raw) {
       try {
         const tenants = JSON.parse(raw);
@@ -208,7 +209,7 @@ export const tenantService = {
 
     // In all modes, if we are specifically previewing pilot demo, return it.
     // This allows /pilot -> /#/tenant_pilot_demo flow to work even in production/supabase mode without breaking the publish gate.
-    const activeTenantId = localStorage.getItem('lari_active_tenant_id');
+    const activeTenantId = localStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT_ID);
     const isPilotDemoRoute = window.location.hash.includes('#/tenant_pilot_demo') || 
                              window.location.pathname.includes('/tenant_pilot_demo') ||
                              window.location.hash.includes('/pilot/customer') ||
@@ -246,7 +247,7 @@ export const tenantService = {
     const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
     if (mode === 'mock') {
        if (activeTenantId && activeTenantId !== 'tenant_pilot_demo') {
-          const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || localStorage.getItem('lari_registered_tenants') || '[]');
+          const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
           const tenantRecord = registeredArr.find((t: any) => t.id === activeTenantId);
           if (tenantRecord) {
              return {
@@ -373,7 +374,7 @@ export const tenantService = {
       } as TenantBranding;
     }
     
-    const key = `lari:${tenantId}:branding`;
+    const key = DYNAMIC_STORAGE_KEYS.tenantBrandingColon(tenantId);
     return dataProvider.get<TenantBranding>(key);
   },
 
@@ -399,7 +400,7 @@ export const tenantService = {
       return;
     }
 
-    let raw = localStorage.getItem('lari_registered_tenants') || localStorage.getItem('lari_registered_tenants');
+    let raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS);
     if (!raw) {
       raw = '[]';
     }
@@ -427,8 +428,7 @@ export const tenantService = {
         };
         tenants.push(item);
       }
-      localStorage.setItem('lari_registered_tenants', JSON.stringify(tenants));
-      localStorage.setItem('lari_registered_tenants', JSON.stringify(tenants));
+      localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(tenants));
     } catch (e) {}
   },
 
@@ -462,7 +462,7 @@ export const tenantService = {
       return next;
     }
 
-    const key = `lari:${tenantId}:branding`;
+    const key = DYNAMIC_STORAGE_KEYS.tenantBrandingColon(tenantId);
     await dataProvider.set(key, next);
     return next;
   }

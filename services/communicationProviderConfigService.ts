@@ -13,7 +13,9 @@ export interface CommunicationProviderConfig {
   supportEmail: string;
 }
 
-const STORAGE_KEY = 'lari_communication_provider_config';
+import { STORAGE_KEYS } from './storageKeys';
+
+const STORAGE_KEY = STORAGE_KEYS.COMMUNICATION_PROVIDER_CONFIG;
 
 const DEFAULT_CONFIG: CommunicationProviderConfig = {
   mode: (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_COMMUNICATION_MODE as any) || 'local_outbox_only',

@@ -5,8 +5,9 @@ import {
 } from '../types';
 import { auditLogService } from './auditLogService';
 import { supportTicketService } from './supportTicketService';
+import { STORAGE_KEYS } from './storageKeys';
 
-const RIGHTS_STORAGE_KEY = 'lari_data_rights_requests_v1';
+const RIGHTS_STORAGE_KEY = STORAGE_KEYS.DATA_RIGHTS_REQUESTS;
 
 export interface CreateRightsRequestInput {
   tenantId?: string;
