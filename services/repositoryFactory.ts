@@ -215,39 +215,5 @@ export const repositoryFactory = {
 
   getPolicyAndConsentRepository(): PolicyAndConsentRepository {
     return selectRepository(localPolicyAndConsent, proxiedSupabasePolicyAndConsent, 'policyAndConsent');
-  },
-
-  getRawLocalRepositories() {
-    return {
-      businessProfile: localBusinessProfile,
-      catalog: localCatalog,
-      booking: localBooking,
-      campaign: localCampaign,
-      tenant: localTenant,
-      subscription: localSubscription,
-      manualProvisioning: localManualProvisioning,
-      selfService: localSelfService,
-      communicationOutbox: localCommunicationOutbox,
-      auditEvent: localAuditEvent,
-      supportTicket: localSupportTicket,
-      policyAndConsent: localPolicyAndConsent,
-    };
-  },
-
-  getRawSupabaseRepositories() {
-    return {
-      businessProfile: supabaseBusinessProfile,
-      catalog: supabaseCatalog,
-      booking: supabaseBooking,
-      campaign: supabaseCampaign,
-      tenant: supabaseTenant,
-      subscription: supabaseSubscription,
-      manualProvisioning: supabaseManualProvisioning,
-      selfService: supabaseSelfService,
-      communicationOutbox: supabaseCommunicationOutbox,
-      auditEvent: supabaseAuditEvent,
-      supportTicket: supabaseSupportTicket,
-      policyAndConsent: supabasePolicyAndConsent,
-    };
   }
 };

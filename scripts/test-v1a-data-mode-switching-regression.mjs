@@ -63,7 +63,7 @@ global.window = globalThis.window;
 let interceptedNetworkCalls = 0;
 const mockFetchResponses = new Map();
 
-// Strict loopback fetch interceptor to enforce Zero Network Egress
+// Strict loopback fetch interceptor to enforce Zero Network Egress and Zero Silent Fallbacks
 globalThis.fetch = async (url, options = {}) => {
   interceptedNetworkCalls++;
   const urlStr = String(url);
@@ -88,16 +88,49 @@ globalThis.fetch = async (url, options = {}) => {
     }
   }
 
-  // Default neutral response for unhandled endpoints in staging tests
-  return {
-    ok: true,
-    status: 200,
-    statusText: 'OK',
-    json: async () => ([]),
-    text: async () => '[]',
-    headers: new Headers({ 'content-type': 'application/json' })
-  };
+  // FAIL CLOSED on every unregistered endpoint (denetçi requirement FINDING-ADIM015-002: zero silent fallbacks)
+  throw new Error(`[MOCK FETCH ERROR] Unregistered endpoint intercepted: ${urlStr}`);
 };
+
+// -----------------------------------------------------------------------------
+// Canonical Contract Validators (Profile, Service Catalog, Appointments)
+// -----------------------------------------------------------------------------
+function assertBusinessProfileContract(profile, context = 'Unknown') {
+  assert.ok(profile, `[${context}] Profile must not be null/undefined`);
+  assert.strictEqual(typeof profile.public_display_name, 'string', `[${context}] public_display_name must be a string`);
+  assert.strictEqual(typeof profile.city, 'string', `[${context}] city must be a string`);
+  assert.ok(profile.public_display_name.length > 0, `[${context}] public_display_name cannot be empty`);
+  if (profile.district !== undefined && profile.district !== null) {
+    assert.strictEqual(typeof profile.district, 'string', `[${context}] district must be a string`);
+  }
+}
+
+function assertServiceContract(service, context = 'Unknown') {
+  assert.ok(service, `[${context}] Service must not be null/undefined`);
+  assert.strictEqual(typeof service.id, 'string', `[${context}] id must be a string`);
+  assert.strictEqual(typeof service.name, 'string', `[${context}] name must be a string`);
+  assert.strictEqual(typeof service.duration, 'number', `[${context}] duration must be a number`);
+  assert.strictEqual(typeof service.price, 'number', `[${context}] price must be a number`);
+  assert.strictEqual(typeof service.active, 'boolean', `[${context}] active must be a boolean`);
+  assert.strictEqual(typeof service.category, 'string', `[${context}] category must be a string`);
+  assert.ok(!isNaN(service.price), `[${context}] price cannot be NaN`);
+  assert.ok(!isNaN(service.duration), `[${context}] duration cannot be NaN`);
+}
+
+function assertAppointmentContract(appointment, context = 'Unknown') {
+  assert.ok(appointment, `[${context}] Appointment must not be null/undefined`);
+  assert.strictEqual(typeof appointment.id, 'string', `[${context}] id must be a string`);
+  assert.strictEqual(typeof appointment.user_name, 'string', `[${context}] user_name must be a string`);
+  assert.strictEqual(typeof appointment.serviceId, 'string', `[${context}] serviceId must be a string`);
+  assert.strictEqual(typeof appointment.staffId, 'string', `[${context}] staffId must be a string`);
+  assert.strictEqual(typeof appointment.date, 'string', `[${context}] date must be a string`);
+  assert.strictEqual(typeof appointment.time, 'string', `[${context}] time must be a string`);
+  assert.strictEqual(typeof appointment.durationMinutes, 'number', `[${context}] durationMinutes must be a number`);
+  assert.strictEqual(typeof appointment.status, 'string', `[${context}] status must be a string`);
+  assert.ok(/confirmed|pending|cancelled|completed/.test(appointment.status), `[${context}] status '${appointment.status}' must be a valid status`);
+  assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(appointment.date), `[${context}] date '${appointment.date}' must be in YYYY-MM-DD format`);
+  assert.ok(/^\d{2}:\d{2}/.test(appointment.time), `[${context}] time '${appointment.time}' must be in HH:MM format`);
+}
 
 // -----------------------------------------------------------------------------
 // Test Execution Helpers
@@ -224,14 +257,16 @@ runTest('1.3 repositoryFactory exports all canonical getter and inspection metho
     'getLaunchMode',
     'isSupabaseMode',
     'isLocalMode',
-    'isPersistentDatabaseRequired',
-    'getRawLocalRepositories',
-    'getRawSupabaseRepositories'
+    'isPersistentDatabaseRequired'
   ];
 
   for (const getter of expectedGetters) {
     assert.strictEqual(typeof repositoryFactory[getter], 'function', `repositoryFactory missing required method: ${getter}`);
   }
+
+  // Security invariant: raw repositories must NOT be exported (fail-closed paymentless/production enforcement)
+  assert.strictEqual(repositoryFactory.getRawLocalRepositories, undefined, 'getRawLocalRepositories must not be exported');
+  assert.strictEqual(repositoryFactory.getRawSupabaseRepositories, undefined, 'getRawSupabaseRepositories must not be exported');
 });
 
 // ============================================================================
@@ -289,7 +324,7 @@ runTest('2.6 supabase_staging without VITE_SUPABASE_ANON_KEY throws fail-closed 
   );
 });
 
-runTest('2.7 paymentless_limited_production forbids local repository and fails closed', () => {
+runTest('2.7 paymentless_limited_production forbids local repository and fails closed across all exported factory paths', () => {
   // Simulate paymentless_limited_production with local mode
   process.env.VITE_LAUNCH_MODE = 'paymentless_limited_production';
   process.env.VITE_DATA_MODE = 'local';
@@ -299,23 +334,37 @@ runTest('2.7 paymentless_limited_production forbids local repository and fails c
   assert.strictEqual(launchModeService.getCurrentLaunchMode(), 'paymentless_limited_production');
   assert.strictEqual(launchModeService.requiresPersistentDatabase('paymentless_limited_production'), true);
 
-  // Any repository getter must fail closed with explicit message
-  assert.throws(
-    () => repositoryFactory.getBusinessProfileRepository(),
-    /Supabase repository required for paymentless production: businessProfile/
-  );
-  assert.throws(
-    () => repositoryFactory.getCatalogRepository(),
-    /Supabase repository required for paymentless production: catalog/
-  );
-  assert.throws(
-    () => repositoryFactory.getBookingRepository(),
-    /Supabase repository required for paymentless production: booking/
-  );
-  assert.throws(
-    () => repositoryFactory.getTenantRepository(),
-    /Supabase repository required for paymentless production: tenant/
-  );
+  // Negative Test (FINDING-ADIM015-001): Every single repository getter must fail closed with explicit message
+  const domainGetters = [
+    ['businessProfile', () => repositoryFactory.getBusinessProfileRepository()],
+    ['catalog', () => repositoryFactory.getCatalogRepository()],
+    ['booking', () => repositoryFactory.getBookingRepository()],
+    ['catalog (service)', () => repositoryFactory.getServiceCatalogRepository()],
+    ['catalog (staff)', () => repositoryFactory.getStaffRepository()],
+    ['catalog (avail)', () => repositoryFactory.getAvailabilityRepository()],
+    ['booking (customer)', () => repositoryFactory.getCustomerRepository()],
+    ['campaign', () => repositoryFactory.getCampaignRepository()],
+    ['tenant', () => repositoryFactory.getTenantRepository()],
+    ['subscription', () => repositoryFactory.getSubscriptionRepository()],
+    ['manualProvisioning', () => repositoryFactory.getManualProvisioningRepository()],
+    ['selfService', () => repositoryFactory.getSelfServiceRepository()],
+    ['communicationOutbox', () => repositoryFactory.getCommunicationOutboxRepository()],
+    ['auditEvent', () => repositoryFactory.getAuditEventRepository()],
+    ['supportTicket', () => repositoryFactory.getSupportTicketRepository()],
+    ['policyAndConsent', () => repositoryFactory.getPolicyAndConsentRepository()]
+  ];
+
+  for (const [domain, getter] of domainGetters) {
+    assert.throws(
+      getter,
+      /Supabase repository required for paymentless production/,
+      `Getter for ${domain} must fail closed under paymentless_limited_production + local`
+    );
+  }
+
+  // Invariant verification: Zero bypass paths exist to obtain a local repository
+  assert.strictEqual(repositoryFactory.getRawLocalRepositories, undefined, 'Factory must not expose getRawLocalRepositories');
+  assert.strictEqual(repositoryFactory.getRawSupabaseRepositories, undefined, 'Factory must not expose getRawSupabaseRepositories');
 
   // Restore launch mode
   process.env.VITE_LAUNCH_MODE = 'local_pre_live';
@@ -518,12 +567,24 @@ await runAsyncTest('4.1 Seed local data, switch to supabase, perform remote ops,
   });
   assert.ok(initialToken);
 
+  // Take immutable JSON snapshots of all local entities before mode switch
+  const localProfileSnapshot = JSON.parse(JSON.stringify(await localProfileRepo.getProfile(TEST_TENANT)));
+  const localServicesSnapshot = JSON.parse(JSON.stringify(await localCatalogRepo.listServices(TEST_TENANT)));
+  const localStaffSnapshot = JSON.parse(JSON.stringify(await localCatalogRepo.listStaff(TEST_TENANT)));
+  const localAppointmentsSnapshot = JSON.parse(JSON.stringify(await localBookingRepo.listAppointments(TEST_TENANT)));
+  const localTokensSnapshot = JSON.parse(JSON.stringify(await localSelfServiceRepo.listTokens(TEST_TENANT)));
+
+  // Validate initial local shapes against canonical contracts
+  assertBusinessProfileContract(localProfileSnapshot, 'Local Initial Profile');
+  assertServiceContract(localServicesSnapshot[0], 'Local Initial Service');
+  assertAppointmentContract(localAppointmentsSnapshot[0], 'Local Initial Appointment');
+
   // Step B: Switch to Supabase Mode
   process.env.VITE_DATA_MODE = 'supabase_staging';
   process.env.VITE_SUPABASE_URL = 'https://fake-staging-ref.supabase.co';
   process.env.VITE_SUPABASE_ANON_KEY = 'fake-staging-anon-key-001';
 
-  // Configure mock fetch to simulate remote staging database with DIFFERENT data
+  // Configure explicit mock fetch handlers for all 3 primary staging domain queries
   mockFetchResponses.set('/rest/v1/tenant_business_profiles', (url) => {
     return {
       json: [{
@@ -531,16 +592,81 @@ await runAsyncTest('4.1 Seed local data, switch to supabase, perform remote ops,
         tenant_id: 'tenant_remote_staging_999',
         public_display_name: 'Staging Remote Salon',
         city: 'Ankara',
+        district: 'Çankaya',
+        phone: '+905559998877',
+        business_category: 'Hair Salon',
         is_public_profile_enabled: true
       }]
     };
   });
 
+  mockFetchResponses.set('/rest/v1/services', (url) => {
+    return {
+      json: [{
+        id: 'srv_remote_888',
+        tenant_id: 'tenant_remote_staging_999',
+        name: 'Staging Saç Kesimi',
+        name_tr: 'Staging Saç Kesimi',
+        duration: 45,
+        price: 500,
+        image: null,
+        active: true,
+        category: 'Kesim'
+      }]
+    };
+  });
+
+  mockFetchResponses.set('/rest/v1/rpc/get_my_tenant_appointments', (url) => {
+    return {
+      json: [{
+        success: true,
+        appointments: [{
+          id: 'apt_remote_777',
+          tenant_id: 'tenant_remote_staging_999',
+          user_id: 'usr_remote_1',
+          customer_id: 'cust_remote_1',
+          user_name: 'Ayşe Uzun',
+          user_email: 'ayse@staging.com',
+          phone: '+905559998877',
+          service_id: 'srv_remote_888',
+          staff_id: 'stf_remote_001',
+          appointment_date: '2026-12-25',
+          appointment_time: '15:30',
+          duration_minutes: 45,
+          status: 'confirmed',
+          notes: 'Staging test appointment',
+          created_at: new Date().toISOString()
+        }]
+      }]
+    };
+  });
+
+  // Invoke all 3 domain repositories through repositoryFactory in Supabase mode (denetçi requirement FINDING-ADIM015-002)
   const supabaseProfileRepo = repositoryFactory.getBusinessProfileRepository();
   const remoteProfile = await supabaseProfileRepo.getProfile('tenant_remote_staging_999');
+  assertBusinessProfileContract(remoteProfile, 'Supabase Staging Profile');
   assert.strictEqual(remoteProfile?.public_display_name, 'Staging Remote Salon');
+  assert.strictEqual(remoteProfile?.city, 'Ankara');
 
-  // Step C: Switch BACK to Local Mode and verify 100% data preservation
+  const supabaseCatalogRepo = repositoryFactory.getCatalogRepository();
+  const remoteServices = await supabaseCatalogRepo.listServices('tenant_remote_staging_999');
+  assert.strictEqual(remoteServices.length, 1);
+  assertServiceContract(remoteServices[0], 'Supabase Staging Service');
+  assert.strictEqual(remoteServices[0].name, 'Staging Saç Kesimi');
+  assert.strictEqual(remoteServices[0].price, 500);
+  assert.strictEqual(remoteServices[0].duration, 45);
+
+  const supabaseBookingRepo = repositoryFactory.getBookingRepository();
+  const remoteAppointments = await supabaseBookingRepo.listAppointments('tenant_remote_staging_999');
+  assert.strictEqual(remoteAppointments.length, 1);
+  assertAppointmentContract(remoteAppointments[0], 'Supabase Staging Appointment');
+  assert.strictEqual(remoteAppointments[0].user_name, 'Ayşe Uzun');
+  assert.strictEqual(remoteAppointments[0].date, '2026-12-25');
+  assert.strictEqual(remoteAppointments[0].time, '15:30');
+  assert.strictEqual(remoteAppointments[0].durationMinutes, 45);
+  assert.strictEqual(remoteAppointments[0].status, 'confirmed');
+
+  // Step C: Switch BACK to Local Mode and verify 100% data preservation and snapshot invariance
   process.env.VITE_DATA_MODE = 'local';
   delete process.env.VITE_SUPABASE_URL;
   delete process.env.VITE_SUPABASE_ANON_KEY;
@@ -550,33 +676,25 @@ await runAsyncTest('4.1 Seed local data, switch to supabase, perform remote ops,
   const restoredBookingRepo = repositoryFactory.getBookingRepository();
   const restoredSelfServiceRepo = repositoryFactory.getSelfServiceRepository();
 
-  // Verify profile untouched
+  // Verify profile untouched and strictly equals snapshot
   const preservedProfile = await restoredProfileRepo.getProfile(TEST_TENANT);
-  assert.ok(preservedProfile);
-  assert.strictEqual(preservedProfile.public_display_name, 'Studio Lari Regent');
-  assert.strictEqual(preservedProfile.city, 'İzmir');
-  assert.strictEqual(preservedProfile.district, 'Alsancak');
+  assert.deepStrictEqual(preservedProfile, localProfileSnapshot, 'Local profile snapshot must remain 100% invariant after two-way cycle');
 
-  // Verify service untouched
+  // Verify services untouched and strictly equals snapshot
   const preservedServices = await restoredCatalogRepo.listServices(TEST_TENANT);
-  const foundService = preservedServices.find(s => s.id === initialService.id);
-  assert.ok(foundService, 'Local service must still exist after switching cycles');
-  assert.strictEqual(foundService.name, 'Özel Keratin Bakımı');
-  assert.strictEqual(foundService.price, 1500);
+  assert.deepStrictEqual(preservedServices, localServicesSnapshot, 'Local services snapshot must remain 100% invariant after two-way cycle');
 
-  // Verify appointment untouched
+  // Verify staff untouched and strictly equals snapshot
+  const preservedStaff = await restoredCatalogRepo.listStaff(TEST_TENANT);
+  assert.deepStrictEqual(preservedStaff, localStaffSnapshot, 'Local staff snapshot must remain 100% invariant after two-way cycle');
+
+  // Verify appointments untouched and strictly equals snapshot
   const preservedAppointments = await restoredBookingRepo.listAppointments(TEST_TENANT);
-  const foundAppointment = preservedAppointments.find(a => a.id === initialAppointment.id);
-  assert.ok(foundAppointment, 'Local appointment must still exist after switching cycles');
-  assert.strictEqual(foundAppointment.user_name, 'Deniz Kaya');
-  assert.strictEqual(foundAppointment.date, '2026-12-15');
-  assert.strictEqual(foundAppointment.status, 'confirmed');
+  assert.deepStrictEqual(preservedAppointments, localAppointmentsSnapshot, 'Local appointments snapshot must remain 100% invariant after two-way cycle');
 
-  // Verify self-service token untouched
+  // Verify self-service tokens untouched and strictly equals snapshot
   const preservedTokens = await restoredSelfServiceRepo.listTokens(TEST_TENANT);
-  const foundToken = preservedTokens.find(t => t.tokenHash === 'hash_test_sha256_reg_token_001');
-  assert.ok(foundToken, 'Local self-service token must still exist after switching cycles');
-  assert.strictEqual(foundToken.appointmentId, initialAppointment.id);
+  assert.deepStrictEqual(preservedTokens, localTokensSnapshot, 'Local self-service tokens snapshot must remain 100% invariant after two-way cycle');
 });
 
 // ============================================================================
@@ -748,6 +866,173 @@ runTest('5.7 AuditEvent, SupportTicket, PolicyAndConsent & Campaign method parit
     new SupabaseCampaignRepository(),
     'CampaignRepository',
     ['listCampaigns', 'saveCampaign', 'deleteCampaign', 'listCustomerReferrals', 'saveCustomerReferral', 'listCustomerRewards', 'saveCustomerReward']
+  );
+});
+
+await runAsyncTest('5.8 Behavioral field and semantic parity between Local and Supabase modes across Profile, Catalog and Booking', async () => {
+  // 1. Local Mode Invocations
+  process.env.VITE_DATA_MODE = 'local';
+  process.env.VITE_LAUNCH_MODE = 'local_pre_live';
+
+  const localProfile = await repositoryFactory.getBusinessProfileRepository().getProfile(TEST_TENANT);
+  const localServices = await repositoryFactory.getCatalogRepository().listServices(TEST_TENANT);
+  const localAppointments = await repositoryFactory.getBookingRepository().listAppointments(TEST_TENANT);
+
+  assertBusinessProfileContract(localProfile, 'Local Mode Invariant');
+  assertServiceContract(localServices[0], 'Local Mode Invariant');
+  assertAppointmentContract(localAppointments[0], 'Local Mode Invariant');
+
+  // 2. Supabase Mode Invocations (via registered mocks)
+  process.env.VITE_DATA_MODE = 'supabase_staging';
+  process.env.VITE_SUPABASE_URL = 'https://fake-staging-ref.supabase.co';
+  process.env.VITE_SUPABASE_ANON_KEY = 'fake-staging-anon-key-001';
+
+  mockFetchResponses.set('/rest/v1/tenant_business_profiles', () => ({
+    json: [{
+      id: 'prof_remote_parity_1',
+      tenant_id: 'tenant_parity_01',
+      public_display_name: 'Parity Salon Supabase',
+      city: 'İstanbul',
+      district: 'Kadıköy',
+      phone: '+905554443322',
+      business_category: 'Beauty',
+      is_public_profile_enabled: true
+    }]
+  }));
+
+  mockFetchResponses.set('/rest/v1/services', () => ({
+    json: [{
+      id: 'srv_remote_parity_1',
+      tenant_id: 'tenant_parity_01',
+      name: 'Fön ve Yıkama',
+      name_tr: 'Fön ve Yıkama',
+      duration: 30,
+      price: 250,
+      image: null,
+      active: true,
+      category: 'Saç'
+    }]
+  }));
+
+  mockFetchResponses.set('/rest/v1/rpc/get_my_tenant_appointments', () => ({
+    json: [{
+      success: true,
+      appointments: [{
+        id: 'apt_remote_parity_1',
+        tenant_id: 'tenant_parity_01',
+        user_id: 'usr_p1',
+        customer_id: 'cust_p1',
+        user_name: 'Kemal Sunal',
+        user_email: 'kemal@example.com',
+        phone: '+905556667788',
+        service_id: 'srv_remote_parity_1',
+        staff_id: 'stf_1',
+        appointment_date: '2026-12-18',
+        appointment_time: '16:00',
+        duration_minutes: 30,
+        status: 'confirmed',
+        notes: null
+      }]
+    }]
+  }));
+
+  const supabaseProfile = await repositoryFactory.getBusinessProfileRepository().getProfile('tenant_parity_01');
+  const supabaseServices = await repositoryFactory.getCatalogRepository().listServices('tenant_parity_01');
+  const supabaseAppointments = await repositoryFactory.getBookingRepository().listAppointments('tenant_parity_01');
+
+  assertBusinessProfileContract(supabaseProfile, 'Supabase Mode Invariant');
+  assertServiceContract(supabaseServices[0], 'Supabase Mode Invariant');
+  assertAppointmentContract(supabaseAppointments[0], 'Supabase Mode Invariant');
+
+  // 3. Behavioral and Semantic Cross-Parity Assertions
+  assert.strictEqual(typeof localProfile.public_display_name, typeof supabaseProfile.public_display_name);
+  assert.strictEqual(typeof localProfile.city, typeof supabaseProfile.city);
+  assert.strictEqual(typeof localServices[0].price, typeof supabaseServices[0].price);
+  assert.strictEqual(typeof localServices[0].duration, typeof supabaseServices[0].duration);
+  assert.strictEqual(typeof localServices[0].active, typeof supabaseServices[0].active);
+  assert.strictEqual(typeof localAppointments[0].status, typeof supabaseAppointments[0].status);
+  assert.strictEqual(typeof localAppointments[0].date, typeof supabaseAppointments[0].date);
+  assert.strictEqual(typeof localAppointments[0].time, typeof supabaseAppointments[0].time);
+  assert.strictEqual(typeof localAppointments[0].durationMinutes, typeof supabaseAppointments[0].durationMinutes);
+});
+
+await runAsyncTest('5.9 Negative Contract: Supabase service catalog missing or renamed price field fails contract validation', async () => {
+  process.env.VITE_DATA_MODE = 'supabase_staging';
+  process.env.VITE_SUPABASE_URL = 'https://fake-staging-ref.supabase.co';
+  process.env.VITE_SUPABASE_ANON_KEY = 'fake-staging-anon-key-001';
+
+  // Temporarily register corrupted service catalog mock with renamed 'amount' instead of 'price'
+  mockFetchResponses.set('/rest/v1/services', () => ({
+    json: [{
+      id: 'srv_corrupted_price',
+      tenant_id: 'tenant_corrupt',
+      name: 'Bozuk Fiyatlı Hizmet',
+      duration: 30,
+      amount: 400, // drift: price is missing
+      active: true,
+      category: 'Test'
+    }]
+  }));
+
+  const catalogRepo = repositoryFactory.getCatalogRepository();
+  const services = await catalogRepo.listServices('tenant_corrupt');
+  assert.strictEqual(services.length, 1);
+  assert.strictEqual(services[0].price, undefined, 'price should be undefined due to schema drift');
+
+  // Assert that asserting the canonical contract fails with an explicit error
+  assert.throws(
+    () => assertServiceContract(services[0], 'Corrupted Service'),
+    /price must be a number/
+  );
+});
+
+await runAsyncTest('5.10 Negative Contract: Supabase booking RPC missing appointment_date or status fails contract validation', async () => {
+  process.env.VITE_DATA_MODE = 'supabase_staging';
+  process.env.VITE_SUPABASE_URL = 'https://fake-staging-ref.supabase.co';
+  process.env.VITE_SUPABASE_ANON_KEY = 'fake-staging-anon-key-001';
+
+  // Temporarily register corrupted booking mock with missing appointment_date and status
+  mockFetchResponses.set('/rest/v1/rpc/get_my_tenant_appointments', () => ({
+    json: [{
+      success: true,
+      appointments: [{
+        id: 'apt_corrupted_date',
+        tenant_id: 'tenant_corrupt',
+        user_id: 'usr_c1',
+        user_name: 'Bozuk Randevu',
+        phone: '+905551112233',
+        service_id: 'srv_1',
+        staff_id: 'stf_1',
+        duration_minutes: 60,
+        slot_day: '2026-12-25', // drift: appointment_date missing
+        time_str: '14:00'
+        // drift: status missing
+      }]
+    }]
+  }));
+
+  const bookingRepo = repositoryFactory.getBookingRepository();
+  const appointments = await bookingRepo.listAppointments('tenant_corrupt');
+  assert.strictEqual(appointments.length, 1);
+  assert.strictEqual(appointments[0].date, undefined, 'date should be undefined due to schema drift');
+
+  // Assert that asserting the canonical contract fails with an explicit error
+  assert.throws(
+    () => assertAppointmentContract(appointments[0], 'Corrupted Appointment'),
+    /date.*must be a string/
+  );
+});
+
+await runAsyncTest('5.11 Negative Contract: Unregistered Supabase endpoints fail closed immediately', async () => {
+  process.env.VITE_DATA_MODE = 'supabase_staging';
+  process.env.VITE_SUPABASE_URL = 'https://fake-staging-ref.supabase.co';
+  process.env.VITE_SUPABASE_ANON_KEY = 'fake-staging-anon-key-001';
+
+  await assert.rejects(
+    async () => {
+      await globalThis.fetch('https://fake-staging-ref.supabase.co/rest/v1/unregistered_mystery_table');
+    },
+    /\[MOCK FETCH ERROR\] Unregistered endpoint intercepted: https:\/\/fake-staging-ref\.supabase\.co\/rest\/v1\/unregistered_mystery_table/
   );
 });
 
