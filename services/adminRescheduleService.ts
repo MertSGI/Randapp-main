@@ -83,6 +83,14 @@ export const adminRescheduleService = {
           reasonCode: res?.reason_code || 'unknown_error',
           requests: Array.isArray(res?.requests) ? res.requests : []
         };
+      } else {
+        const { appointmentSelfServiceService } = await import('./appointmentSelfServiceService');
+        const res = await appointmentSelfServiceService.adminListPendingRescheduleRequests(params);
+        return {
+          success: res.success,
+          reasonCode: res.reasonCode,
+          requests: (res.requests as PendingRescheduleRequestItem[]) || []
+        };
       }
     } catch (err: any) {
       console.error('[adminRescheduleService] listPendingRescheduleRequests exception:', err);
@@ -124,7 +132,8 @@ export const adminRescheduleService = {
 
     try {
       if (getDataSourceMode() === 'supabase') {
-        const idempotencyKey = params.idempotencyKey || `admin_dec_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const { generateSecureId } = await import('./appointmentSelfServiceService');
+        const idempotencyKey = params.idempotencyKey || generateSecureId('admin_dec_');
         const { data, error } = await supabase.rpc('admin_decide_reschedule_request', {
           p_change_request_id: params.changeRequestId,
           p_decision: params.decision,
@@ -157,6 +166,14 @@ export const adminRescheduleService = {
           appointmentTime: res?.appointment_time,
           requestStatus: res?.request_status,
           appointmentStatus: res?.appointment_status,
+          message: msg
+        };
+      } else {
+        const { appointmentSelfServiceService } = await import('./appointmentSelfServiceService');
+        const res = await appointmentSelfServiceService.adminDecideRescheduleRequest(params);
+        const msg = mapAdminDecisionReasonCodeToMessage(res.reasonCode, params.decision);
+        return {
+          ...res,
           message: msg
         };
       }

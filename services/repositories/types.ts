@@ -142,6 +142,15 @@ export interface SelfServiceRepository {
   listChangeRequests(tenantId: string): Promise<any[]>;
   createChangeRequest(tenantId: string, input: any): Promise<any>;
   updateChangeRequest(requestId: string, patch: any): Promise<void>;
+  listPendingRescheduleRequests?(tenantId?: string): Promise<any[]>;
+  decideRescheduleRequest?(params: {
+    tenantId?: string;
+    changeRequestId: string;
+    decision: 'approved' | 'rejected';
+    reason?: string;
+    actorId?: string;
+    idempotencyKey?: string;
+  }): Promise<any>;
 }
 
 export interface CommunicationOutboxRepository {

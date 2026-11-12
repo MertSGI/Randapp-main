@@ -1040,6 +1040,14 @@ export const appointmentSelfServiceService = {
           reasonCode: res?.reason_code || 'unknown_error',
           requests: res?.requests || []
         };
+      } else {
+        const repo = getSelfServiceRepository() as any;
+        if (repo && typeof repo.listPendingRescheduleRequests === 'function') {
+          const tenantId = (params as any)?.tenantId;
+          const reqs = await repo.listPendingRescheduleRequests(tenantId);
+          return { success: true, reasonCode: 'ok', requests: reqs };
+        }
+        return { success: true, reasonCode: 'ok', requests: [] };
       }
     } catch (e: any) {
       console.error('[appointmentSelfServiceService] adminListPendingRescheduleRequests exception:', e);
@@ -1107,6 +1115,11 @@ export const appointmentSelfServiceService = {
           requestStatus: res?.request_status,
           appointmentStatus: res?.appointment_status
         };
+      } else {
+        const repo = getSelfServiceRepository() as any;
+        if (repo && typeof repo.decideRescheduleRequest === 'function') {
+          return await repo.decideRescheduleRequest(params);
+        }
       }
     } catch (e: any) {
       console.error('[appointmentSelfServiceService] adminDecideRescheduleRequest exception:', e);
