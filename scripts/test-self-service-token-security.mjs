@@ -1008,26 +1008,47 @@ try {
     await db.query(`RESET ROLE;`);
   });
 
-  await runAsyncTest('8.10. [GERÇEK DB - FINDING-004] Paralel sorgu yarış durumunda (concurrency) veritabanı kilit mekanizması fail-closed çalışır', async () => {
+  await runAsyncTest('8.10. [GERÇEK DB - FINDING-005] Çoklu bağlantılı paralel sorgu yarış durumunda (concurrency) advisory lock devrededir: en fazla ilk 5 geçersiz çağrı işlenir, kalanlar ve takip sorguları TOKEN_LOOKUP_RATE_LIMITED döner', async () => {
     const db = await getDisposablePgEngine();
     const concurrentIp = '198.51.100.77';
-    await db.query(`SELECT set_config('request.headers', $1, false)`, [JSON.stringify({ 'x-forwarded-for': concurrentIp })]);
-    
-    const promises = [];
+
+    // 10 ayrı bağımsız TCP bağlantısı açarak gerçek eşzamanlı oturumlar oluştur
+    const swarm = [];
     for (let i = 0; i < 10; i++) {
-      promises.push(db.query(`
-        SELECT public.get_public_appointment_by_manage_token($1) AS result
-      `, [`apt_tok_concurrent_db_${i}_123456789012345678901234567890`]));
+      const c = embeddedPg.getPgClient('postgres', '127.0.0.1');
+      await c.connect();
+      await c.query(`SELECT set_config('request.headers', $1, false)`, [JSON.stringify({ 'x-forwarded-for': concurrentIp })]);
+      swarm.push(c);
     }
-    const dbResults = await Promise.all(promises);
-    assert.strictEqual(dbResults.length, 10, 'Tüm 10 paralel sorgu tamamlandı');
-    
-    // Follow-up query MUST be firmly locked
-    const followUpDb = await db.query(`
-      SELECT public.get_public_appointment_by_manage_token('apt_tok_concurrent_followup_12345678901234567890') AS result
-    `);
-    assert.strictEqual(followUpDb.rows[0].result.success, false);
-    assert.strictEqual(followUpDb.rows[0].result.reason_code, 'TOKEN_LOOKUP_RATE_LIMITED', 'Paralel yarış sonrası veritabanı TOKEN_LOOKUP_RATE_LIMITED ile kilitli olmalıdır');
+
+    try {
+      // 10 ayrı TCP bağlantısından eşzamanlı olarak farklı geçersiz tokenlar gönder
+      const results = await Promise.all(swarm.map((c, idx) => {
+        return c.query(`
+          SELECT public.get_public_appointment_by_manage_token($1) AS result
+        `, [`apt_tok_concurrent_swarm_${idx}_123456789012345678901234567890`]).then(r => r.rows[0].result);
+      }));
+
+      assert.strictEqual(results.length, 10, 'Tüm 10 paralel sorgu tamamlandı');
+      
+      const invalidTokenCount = results.filter(r => r.reason_code === 'invalid_token').length;
+      const rateLimitedCount = results.filter(r => r.reason_code === 'TOKEN_LOOKUP_RATE_LIMITED').length;
+
+      // İşlenen geçersiz token sayısı en fazla 5 olmalıdır; kalanlar derhal kilitlenmelidir
+      assert.ok(invalidTokenCount <= 5, `Geçersiz token sayısı en fazla 5 olmalı, gerçek: ${invalidTokenCount}`);
+      assert.ok(rateLimitedCount >= 5, `Kilitlenen sorgu sayısı en az 5 olmalı, gerçek: ${rateLimitedCount}`);
+      assert.strictEqual(invalidTokenCount + rateLimitedCount, 10, 'Tüm sonuçlar invalid_token veya TOKEN_LOOKUP_RATE_LIMITED olmalıdır');
+
+      // Takip sorgusu da kilitli kalmalıdır
+      await db.query(`SELECT set_config('request.headers', $1, false)`, [JSON.stringify({ 'x-forwarded-for': concurrentIp })]);
+      const followUp = await db.query(`
+        SELECT public.get_public_appointment_by_manage_token('apt_tok_concurrent_followup_12345678901234567890') AS result
+      `);
+      assert.strictEqual(followUp.rows[0].result.success, false);
+      assert.strictEqual(followUp.rows[0].result.reason_code, 'TOKEN_LOOKUP_RATE_LIMITED', 'Takip sorgusu TOKEN_LOOKUP_RATE_LIMITED olarak kilitli kalmalıdır');
+    } finally {
+      await Promise.all(swarm.map(c => c.end().catch(() => {})));
+    }
   });
 
 } finally {

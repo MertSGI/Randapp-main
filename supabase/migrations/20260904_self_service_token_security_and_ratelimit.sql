@@ -311,6 +311,21 @@ BEGIN
     v_server_ip := public.resolve_self_service_client_ip(p_client_ip);
     v_clean_fp  := NULLIF(trim(lower(p_client_fingerprint)), '');
 
+    -- Step 1.5: Acquire transaction-scoped advisory locks in deterministic order to prevent concurrency races & deadlocks
+    IF v_server_ip IS NOT NULL AND v_clean_fp IS NOT NULL THEN
+        IF hashtext('self_service_ip:' || v_server_ip) < hashtext('self_service_fp:' || v_clean_fp) THEN
+            PERFORM pg_advisory_xact_lock(hashtext('self_service_ip:' || v_server_ip));
+            PERFORM pg_advisory_xact_lock(hashtext('self_service_fp:' || v_clean_fp));
+        ELSE
+            PERFORM pg_advisory_xact_lock(hashtext('self_service_fp:' || v_clean_fp));
+            PERFORM pg_advisory_xact_lock(hashtext('self_service_ip:' || v_server_ip));
+        END IF;
+    ELSIF v_server_ip IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtext('self_service_ip:' || v_server_ip));
+    ELSIF v_clean_fp IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtext('self_service_fp:' || v_clean_fp));
+    END IF;
+
     -- Step 2: Enforce Rate Limiting & Lockout
     v_rate_check := public.check_self_service_token_rate_limit(v_server_ip, v_clean_fp);
     IF NOT (v_rate_check->>'allowed')::boolean THEN
