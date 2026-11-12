@@ -1049,11 +1049,13 @@ try {
       assert.strictEqual(followUp.rows[0].result.reason_code, 'TOKEN_LOOKUP_RATE_LIMITED', 'Takip sorgusu TOKEN_LOOKUP_RATE_LIMITED olarak kilitli kalmalıdır');
     } finally {
       await Promise.all(swarm.map(c => c.end().catch(() => {})));
+      await db.query(`SELECT set_config('request.headers', '', false)`);
     }
   });
 
   await runAsyncTest('8.11. [GERÇEK DB - FINDING-006] Tenant A randevusuna Tenant B ye ait yabancı service_id, staff_id veya branch_id bağlansa dahi Tenant B verisi sızdırılmaz (tenant izolasyonu)', async () => {
     const db = await getDisposablePgEngine();
+    await db.query(`SELECT set_config('request.headers', '', false)`);
 
     // 1. Tenant A (Meşru kiracı) ve Tenant B (Yabancı/Kurban kiracı) oluştur
     const tA = await db.query(`
