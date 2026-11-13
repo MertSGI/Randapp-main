@@ -124,13 +124,15 @@ globalThis.fetch = async (url, options = {}) => {
         reqHeaders['host'] = explicitHost;
         reqHeaders['x-forwarded-host'] = explicitHost;
       }
+      reqHeaders['connection'] = 'close';
 
       const req = http.request({
         hostname: parsedUrl.hostname,
         port: parsedUrl.port,
         path: parsedUrl.pathname + parsedUrl.search,
         method: options.method || 'GET',
-        headers: reqHeaders
+        headers: reqHeaders,
+        agent: false
       }, (res) => {
         const chunks = [];
         res.on('data', chunk => chunks.push(chunk));
@@ -154,6 +156,9 @@ globalThis.fetch = async (url, options = {}) => {
         });
       });
 
+      req.setTimeout(10000, () => {
+        req.destroy(new Error('Local loopback HTTP request timed out after 10s'));
+      });
       req.on('error', reject);
       if (options.body) {
         req.write(typeof options.body === 'string' ? options.body : JSON.stringify(options.body));
@@ -205,6 +210,20 @@ function runTest(name, fn) {
   }
 }
 
+let pgEngine = null;
+let pgClient = null;
+let disposableTmpDir = null;
+
+async function cleanupDbSilently() {
+  if (pgClient) {
+    const clientToClose = pgClient;
+    pgClient = null;
+    try {
+      await clientToClose.close();
+    } catch {}
+  }
+}
+
 async function runAsyncTest(name, fn) {
   totalTests++;
   try {
@@ -213,6 +232,7 @@ async function runAsyncTest(name, fn) {
     passedTests++;
   } catch (err) {
     console.error(`  ❌ [FAIL] ${name}: ${err.message}`);
+    await cleanupDbSilently();
     process.exit(1);
   }
 }
@@ -385,17 +405,17 @@ function createAuthenticatedApiHandler(options) {
     const callerRole = claims.role || claims.app_metadata?.role || 'authenticated';
 
     // Parse URL path and query
-    let path = req.url || '/';
+    let reqPath = req.url || '/';
     let searchParams = null;
     try {
-      const parsed = new URL(path, 'http://localhost');
-      path = parsed.pathname;
+      const parsed = new URL(reqPath, 'http://localhost');
+      reqPath = parsed.pathname;
       searchParams = parsed.searchParams;
     } catch {
-      const qIdx = path.indexOf('?');
+      const qIdx = reqPath.indexOf('?');
       if (qIdx !== -1) {
-        searchParams = new URLSearchParams(path.slice(qIdx + 1));
-        path = path.slice(0, qIdx);
+        searchParams = new URLSearchParams(reqPath.slice(qIdx + 1));
+        reqPath = reqPath.slice(0, qIdx);
       }
     }
 
@@ -420,10 +440,10 @@ function createAuthenticatedApiHandler(options) {
 
     // 1. Host and Tenant Boundary Enforcement for Tenant-Scoped Endpoints
     const isTenantScopedEndpoint =
-      path.startsWith('/api/') ||
-      path.startsWith('/rest/v1/') ||
-      path === '/api' ||
-      path === '/rest/v1';
+      reqPath.startsWith('/api/') ||
+      reqPath.startsWith('/rest/v1/') ||
+      reqPath === '/api' ||
+      reqPath === '/rest/v1';
 
     if (isTenantScopedEndpoint && callerRole !== 'super_admin') {
       if (hostTenant && hostTenant.id !== 'tenant_demo') {
@@ -482,6 +502,8 @@ function startAuthenticatedApiServer(options) {
       });
     });
 
+    server.on('error', reject);
+
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address();
       if (!addr || typeof addr === 'string') {
@@ -495,12 +517,26 @@ function startAuthenticatedApiServer(options) {
         port,
         url,
         close: () => new Promise((resClose) => {
-          server.close(() => resClose());
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            resClose();
+          };
+          const timer = setTimeout(() => {
+            try { server.closeAllConnections?.(); } catch {}
+            finish();
+          }, 2000);
+          timer.unref?.();
+          try { server.closeIdleConnections?.(); } catch {}
+          server.close(() => {
+            clearTimeout(timer);
+            finish();
+          });
+          try { server.closeAllConnections?.(); } catch {}
         })
       });
     });
-
-    server.on('error', reject);
   });
 }
 
@@ -1068,42 +1104,72 @@ function getAvailablePort() {
   });
 }
 
-let pgEngine = null;
-let pgClient = null;
-let disposableTmpDir = null;
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
+    timer.unref?.();
+    Promise.resolve(promise).then(
+      (val) => {
+        clearTimeout(timer);
+        if (!settled) {
+          settled = true;
+          resolve(val);
+        }
+      },
+      (err) => {
+        clearTimeout(timer);
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
+      }
+    );
+  });
+}
 
 async function getDisposablePg() {
   if (pgClient) return pgClient;
 
-  // Primary: Attempt isolated native EmbeddedPostgres
+  // Primary: Attempt isolated native EmbeddedPostgres with bounded startup/shutdown timeouts
+  let pg = null;
   try {
     const port = await getAvailablePort();
     disposableTmpDir = path.join(os.tmpdir(), `pg_lari_cross_tenant_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`);
     fs.mkdirSync(disposableTmpDir, { recursive: true });
 
-    const pg = new EmbeddedPostgres({
+    pg = new EmbeddedPostgres({
       databaseDir: disposableTmpDir,
       port,
       user: 'postgres',
       password: 'password',
-      initdbFlags: ['--locale=C', '--encoding=UTF8'],
+      initdbFlags: ['--locale=C', '--encoding=UTF8', '--no-sync'],
+      postgresFlags: ['-F'],
       persistent: false
     });
-    await pg.initialise();
-    await pg.start();
+    await withTimeout(pg.initialise(), 35000, 'EmbeddedPostgres.initialise');
+    await withTimeout(pg.start(), 25000, 'EmbeddedPostgres.start');
     pgEngine = pg;
 
-    const rawClient = pg.getPgClient();
-    await rawClient.connect();
-    await rawClient.query(`ALTER DATABASE postgres SET synchronous_commit = 'off'; SET synchronous_commit = 'off';`);
+    const rawClient = pg.getPgClient('postgres', '127.0.0.1');
+    await withTimeout(rawClient.connect(), 10000, 'EmbeddedPostgres.connect');
+    await withTimeout(
+      rawClient.query(`ALTER DATABASE postgres SET synchronous_commit = 'off'; SET synchronous_commit = 'off';`),
+      10000,
+      'EmbeddedPostgres.synchronous_commit'
+    );
 
     pgClient = {
       engineType: 'EmbeddedPostgres (Real PostgreSQL 17 engine)',
       query: async (sql, params = []) => rawClient.query(sql, params),
       exec: async (sql) => { await rawClient.query(sql); },
       close: async () => {
-        try { await rawClient.end(); } catch {}
-        try { await pg.stop(); } catch {}
+        try { await withTimeout(rawClient.end(), 3000, 'pgClient.end'); } catch {}
+        try { await withTimeout(pg.stop(), 5000, 'EmbeddedPostgres.stop'); } catch {}
         if (disposableTmpDir && fs.existsSync(disposableTmpDir)) {
           try { fs.rmSync(disposableTmpDir, { recursive: true, force: true }); } catch {}
         }
@@ -1111,9 +1177,22 @@ async function getDisposablePg() {
     };
     return pgClient;
   } catch (err) {
+    if (pg) {
+      try { await withTimeout(pg.stop(), 3000, 'EmbeddedPostgres.cleanupStop'); } catch {}
+    }
+    if (disposableTmpDir && fs.existsSync(disposableTmpDir)) {
+      try { fs.rmSync(disposableTmpDir, { recursive: true, force: true }); } catch {}
+    }
     console.warn(`[INFO] Native PostgreSQL process init deferred (${err.message}). Using in-process PGlite PostgreSQL engine...`);
-    const { PGlite } = await import('@electric-sql/pglite');
-    const pgliteDb = new PGlite();
+    const [{ PGlite }, { uuid_ossp }, { pgcrypto }] = await Promise.all([
+      import('@electric-sql/pglite'),
+      import('@electric-sql/pglite/contrib/uuid_ossp'),
+      import('@electric-sql/pglite/contrib/pgcrypto')
+    ]);
+    const pgliteDb = new PGlite({
+      extensions: { uuid_ossp, pgcrypto }
+    });
+    await withTimeout(pgliteDb.waitReady, 15000, 'PGlite.waitReady');
     pgClient = {
       engineType: 'PGlite (Real WebAssembly PostgreSQL engine)',
       query: async (sql, params = []) => {
@@ -1127,7 +1206,7 @@ async function getDisposablePg() {
         await pgliteDb.exec(sql);
       },
       close: async () => {
-        try { await pgliteDb.close(); } catch {}
+        try { await withTimeout(pgliteDb.close(), 3000, 'PGlite.close'); } catch {}
       }
     };
     return pgClient;
