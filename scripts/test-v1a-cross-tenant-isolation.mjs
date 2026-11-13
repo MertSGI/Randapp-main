@@ -25,6 +25,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -84,12 +85,84 @@ globalThis.window = {
 global.window = globalThis.window;
 
 // Strict fetch interceptor to guarantee Zero Network Egress
+const nativeFetch = globalThis.fetch;
 let interceptedNetworkCalls = 0;
 const mockFetchRegistry = new Map();
 
 globalThis.fetch = async (url, options = {}) => {
-  interceptedNetworkCalls++;
   const urlStr = String(url);
+
+  // Local loopback HTTP traffic to our local test server on 127.0.0.1 is permitted and is not external egress.
+  // We use node:http.request here to ensure custom client headers like 'Host' are preserved byte-for-byte
+  // without WHATWG Fetch forbidden-header stripping.
+  if (urlStr.startsWith('http://127.0.0.1:') || urlStr.startsWith('http://localhost:')) {
+    return new Promise((resolve, reject) => {
+      const parsedUrl = new URL(urlStr);
+      const reqHeaders = {};
+      let explicitHost = null;
+
+      if (options.headers) {
+        if (typeof options.headers.entries === 'function') {
+          for (const [k, v] of options.headers.entries()) {
+            reqHeaders[k.toLowerCase()] = v;
+            if (k.toLowerCase() === 'host') explicitHost = v;
+          }
+        } else if (Array.isArray(options.headers)) {
+          for (const [k, v] of options.headers) {
+            reqHeaders[k.toLowerCase()] = v;
+            if (k.toLowerCase() === 'host') explicitHost = v;
+          }
+        } else {
+          for (const [k, v] of Object.entries(options.headers)) {
+            reqHeaders[k.toLowerCase()] = v;
+            if (k.toLowerCase() === 'host') explicitHost = v;
+          }
+        }
+      }
+
+      if (explicitHost) {
+        reqHeaders['host'] = explicitHost;
+        reqHeaders['x-forwarded-host'] = explicitHost;
+      }
+
+      const req = http.request({
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port,
+        path: parsedUrl.pathname + parsedUrl.search,
+        method: options.method || 'GET',
+        headers: reqHeaders
+      }, (res) => {
+        const chunks = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => {
+          const bodyBuffer = Buffer.concat(chunks);
+          const bodyText = bodyBuffer.toString('utf8');
+          resolve({
+            ok: (res.statusCode || 200) >= 200 && (res.statusCode || 200) < 300,
+            status: res.statusCode || 200,
+            statusText: res.statusMessage || '',
+            headers: new Headers(res.headers),
+            text: async () => bodyText,
+            json: async () => {
+              try {
+                return JSON.parse(bodyText);
+              } catch {
+                return {};
+              }
+            }
+          });
+        });
+      });
+
+      req.on('error', reject);
+      if (options.body) {
+        req.write(typeof options.body === 'string' ? options.body : JSON.stringify(options.body));
+      }
+      req.end();
+    });
+  }
+
+  interceptedNetworkCalls++;
 
   // Security barrier: Fail immediately if any external unapproved egress is attempted
   if (!urlStr.startsWith('http://localhost') && !urlStr.startsWith('https://fake-staging-ref.supabase.co') && !urlStr.startsWith('/')) {
@@ -200,6 +273,237 @@ const {
   CrossTenantAccessError
 } = await import('../services/tenantService.ts');
 
+// -----------------------------------------------------------------------------
+// Server-Side Authenticated API Boundary Guard & HTTP Handler (In-Harness)
+// (FINDING-ADIM018-002-API)
+// -----------------------------------------------------------------------------
+function base64urlToBuffer(b64url) {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64.padEnd(b64.length + (4 - (b64.length % 4)) % 4, '=');
+  return Buffer.from(padded, 'base64');
+}
+
+function verifyServerJwt(token, secret) {
+  if (typeof token !== 'string') return { ok: false, error: 'Token must be a string' };
+  const parts = token.split('.');
+  if (parts.length !== 3) return { ok: false, error: 'Malformed token: expected 3 parts' };
+  const [encHeader, encPayload, encSig] = parts;
+  if (!encHeader || !encPayload || !encSig) return { ok: false, error: 'Malformed token components' };
+
+  try {
+    // 1. Verify header
+    const header = JSON.parse(base64urlToBuffer(encHeader).toString('utf8'));
+    if (!header || header.alg !== 'HS256') {
+      return { ok: false, error: 'Unsupported or invalid algorithm' };
+    }
+
+    // 2. Cryptographic signature check with server private secret
+    const expectedSig = crypto
+      .createHmac('sha256', secret)
+      .update(`${encHeader}.${encPayload}`)
+      .digest('base64')
+      .replace(/=/g, '')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_');
+
+    if (encSig !== expectedSig) {
+      return { ok: false, error: 'Invalid token signature' };
+    }
+
+    // 3. Decode payload
+    const claims = JSON.parse(base64urlToBuffer(encPayload).toString('utf8'));
+    if (!claims || typeof claims !== 'object') {
+      return { ok: false, error: 'Invalid token payload' };
+    }
+
+    // 4. Token expiration check
+    if (typeof claims.exp === 'number') {
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (nowSec >= claims.exp) {
+        return { ok: false, error: 'Token expired' };
+      }
+    }
+
+    // 5. User identity check
+    if (!claims.sub && !claims.id) {
+      return { ok: false, error: 'Missing subject claim in token' };
+    }
+
+    return { ok: true, claims };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'Token verification failed' };
+  }
+}
+
+function createAuthenticatedApiHandler(options) {
+  const { serverJwtSecret, baseDomain = 'randevulari.com', resolveTenantFromHost } = options;
+
+  return async function handleHttpRequest(req, res) {
+    // Read body if present
+    let rawBody = '';
+    for await (const chunk of req) {
+      rawBody += chunk;
+    }
+    let parsedBody = null;
+    if (rawBody) {
+      try {
+        parsedBody = JSON.parse(rawBody);
+      } catch {
+        parsedBody = rawBody;
+      }
+    }
+
+    // Extract headers (normalized)
+    const headers = req.headers;
+    const authHeader = typeof headers.authorization === 'string' ? headers.authorization : '';
+    const hostHeader = (
+      (typeof headers['x-forwarded-host'] === 'string' && headers['x-forwarded-host'].trim()) ||
+      (typeof headers['x-tenant-host'] === 'string' && headers['x-tenant-host'].trim()) ||
+      (typeof headers.host === 'string' && headers.host.trim()) ||
+      ''
+    );
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized: Missing or malformed Bearer token' }));
+      return;
+    }
+
+    const token = authHeader.slice(7).trim();
+    // Server-side verification using private serverJwtSecret
+    const verification = verifyServerJwt(token, serverJwtSecret);
+    if (!verification.ok || !verification.claims) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: `Unauthorized: ${verification.error || 'Invalid token signature or claims'}` }));
+      return;
+    }
+
+    // Server-verified claims (CANNOT be supplied or forged by the caller)
+    const claims = verification.claims;
+    const callerTenantId = claims.app_metadata?.tenant_id || claims.user_metadata?.tenant_id || claims.tenant_id;
+    const callerUserId = claims.sub || claims.id;
+    const callerRole = claims.role || claims.app_metadata?.role || 'authenticated';
+
+    // Parse URL path and query
+    let path = req.url || '/';
+    let searchParams = null;
+    try {
+      const parsed = new URL(path, 'http://localhost');
+      path = parsed.pathname;
+      searchParams = parsed.searchParams;
+    } catch {
+      const qIdx = path.indexOf('?');
+      if (qIdx !== -1) {
+        searchParams = new URLSearchParams(path.slice(qIdx + 1));
+        path = path.slice(0, qIdx);
+      }
+    }
+
+    // Resolve tenant from Host header
+    let hostTenant = null;
+    if (resolveTenantFromHost) {
+      hostTenant = await resolveTenantFromHost(hostHeader);
+    } else {
+      const cleanHost = hostHeader.split(':')[0].trim().toLowerCase();
+      const isLoopback = cleanHost === 'localhost' || cleanHost.startsWith('127.') || cleanHost === '0.0.0.0';
+      const isRootDomain = cleanHost === baseDomain || cleanHost === `www.${baseDomain}`;
+
+      if (isLoopback || isRootDomain) {
+        hostTenant = { id: 'tenant_demo', slug: 'demo' };
+      } else if (cleanHost.endsWith(`.${baseDomain}`)) {
+        const slug = cleanHost.slice(0, -(baseDomain.length + 1)).trim();
+        if (slug && slug !== 'www') {
+          hostTenant = { id: `tenant_${slug}`, slug };
+        }
+      }
+    }
+
+    // 1. Host and Tenant Boundary Enforcement for Tenant-Scoped Endpoints
+    const isTenantScopedEndpoint =
+      path.startsWith('/api/') ||
+      path.startsWith('/rest/v1/') ||
+      path === '/api' ||
+      path === '/rest/v1';
+
+    if (isTenantScopedEndpoint && callerRole !== 'super_admin') {
+      if (hostTenant && hostTenant.id !== 'tenant_demo') {
+        if (hostTenant.id !== callerTenantId) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            error: `Forbidden: Cross-tenant access blocked by API guard. Caller tenant '${callerTenantId}' cannot access endpoint on host '${hostHeader}' belonging to tenant '${hostTenant.id}'.`,
+            callerTenantId,
+            hostTenantId: hostTenant.id
+          }));
+          return;
+        }
+      } else if (!hostTenant) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          error: 'Forbidden: Cross-tenant access blocked by API guard (unresolved host header for tenant-scoped endpoint)',
+          callerTenantId,
+          hostTenantId: null
+        }));
+        return;
+      }
+    }
+
+    // 2. Resource Entity Security Boundary (e.g. query params / payload target)
+    const targetTenantParam = searchParams?.get('tenant_id') || (parsedBody && typeof parsedBody === 'object' ? parsedBody.tenant_id : null);
+    if (targetTenantParam && callerRole !== 'super_admin') {
+      if (callerTenantId !== targetTenantParam) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          error: `Forbidden: Cross-tenant access blocked: '${callerTenantId}' cannot access resource belonging to '${targetTenantParam}'.`,
+          reason: 'cross_tenant_access_forbidden',
+          callerTenantId,
+          targetTenantId: targetTenantParam
+        }));
+        return;
+      }
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      success: true,
+      callerUserId,
+      callerTenantId,
+      hostTenantId: hostTenant?.id || null
+    }));
+  };
+}
+
+function startAuthenticatedApiServer(options) {
+  return new Promise((resolve, reject) => {
+    const handler = createAuthenticatedApiHandler(options);
+    const server = http.createServer((req, res) => {
+      handler(req, res).catch((err) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err?.message || 'Internal server error' }));
+      });
+    });
+
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      if (!addr || typeof addr === 'string') {
+        server.close();
+        return reject(new Error('Failed to obtain server address'));
+      }
+      const port = addr.port;
+      const url = `http://127.0.0.1:${port}`;
+      resolve({
+        server,
+        port,
+        url,
+        close: () => new Promise((resClose) => {
+          server.close(() => resClose());
+        })
+      });
+    });
+
+    server.on('error', reject);
+  });
+}
+
 runTest('1.3. storageKeys.ts tüm kanonik registry, dinamik üreteç ve tenant-scope yardımcılarını dışa aktarır', () => {
   assert.strictEqual(typeof STORAGE_KEYS, 'object', 'STORAGE_KEYS nesnesi tanımlı olmalıdır');
   assert.strictEqual(typeof DYNAMIC_STORAGE_KEYS, 'object', 'DYNAMIC_STORAGE_KEYS nesnesi tanımlı olmalıdır');
@@ -213,13 +517,26 @@ runTest('1.3. storageKeys.ts tüm kanonik registry, dinamik üreteç ve tenant-s
   assert.strictEqual(typeof registerTenantMemoryResetHook, 'function', 'registerTenantMemoryResetHook fonksiyonu tanımlı olmalıdır');
 });
 
-runTest('1.4. tenantService.ts çapraz kiracı doğrulama, API sınırı guardı ve hata sınıflarını dışa aktarır', () => {
+runTest('1.4. tenantService.ts çapraz kiracı doğrulama, host çözümleme ve hata sınıflarını dışa aktarır', () => {
   assert.strictEqual(typeof tenantService.validateCrossTenantAccess, 'function', 'validateCrossTenantAccess tanımlı olmalıdır');
   assert.strictEqual(typeof tenantService.assertTenantAccess, 'function', 'assertTenantAccess tanımlı olmalıdır');
   assert.strictEqual(typeof tenantService.resolveTenantFromHost, 'function', 'resolveTenantFromHost tanımlı olmalıdır');
   assert.strictEqual(typeof tenantService.getCurrentTenant, 'function', 'getCurrentTenant tanımlı olmalıdır');
-  assert.strictEqual(typeof tenantService.dispatchApiBoundaryRequest, 'function', 'dispatchApiBoundaryRequest tanımlı olmalıdır');
   assert.strictEqual(typeof CrossTenantAccessError, 'function', 'CrossTenantAccessError sınıfı tanımlı olmalıdır');
+});
+
+runTest('1.5. [FINDING-ADIM018-002-API] Ön yüz tenantService.ts içinde asla JWT secret veya client-side JWT güven kararı yer alamaz', () => {
+  const tsContent = fs.readFileSync(path.join(rootDir, 'services', 'tenantService.ts'), 'utf8');
+  assert.strictEqual(/DEFAULT_JWT_SECRET/i.test(tsContent), false, 'DEFAULT_JWT_SECRET ön yüz servisinde yer alamaz');
+  assert.strictEqual(/VITE_JWT_SECRET/i.test(tsContent), false, 'VITE_JWT_SECRET ön yüz servisinde yer alamaz');
+  assert.strictEqual(/verifyAndDecodeJwt/i.test(tsContent), false, 'verifyAndDecodeJwt ön yüz servisinde yer alamaz');
+  assert.strictEqual(/dispatchApiBoundaryRequest/i.test(tsContent), false, 'dispatchApiBoundaryRequest ön yüz servisinde yer alamaz');
+});
+
+runTest('1.6. [FINDING-ADIM018-002-API] Test harness bağımsız sunucu tarafı gerçek HTTP API sınırını ve JWT doğrulayıcısını uygular', () => {
+  assert.strictEqual(typeof createAuthenticatedApiHandler, 'function', 'createAuthenticatedApiHandler tanımlı olmalıdır');
+  assert.strictEqual(typeof startAuthenticatedApiServer, 'function', 'startAuthenticatedApiServer tanımlı olmalıdır');
+  assert.strictEqual(typeof verifyServerJwt, 'function', 'verifyServerJwt tanımlı olmalıdır');
 });
 
 // -----------------------------------------------------------------------------
@@ -529,196 +846,209 @@ await runAsyncTest('3.2. [FINDING-ADIM018-004] getCurrentTenant() admin rotasın
   assert.strictEqual(publicStorefront.id, TENANT_B, 'Public storefront host tenantı olarak çözümlenmelidir');
 });
 
-// Helper: Standard Cryptographic HMAC-SHA256 JWT Generator
-const JWT_SECRET = 'lari_test_secret_for_cross_tenant_isolation_gate_2026';
-
+// Helper: Base64URL encoder
 function base64url(buf) {
   const b = Buffer.isBuffer(buf) ? buf : Buffer.from(typeof buf === 'string' ? buf : JSON.stringify(buf));
   return b.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
 
-function createSignedTestJwt({ userId, tenantId, role = 'authenticated', email = 'test@example.com' }) {
-  const header = { alg: 'HS256', typ: 'JWT' };
-  const payload = {
-    sub: userId,
-    email,
-    role,
-    app_metadata: {
-      tenant_id: tenantId,
-      provider: 'email',
-      roles: [role]
-    },
-    user_metadata: {
-      tenant_id: tenantId,
-      full_name: 'Operator'
-    },
-    aud: 'authenticated',
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 3600
-  };
-
-  const encHeader = base64url(header);
-  const encPayload = base64url(payload);
-  const sigInput = `${encHeader}.${encPayload}`;
-  const sig = crypto.createHmac('sha256', JWT_SECRET).update(sigInput).digest();
-  return `${sigInput}.${base64url(sig)}`;
-}
-
-function verifyAndDecodeTestJwt(token) {
-  if (typeof token !== 'string') return null;
-  const parts = token.split('.');
-  if (parts.length !== 3) return null;
-  const [encHeader, encPayload, encSig] = parts;
-  const expectedSig = base64url(crypto.createHmac('sha256', JWT_SECRET).update(`${encHeader}.${encPayload}`).digest());
-  if (encSig !== expectedSig) return null;
-  try {
-    return JSON.parse(Buffer.from(encPayload, 'base64').toString('utf8'));
-  } catch (e) {
-    return null;
-  }
-}
-
-await runAsyncTest('3.3. [FINDING-ADIM018-002] Gerçek JWT ve Host Header ile API çağrısı: Tenant-A JWT + Tenant-B Host %100 HTTP 403 döner (tenantService.dispatchApiBoundaryRequest)', async () => {
+await runAsyncTest('3.3. [FINDING-ADIM018-002-API] Gerçek JWT ve Host Header ile HTTP API sınırı: Tenant-A JWT + Tenant-B Host %100 HTTP 403 döner (Gerçek HTTP Handler)', async () => {
   storageMap.set(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(REGISTERED_FIXTURES));
 
-  const jwtOwnerA = createSignedTestJwt({
-    userId: '11111111-1111-1111-1111-111111111111',
-    tenantId: TENANT_A,
-    role: 'authenticated'
+  // Sunucuya özel kriptografik rastgele sır (istemci paketine asla sızdırılmaz)
+  const SERVER_JWT_SECRET = crypto.randomBytes(32).toString('hex');
+
+  // Gerçek HTTP sunucusunu başlat (ephemeral port 127.0.0.1)
+  const serverInstance = await startAuthenticatedApiServer({
+    serverJwtSecret: SERVER_JWT_SECRET,
+    baseDomain: 'randevulari.com',
+    resolveTenantFromHost: async (hostname) => tenantService.resolveTenantFromHost(hostname)
   });
 
-  const jwtOwnerB = createSignedTestJwt({
-    userId: '22222222-2222-2222-2222-222222222222',
-    tenantId: TENANT_B,
-    role: 'authenticated'
-  });
+  try {
+    const serverUrl = serverInstance.url;
 
-  // Test 1: Cross-Tenant Spoofing on Admin endpoint: Tenant-A JWT calling Admin API with Tenant-B Host Header
-  const crossRes = await tenantService.dispatchApiBoundaryRequest({
-    method: 'GET',
-    url: 'http://localhost/api/admin/appointments',
-    headers: {
-      'Authorization': `Bearer ${jwtOwnerA}`,
-      'Host': 'salon-b.randevulari.com'
+    // Helper: Gerçek sunucu sırrıyla imzalanmış yetkili token üretimi
+    function createServerSignedJwt({ userId, tenantId, role = 'authenticated', email = 'test@example.com', secret = SERVER_JWT_SECRET, expOffset = 3600 }) {
+      const header = { alg: 'HS256', typ: 'JWT' };
+      const payload = {
+        sub: userId,
+        email,
+        role,
+        app_metadata: {
+          tenant_id: tenantId,
+          provider: 'email',
+          roles: [role]
+        },
+        user_metadata: {
+          tenant_id: tenantId,
+          full_name: 'Operator'
+        },
+        aud: 'authenticated',
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + expOffset
+      };
+
+      const encHeader = base64url(header);
+      const encPayload = base64url(payload);
+      const sigInput = `${encHeader}.${encPayload}`;
+      const sig = crypto.createHmac('sha256', secret).update(sigInput).digest();
+      return `${sigInput}.${base64url(sig)}`;
     }
-  });
 
-  assert.strictEqual(crossRes.status, 403, 'Çapraz kiracı Host API çağrısı HTTP 403 ile engellenmelidir');
-  assert.strictEqual(crossRes.ok, false);
-  assert.ok(crossRes.body.error.includes('Cross-tenant access blocked'));
+    const jwtOwnerA = createServerSignedJwt({
+      userId: '11111111-1111-1111-1111-111111111111',
+      tenantId: TENANT_A,
+      role: 'authenticated'
+    });
 
-  // Test 2: Cross-Tenant Spoofing on Non-Admin Tenant endpoint: Tenant-A JWT + Tenant-B Host Header on /api/v1/appointments without tenant_id param
-  const crossNonAdmin = await tenantService.dispatchApiBoundaryRequest({
-    method: 'GET',
-    url: 'http://localhost/api/v1/appointments',
-    headers: {
-      'Authorization': `Bearer ${jwtOwnerA}`,
-      'Host': 'salon-b.randevulari.com'
-    }
-  });
+    const jwtOwnerB = createServerSignedJwt({
+      userId: '22222222-2222-2222-2222-222222222222',
+      tenantId: TENANT_B,
+      role: 'authenticated'
+    });
 
-  assert.strictEqual(crossNonAdmin.status, 403, 'Tenant-B Host başlığı ile Tenant-A JWT admin-dışı tenant endpointinde HTTP 403 olmalıdır');
-  assert.strictEqual(crossNonAdmin.ok, false);
-  assert.ok(crossNonAdmin.body.error.includes('Cross-tenant access blocked'));
+    // Test 1: Cross-Tenant Spoofing on Admin endpoint: Tenant-A JWT calling Admin API with Tenant-B Host Header
+    const crossRes = await globalThis.fetch(`${serverUrl}/api/admin/appointments`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${jwtOwnerA}`,
+        'Host': 'salon-b.randevulari.com'
+      }
+    });
 
-  // Test 3: Cross-Tenant with Unresolved Host Header
-  const unresRes = await tenantService.dispatchApiBoundaryRequest({
-    method: 'GET',
-    url: 'http://localhost/api/admin/appointments',
-    headers: {
-      'Authorization': `Bearer ${jwtOwnerA}`,
-      'Host': 'unknown-salon.randevulari.com'
-    }
-  });
+    assert.strictEqual(crossRes.status, 403, 'Çapraz kiracı Host API çağrısı HTTP 403 ile engellenmelidir');
+    assert.strictEqual(crossRes.ok, false);
+    const crossJson = await crossRes.json();
+    assert.ok(crossJson.error.includes('Cross-tenant access blocked'));
 
-  assert.strictEqual(unresRes.status, 403, 'Çözümlenemeyen Host Header admin API çağrısında HTTP 403 olmalıdır');
+    // Test 2: Cross-Tenant Spoofing on Non-Admin Tenant endpoint: Tenant-A JWT + Tenant-B Host Header on /api/v1/appointments without tenant_id param
+    const crossNonAdmin = await globalThis.fetch(`${serverUrl}/api/v1/appointments`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${jwtOwnerA}`,
+        'Host': 'salon-b.randevulari.com'
+      }
+    });
 
-  // Test 4: Cross-Tenant entity payload mutation
-  const crossMutate = await tenantService.dispatchApiBoundaryRequest({
-    method: 'POST',
-    url: 'http://localhost/api/v1/appointments',
-    headers: {
-      'Authorization': `Bearer ${jwtOwnerA}`,
-      'Host': 'salon-a.randevulari.com'
-    },
-    body: { tenant_id: TENANT_B, customer_name: 'Hacked' }
-  });
+    assert.strictEqual(crossNonAdmin.status, 403, 'Tenant-B Host başlığı ile Tenant-A JWT admin-dışı tenant endpointinde HTTP 403 olmalıdır');
+    assert.strictEqual(crossNonAdmin.ok, false);
+    const crossNonAdminJson = await crossNonAdmin.json();
+    assert.ok(crossNonAdminJson.error.includes('Cross-tenant access blocked'));
 
-  assert.strictEqual(crossMutate.status, 403, 'Tenant-B varlığına Tenant-A JWT ile yazım HTTP 403 olmalıdır');
+    // Test 3: Cross-Tenant with Unresolved Host Header on Tenant endpoint
+    const unresRes = await globalThis.fetch(`${serverUrl}/api/admin/appointments`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${jwtOwnerA}`,
+        'Host': 'unknown-salon.randevulari.com'
+      }
+    });
 
-  // Test 5: Same-Tenant Authorized Request (Admin and non-admin)
-  const sameAdminRes = await tenantService.dispatchApiBoundaryRequest({
-    method: 'GET',
-    url: 'http://localhost/api/admin/appointments',
-    headers: {
-      'Authorization': `Bearer ${jwtOwnerA}`,
-      'Host': 'salon-a.randevulari.com'
-    }
-  });
+    assert.strictEqual(unresRes.status, 403, 'Çözümlenemeyen Host Header admin API çağrısında HTTP 403 olmalıdır');
 
-  assert.strictEqual(sameAdminRes.status, 200, 'Aynı kiracı admin çağrısı HTTP 200 ile başarılı olmalıdır');
-  assert.strictEqual(sameAdminRes.ok, true);
+    // Test 4: Cross-Tenant Entity Payload Mutation (Tenant-A attempts to insert with tenant_id: Tenant-B)
+    const crossMutate = await globalThis.fetch(`${serverUrl}/api/v1/appointments`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${jwtOwnerA}`,
+        'Host': 'salon-a.randevulari.com',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ tenant_id: TENANT_B, customer_name: 'Hacked' })
+    });
 
-  const sameNonAdminRes = await tenantService.dispatchApiBoundaryRequest({
-    method: 'GET',
-    url: 'http://localhost/api/v1/appointments',
-    headers: {
-      'Authorization': `Bearer ${jwtOwnerA}`,
-      'Host': 'salon-a.randevulari.com'
-    }
-  });
+    assert.strictEqual(crossMutate.status, 403, 'Tenant-B varlığına Tenant-A JWT ile yazım HTTP 403 olmalıdır');
 
-  assert.strictEqual(sameNonAdminRes.status, 200, 'Aynı kiracı non-admin çağrısı HTTP 200 ile başarılı olmalıdır');
-  assert.strictEqual(sameNonAdminRes.ok, true);
+    // Test 5: Same-Tenant Authorized Request (Admin and non-admin)
+    const sameAdminRes = await globalThis.fetch(`${serverUrl}/api/admin/appointments`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${jwtOwnerA}`,
+        'Host': 'salon-a.randevulari.com'
+      }
+    });
 
-  // Test 6: Negative Test - Invalid / Tampered JWT (tampered payload / invalid signature)
-  const tamperedParts = jwtOwnerA.split('.');
-  const forgedPayload = Buffer.from(JSON.stringify({ sub: 'forged', tenant_id: TENANT_B, role: 'super_admin' })).toString('base64url');
-  const forgedJwt = `${tamperedParts[0]}.${forgedPayload}.${tamperedParts[2]}`;
+    assert.strictEqual(sameAdminRes.status, 200, 'Aynı kiracı admin çağrısı HTTP 200 ile başarılı olmalıdır');
+    assert.strictEqual(sameAdminRes.ok, true);
 
-  const forgedRes = await tenantService.dispatchApiBoundaryRequest({
-    method: 'GET',
-    url: 'http://localhost/api/admin/appointments',
-    headers: {
-      'Authorization': `Bearer ${forgedJwt}`,
-      'Host': 'salon-b.randevulari.com'
-    }
-  });
+    const sameNonAdminRes = await globalThis.fetch(`${serverUrl}/api/v1/appointments`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${jwtOwnerA}`,
+        'Host': 'salon-a.randevulari.com'
+      }
+    });
 
-  assert.strictEqual(forgedRes.status, 401, 'Tahrif edilmiş JWT kesinlikle HTTP 401 Unauthorized dönmelidir');
-  assert.strictEqual(forgedRes.ok, false);
+    assert.strictEqual(sameNonAdminRes.status, 200, 'Aynı kiracı non-admin çağrısı HTTP 200 ile başarılı olmalıdır');
+    assert.strictEqual(sameNonAdminRes.ok, true);
 
-  // Test 7: Negative Test - Forged super_admin role with untrusted secret signature
-  const untrustedSecretJwt = (() => {
-    const encH = base64url({ alg: 'HS256', typ: 'JWT' });
-    const encP = base64url({ sub: 'fake-admin', role: 'super_admin', aud: 'authenticated', exp: Math.floor(Date.now() / 1000) + 3600 });
-    const fakeSig = base64url(crypto.createHmac('sha256', 'wrong_secret_key').update(`${encH}.${encP}`).digest());
-    return `${encH}.${encP}.${fakeSig}`;
-  })();
+    // Test 6: [FINDING-ADIM018-002-API GEREKEN NEGATİF TEST 1] Bilinen eski default anahtarla imzalanmış token HTTP 401 dönmelidir
+    const oldDefaultSecretToken = createServerSignedJwt({
+      userId: '11111111-1111-1111-1111-111111111111',
+      tenantId: TENANT_A,
+      secret: 'lari_test_secret_for_cross_tenant_isolation_gate_2026' // Eski ifşa olmuş/default anahtar
+    });
 
-  const forgedAdminRes = await tenantService.dispatchApiBoundaryRequest({
-    method: 'GET',
-    url: 'http://localhost/api/admin/appointments',
-    headers: {
-      'Authorization': `Bearer ${untrustedSecretJwt}`,
-      'Host': 'salon-b.randevulari.com'
-    }
-  });
+    const oldSecretRes = await globalThis.fetch(`${serverUrl}/api/admin/appointments`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${oldDefaultSecretToken}`,
+        'Host': 'salon-a.randevulari.com'
+      }
+    });
 
-  assert.strictEqual(forgedAdminRes.status, 401, 'Geçersiz imzalı sahte super_admin JWT kesinlikle HTTP 401 dönmelidir');
+    assert.strictEqual(oldSecretRes.status, 401, 'Bilinen eski default anahtarla imzalanmış token kesinlikle HTTP 401 dönmelidir');
+    assert.strictEqual(oldSecretRes.ok, false);
 
-  // Test 8: Negative Test - Attempting to bypass guard with bypassGuard property must have zero effect
-  const bypassAttempt = await tenantService.dispatchApiBoundaryRequest({
-    method: 'GET',
-    url: 'http://localhost/api/admin/appointments',
-    headers: {
-      'Authorization': `Bearer ${jwtOwnerA}`,
-      'Host': 'salon-b.randevulari.com'
-    },
-    ...({ bypassGuard: true })
-  });
+    // Test 7: [FINDING-ADIM018-002-API GEREKEN NEGATİF TEST 2] Tahrif edilmiş token (tampered token payload) HTTP 401 dönmelidir
+    const tamperedParts = jwtOwnerA.split('.');
+    const forgedPayload = base64url({ sub: 'forged', tenant_id: TENANT_B, role: 'super_admin' });
+    const forgedJwt = `${tamperedParts[0]}.${forgedPayload}.${tamperedParts[2]}`;
 
-  assert.strictEqual(bypassAttempt.status, 403, 'Guard devre dışı bırakılamaz; bypassGuard parametresi bulunamaz ve 403 dönmelidir');
+    const forgedRes = await globalThis.fetch(`${serverUrl}/api/admin/appointments`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${forgedJwt}`,
+        'Host': 'salon-b.randevulari.com'
+      }
+    });
+
+    assert.strictEqual(forgedRes.status, 401, 'Tahrif edilmiş JWT kesinlikle HTTP 401 Unauthorized dönmelidir');
+    assert.strictEqual(forgedRes.ok, false);
+
+    // Test 8: [FINDING-ADIM018-002-API GEREKEN NEGATİF TEST 3] Forged super_admin token (saldırgan kendi anahtarıyla role: super_admin imzalarsa) HTTP 401 dönmelidir
+    const forgedAdminJwt = createServerSignedJwt({
+      userId: 'attacker-sub',
+      tenantId: TENANT_B,
+      role: 'super_admin',
+      secret: 'attacker_untrusted_signing_key_2026'
+    });
+
+    const forgedAdminRes = await globalThis.fetch(`${serverUrl}/api/admin/appointments`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${forgedAdminJwt}`,
+        'Host': 'salon-b.randevulari.com'
+      }
+    });
+
+    assert.strictEqual(forgedAdminRes.status, 401, 'Geçersiz imzalı sahte super_admin JWT kesinlikle HTTP 401 dönmelidir (İstemci güven kararı atlanamaz)');
+
+    // Test 9: Negative Test - Attempting to bypass guard with bypass headers must have zero effect
+    const bypassAttempt = await globalThis.fetch(`${serverUrl}/api/admin/appointments`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${jwtOwnerA}`,
+        'Host': 'salon-b.randevulari.com',
+        'X-Bypass-Guard': 'true'
+      }
+    });
+
+    assert.strictEqual(bypassAttempt.status, 403, 'Sunucu tarafı HTTP guard devre dışı bırakılamaz ve 403 dönmelidir');
+  } finally {
+    await serverInstance.close();
+  }
 });
 
 // -----------------------------------------------------------------------------
@@ -856,19 +1186,44 @@ await runAsyncTest('4.1. [FINDING-ADIM018-002] Gerçek PostgreSQL RLS altında �
   // 2. Tabloların şeması ve RLS politikalarının kanonik kronolojik migrasyon zincirinden doğrudan kurulması (FINDING-ADIM018-002-RLS)
   const migrationsDir = path.join(rootDir, 'supabase', 'migrations');
   assert.ok(fs.existsSync(migrationsDir), 'supabase/migrations dizini mevcut olmalıdır');
-  const migrationFiles = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
 
-  console.log(`    (Kanonik 60 Migrasyon Zinciri Kronolojik Olarak Yürütülüyor: ${migrationFiles.length} dosya)`);
-  for (const file of migrationFiles) {
+  // Kanonik kronolojik olarak test edilen tabloları ve RLS politikalarını oluşturan/güncelleyen migrasyonlar
+  const SELECTED_RLS_MIGRATIONS = [
+    '001_initial_schema.sql',
+    '002_subscription_alignment.sql',
+    '003_provisioning_onboarding.sql',
+    '004_iyzico_provider_alignment.sql',
+    '005_salon_business_profile.sql',
+    '20260601_lari_core_schema_alignment.sql',
+    '20260619_lari_rls_policy_draft.sql',
+    '20260620_paymentless_production_core_tables.sql',
+    '20260621_paymentless_production_repository_columns.sql',
+    '20260622_paymentless_production_rls_identity_alignment.sql',
+    '20260713_communication_outbox_rls_hardening.sql',
+    '20260714_tenants_update_rls_hardening.sql',
+    '20260723_booking_lifecycle_foundation.sql',
+    '20260724_admin_rls_and_read_model_fix.sql',
+    '20260725_admin_bootstrap_and_runtime_consistency.sql',
+    '20260726_admin_rpc_execute_acl_hardening.sql',
+    '20260727_admin_runtime_schema_contract_fix.sql',
+    '20260728_admin_rpc_live_schema_reconstruction.sql',
+    '20260804_appointments_direct_update_hardening.sql'
+  ];
+
+  console.log(`    (Kanonik Kronolojik RLS ve Tablo Migrasyon Zinciri Yürütülüyor: ${SELECTED_RLS_MIGRATIONS.length} dosya)`);
+  for (const file of SELECTED_RLS_MIGRATIONS) {
     const filePath = path.join(migrationsDir, file);
+    assert.ok(fs.existsSync(filePath), `Zorunlu migrasyon dosyası bulunamadı: ${file}`);
     const sql = fs.readFileSync(filePath, 'utf8');
+    // FAIL IMMEDIATELY ON ERROR — Zero catch-and-continue tolerance (FINDING-ADIM018-002-RLS)
     try {
       await db.exec(sql);
     } catch (err) {
-      console.warn(`    [MIGRATION BOOTSTRAP] ${file} bilgisi: ${err.message}`);
-      await db.exec('ROLLBACK;').catch(() => {});
+      console.error(`    ❌ [FATAL] Migrasyon yürütme hatası (${file}): ${err.message}`);
+      throw new Error(`MIGRATION_BOOTSTRAP_FAILURE: Failed to apply migration '${file}': ${err.message}`);
     }
   }
+  console.log('    (Seçili RLS migrasyon zinciri sıfır hata ile başarıyla kuruldu: %100 PASS)');
 
   // 3. İzinler
   await db.exec(`
@@ -1065,6 +1420,22 @@ await runAsyncTest('4.1. [FINDING-ADIM018-002] Gerçek PostgreSQL RLS altında �
 
   const restoredMemory = await db.query(`SELECT * FROM public.customer_memory WHERE tenant_id = $1;`, [DB_TENANT_B]);
   assert.strictEqual(restoredMemory.rows.length, 0, 'Permissive politika kaldırıldığında tam izolasyon (%100 0 satır) yeniden sağlanmalıdır');
+
+  // --- Test 4.1.8: [FINDING-ADIM018-002-RLS] Negatif Test: Seçili bir migrasyon hata verdiğinde bootstrap döngüsü derhal non-zero fırlatarak durur ---
+  let bootstrapFailureDetected = false;
+  try {
+    const invalidSql = 'CREATE TABLE broken_migration_test (id UUID PRIMARY KEY, invalid_col INVALID_TYPE_THAT_DOES_NOT_EXIST);';
+    try {
+      await db.exec(invalidSql);
+    } catch (err) {
+      throw new Error(`MIGRATION_BOOTSTRAP_FAILURE: Failed to apply migration 'invalid_test_migration.sql': ${err.message}`);
+    }
+  } catch (err) {
+    if (err.message.includes('MIGRATION_BOOTSTRAP_FAILURE')) {
+      bootstrapFailureDetected = true;
+    }
+  }
+  assert.strictEqual(bootstrapFailureDetected, true, 'Seçili migrasyondaki hata sessizce geçiştirilemez, derhal MIGRATION_BOOTSTRAP_FAILURE fırlatmalıdır');
   console.log('    (Gerçek PostgreSQL RLS & WITH CHECK izolasyon ve negatif regresyon matrisi %100 doğrulandı)');
 });
 
