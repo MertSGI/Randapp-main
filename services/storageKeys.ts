@@ -117,6 +117,78 @@ export function isLariStorageKey(key: string): boolean {
 }
 
 /**
+ * Statik platform anahtarlarının hızlı sorgulanması için küme.
+ */
+const STATIC_STORAGE_KEYS_SET = new Set<string>(Object.values(STORAGE_KEYS));
+
+const TENANT_PREFIXES_WITH_UNDERSCORE = [
+  'lari_branches_',
+  'lari_customer_consents_by_tenant_',
+  'lari_customer_data_requests_by_tenant_',
+  'lari_share_checklist_',
+  'lari_customer_profile_',
+  'lari_tenant_booking_policies_',
+  'lari_pilot_customer_tracker_by_tenant_',
+  'lari_customer_campaigns_by_tenant_',
+  'lari_customer_referrals_by_tenant_',
+  'lari_customer_campaign_rewards_by_tenant_',
+];
+
+/**
+ * Tenant-scoped bir depolama anahtarından ait olduğu tenantId'yi çıkarır.
+ * Global veya platform düzeyindeki anahtarlar için null döndürür.
+ */
+export function extractTenantFromStorageKey(key: string): string | null {
+  if (typeof key !== 'string' || !isLariStorageKey(key)) return null;
+  if (STATIC_STORAGE_KEYS_SET.has(key)) return null;
+
+  // 1. Colon namespace format: lari:<tenantId>:<resource>
+  if (key.startsWith('lari:')) {
+    const parts = key.split(':');
+    if (parts.length >= 3 && parts[1]) {
+      return parts[1];
+    }
+    return null;
+  }
+
+  // 2. Middle-token format: lari_availability_<tenantId>_configured
+  const availMatch = key.match(/^lari_availability_(.+)_configured$/);
+  if (availMatch && availMatch[1]) {
+    return availMatch[1];
+  }
+
+  // 3. Middle-token format: lari_backup_<tenantId>_[0-9]+.*\.json$ or lari_backup_<tenantId>_<timestamp>.json
+  const backupMatch = key.match(/^lari_backup_(.+)_[0-9]+.*\.json$/) || key.match(/^lari_backup_(.+)_[^_]+\.json$/);
+  if (backupMatch && backupMatch[1]) {
+    return backupMatch[1];
+  }
+
+  // 4. Underscore suffix prefixes
+  for (const prefix of TENANT_PREFIXES_WITH_UNDERSCORE) {
+    if (key.startsWith(prefix)) {
+      const extracted = key.slice(prefix.length);
+      return extracted.length > 0 ? extracted : null;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Bir depolama anahtarının belirli bir kiracıya (tenantId) ait olup olmadığını doğrular.
+ * Global platform anahtarlarını (STORAGE_KEYS) hariç tutarak ve extractTenantFromStorageKey
+ * kanonik gramerini kullanarak tam sahip eşleşmesini garanti eder (FINDING-ADIM018-001).
+ * Önek / sonek çakışmalı kiracı kimliklerinde (örn. alpha vs beta_alpha vs alpha_evil)
+ * sızıntı ve hatalı silinmeyi kesin olarak önler.
+ */
+export function isTenantStorageKey(key: string, tenantId: string): boolean {
+  if (typeof key !== 'string' || !tenantId || !isLariStorageKey(key)) return false;
+  if (STATIC_STORAGE_KEYS_SET.has(key)) return false;
+
+  return extractTenantFromStorageKey(key) === tenantId;
+}
+
+/**
  * In-memory state reset callback kaydı.
  * Servisler ve depolar in-memory fallback değişkenlerini (map/array vb.)
  * merkezi purge/reset çağrısına bağlamak için bu kancayı kullanır.
@@ -128,6 +200,19 @@ export function registerMemoryResetHook(hook: MemoryResetHook): () => void {
   memoryResetHooks.add(hook);
   return () => {
     memoryResetHooks.delete(hook);
+  };
+}
+
+/**
+ * Kiracı bazlı (tenant-scoped) in-memory state reset kancası.
+ */
+export type TenantMemoryResetHook = (tenantId: string) => void;
+const tenantMemoryResetHooks = new Set<TenantMemoryResetHook>();
+
+export function registerTenantMemoryResetHook(hook: TenantMemoryResetHook): () => void {
+  tenantMemoryResetHooks.add(hook);
+  return () => {
+    tenantMemoryResetHooks.delete(hook);
   };
 }
 
@@ -263,3 +348,208 @@ export function purgeAllLariStorage(
  */
 export const purgeLariStorage = purgeAllLariStorage;
 export const resetStorage = purgeAllLariStorage;
+
+/**
+ * Belirli bir kiracıya ait tüm depolama anahtarlarını listeler.
+ */
+export function getTenantStorageKeys(
+  tenantId: string,
+  customStorage?: {
+    length?: number;
+    key?: (index: number) => string | null;
+  }
+): string[] {
+  if (!tenantId) return [];
+
+  let targetStorage: any = customStorage;
+  if (!targetStorage) {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      targetStorage = window.localStorage;
+    } else if (typeof localStorage !== 'undefined') {
+      targetStorage = localStorage;
+    }
+  }
+
+  if (!targetStorage) return [];
+  const keys = new Set<string>();
+
+  if (typeof targetStorage.length === 'number' && typeof targetStorage.key === 'function') {
+    const len = targetStorage.length;
+    for (let i = 0; i < len; i++) {
+      try {
+        const k = targetStorage.key(i);
+        if (k && isTenantStorageKey(k, tenantId)) {
+          keys.add(k);
+        }
+      } catch (e) {}
+    }
+  }
+
+  try {
+    for (const k of Object.keys(targetStorage)) {
+      if (isTenantStorageKey(k, tenantId)) {
+        keys.add(k);
+      }
+    }
+  } catch (e) {}
+
+  return Array.from(keys);
+}
+
+/**
+ * Yalnızca belirli bir kiracıya (tenantId) ait tüm depolama anahtarlarını siler ve
+ * kayıtlı tenant bellek kancalarını çalıştırır.
+ * Global platform anahtarlarına ve diğer kiracıların verilerine KESİNLİKLE DOKUNMAZ.
+ */
+export function purgeTenantStorage(
+  tenantId: string,
+  customStorage?: {
+    length?: number;
+    key?: (index: number) => string | null;
+    removeItem: (key: string) => void;
+  },
+  options: PurgeLariStorageOptions = { throwOnError: true }
+): PurgeLariStorageResult {
+  if (!tenantId) {
+    throw new Error('[storageKeys] purgeTenantStorage requires a non-empty tenantId');
+  }
+
+  const removedKeys: string[] = [];
+  const failures: StoragePurgeFailure[] = [];
+
+  let targetStorage: any = customStorage;
+  if (!targetStorage) {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      targetStorage = window.localStorage;
+    } else if (typeof localStorage !== 'undefined') {
+      targetStorage = localStorage;
+    }
+  }
+
+  if (targetStorage && typeof targetStorage.removeItem === 'function') {
+    const keysToRemove = new Set<string>();
+
+    if (typeof targetStorage.length === 'number' && typeof targetStorage.key === 'function') {
+      const len = targetStorage.length;
+      for (let i = 0; i < len; i++) {
+        try {
+          const k = targetStorage.key(i);
+          if (k && isTenantStorageKey(k, tenantId)) {
+            keysToRemove.add(k);
+          }
+        } catch (err) {
+          failures.push({ phase: 'enumeration', error: err });
+        }
+      }
+    }
+
+    try {
+      const candidates = Object.keys(targetStorage);
+      for (const k of candidates) {
+        if (isTenantStorageKey(k, tenantId)) {
+          keysToRemove.add(k);
+        }
+      }
+    } catch (err) {
+      failures.push({ phase: 'enumeration', error: err });
+    }
+
+    for (const k of keysToRemove) {
+      try {
+        targetStorage.removeItem(k);
+        removedKeys.push(k);
+      } catch (err) {
+        failures.push({ phase: 'removal', key: k, error: err });
+      }
+    }
+  }
+
+  // Tenant-specific memory reset hooks
+  let inMemoryHooksRun = 0;
+  for (const hook of tenantMemoryResetHooks) {
+    try {
+      hook(tenantId);
+      inMemoryHooksRun++;
+    } catch (err) {
+      failures.push({ phase: 'hook', error: err });
+      console.warn(`[storageKeys] Tenant memory reset hook failed for ${tenantId}:`, err);
+    }
+  }
+
+  const result: PurgeLariStorageResult = {
+    ok: failures.length === 0,
+    removedKeys,
+    inMemoryHooksRun,
+    failures,
+  };
+
+  if (failures.length > 0 && options?.throwOnError !== false) {
+    throw new StoragePurgeError(failures, removedKeys, inMemoryHooksRun);
+  }
+
+  return result;
+}
+
+export interface TenantStorageContainmentResult {
+  isolated: boolean;
+  tenantAKeyCount: number;
+  tenantBKeyCount: number;
+  leaks: string[];
+}
+
+/**
+ * İki farklı kiracı arasındaki storage anahtarlarının tam ayrık (disjoint) ve
+ * sızdırmaz olduğunu matematiksel olarak doğrular.
+ */
+export function assertTenantStorageContainment(
+  tenantIdA: string,
+  tenantIdB: string,
+  customStorage?: any
+): TenantStorageContainmentResult {
+  if (!tenantIdA || !tenantIdB) {
+    throw new Error('[storageKeys] assertTenantStorageContainment requires two tenant IDs');
+  }
+  if (tenantIdA === tenantIdB) {
+    throw new Error('[storageKeys] assertTenantStorageContainment requires distinct tenant IDs');
+  }
+
+  const keysA = getTenantStorageKeys(tenantIdA, customStorage);
+  const keysB = getTenantStorageKeys(tenantIdB, customStorage);
+  const setA = new Set(keysA);
+  const setB = new Set(keysB);
+
+  const leaks: string[] = [];
+
+  for (const k of keysA) {
+    if (setB.has(k)) {
+      leaks.push(`Collision: Key '${k}' present in both Tenant ${tenantIdA} and Tenant ${tenantIdB}`);
+    }
+    if (isTenantStorageKey(k, tenantIdB)) {
+      leaks.push(`Leak: Key '${k}' for Tenant ${tenantIdA} matched Tenant ${tenantIdB}`);
+    }
+    const extracted = extractTenantFromStorageKey(k);
+    if (extracted && extracted !== tenantIdA) {
+      leaks.push(`Mismatch: Key '${k}' extracted tenant '${extracted}', expected '${tenantIdA}'`);
+    }
+  }
+
+  for (const k of keysB) {
+    if (setA.has(k)) {
+      leaks.push(`Collision: Key '${k}' present in both Tenant ${tenantIdB} and Tenant ${tenantIdA}`);
+    }
+    if (isTenantStorageKey(k, tenantIdA)) {
+      leaks.push(`Leak: Key '${k}' for Tenant ${tenantIdB} matched Tenant ${tenantIdA}`);
+    }
+    const extracted = extractTenantFromStorageKey(k);
+    if (extracted && extracted !== tenantIdB) {
+      leaks.push(`Mismatch: Key '${k}' extracted tenant '${extracted}', expected '${tenantIdB}'`);
+    }
+  }
+
+  return {
+    isolated: leaks.length === 0,
+    tenantAKeyCount: keysA.length,
+    tenantBKeyCount: keysB.length,
+    leaks,
+  };
+}

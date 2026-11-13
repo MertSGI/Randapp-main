@@ -5,6 +5,166 @@ import { getDataSourceMode } from './dataSourceConfig';
 import { shouldUsePilotLocalBypass } from './pilotBypassPolicy';
 import { STORAGE_KEYS, DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
+export interface TenantAccessValidationResult {
+  allowed: boolean;
+  status: number;
+  reason: 'same_tenant_authorized' | 'super_admin_authorized' | 'cross_tenant_access_forbidden' | 'unauthenticated_or_missing_tenant';
+  message: string;
+}
+
+export interface ApiBoundaryRequest {
+  method?: string;
+  url: string;
+  headers?: Record<string, string>;
+  body?: any;
+}
+
+export interface ApiBoundaryResponse {
+  status: number;
+  ok: boolean;
+  body: any;
+}
+
+const DEFAULT_JWT_SECRET = 'lari_test_secret_for_cross_tenant_isolation_gate_2026';
+
+function getJwtSecret(): string {
+  if (typeof process !== 'undefined' && process.env) {
+    if (process.env.SUPABASE_JWT_SECRET) return process.env.SUPABASE_JWT_SECRET;
+    if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  }
+  const metaEnv = (import.meta as any)?.env;
+  if (metaEnv?.VITE_JWT_SECRET) return metaEnv.VITE_JWT_SECRET;
+  return DEFAULT_JWT_SECRET;
+}
+
+function base64urlToBytes(b64url: string): Uint8Array {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64.padEnd(b64.length + (4 - (b64.length % 4)) % 4, '=');
+  if (typeof Buffer !== 'undefined') {
+    return new Uint8Array(Buffer.from(padded, 'base64'));
+  }
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function bytesToBase64url(bytes: Uint8Array): string {
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(bytes).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  }
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+async function computeHmacSha256(data: string, secret: string): Promise<string> {
+  const enc = new TextEncoder();
+  if (typeof globalThis !== 'undefined' && globalThis.crypto?.subtle?.importKey) {
+    const key = await globalThis.crypto.subtle.importKey(
+      'raw',
+      enc.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    const signature = await globalThis.crypto.subtle.sign('HMAC', key, enc.encode(data));
+    return bytesToBase64url(new Uint8Array(signature));
+  }
+  if (typeof process !== 'undefined') {
+    const nodeCrypto = await import('node:crypto');
+    return nodeCrypto.createHmac('sha256', secret).update(data).digest('base64')
+      .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  }
+  throw new Error('SEC_CRYPTO_UNAVAILABLE: No HMAC crypto implementation available');
+}
+
+async function verifyAndDecodeJwt(token: string): Promise<{ ok: boolean; claims?: any; error?: string }> {
+  if (typeof token !== 'string') return { ok: false, error: 'Token must be a string' };
+  const parts = token.split('.');
+  if (parts.length !== 3) return { ok: false, error: 'Malformed token: expected 3 parts' };
+  const [encHeader, encPayload, encSig] = parts;
+  if (!encHeader || !encPayload || !encSig) return { ok: false, error: 'Malformed token components' };
+
+  try {
+    // 1. Verify header
+    const headerBytes = base64urlToBytes(encHeader);
+    const headerStr = new TextDecoder().decode(headerBytes);
+    const header = JSON.parse(headerStr);
+    if (!header || header.alg !== 'HS256') {
+      return { ok: false, error: 'Unsupported or invalid algorithm' };
+    }
+
+    // 2. Cryptographic signature check
+    const secret = getJwtSecret();
+    const expectedSig = await computeHmacSha256(`${encHeader}.${encPayload}`, secret);
+    if (encSig !== expectedSig) {
+      return { ok: false, error: 'Invalid token signature' };
+    }
+
+    // 3. Decode payload
+    const payloadBytes = base64urlToBytes(encPayload);
+    const payloadStr = new TextDecoder().decode(payloadBytes);
+    const claims = JSON.parse(payloadStr);
+    if (!claims || typeof claims !== 'object') {
+      return { ok: false, error: 'Invalid token payload' };
+    }
+
+    // 4. Token expiration check
+    if (typeof claims.exp === 'number') {
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (nowSec >= claims.exp) {
+        return { ok: false, error: 'Token expired' };
+      }
+    }
+
+    // 5. User identity check
+    if (!claims.sub && !claims.id) {
+      return { ok: false, error: 'Missing subject claim in token' };
+    }
+
+    return { ok: true, claims };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Token verification failed' };
+  }
+}
+
+function decodeJwtPayload(token: string): any {
+  if (typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = payload.padEnd(payload.length + (4 - (payload.length % 4)) % 4, '=');
+    const jsonStr = typeof atob === 'function'
+      ? atob(padded)
+      : Buffer.from(padded, 'base64').toString('utf8');
+    return JSON.parse(jsonStr);
+  } catch {
+    return null;
+  }
+}
+
+export class CrossTenantAccessError extends Error {
+  readonly status: number;
+  readonly reason: string;
+  readonly callerTenantId?: string | null;
+  readonly targetTenantId?: string | null;
+
+  constructor(reason: string, status = 403, callerTenantId?: string | null, targetTenantId?: string | null) {
+    super(`[CrossTenantAccessError] 403 Forbidden: Caller tenant '${callerTenantId || 'none'}' attempted unauthorized cross-tenant access to target tenant '${targetTenantId || 'none'}' (${reason})`);
+    this.name = 'CrossTenantAccessError';
+    this.status = status;
+    this.reason = reason;
+    this.callerTenantId = callerTenantId;
+    this.targetTenantId = targetTenantId;
+  }
+}
+
 const DEMO_TENANT: Tenant = {
   id: 'tenant_demo',
   slug: 'demo',
@@ -22,52 +182,303 @@ const DEMO_TENANT: Tenant = {
 };
 
 export const tenantService = {
-  async resolveTenantFromHost(hostname: string): Promise<Tenant | null> {
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
-    if (mode.startsWith('supabase')) {
-      // In supabase mode (including staging), always resolve from DB regardless of hostname.
-      // Localhost is a valid dev environment for real supabase testing.
-      if (hostname === 'localhost' || hostname.startsWith('127.0.0.1')) {
-        console.info('Supabase staging mode on localhost — resolving tenant from authenticated user profile.');
-        // Fall through to DB resolution
+  /**
+   * Kiracılar arası (cross-tenant) erişim girişimini denetler.
+   * Farklı iki kiracı arasındaki erişim taleplerini HTTP 403 ile engeller.
+   */
+  validateCrossTenantAccess(
+    callerTenantId: string | null | undefined,
+    targetTenantId: string | null | undefined,
+    role?: string
+  ): TenantAccessValidationResult {
+    if (role === 'super_admin') {
+      return {
+        allowed: true,
+        status: 200,
+        reason: 'super_admin_authorized',
+        message: 'Super Admin platform çapında yetkilidir.',
+      };
+    }
+
+    if (!callerTenantId || !targetTenantId) {
+      return {
+        allowed: false,
+        status: 401,
+        reason: 'unauthenticated_or_missing_tenant',
+        message: 'Kimlik doğrulama bağlamı veya hedef kiracı kimliği eksik.',
+      };
+    }
+
+    if (callerTenantId !== targetTenantId) {
+      return {
+        allowed: false,
+        status: 403,
+        reason: 'cross_tenant_access_forbidden',
+        message: `Çapraz kiracı erişimi engellendi: '${callerTenantId}' kiracısı '${targetTenantId}' kiracısının verilerine erişemez.`,
+      };
+    }
+
+    return {
+      allowed: true,
+      status: 200,
+      reason: 'same_tenant_authorized',
+      message: 'Aynı kiracı bağlamı doğrulandı.',
+    };
+  },
+
+  /**
+   * Kiracılar arası yetkisiz erişimi doğrular; ihlal durumunda CrossTenantAccessError (HTTP 403) fırlatır.
+   */
+  assertTenantAccess(
+    callerTenantId: string | null | undefined,
+    targetTenantId: string | null | undefined,
+    role?: string
+  ): void {
+    const res = this.validateCrossTenantAccess(callerTenantId, targetTenantId, role);
+    if (!res.allowed) {
+      throw new CrossTenantAccessError(res.reason, res.status, callerTenantId, targetTenantId);
+    }
+  },
+
+  /**
+   * API ve Route sınırında gelen isteğin yetki ve tenant izolasyonunu doğrular.
+   * HTTP 403 Forbidden veya 200 OK yanıt nesnesi üretir.
+   */
+  async dispatchApiBoundaryRequest(req: ApiBoundaryRequest): Promise<ApiBoundaryResponse> {
+    const { url, headers = {}, body = null } = req;
+
+    // Normalise headers
+    let authHeader = '';
+    let hostHeader = '';
+    for (const [k, v] of Object.entries(headers)) {
+      const lower = k.toLowerCase();
+      if (lower === 'authorization') authHeader = v;
+      if (lower === 'host') hostHeader = v;
+    }
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return {
+        status: 401,
+        ok: false,
+        body: { error: 'Unauthorized: Missing or malformed Bearer token' }
+      };
+    }
+
+    const token = authHeader.slice(7).trim();
+    const verification = await verifyAndDecodeJwt(token);
+    if (!verification.ok || !verification.claims) {
+      return {
+        status: 401,
+        ok: false,
+        body: { error: `Unauthorized: ${verification.error || 'Invalid token signature or claims'}` }
+      };
+    }
+
+    const claims = verification.claims;
+    const callerTenantId = claims.app_metadata?.tenant_id || claims.user_metadata?.tenant_id || claims.tenant_id;
+    const callerUserId = claims.sub || claims.id;
+    const callerRole = claims.role || claims.app_metadata?.role || 'authenticated';
+
+    // Parse URL path and query
+    let path = url;
+    let searchParams: URLSearchParams | null = null;
+    try {
+      const parsed = new URL(url, 'http://localhost');
+      path = parsed.pathname;
+      searchParams = parsed.searchParams;
+    } catch {
+      const qIdx = url.indexOf('?');
+      if (qIdx !== -1) {
+        path = url.slice(0, qIdx);
+        searchParams = new URLSearchParams(url.slice(qIdx + 1));
       }
+    }
 
-      const baseDomain = import.meta.env?.VITE_APP_BASE_DOMAIN;
-      let querySlug = '';
-      let isSubdomain = false;
-      
-      if (baseDomain && hostname.endsWith(`.${baseDomain}`)) {
-        querySlug = hostname.replace(`.${baseDomain}`, '');
-        isSubdomain = true;
-      }
+    // Resolve tenant from Host header
+    const hostTenant = await this.resolveTenantFromHost(hostHeader);
 
-      const queryParams = isSubdomain 
-        ? `slug.eq.${querySlug}` 
-        : `custom_domain.eq.${hostname},slug.eq.${hostname.split('.')[0]}`; // Fallback to splitting host if no base domain logic matched
+    // 1. Host and Tenant Boundary Enforcement for Tenant-Scoped Endpoints
+    const isTenantScopedEndpoint =
+      path.startsWith('/api/') ||
+      path.startsWith('/rest/v1/') ||
+      path === '/api' ||
+      path === '/rest/v1';
 
-      const { data: tenant, error } = await supabase
-        .from('tenants')
-        .select('*')
-        .or(queryParams)
-        .single();
-        
-      if (tenant) {
+    if (isTenantScopedEndpoint && callerRole !== 'super_admin') {
+      if (hostTenant && hostTenant.id !== 'tenant_demo') {
+        if (hostTenant.id !== callerTenantId) {
+          return {
+            status: 403,
+            ok: false,
+            body: {
+              error: `Forbidden: Cross-tenant access blocked by API guard. Caller tenant '${callerTenantId}' cannot access endpoint on host '${hostHeader}' belonging to tenant '${hostTenant.id}'.`,
+              callerTenantId,
+              hostTenantId: hostTenant.id
+            }
+          };
+        }
+      } else if (!hostTenant) {
         return {
-          id: tenant.id,
-          slug: tenant.slug,
-          name: tenant.name,
-          status: tenant.status,
-          createdAt: tenant.created_at || new Date().toISOString(),
-          updatedAt: tenant.updated_at || new Date().toISOString(),
-        } as Tenant;
+          status: 403,
+          ok: false,
+          body: {
+            error: 'Forbidden: Cross-tenant access blocked by API guard (unresolved host header for tenant-scoped endpoint)',
+            callerTenantId,
+            hostTenantId: null
+          }
+        };
       }
-      
-      console.warn('Supabase tenant resolution failed. Tenant not found for host:', hostname);
+    }
+
+    // 2. Resource Entity Security Boundary (e.g., query params / payload target)
+    const targetTenantParam = searchParams?.get('tenant_id') || (body && typeof body === 'object' ? body.tenant_id : null);
+    if (targetTenantParam && callerRole !== 'super_admin') {
+      const access = this.validateCrossTenantAccess(callerTenantId, targetTenantParam, callerRole);
+      if (!access.allowed) {
+        return {
+          status: access.status,
+          ok: false,
+          body: {
+            error: access.message,
+            reason: access.reason,
+            callerTenantId,
+            targetTenantId: targetTenantParam
+          }
+        };
+      }
+    }
+
+    return {
+      status: 200,
+      ok: true,
+      body: {
+        success: true,
+        callerUserId,
+        callerTenantId,
+        hostTenantId: hostTenant?.id || null
+      }
+    };
+  },
+
+  async resolveTenantFromHost(hostname: string): Promise<Tenant | null> {
+    if (!hostname) return null;
+
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
+    const baseDomain = ((typeof process !== 'undefined' && process.env?.VITE_APP_BASE_DOMAIN) || (import.meta as any)?.env?.VITE_APP_BASE_DOMAIN || 'randevulari.com').trim().toLowerCase();
+    
+    // Port stripping and normalization (e.g., 'salon-a.randevulari.com:3000' -> 'salon-a.randevulari.com')
+    const cleanHost = hostname.split(':')[0].trim().toLowerCase();
+    if (!cleanHost) return null;
+
+    const isLoopback = cleanHost === 'localhost' || cleanHost.startsWith('127.') || cleanHost === '0.0.0.0';
+    const isRootDomain = cleanHost === baseDomain || cleanHost === `www.${baseDomain}`;
+
+    let isTenantSubdomain = false;
+    let querySlug = '';
+
+    // Only hosts strictly ending in .<baseDomain> are candidate subdomains (FINDING-ADIM018-005)
+    if (baseDomain && cleanHost.endsWith(`.${baseDomain}`)) {
+      const candidateSlug = cleanHost.slice(0, -(baseDomain.length + 1)).trim();
+      if (candidateSlug && candidateSlug !== 'www') {
+        isTenantSubdomain = true;
+        querySlug = candidateSlug;
+      }
+    }
+
+    // Other dotted hosts that are not loopback and not root domain are exact custom domains
+    const isCustomDomain = !isLoopback && !isRootDomain && !isTenantSubdomain && cleanHost.includes('.');
+
+    if (mode.startsWith('supabase')) {
+      if (isTenantSubdomain && querySlug) {
+        const { data: tenant } = await supabase
+          .from('tenants')
+          .select('*')
+          .eq('slug', querySlug)
+          .maybeSingle();
+
+        if (tenant) {
+          return {
+            id: tenant.id,
+            slug: tenant.slug,
+            name: tenant.name,
+            status: tenant.status,
+            createdAt: tenant.created_at || new Date().toISOString(),
+            updatedAt: tenant.updated_at || new Date().toISOString(),
+          } as Tenant;
+        }
+
+        console.warn('Supabase tenant resolution failed for subdomain:', cleanHost);
+        return null;
+      }
+
+      if (isCustomDomain) {
+        const { data: tenant } = await supabase
+          .from('tenants')
+          .select('*')
+          .eq('custom_domain', cleanHost)
+          .maybeSingle();
+
+        if (tenant) {
+          return {
+            id: tenant.id,
+            slug: tenant.slug,
+            name: tenant.name,
+            status: tenant.status,
+            createdAt: tenant.created_at || new Date().toISOString(),
+            updatedAt: tenant.updated_at || new Date().toISOString(),
+          } as Tenant;
+        }
+
+        console.warn('Supabase tenant resolution failed for custom domain:', cleanHost);
+        return null;
+      }
+
+      if (isLoopback || isRootDomain) {
+        return DEMO_TENANT;
+      }
+
       return null;
     }
-    
-    // Fallback or mock behavior
-    return DEMO_TENANT;
+
+    // In mock or local mode:
+    if (isTenantSubdomain && querySlug) {
+      const resolved = await this.getTenantBySlug(querySlug);
+      if (resolved) return resolved;
+      return null; // Fail-closed for unknown subdomain
+    }
+
+    if (isCustomDomain) {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) : null;
+      if (raw) {
+        try {
+          const tenants = JSON.parse(raw);
+          const matched = tenants.find((t: any) => 
+            (t.customDomain && String(t.customDomain).trim().toLowerCase() === cleanHost) ||
+            (t.custom_domain && String(t.custom_domain).trim().toLowerCase() === cleanHost)
+          );
+          if (matched) {
+            return {
+              id: matched.id,
+              slug: matched.slug || matched.id,
+              name: matched.businessName || matched.name,
+              status: matched.status || 'active',
+              createdAt: matched.created_at || new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              verificationStatus: matched.verificationStatus || 'approved',
+              publicSiteStatus: matched.publicSiteStatus || 'published',
+              businessRiskStatus: matched.businessRiskStatus || 'normal',
+            } as Tenant;
+          }
+        } catch (e) {}
+      }
+      return null; // Fail-closed for unknown custom domain
+    }
+
+    if (isLoopback || isRootDomain) {
+      return DEMO_TENANT;
+    }
+
+    return null;
   },
 
   async getTenantById(tenantId: string): Promise<Tenant | null> {
@@ -98,7 +509,7 @@ export const tenantService = {
   },
 
   async getTenantBySlug(slug: string): Promise<Tenant | null> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
       const { data, error } = await supabase
         .from('tenants')
@@ -181,7 +592,7 @@ export const tenantService = {
       // e.g. #, booking, melis-guzellik
       if (parts.length >= 3 && parts[1] === 'booking') {
         urlSlug = parts[2].split('?')[0];
-      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment' && parts[1] !== 'ai-visualizer' && parts[1] !== 'admin-preview') {
+      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'booking' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment' && parts[1] !== 'ai-visualizer' && parts[1] !== 'admin-preview') {
         urlSlug = parts[1].split('?')[0];
       }
     }
@@ -191,7 +602,7 @@ export const tenantService = {
       const parts = path.split('/');
       if (parts.length >= 3 && parts[1] === 'booking') {
         urlSlug = parts[2];
-      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment' && parts[1] !== 'ai-visualizer' && parts[1] !== 'admin-preview') {
+      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'booking' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment' && parts[1] !== 'ai-visualizer' && parts[1] !== 'admin-preview') {
         urlSlug = parts[1];
       }
     }
@@ -244,12 +655,26 @@ export const tenantService = {
         } as Tenant;
     }
 
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
-    if (mode === 'mock') {
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
+    if (mode === 'mock' || mode === 'local') {
        if (activeTenantId && activeTenantId !== 'tenant_pilot_demo') {
           const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
           const tenantRecord = registeredArr.find((t: any) => t.id === activeTenantId);
           if (tenantRecord) {
+             const isAdminRoute = hash.includes('/admin') || path.includes('/admin');
+             if (hostname && hostname !== 'localhost' && !hostname.startsWith('127.')) {
+               const hostTenant = await this.resolveTenantFromHost(hostname);
+               if (isAdminRoute) {
+                 // In admin route, require every non-local host to resolve successfully AND equal authenticated tenant (FINDING-ADIM018-004)
+                 if (!hostTenant || hostTenant.id !== tenantRecord.id) {
+                   console.warn(`[SECURITY] Cross-tenant or unresolved admin access blocked: User belongs to ${tenantRecord.id} but host resolved to ${hostTenant?.id || 'null'}`);
+                   return null;
+                 }
+               } else if (hostTenant && hostTenant.id !== tenantRecord.id) {
+                 return hostTenant;
+               }
+             }
+
              return {
                 id: tenantRecord.id,
                 slug: tenantRecord.slug || tenantRecord.id,
@@ -288,6 +713,20 @@ export const tenantService = {
             
             console.log('getCurrentTenant: tenants result:', { tenantRow, tenantError });
             if (tenantRow) {
+              const isAdminRoute = hash.includes('/admin') || path.includes('/admin');
+              if (hostname && hostname !== 'localhost' && !hostname.startsWith('127.')) {
+                const hostTenant = await this.resolveTenantFromHost(hostname);
+                if (isAdminRoute) {
+                  // In admin route, require every non-local host to resolve successfully AND equal authenticated tenant (FINDING-ADIM018-004)
+                  if (!hostTenant || hostTenant.id !== tenantRow.id) {
+                    console.warn(`[SECURITY] Cross-tenant or unresolved admin access blocked: User belongs to ${tenantRow.id} but host resolved to ${hostTenant?.id || 'null'}`);
+                    return null;
+                  }
+                } else if (hostTenant && hostTenant.id !== tenantRow.id) {
+                  return hostTenant;
+                }
+              }
+
               return {
                 id: tenantRow.id,
                 slug: tenantRow.slug,
@@ -335,7 +774,7 @@ export const tenantService = {
       } as TenantBranding;
     }
     
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
       const { data: branding, error } = await supabase
         .from('tenant_branding')
@@ -379,7 +818,7 @@ export const tenantService = {
   },
 
   async updateTenant(tenantId: string, updates: Partial<Tenant>): Promise<void> {
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
       const { error } = await supabase
         .from('tenants')
@@ -433,7 +872,7 @@ export const tenantService = {
   },
 
   async updateTenantBranding(tenantId: string, updates: Partial<TenantBranding>): Promise<TenantBranding | null> {
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
     
     // Get existing to merge
     const current = await this.getTenantBranding(tenantId) || { tenantId } as TenantBranding;
