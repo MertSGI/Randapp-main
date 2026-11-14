@@ -37,11 +37,32 @@ const MAX_CONSECUTIVE_FAILED_LOOKUPS = 5;
 const LOOKUP_LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes fail-closed lockout
 
 let memoryTokenLookupFailures = new Map<string, TokenLookupFailureRecord>();
+const selfServiceTenantLocks = new Map<string, Promise<void>>();
+
+export async function withSelfServiceTenantLock<T>(tenantId: string, work: () => Promise<T>): Promise<T> {
+  const prev = selfServiceTenantLocks.get(tenantId) ?? Promise.resolve();
+  let release!: () => void;
+  const next = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const queued = prev.then(() => next, () => next);
+  selfServiceTenantLocks.set(tenantId, queued);
+  await prev;
+  try {
+    return await work();
+  } finally {
+    release();
+    if (selfServiceTenantLocks.get(tenantId) === queued) {
+      selfServiceTenantLocks.delete(tenantId);
+    }
+  }
+}
 
 // Register in-memory reset hook for centralized purge / reset (V1A-TECH-01)
 registerMemoryResetHook(() => {
   memoryPolicies.clear();
   memoryTokenLookupFailures.clear();
+  selfServiceTenantLocks.clear();
 });
 
 export function getSecureRandomBytes(byteCount: number): Uint8Array {
@@ -117,6 +138,24 @@ export type SelfServiceAppointmentResult =
   | { kind: 'success'; appointment: Appointment; tokenObj: AppointmentAccessToken; rawData: any }
   | { kind: 'invalid_token'; reasonCode: 'invalid_token' | 'TOKEN_EXPIRED' | 'TOKEN_LOOKUP_RATE_LIMITED' | string }
   | { kind: 'service_error'; message: string; reasonCode?: string };
+
+export class RescheduleSlotConflictError extends Error {
+  readonly code = 'SLOT_ALREADY_BOOKED';
+  readonly statusCode = 409;
+  constructor(message = 'Talep edilen saat dilimi başka bir randevu tarafından rezerve edilmiştir (SLOT_ALREADY_BOOKED).') {
+    super(message);
+    this.name = 'RescheduleSlotConflictError';
+  }
+}
+
+export interface SafeRescheduleResult {
+  success: boolean;
+  statusCode: 201 | 200 | 409 | 400 | 500;
+  code: 'RESCHEDULE_REQUESTED' | 'SLOT_ALREADY_BOOKED' | 'REQUEST_ALREADY_PENDING' | 'INVALID_INPUT' | 'INTERNAL_ERROR';
+  changeRequest?: AppointmentChangeRequest;
+  message?: string;
+  reasonCode?: string;
+}
 
 export const appointmentSelfServiceService = {
   // Asynchronous replacement for loaded tokens
@@ -806,100 +845,162 @@ export const appointmentSelfServiceService = {
   },
 
   // Part 3: requestAppointmentReschedule
-  async requestAppointmentReschedule(token: string, requestedDateTime: string, note: string): Promise<{ changeRequest?: AppointmentChangeRequest; success: boolean; message: string }> {
+  async requestAppointmentReschedule(token: string, requestedDateTime: string, note: string): Promise<{ changeRequest?: AppointmentChangeRequest; success: boolean; message: string; reasonCode?: string }> {
     const validation = await this.getAppointmentByAccessToken(token);
     if (!validation) {
-      return { success: false, message: 'Geçersiz veya süresi dolmuş bağlantı.' };
+      return { success: false, message: 'Geçersiz veya süresi dolmuş bağlantı.', reasonCode: 'invalid_token' };
     }
 
     const { appointment, tokenObj } = validation;
     const policy = this.getBookingPolicy(tokenObj.tenantId);
 
     if (!policy.allowCustomerRescheduleRequest) {
-      return { success: false, message: 'Bu işletme için randevu erteleme/değişiklik talebi devre dışı bırakılmıştır.' };
+      return { success: false, message: 'Bu işletme için randevu erteleme/değişiklik talebi devre dışı bırakılmıştır.', reasonCode: 'reschedule_disabled' };
     }
 
-    const repo = getSelfServiceRepository();
-    const id = generateSecureId('req_');
-    const [proposedDate, proposedTime] = requestedDateTime.split(' ');
+    return withSelfServiceTenantLock(tokenObj.tenantId, async () => {
+      const [proposedDate, proposedTime] = requestedDateTime.split(' ');
 
-    const newRequest: AppointmentChangeRequest = {
-      id,
-      tenantId: tokenObj.tenantId,
-      appointmentId: appointment.id,
-      customerId: appointment.customerId,
-      type: 'reschedule',
-      status: 'requested',
-      requestedDateTime, // Should be "YYYY-MM-DD HH:mm"
-      customerNote: note,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
+      // Check duplicate pending request
+      const existingRequests = await this.getAllChangeRequestsAsync(tokenObj.tenantId);
+      const hasPending = existingRequests.some(r => 
+        r.appointmentId === appointment.id && 
+        r.type === 'reschedule' && 
+        (r.status === 'requested' || r.status === 'pending')
+      );
+      if (hasPending) {
+        return {
+          success: false,
+          message: 'Bu randevu için halihazırda bekleyen bir erteleme talebi bulunmaktadır.',
+          reasonCode: 'request_already_pending'
+        };
+      }
 
-    await repo.createChangeRequest(tokenObj.tenantId, {
-      id,
-      appointmentId: appointment.id,
-      requestType: 'reschedule',
-      requestedBy: 'customer',
-      proposedDate: proposedDate || null,
-      proposedTime: proposedTime || null,
-      reason: note,
-      status: 'requested',
-      createdAt: newRequest.createdAt
-    });
-
-    try {
-      auditLogService.logAuditEvent({
-        tenantId: tokenObj.tenantId,
-        actorType: 'customer',
-        category: 'customer_self_service',
-        severity: 'notice',
-        action: 'appointment_reschedule_requested',
-        entityType: 'AppointmentChangeRequest',
-        entityId: id,
-        summary: `Müşteri randevu erteleme talebi oluşturdu (${appointment.user_name || 'Müşteri'})`,
-        safeDetails: {
-          requestId: id,
-          appointmentId: appointment.id,
-          requestedDateTime,
-          note
-        }
+      // Check slot conflict against active appointments for this staff
+      const bookingRepo = getBookingRepository();
+      const allAppointments = await bookingRepo.listAppointments(tokenObj.tenantId);
+      const targetStaffId = appointment.staffId || (appointment as any).staff_id;
+      const isSlotOccupied = allAppointments.some(a => {
+        if (a.id === appointment.id) return false;
+        if (a.status !== 'confirmed' && a.status !== 'completed') return false;
+        const sId = a.staffId || (a as any).staff_id;
+        if (targetStaffId && sId && sId !== targetStaffId) return false;
+        const aDate = a.date || (a as any).appointment_date;
+        const aTime = a.time || (a as any).appointment_time;
+        return aDate === proposedDate && aTime === proposedTime;
       });
-    } catch (e) {
-      console.error('Audit logging for reschedule request failed:', e);
-    }
 
-    // Queue communications outbox
-    try {
-      const tenant = await tenantService.getTenantById(tokenObj.tenantId);
-      const bizName = tenant?.branding?.businessName || tenant?.name || 'Güzellik Salonu';
-      
-      communicationEventService.queueCommunicationEvent({
+      const isSlotClaimedByPendingReschedule = existingRequests.some(r => {
+        if (r.appointmentId === appointment.id) return false;
+        if (r.type !== 'reschedule') return false;
+        if (r.status !== 'requested' && r.status !== 'pending') return false;
+
+        if (targetStaffId) {
+          const reqAppt = allAppointments.find(a => a.id === r.appointmentId);
+          const reqStaffId = reqAppt ? (reqAppt.staffId || (reqAppt as any).staff_id) : null;
+          if (reqStaffId && reqStaffId !== targetStaffId) {
+            return false;
+          }
+        }
+
+        const dateMatch = ((r as any).proposedDate === proposedDate) ||
+          (r.requestedDateTime && r.requestedDateTime.startsWith(proposedDate));
+        const timeMatch = ((r as any).proposedTime === proposedTime) ||
+          (r.requestedDateTime && r.requestedDateTime.endsWith(proposedTime));
+
+        return Boolean(dateMatch && timeMatch);
+      });
+
+      if (isSlotOccupied || isSlotClaimedByPendingReschedule) {
+        return {
+          success: false,
+          message: 'Seçilen saat dilimi doludur (SLOT_ALREADY_BOOKED).',
+          reasonCode: 'SLOT_ALREADY_BOOKED'
+        };
+      }
+
+      const repo = getSelfServiceRepository();
+      const id = generateSecureId('req_');
+
+      const newRequest: AppointmentChangeRequest = {
+        id,
         tenantId: tokenObj.tenantId,
-        customerId: appointment.id,
         appointmentId: appointment.id,
-        audience: 'customer',
-        channel: 'whatsapp',
-        type: 'reschedule_request_created' as any,
-        contextArgs: {
-          customerName: appointment.user_name || 'Müşteri',
-          businessName: bizName,
-          date: appointment.date,
-          time: appointment.time,
-          newDate: proposedDate || '',
-          newTime: proposedTime || '',
-          notes: note
-        }
-      });
-    } catch (e) {
-      console.error('Failed to queue reschedule request comms', e);
-    }
+        customerId: appointment.customerId,
+        type: 'reschedule',
+        status: 'requested',
+        requestedDateTime, // Should be "YYYY-MM-DD HH:mm"
+        customerNote: note,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
 
-    return {
-      changeRequest: newRequest,
-      success: true,
-      message: 'Değişiklik talebiniz işletmeye iletildi.'
-    };
+      await repo.createChangeRequest(tokenObj.tenantId, {
+        id,
+        appointmentId: appointment.id,
+        requestType: 'reschedule',
+        requestedBy: 'customer',
+        proposedDate: proposedDate || null,
+        proposedTime: proposedTime || null,
+        reason: note,
+        status: 'requested',
+        createdAt: newRequest.createdAt
+      });
+
+      try {
+        auditLogService.logAuditEvent({
+          tenantId: tokenObj.tenantId,
+          actorType: 'customer',
+          category: 'customer_self_service',
+          severity: 'notice',
+          action: 'appointment_reschedule_requested',
+          entityType: 'AppointmentChangeRequest',
+          entityId: id,
+          summary: `Müşteri randevu erteleme talebi oluşturdu (${appointment.user_name || 'Müşteri'})`,
+          safeDetails: {
+            requestId: id,
+            appointmentId: appointment.id,
+            requestedDateTime,
+            note
+          }
+        });
+      } catch (e) {
+        console.error('Audit logging for reschedule request failed:', e);
+      }
+
+      // Queue communications outbox
+      try {
+        const tenant = await tenantService.getTenantById(tokenObj.tenantId);
+        const bizName = tenant?.branding?.businessName || tenant?.name || 'Güzellik Salonu';
+        
+        communicationEventService.queueCommunicationEvent({
+          tenantId: tokenObj.tenantId,
+          customerId: appointment.id,
+          appointmentId: appointment.id,
+          audience: 'customer',
+          channel: 'whatsapp',
+          type: 'reschedule_request_created' as any,
+          contextArgs: {
+            customerName: appointment.user_name || 'Müşteri',
+            businessName: bizName,
+            date: appointment.date,
+            time: appointment.time,
+            newDate: proposedDate || '',
+            newTime: proposedTime || '',
+            notes: note
+          }
+        });
+      } catch (e) {
+        console.error('Failed to queue reschedule request comms', e);
+      }
+
+      return {
+        changeRequest: newRequest,
+        success: true,
+        message: 'Değişiklik talebiniz işletmeye iletildi.',
+        reasonCode: 'ok'
+      };
+    });
   },
 
   /**
@@ -1330,5 +1431,68 @@ export const appointmentSelfServiceService = {
       console.error('Error reviewing change request', e);
       return false;
     }
+  }
+};
+
+export const requestRescheduleSafely = async (
+  token: string,
+  requestedDateTime: string,
+  note: string
+): Promise<SafeRescheduleResult> => {
+  try {
+    const res = await appointmentSelfServiceService.requestAppointmentReschedule(token, requestedDateTime, note);
+    if (res.success) {
+      return {
+        success: true,
+        statusCode: 201,
+        code: 'RESCHEDULE_REQUESTED',
+        changeRequest: res.changeRequest,
+        message: res.message,
+        reasonCode: 'ok'
+      };
+    }
+    const rCode = res.reasonCode || '';
+    if (rCode === 'SLOT_ALREADY_BOOKED' || rCode === 'slot_unavailable' || rCode === 'slot_conflict') {
+      return {
+        success: false,
+        statusCode: 409,
+        code: 'SLOT_ALREADY_BOOKED',
+        message: res.message,
+        reasonCode: 'SLOT_ALREADY_BOOKED'
+      };
+    }
+    if (rCode === 'request_already_pending') {
+      return {
+        success: false,
+        statusCode: 409,
+        code: 'REQUEST_ALREADY_PENDING',
+        message: res.message,
+        reasonCode: 'request_already_pending'
+      };
+    }
+    return {
+      success: false,
+      statusCode: 400,
+      code: 'INVALID_INPUT',
+      message: res.message,
+      reasonCode: rCode || 'invalid_request'
+    };
+  } catch (err: any) {
+    if (err instanceof RescheduleSlotConflictError || err?.code === 'SLOT_ALREADY_BOOKED' || err?.message?.includes('SLOT_ALREADY_BOOKED')) {
+      return {
+        success: false,
+        statusCode: 409,
+        code: 'SLOT_ALREADY_BOOKED',
+        message: err.message,
+        reasonCode: 'SLOT_ALREADY_BOOKED'
+      };
+    }
+    return {
+      success: false,
+      statusCode: 500,
+      code: 'INTERNAL_ERROR',
+      message: err?.message || 'Unknown error',
+      reasonCode: 'internal_error'
+    };
   }
 };

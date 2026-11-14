@@ -105,6 +105,26 @@ interface LocalOtpChallenge {
 const localChallenges: Map<string, LocalOtpChallenge> = new Map();
 const reservedChallengeIds: Set<string> = new Set();
 const syntheticOutbox: SyntheticOutboxEntry[] = [];
+const otpChallengeLocks: Map<string, Promise<void>> = new Map();
+
+export async function withOtpChallengeLock<T>(challengeId: string, work: () => Promise<T>): Promise<T> {
+  const prev = otpChallengeLocks.get(challengeId) ?? Promise.resolve();
+  let release!: () => void;
+  const next = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const queued = prev.then(() => next, () => next);
+  otpChallengeLocks.set(challengeId, queued);
+  await prev;
+  try {
+    return await work();
+  } finally {
+    release();
+    if (otpChallengeLocks.get(challengeId) === queued) {
+      otpChallengeLocks.delete(challengeId);
+    }
+  }
+}
 
 // Robust cryptographic SHA-256 helper (WebCrypto subtle in browsers, node:crypto in Node.js)
 // Invariant (FINDING-ADIM010-008): Reversible fallback (sim_hash) is removed; fails closed if no crypto available.
@@ -384,91 +404,94 @@ export const publicBookingOtpService = {
     }
 
     // --- Local / Synthetic Harness Path ---
-    const challenge = localChallenges.get(request.challengeId);
-    if (!challenge) {
-      return { success: false, reasonCode: 'invalid_challenge', message: 'Doğrulama oturumu bulunamadı.' };
-    }
+    return withOtpChallengeLock(request.challengeId, async () => {
+      const challenge = localChallenges.get(request.challengeId);
+      if (!challenge) {
+        return { success: false, reasonCode: 'invalid_challenge', message: 'Doğrulama oturumu bulunamadı.' };
+      }
 
-    if (challenge.slug !== request.slug) {
-      return { success: false, reasonCode: 'tenant_mismatch', message: 'Oturum salon ile eşleşmiyor.' };
-    }
+      if (challenge.slug !== request.slug) {
+        return { success: false, reasonCode: 'tenant_mismatch', message: 'Oturum salon ile eşleşmiyor.' };
+      }
 
-    if (challenge.phone !== cleanPhone) {
-      return { success: false, reasonCode: 'phone_mismatch', message: 'Telefon numarası eşleşmiyor.' };
-    }
+      if (challenge.phone !== cleanPhone) {
+        return { success: false, reasonCode: 'phone_mismatch', message: 'Telefon numarası eşleşmiyor.' };
+      }
 
-    if (challenge.status === 'locked' || challenge.attemptsCount >= challenge.maxAttempts) {
-      return {
-        success: false,
-        reasonCode: 'otp_brute_force_locked',
-        attemptsRemaining: 0,
-        message: 'Çok fazla hatalı deneme nedeniyle bu doğrulama kilitlenmiştir.',
-      };
-    }
-
-    const now = Date.now();
-    if (challenge.expiresAt <= now || challenge.status === 'expired') {
-      challenge.status = 'expired';
-      return { success: false, reasonCode: 'otp_expired', message: 'Doğrulama kodunun süresi dolmuş.' };
-    }
-
-    if (challenge.status === 'consumed') {
-      return { success: false, reasonCode: 'otp_already_consumed', message: 'Bu kod daha önce kullanılmış.' };
-    }
-
-    let inputHash: string;
-    try {
-      inputHash = await computeSha256(request.otpCode.trim());
-    } catch (err) {
-      console.error('[publicBookingOtpService] verifyOtp crypto hash unavailable:', err);
-      return {
-        success: false,
-        reasonCode: 'temporary_failure',
-        message: 'Güvenlik doğrulama servisi geçici olarak kullanılamıyor.',
-      };
-    }
-    if (inputHash !== challenge.otpCodeHash) {
-      challenge.attemptsCount++;
-      if (challenge.attemptsCount >= challenge.maxAttempts) {
+      if (challenge.status === 'locked' || challenge.attemptsCount >= challenge.maxAttempts) {
         challenge.status = 'locked';
         return {
           success: false,
           reasonCode: 'otp_brute_force_locked',
           attemptsRemaining: 0,
-          message: 'Çok fazla hatalı kod girildi. Oturum kilitlendi.',
+          message: 'Çok fazla hatalı deneme nedeniyle bu doğrulama kilitlenmiştir.',
         };
       }
-      return {
-        success: false,
-        reasonCode: 'otp_invalid',
-        attemptsRemaining: challenge.maxAttempts - challenge.attemptsCount,
-        message: `Hatalı doğrulama kodu. Kalan hakkınız: ${challenge.maxAttempts - challenge.attemptsCount}`,
-      };
-    }
 
-    // Verification successful: hash token before committing verified status (fail-closed)
-    const token = `vtok_${now}_${Math.random().toString(36).substring(2, 12)}`;
-    let tokenHash: string;
-    try {
-      tokenHash = await computeSha256(token);
-    } catch (err) {
-      console.error('[publicBookingOtpService] verifyOtp token hash unavailable:', err);
-      return {
-        success: false,
-        reasonCode: 'temporary_failure',
-        message: 'Güvenlik doğrulama servisi geçici olarak kullanılamıyor.',
-      };
-    }
-    challenge.status = 'verified';
-    challenge.verifiedAt = now;
-    challenge.verificationToken = token;
-    challenge.verificationTokenHash = tokenHash;
+      const now = Date.now();
+      if (challenge.expiresAt <= now || challenge.status === 'expired') {
+        challenge.status = 'expired';
+        return { success: false, reasonCode: 'otp_expired', message: 'Doğrulama kodunun süresi dolmuş.' };
+      }
 
-    return {
-      success: true,
-      verificationToken: token,
-      reasonCode: 'ok',
-    };
+      if (challenge.status === 'consumed' || challenge.status === 'verified') {
+        return { success: false, reasonCode: 'otp_already_consumed', message: 'Bu kod daha önce kullanılmış.' };
+      }
+
+      let inputHash: string;
+      try {
+        inputHash = await computeSha256(request.otpCode.trim());
+      } catch (err) {
+        console.error('[publicBookingOtpService] verifyOtp crypto hash unavailable:', err);
+        return {
+          success: false,
+          reasonCode: 'temporary_failure',
+          message: 'Güvenlik doğrulama servisi geçici olarak kullanılamıyor.',
+        };
+      }
+      if (inputHash !== challenge.otpCodeHash) {
+        challenge.attemptsCount++;
+        if (challenge.attemptsCount >= challenge.maxAttempts) {
+          challenge.status = 'locked';
+          return {
+            success: false,
+            reasonCode: 'otp_brute_force_locked',
+            attemptsRemaining: 0,
+            message: 'Çok fazla hatalı kod girildi. Oturum kilitlendi.',
+          };
+        }
+        return {
+          success: false,
+          reasonCode: 'otp_invalid',
+          attemptsRemaining: challenge.maxAttempts - challenge.attemptsCount,
+          message: `Hatalı doğrulama kodu. Kalan hakkınız: ${challenge.maxAttempts - challenge.attemptsCount}`,
+        };
+      }
+
+      // Verification successful: hash token before committing verified status (fail-closed)
+      const token = `vtok_${now}_${Math.random().toString(36).substring(2, 12)}`;
+      let tokenHash: string;
+      try {
+        tokenHash = await computeSha256(token);
+      } catch (err) {
+        console.error('[publicBookingOtpService] verifyOtp token hash unavailable:', err);
+        return {
+          success: false,
+          reasonCode: 'temporary_failure',
+          message: 'Güvenlik doğrulama servisi geçici olarak kullanılamıyor.',
+        };
+      }
+      challenge.status = 'verified';
+      challenge.verifiedAt = now;
+      challenge.verificationToken = token;
+      challenge.verificationTokenHash = tokenHash;
+
+      return {
+        success: true,
+        verificationToken: token,
+        reasonCode: 'ok',
+      };
+    });
   },
 
   /**
@@ -498,6 +521,7 @@ export const publicBookingOtpService = {
     localChallenges.clear();
     reservedChallengeIds.clear();
     syntheticOutbox.length = 0;
+    otpChallengeLocks.clear();
   },
 
   /**
