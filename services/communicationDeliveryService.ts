@@ -39,6 +39,22 @@ export class CommunicationDeliveryService {
     this.retryPolicy = retryPolicy || new CommunicationRetryPolicy(DEFAULT_RETRY_POLICY);
   }
 
+  static isRetryableError(statusCode?: number, errorCode?: string): boolean {
+    if (statusCode === 429) return true;
+    if (statusCode && statusCode >= 500 && statusCode < 600) return true;
+    const retryableCodes = new Set([
+      'NETWORK_TIMEOUT',
+      'CONNECTION_RESET',
+      'ECONNRESET',
+      'ETIMEDOUT',
+      'ECONNREFUSED',
+      'GATEWAY_TIMEOUT',
+      'SOCKET_TIMEOUT'
+    ]);
+    if (errorCode && retryableCodes.has(errorCode)) return true;
+    return false;
+  }
+
   // Canonical deep equality helper for deterministic payload comparison
   static canonicalEqual(a: any, b: any): boolean {
     if (a === b) return true;
@@ -195,8 +211,12 @@ export class CommunicationDeliveryService {
       throw new Error(`Cannot queue skipped intent ${intentId}: consent was denied`);
     }
 
-    if (intent.status !== 'rendered') {
-      throw new Error(`Cannot queue intent in status '${intent.status}'. Expected 'rendered'`);
+    if ((intent.status as string) === 'dead_letter') {
+      throw new Error(`Cannot queue dead_letter intent ${intentId} without explicit administrative revival`);
+    }
+
+    if (intent.status !== 'rendered' && (intent.status as string) !== 'retry_scheduled') {
+      throw new Error(`Cannot queue intent in status '${intent.status}'. Expected 'rendered' or 'retry_scheduled'`);
     }
 
     intent.status = 'queued';
@@ -333,6 +353,222 @@ export class CommunicationDeliveryService {
     }
 
     return intent;
+  }
+
+  scheduleRetry(
+    intentId: string,
+    options?: {
+      nextRetryAt?: string;
+      delayMs?: number;
+      reason?: string;
+      retryCount?: number;
+    }
+  ): OutboxIntent {
+    const intent = this.intents.get(intentId);
+    if (!intent) {
+      throw new Error(`Intent ${intentId} not found`);
+    }
+
+    if (intent.status === 'delivered') {
+      throw new Error(`Cannot schedule retry for intent ${intentId}: already delivered`);
+    }
+
+    if (intent.status === 'skipped') {
+      throw new Error(`Cannot schedule retry for skipped intent ${intentId}: consent was denied`);
+    }
+
+    if ((intent.status as string) === 'dead_letter') {
+      throw new Error(`Cannot schedule retry for dead_letter intent ${intentId}: terminal dead_letter state`);
+    }
+
+    const currentRetryCount = options?.retryCount !== undefined
+      ? options.retryCount
+      : (((intent as any).retryCount || (intent.metadata?.retryCount as number) || 0) + 1);
+
+    let nextRetryAt = options?.nextRetryAt;
+    if (!nextRetryAt) {
+      const delay = options?.delayMs !== undefined
+        ? options.delayMs
+        : this.retryPolicy.calculateBackoff(currentRetryCount);
+      nextRetryAt = new Date(Date.now() + delay).toISOString();
+    }
+
+    intent.status = 'retry_scheduled' as any;
+    (intent as any).retryCount = currentRetryCount;
+    (intent as any).nextRetryAt = nextRetryAt;
+    intent.metadata = {
+      ...(intent.metadata || {}),
+      retryCount: currentRetryCount,
+      nextRetryAt
+    };
+    if (options?.reason) {
+      intent.failureReason = options.reason;
+    }
+    intent.updatedAt = new Date().toISOString();
+
+    return intent;
+  }
+
+  moveToDeadLetter(
+    intentId: string,
+    reason: string,
+    errorCode: string = 'DEAD_LETTER'
+  ): OutboxIntent {
+    const intent = this.intents.get(intentId);
+    if (!intent) {
+      throw new Error(`Intent ${intentId} not found`);
+    }
+
+    if (intent.status === 'delivered') {
+      throw new Error(`Cannot move intent ${intentId} to dead_letter: already delivered`);
+    }
+
+    if (intent.status === 'skipped') {
+      throw new Error(`Cannot move skipped intent ${intentId} to dead_letter: consent was denied`);
+    }
+
+    const now = new Date().toISOString();
+    intent.status = 'dead_letter' as any;
+    intent.failureReason = reason;
+    intent.metadata = {
+      ...(intent.metadata || {}),
+      deadLetterAt: now,
+      deadLetterReason: reason
+    };
+    intent.updatedAt = now;
+
+    this.failures.push({
+      intentId,
+      failureType: errorCode === 'POISON_MESSAGE' ? 'POISON_MESSAGE' : 'RETRY_EXHAUSTED',
+      reason,
+      code: errorCode,
+      attemptCount: (intent as any).retryCount || this.attempts.filter(a => a.intentId === intentId).length,
+      terminal: true,
+      timestamp: now
+    });
+
+    return intent;
+  }
+
+  reviveDeadLetter(intentId: string, authorizedActorId: string): OutboxIntent {
+    if (!authorizedActorId || !authorizedActorId.trim()) {
+      throw new Error('Authorized actor ID is required to revive dead letter intent');
+    }
+    const intent = this.intents.get(intentId);
+    if (!intent) {
+      throw new Error(`Intent ${intentId} not found`);
+    }
+    if ((intent.status as string) !== 'dead_letter') {
+      throw new Error(`Cannot revive intent ${intentId}: status is '${intent.status}', expected 'dead_letter'`);
+    }
+
+    if (!intent.consentVerified) {
+      throw new Error(`Cannot revive dead_letter intent ${intentId}: customer consent was not verified (consentVerified=false)`);
+    }
+
+    intent.status = 'rendered';
+    intent.failureReason = undefined;
+    intent.metadata = {
+      ...(intent.metadata || {}),
+      revivedBy: authorizedActorId,
+      revivedAt: new Date().toISOString()
+    };
+    intent.updatedAt = new Date().toISOString();
+    return intent;
+  }
+
+  handleTransientFailure(
+    intentId: string,
+    error: {
+      statusCode?: number;
+      errorCode?: string;
+      errorMessage?: string;
+      retryAfterMs?: number;
+      providerName?: string;
+    }
+  ): {
+    intent: OutboxIntent;
+    status: 'retry_scheduled' | 'dead_letter';
+    nextRetryAt?: string;
+    retryCount: number;
+    backoffMs: number;
+    terminal: boolean;
+  } {
+    const intent = this.intents.get(intentId);
+    if (!intent) {
+      throw new Error(`Intent ${intentId} not found`);
+    }
+
+    const priorAttempts = this.getAttemptsForIntent(intentId);
+    const attemptNumber = priorAttempts.length + 1;
+
+    // Record the dispatch attempt
+    this.recordDispatchAttempt({
+      intentId,
+      tenantId: intent.tenantId,
+      providerName: error.providerName || 'external_provider',
+      attemptNumber,
+      status: 'failed',
+      httpStatusCode: error.statusCode,
+      errorCode: error.errorCode,
+      errorMessage: error.errorMessage,
+      retryAfterMs: error.retryAfterMs
+    });
+
+    const isRetryable = CommunicationDeliveryService.isRetryableError(error.statusCode, error.errorCode) ||
+      this.retryPolicy.isRetryable(error.statusCode, error.errorCode);
+    const maxAttempts = this.retryPolicy.maxAttempts;
+
+    const reasonParts: string[] = [];
+    if (error.errorCode) reasonParts.push(`[${error.errorCode}]`);
+    if (error.statusCode) reasonParts.push(`HTTP ${error.statusCode}`);
+    if (error.errorMessage) reasonParts.push(error.errorMessage);
+    const detailedReason = reasonParts.join(' ') || (isRetryable ? 'Transient failure' : 'Permanent failure');
+
+    if (isRetryable && attemptNumber < maxAttempts) {
+      const backoffMs = this.retryPolicy.calculateBackoff(attemptNumber, error.retryAfterMs);
+      const nextRetryAt = new Date(Date.now() + backoffMs).toISOString();
+      const updatedIntent = this.scheduleRetry(intentId, {
+        nextRetryAt,
+        delayMs: backoffMs,
+        reason: detailedReason,
+        retryCount: attemptNumber
+      });
+
+      this.failures.push({
+        intentId,
+        failureType: error.statusCode === 429 ? 'RATE_LIMITED' : 'RETRYABLE',
+        reason: detailedReason,
+        code: error.errorCode || String(error.statusCode || 'TRANSIENT_ERROR'),
+        attemptCount: attemptNumber,
+        terminal: false,
+        timestamp: new Date().toISOString()
+      });
+
+      return {
+        intent: updatedIntent,
+        status: 'retry_scheduled',
+        nextRetryAt,
+        retryCount: attemptNumber,
+        backoffMs,
+        terminal: false
+      };
+    } else {
+      // Retry exhausted or non-retryable failure -> Move to dead_letter
+      const reason = attemptNumber >= maxAttempts
+        ? `Dispatch retry exhausted after ${attemptNumber} attempts: ${detailedReason}`
+        : `Terminal delivery failure: ${detailedReason}`;
+      const code = attemptNumber >= maxAttempts ? 'RETRY_EXHAUSTED' : (error.errorCode || 'PERMANENT_ERROR');
+      const updatedIntent = this.moveToDeadLetter(intentId, reason, code);
+
+      return {
+        intent: updatedIntent,
+        status: 'dead_letter',
+        retryCount: attemptNumber,
+        backoffMs: 0,
+        terminal: true
+      };
+    }
   }
 
   getIntent(intentId: string): OutboxIntent | undefined {

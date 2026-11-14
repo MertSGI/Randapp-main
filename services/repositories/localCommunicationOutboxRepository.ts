@@ -45,8 +45,12 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
     }
   }
 
-  async listEvents(tenantId: string): Promise<any[]> {
-    return this.getStoredEvents().filter(e => e.tenantId === tenantId);
+  async listEvents(tenantId: string, filter?: { status?: string }): Promise<any[]> {
+    const list = this.getStoredEvents().filter(e => e.tenantId === tenantId);
+    if (filter?.status) {
+      return list.filter(e => e.status === filter.status);
+    }
+    return list;
   }
 
   async enqueueEvent(tenantId: string, event: any): Promise<any> {
@@ -121,8 +125,11 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
     }
 
     const idx = events.findIndex(e => e.tenantId === tenantId && e.id === eventId);
-    if (events[idx]?.status === 'skipped' && status === 'queued') {
-      throw new Error("Local outbox cannot move terminal status 'skipped' back to 'queued'");
+    if (events[idx]?.status === 'skipped' && status !== 'skipped') {
+      throw new Error(`Local outbox cannot move terminal status 'skipped' back to '${status}'`);
+    }
+    if (events[idx]?.status === 'dead_letter' && status !== 'dead_letter') {
+      throw new Error(`Local outbox cannot move terminal status 'dead_letter' back to '${status}' without explicit revival`);
     }
 
     events[idx].status = status;
@@ -131,5 +138,126 @@ export class LocalCommunicationOutboxRepository implements CommunicationOutboxRe
     }
     events[idx].updatedAt = new Date().toISOString();
     this.saveStoredEvents(events);
+  }
+
+  async scheduleRetry(
+    tenantId: string,
+    eventId: string,
+    options?: { nextRetryAt?: string; delayMs?: number; reason?: string; retryCount?: number }
+  ): Promise<any> {
+    this.requireNonBlank(tenantId, 'tenantId');
+    this.requireNonBlank(eventId, 'eventId');
+    const events = this.getStoredEvents();
+    const idx = events.findIndex(e => e.tenantId === tenantId && e.id === eventId);
+    if (idx === -1) {
+      throw new Error('Local outbox event not found for tenant');
+    }
+    if (events[idx].status === 'delivered') {
+      throw new Error(`Cannot schedule retry for delivered event ${eventId}`);
+    }
+    if (events[idx].status === 'skipped') {
+      throw new Error(`Cannot schedule retry for skipped event ${eventId}`);
+    }
+    if (events[idx].status === 'dead_letter') {
+      throw new Error(`Cannot schedule retry for dead_letter event ${eventId}: terminal state`);
+    }
+
+    const currentRetryCount = options?.retryCount !== undefined
+      ? options.retryCount
+      : ((events[idx].retryCount || events[idx].metadata?.retryCount || 0) + 1);
+
+    const delay = options?.delayMs !== undefined ? options.delayMs : 1000 * Math.pow(2, currentRetryCount - 1);
+    const nextRetryAt = options?.nextRetryAt || new Date(Date.now() + delay).toISOString();
+
+    events[idx].status = 'retry_scheduled';
+    events[idx].retryCount = currentRetryCount;
+    events[idx].nextRetryAt = nextRetryAt;
+    if (options?.reason) {
+      events[idx].failureReason = options.reason;
+    }
+    events[idx].metadata = {
+      ...(events[idx].metadata || {}),
+      retryCount: currentRetryCount,
+      nextRetryAt,
+      lastRetryScheduledAt: new Date().toISOString()
+    };
+    events[idx].updatedAt = new Date().toISOString();
+    this.saveStoredEvents(events);
+    return events[idx];
+  }
+
+  async moveToDeadLetter(
+    tenantId: string,
+    eventId: string,
+    reason: string
+  ): Promise<any> {
+    this.requireNonBlank(tenantId, 'tenantId');
+    this.requireNonBlank(eventId, 'eventId');
+    const events = this.getStoredEvents();
+    const idx = events.findIndex(e => e.tenantId === tenantId && e.id === eventId);
+    if (idx === -1) {
+      throw new Error('Local outbox event not found for tenant');
+    }
+    if (events[idx].status === 'delivered') {
+      throw new Error(`Cannot move delivered event ${eventId} to dead_letter`);
+    }
+    if (events[idx].status === 'skipped') {
+      throw new Error(`Cannot move skipped event ${eventId} to dead_letter: consent was denied`);
+    }
+
+    events[idx].status = 'dead_letter';
+    events[idx].failureReason = reason;
+    events[idx].metadata = {
+      ...(events[idx].metadata || {}),
+      deadLetterAt: new Date().toISOString(),
+      deadLetterReason: reason
+    };
+    events[idx].updatedAt = new Date().toISOString();
+    this.saveStoredEvents(events);
+    return events[idx];
+  }
+
+  async handleRetrySweep(
+    tenantId?: string,
+    options?: { sweepTime?: string | number | Date }
+  ): Promise<{ affectedRecordCount: number; affectedTenantIds: string[] }> {
+    const events = this.getStoredEvents();
+    const affectedTenantIds: string[] = [];
+    let affectedRecordCount = 0;
+    const sweepTimestamp = options?.sweepTime ? new Date(options.sweepTime).getTime() : Date.now();
+
+    for (const ev of events) {
+      if (tenantId && ev.tenantId !== tenantId) continue;
+      if (ev.status === 'retry_scheduled') {
+        const nextRetryRaw = ev.nextRetryAt || ev.metadata?.nextRetryAt;
+        if (!nextRetryRaw) continue;
+        const nextRetryTime = new Date(nextRetryRaw).getTime();
+        if (isNaN(nextRetryTime) || nextRetryTime > sweepTimestamp) {
+          continue;
+        }
+
+        const retryCount = (ev.retryCount || ev.metadata?.retryCount || 0);
+        if (retryCount >= 3) {
+          ev.status = 'dead_letter';
+          ev.failureReason = 'Max retry attempts exhausted (dead_letter)';
+          ev.metadata = { ...(ev.metadata || {}), deadLetterAt: new Date().toISOString() };
+        } else {
+          ev.status = 'rendered';
+          ev.retryCount = retryCount + 1;
+          ev.metadata = { ...(ev.metadata || {}), retryCount: retryCount + 1, retriedAt: new Date().toISOString() };
+        }
+        ev.updatedAt = new Date().toISOString();
+        if (!affectedTenantIds.includes(ev.tenantId)) {
+          affectedTenantIds.push(ev.tenantId);
+        }
+        affectedRecordCount++;
+      }
+    }
+
+    if (affectedRecordCount > 0) {
+      this.saveStoredEvents(events);
+    }
+
+    return { affectedRecordCount, affectedTenantIds };
   }
 }
