@@ -1,5 +1,4 @@
 # LARİ Supabase Migration Apply Manifest
-47. **20260822_h1e_release_control_and_eligibility_read_contracts.sql** — Stage H1E-A Global Release Control Singleton Table with Safe Default Row & Super Admin Eligibility Snapshot Read RPC.
 
 This manifest documents the active canonical migration graph, database schema ownership, and execution procedures for LARİ.
 
@@ -117,6 +116,25 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 | `consent_ledger` | `20260620_paymentless_production_core_tables.sql`| — | `20260622_paymentless_production_rls_identity_alignment.sql` |
 | `data_rights_requests` | `20260620_paymentless_production_core_tables.sql`| — | `20260622_paymentless_production_rls_identity_alignment.sql` |
 | `admin_mutation_idempotency` | `20260731_admin_appointment_status_mutation_rpc.sql`| — | `20260731_admin_appointment_status_mutation_rpc.sql` |
+| `branches` | `20260723_booking_lifecycle_foundation.sql` | — | `20260723_booking_lifecycle_foundation.sql` |
+| `staff_branches` | `20260723_booking_lifecycle_foundation.sql` | — | `20260723_booking_lifecycle_foundation.sql` |
+| `service_branches` | `20260723_booking_lifecycle_foundation.sql` | — | `20260723_booking_lifecycle_foundation.sql` |
+| `admin_reschedule_decision_idempotency` | `20260808_admin_reschedule_request_decision_rpc.sql` | — | `20260808_admin_reschedule_request_decision_rpc.sql` |
+| `commercial_feature_definitions` | `20260810_h1a_commercial_catalog_and_read_contracts.sql` | — | `20260810_h1a_commercial_catalog_and_read_contracts.sql` |
+| `plans` | `20260810_h1a_commercial_catalog_and_read_contracts.sql` | — | `20260810_h1a_commercial_catalog_and_read_contracts.sql` |
+| `plan_versions` | `20260810_h1a_commercial_catalog_and_read_contracts.sql` | — | `20260810_h1a_commercial_catalog_and_read_contracts.sql` |
+| `plan_entitlements` | `20260810_h1a_commercial_catalog_and_read_contracts.sql` | — | `20260810_h1a_commercial_catalog_and_read_contracts.sql` |
+| `tenant_entitlement_overrides` | `20260810_h1a_commercial_catalog_and_read_contracts.sql` | — | `20260810_h1a_commercial_catalog_and_read_contracts.sql` |
+| `subscription_events` | `20260810_h1a_commercial_catalog_and_read_contracts.sql` | — | `20260810_h1a_commercial_catalog_and_read_contracts.sql` |
+| `billing_transactions` | `20260810_h1a_commercial_catalog_and_read_contracts.sql` | — | `20260810_h1a_commercial_catalog_and_read_contracts.sql` |
+| `usage_counters` | `20260810_h1a_commercial_catalog_and_read_contracts.sql` | `20260815` | `20260810_h1a_commercial_catalog_and_read_contracts.sql` |
+| `platform_system_restrictions` | `20260810_h1a_commercial_catalog_and_read_contracts.sql` | — | `20260810_h1a_commercial_catalog_and_read_contracts.sql` |
+| `super_admin_commercial_mutation_idempotency` | `20260811_h1b_super_admin_commercial_mutations.sql` | — | `20260811_h1b_super_admin_commercial_mutations.sql` |
+| `platform_global_release_control` | `20260822_h1e_release_control_and_eligibility_read_contracts.sql` | — | `20260822_h1e_release_control_and_eligibility_read_contracts.sql` |
+| `tenant_pilot_authorizations` | `20260824_h1e_b_pilot_authorization_history.sql` | — | `20260825_h1e_b_authorization_contract_hardening.sql` |
+| `platform_release_phase_transition_history` | `20260828_h1e_c_controlled_release_phase_transition.sql` | — | `20260828_h1e_c_controlled_release_phase_transition.sql` |
+| `super_admin_release_transition_idempotency` | `20260828_h1e_c_controlled_release_phase_transition.sql` | — | `20260828_h1e_c_controlled_release_phase_transition.sql` |
+| `payment_webhook_idempotency` | `20260901_payment_webhook_idempotency_and_replay_security.sql` | — | `20260901_payment_webhook_idempotency_and_replay_security.sql` |
 | `public_booking_rate_limit_events` | `20260903_public_booking_ratelimit_spam_and_otp_contract.sql` | — | `20260903_public_booking_ratelimit_spam_and_otp_contract.sql` |
 | `public_booking_otp_challenges` | `20260903_public_booking_ratelimit_spam_and_otp_contract.sql` | — | `20260903_public_booking_ratelimit_spam_and_otp_contract.sql` |
 | `self_service_token_rate_limits` | `20260904_self_service_token_security_and_ratelimit.sql` | — | `20260904_self_service_token_security_and_ratelimit.sql` |
