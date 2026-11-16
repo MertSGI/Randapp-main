@@ -104,6 +104,8 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 94. **`20261008_phase7_node1_verified_reviews_foundation.sql`** — V2 Faz F1 (from `72911e4:20261004` + self-service manage-token path): `reviews` and `review_idempotency_keys` tables with direct DML revoked, `create_verified_review`, `create_verified_review_by_manage_token` (SHA-256 token + `20260904` rate-limit protection + completed-only + cross-tenant fail-closed), `get_public_reviews`, `get_tenant_reviews`, and `moderate_review`.
 95. **`20261009_phase7_node2_discovery_marketplace_projection.sql`** — V2 Faz F1 (from `72911e4:20261005`): Server-authoritative public Discovery Marketplace projections (`get_discovery_marketplace_listings`, `get_discovery_marketplace_detail`) reusing `evaluate_public_booking_eligibility_internal` and aggregating strictly `reviews.is_published = true` without duplicating business truth tables.
 96. **`20261010_phase7_node3_favorites_fast_rebooking.sql`** — V2 Faz F1 (from `72911e4:20261006`): `customer_favorites` relationship table with direct DML revoked, `set_customer_favorite`, `get_customer_favorites`, and `get_fast_rebooking_seed_by_manage_token` (binding rebooking strictly to `evaluate_booking_slot` and `create_public_booking`).
+97. **`20261011_program_v2_security_surface_hardening.sql`** — V2 Faz H1 (from `72911e4:20261007`): Program V2 security surface hardening — locks down `ht_rate_limit_buckets` privileges/RLS, enforces `SET search_path = pg_catalog, public` and revokes `PUBLIC`/`anon` EXECUTE on `get_user_role`, `get_user_tenant_id`, and `is_super_admin` (with `active = true`), and sets `SET search_path = pg_catalog, public` on `update_updated_at_column` and `update_tenant_business_profiles_updated_at_column`.
+98. **`20261012_appointment_access_tokens_table_access_hardening.sql`** — V2 Faz H1 (from `72911e4:20261011155623`): Forward-only hardening on `public.appointment_access_tokens` — verifies table identity and drops permissive `"Allow public select by token hash"` (`USING (true)`) policy while revoking `PUBLIC`/`anon` table privileges, preserving `SECURITY DEFINER` token RPC boundaries and authenticated owner/admin RLS.
 
 ---
 
@@ -143,7 +145,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 | `business_verification_reviews`| `20260601_lari_core_schema_alignment.sql` | — | `20260601`, `20260619` |
 | `notification_templates` | `20260601_lari_core_schema_alignment.sql` | — | `20260601`, `20260619` |
 | `notification_logs` | `20260601_lari_core_schema_alignment.sql` | — | `20260601`, `20260619` |
-| `appointment_access_tokens` | `20260620_paymentless_production_core_tables.sql`| — | `20260622_paymentless_production_rls_identity_alignment.sql` |
+| `appointment_access_tokens` | `20260620_paymentless_production_core_tables.sql`| `20261012` | `20260622`, `20261012_appointment_access_tokens_table_access_hardening.sql` |
 | `appointment_change_requests` | `20260620_paymentless_production_core_tables.sql`| — | `20260622_paymentless_production_rls_identity_alignment.sql` |
 | `communication_outbox` | `20260620_paymentless_production_core_tables.sql`| `20260713` | `20260713_communication_outbox_rls_hardening.sql` |
 | `audit_events` | `20260620_paymentless_production_core_tables.sql`| — | `20260622_paymentless_production_rls_identity_alignment.sql` |
@@ -364,4 +366,17 @@ After the migrations have successfully been applied:
   * Direct table access on `reviews`, `review_idempotency_keys`, and `customer_favorites` is revoked from `PUBLIC`, `anon`, and `authenticated`.
   * `create_verified_review` (authenticated `auth.uid()` customer ownership) and `create_verified_review_by_manage_token` (SHA-256 token ownership + `20260904` brute-force lockout protection) both fail closed on non-completed appointments, cross-tenant mismatches, forged/expired/used tokens, and payload conflicts, and always insert reviews unpublished (`is_published = false`) pending moderation.
   * `get_fast_rebooking_seed_by_manage_token` resolves current canonical tenant/branch/service/staff eligibility and binds rebooking to `evaluate_booking_slot` + `create_public_booking` without leaking PII.
+
+---
+
+## 14. V2 Faz H1 — Program V2 Security Surface & Token Table Hardening (ADIM-039)
+
+* **Conflict-Free Sequential Timestamps (`20261011..20261012`)**: Ported from historical V2 branch (`72911e4`: `20261007`, `20261011155623`) after `20261010` without modifying `20260901..20261010`.
+* **Security Surface Invariants (`20261011` & `20261012`)**:
+  * `public.ht_rate_limit_buckets`: RLS enabled and all privileges revoked from `PUBLIC`, `anon`, and `authenticated`.
+  * `public.get_user_role(uuid)`, `public.get_user_tenant_id(uuid)`, `public.is_super_admin(uuid)`: pinned to `SET search_path = pg_catalog, public`, `active = true` enforced on `is_super_admin`, and `EXECUTE` revoked from `PUBLIC` and `anon`.
+  * Trigger functions `public.update_updated_at_column()` and `public.update_tenant_business_profiles_updated_at_column()` pinned to `SET search_path = pg_catalog, public`.
+  * `public.appointment_access_tokens`: drops legacy `"Allow public select by token hash"` (`USING (true)`) policy and revokes `PUBLIC`/`anon` direct table privileges while keeping `SECURITY DEFINER` token RPCs intact.
+* **Program Seal**: Source state sealed at `SOURCE_CANDIDATE_COMPLETE` with `PRODUCTION = NO_GO`, `PAID_FALLBACK = DISABLED`, `AUTO_MERGE = DISABLED`, `NO_REMOTE_DB_WRITE = TRUE`, and GitHub **Issue #10** open pending Phase I (`ADIM-040..045`) Release Closure.
+
 

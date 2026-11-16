@@ -75,7 +75,7 @@ async function runPgTests() {
     await client.query(bootstrapSql);
 
     const migrationFiles = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
-    assert.equal(migrationFiles.length, 96, `Expected 96 total migrations, got ${migrationFiles.length}`);
+    assert.equal(migrationFiles.length, 98, `Expected 98 total migrations, got ${migrationFiles.length}`);
 
     const bridgeSql = fs.readFileSync(
       path.join(testsDir, 'fixtures', 'p2a_historical_replay_bridge_before_migration_38.sql'),
@@ -3028,7 +3028,112 @@ async function runPgTests() {
     await client.query(`RESET ROLE;`);
 
     console.log('[PASS] ADIM-037 Faz F1 Discovery Marketplace, Verified Reviews & Favorites / Fast-Rebooking verified on PG17');
-    console.log('\nALL ADIM-033 + ADIM-034 + ADIM-035 + ADIM-036 + ADIM-037 DISPOSABLE PG17 TESTS PASSED.');
+
+    // =========================================================================
+    // ADIM-039 Faz H1: Program V2 Security Surface & Token Table Hardening
+    // =========================================================================
+    console.log('\n── ADIM-039 Faz H1 PG17 Security Surface & Token Hardening Matrix ──');
+    await setAuthenticatedRole(null);
+
+    // 1. ht_rate_limit_buckets RLS + privilege revocation
+    const rlTableMeta = (await client.query(`
+      SELECT c.relrowsecurity AS rls_enabled,
+             has_table_privilege('anon', 'public.ht_rate_limit_buckets', 'SELECT') AS anon_sel,
+             has_table_privilege('authenticated', 'public.ht_rate_limit_buckets', 'SELECT') AS auth_sel,
+             has_table_privilege('authenticated', 'public.ht_rate_limit_buckets', 'INSERT') AS auth_ins
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relname = 'ht_rate_limit_buckets';
+    `)).rows[0];
+    assert.equal(rlTableMeta.rls_enabled, true);
+    assert.equal(rlTableMeta.anon_sel, false);
+    assert.equal(rlTableMeta.auth_sel, false);
+    assert.equal(rlTableMeta.auth_ins, false);
+
+    // 2. Identity & trigger helpers pinned to search_path = pg_catalog, public and EXECUTE revoked from PUBLIC/anon
+    const hardenedFuncs = (await client.query(`
+      SELECT p.proname,
+             p.prosecdef,
+             p.proconfig,
+             has_function_privilege('public', p.oid, 'EXECUTE') AS pub_exec,
+             has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_exec,
+             has_function_privilege('authenticated', p.oid, 'EXECUTE') AS auth_exec
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+        AND p.proname IN (
+          'get_user_role',
+          'get_user_tenant_id',
+          'is_super_admin',
+          'update_updated_at_column',
+          'update_tenant_business_profiles_updated_at_column'
+        )
+      ORDER BY p.proname;
+    `)).rows;
+    assert.equal(hardenedFuncs.length, 5, 'All 5 Program V2 hardened helper/trigger functions must exist');
+    for (const fn of hardenedFuncs) {
+      const hasPinnedSearchPath = Array.isArray(fn.proconfig) && fn.proconfig.some((c) => c === 'search_path=pg_catalog, public');
+      assert.equal(hasPinnedSearchPath, true, `${fn.proname} must pin search_path=pg_catalog, public`);
+      if (['get_user_role', 'get_user_tenant_id', 'is_super_admin'].includes(fn.proname)) {
+        assert.equal(fn.prosecdef, true, `${fn.proname} must be SECURITY DEFINER`);
+        assert.equal(fn.pub_exec, false, `${fn.proname} must not grant EXECUTE to PUBLIC`);
+        assert.equal(fn.anon_exec, false, `${fn.proname} must not grant EXECUTE to anon`);
+        assert.equal(fn.auth_exec, true, `${fn.proname} must grant EXECUTE to authenticated`);
+      }
+    }
+
+    // Negative: anon cannot execute get_user_role / get_user_tenant_id / is_super_admin
+    await client.query(`SET ROLE anon;`);
+    for (const fnCall of [
+      `SELECT public.get_user_role($1);`,
+      `SELECT public.get_user_tenant_id($1);`,
+      `SELECT public.is_super_admin($1);`,
+    ]) {
+      await assert.rejects(
+        async () => client.query(fnCall, [f1OwnerAUid]),
+        (err) => err && err.code === '42501',
+        `anon must receive 42501 for ${fnCall}`
+      );
+    }
+    await client.query(`RESET ROLE;`);
+
+    // Negative: inactive super_admin must return false from is_super_admin
+    const inactiveSuperUid = '99999999-ffff-4fff-8fff-999999999039';
+    await client.query(`INSERT INTO auth.users (id, email) VALUES ($1, 'inactive-super@example.test') ON CONFLICT DO NOTHING;`, [inactiveSuperUid]);
+    await client.query(`INSERT INTO public.users_profile (id, tenant_id, name, role, active) VALUES ($1, NULL, 'Inactive Super', 'super_admin', false) ON CONFLICT (id) DO UPDATE SET active = false;`, [inactiveSuperUid]);
+    const inactiveSuperCheck = (await client.query(`SELECT public.is_super_admin($1) AS res;`, [inactiveSuperUid])).rows[0].res;
+    assert.equal(inactiveSuperCheck, false, 'Inactive super_admin must return false from is_super_admin');
+
+    // 3. appointment_access_tokens direct browser access revoked (20261012) while SECURITY DEFINER RPCs work
+    const openTokenPolicyCnt = (await client.query(`
+      SELECT count(*)::int AS cnt
+      FROM pg_policies
+      WHERE schemaname = 'public'
+        AND tablename = 'appointment_access_tokens'
+        AND policyname = 'Allow public select by token hash';
+    `)).rows[0].cnt;
+    assert.equal(openTokenPolicyCnt, 0, 'Permissive Allow public select by token hash policy must be absent');
+
+    for (const priv of ['SELECT', 'INSERT', 'UPDATE', 'DELETE']) {
+      const hasAnonPriv = (await client.query(
+        `SELECT has_table_privilege('anon', 'public.appointment_access_tokens', $1) AS granted;`,
+        [priv]
+      )).rows[0].granted;
+      assert.equal(hasAnonPriv, false, `anon must not have ${priv} on public.appointment_access_tokens`);
+    }
+
+    await client.query(`SET ROLE anon;`);
+    await assert.rejects(
+      async () => client.query(`SELECT * FROM public.appointment_access_tokens;`),
+      (err) => err && err.code === '42501',
+      'anon direct SELECT on appointment_access_tokens must fail with 42501'
+    );
+    const tokReadViaRpc = (await client.query(`SELECT public.get_public_appointment_by_manage_token($1) AS res;`, [rawTokenCompleted])).rows[0].res;
+    assert.equal(tokReadViaRpc.success, true, 'SECURITY DEFINER token read RPC must continue working for anon');
+    await client.query(`RESET ROLE;`);
+
+    console.log('[PASS] ADIM-039 Faz H1 Program V2 Security Surface & Token Table Hardening verified on PG17');
+    console.log('\nALL ADIM-033 + ADIM-034 + ADIM-035 + ADIM-036 + ADIM-037 + ADIM-039 DISPOSABLE PG17 TESTS PASSED.');
   } finally {
     if (client) {
       try { await client.end(); } catch {}

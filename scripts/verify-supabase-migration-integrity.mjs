@@ -212,6 +212,42 @@ if (!outboxSuperAdminPolicyExists) {
   process.exit(1);
 }
 console.log('[PASS] communication_outbox RLS hardening policies are present in the active migration path.');
+
+// 4.6. Program V2 Security Surface & Token Table Hardening checks (ADIM-039)
+const v2SecurityMig = '20261011_program_v2_security_surface_hardening.sql';
+const v2TokenHardeningMig = '20261012_appointment_access_tokens_table_access_hardening.sql';
+if (!activeFiles.includes(v2SecurityMig) || !activeFiles.includes(v2TokenHardeningMig)) {
+  console.error(`[FAIL] Missing Program V2 security hardening migrations (${v2SecurityMig}, ${v2TokenHardeningMig}).`);
+  process.exit(1);
+}
+const v2SecuritySql = fs.readFileSync(path.join(migrationsDir, v2SecurityMig), 'utf8');
+const v2TokenSql = fs.readFileSync(path.join(migrationsDir, v2TokenHardeningMig), 'utf8');
+
+for (const fnName of [
+  'get_user_role',
+  'get_user_tenant_id',
+  'is_super_admin',
+  'update_updated_at_column',
+  'update_tenant_business_profiles_updated_at_column',
+]) {
+  const fnSearchPathRe = new RegExp(`CREATE\\s+OR\\s+REPLACE\\s+FUNCTION\\s+public\\.${fnName}[\\s\\S]*?SET\\s+search_path\\s*=\\s*pg_catalog,\\s*public`, 'i');
+  if (!fnSearchPathRe.test(v2SecuritySql)) {
+    console.error(`[FAIL] ${v2SecurityMig} missing fixed search_path on public.${fnName}.`);
+    process.exit(1);
+  }
+}
+if (!/REVOKE\s+ALL\s+PRIVILEGES\s+ON\s+TABLE\s+public\.ht_rate_limit_buckets\s+FROM\s+PUBLIC[\s\S]*FROM\s+anon[\s\S]*FROM\s+authenticated/i.test(v2SecuritySql)) {
+  console.error(`[FAIL] ${v2SecurityMig} must revoke ht_rate_limit_buckets privileges from PUBLIC, anon, authenticated.`);
+  process.exit(1);
+}
+if (
+  !/REVOKE\s+ALL\s+PRIVILEGES\s+ON\s+TABLE\s+public\.appointment_access_tokens\s+FROM\s+PUBLIC,\s*anon/i.test(v2TokenSql) ||
+  !/DROP\s+POLICY\s+IF\s+EXISTS\s+"Allow public select by token hash"\s+ON\s+public\.appointment_access_tokens/i.test(v2TokenSql)
+) {
+  console.error(`[FAIL] ${v2TokenHardeningMig} must revoke PUBLIC/anon privileges and drop legacy open token policy.`);
+  process.exit(1);
+}
+console.log('[PASS] Program V2 security surface & appointment_access_tokens hardening migrations verified.');
 // 5. Check required core tables exist
 const requiredTables = [
   'tenants',

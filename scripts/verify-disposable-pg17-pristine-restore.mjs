@@ -335,7 +335,7 @@ function loadCanonicalPre20260804Fixtures(tmpDir) {
     .readdirSync(migrationsDir)
     .filter((f) => f.endsWith('.sql'))
     .sort();
-  assert.equal(allMigrations.length, 60, `Expected 60 migrations in supabase/migrations, got ${allMigrations.length}`);
+  assert.equal(allMigrations.length, 98, `Expected 98 migrations in supabase/migrations, got ${allMigrations.length}`);
 
   const preMigrations = allMigrations.filter((f) => f < '20260804_');
   const forwardMigrationFiles = allMigrations.filter((f) => f >= '20260804_');
@@ -344,8 +344,10 @@ function loadCanonicalPre20260804Fixtures(tmpDir) {
     forwardMigrationFiles.includes('20260901_payment_webhook_idempotency_and_replay_security.sql') &&
       forwardMigrationFiles.includes('20260902_subscription_sync_transaction.sql') &&
       forwardMigrationFiles.includes('20260903_public_booking_ratelimit_spam_and_otp_contract.sql') &&
-      forwardMigrationFiles.includes('20260904_self_service_token_security_and_ratelimit.sql'),
-    '20260901..20260904 candidate migrations must be preserved in forward migration chain'
+      forwardMigrationFiles.includes('20260904_self_service_token_security_and_ratelimit.sql') &&
+      forwardMigrationFiles.includes('20261011_program_v2_security_surface_hardening.sql') &&
+      forwardMigrationFiles.includes('20261012_appointment_access_tokens_table_access_hardening.sql'),
+    '20260901..20260904 candidate migrations and 20261011..20261012 security hardening migrations must be preserved in forward migration chain'
   );
 
   const repoSchemaRaw = fs.readFileSync(schemaDumpPath, 'utf8');
@@ -696,14 +698,17 @@ async function run() {
     assert.equal(engine.kind, engineKindBeforeRestore, 'Broken forward migration must never switch engines mid-restore');
     console.log('  [PASS] Negative 1.4: Broken forward migration -> FORWARD_MIGRATION_FAILED (no mid-restore fallback, no verdict)');
 
-    // 1.5 Missing 20261011 proposal (pre-hardening open policy remains) -> FAIL in POSTCONDITION_FAILED
+    // 1.5 Missing 20261012 token table hardening & 20261011 proposal (pre-hardening open policy remains) -> FAIL in POSTCONDITION_FAILED
+    const preTokenHardeningForward = fixtures.forwardMigrations.filter(
+      (m) => m.name !== '20261012_appointment_access_tokens_table_access_hardening.sql'
+    );
     await assert.rejects(
       () =>
         executeRestoreIntoPristineClone(engine, {
           dbName: 'lari_restore_neg_no_p0',
           schemaChunks: fixtures.schemaChunks,
           dataSql: fixtures.dataSql,
-          forwardMigrations: fixtures.forwardMigrations,
+          forwardMigrations: preTokenHardeningForward,
           proposalSql: '',
         }),
       (err) => err instanceof RestoreStageError && err.stage === 'POSTCONDITION_FAILED' && err.message.includes('P0_NOT_APPLIED')
@@ -714,7 +719,7 @@ async function run() {
     // -------------------------------------------------------------------------
     // Step 2: Positive End-to-End Restore Verification (Same Dumps + Migrations + P0 Proposal)
     // -------------------------------------------------------------------------
-    console.log('\n--- Step 2: End-to-End Restore (Pre-20260804 Dumps -> Forward 20260804..20260904 -> 20261011 Proposal) ---');
+    console.log('\n--- Step 2: End-to-End Restore (Pre-20260804 Dumps -> Forward 20260804..20261012 -> 20261011 Proposal) ---');
     const positive = await executeRestoreIntoPristineClone(engine, {
       dbName: 'lari_restore_pristine_pg17',
       schemaChunks: fixtures.schemaChunks,
