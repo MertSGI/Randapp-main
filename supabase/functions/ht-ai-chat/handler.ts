@@ -1,0 +1,836 @@
+// ============================================================================
+// ht-ai-chat — Pure Request Handler (Deno Edge & Node/tsx Testable)
+//
+// Public Health Tourism AI Lead Agent. Server-authoritative conversation
+// boundary for assistive intake/navigation help.
+//
+// Server-only security gates:
+// - HT_AI_CHAT_LIVE_ENABLED === 'true' required BEFORE service-role mutations
+//   or provider execution (otherwise returns 503 DISABLED_EXTERNAL_HOLD).
+// - Explicit allowlisted provider switch via resolveHtAiProviderConfig.
+// ============================================================================
+
+import { readEdgeEnv } from "../_shared/aiEdgePolicy.ts";
+import {
+  isProviderReplyGrounded,
+  buildGroundedReplacementResponse,
+  executeProviderCall,
+  resolveHtAiProviderConfig,
+} from "./provider-policy.ts";
+
+export const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+/** Maximum user message length */
+const MAX_MESSAGE_LENGTH = 2_000;
+
+/** Maximum messages per conversation before suggesting handoff */
+const MAX_CONVERSATION_MESSAGES = 50;
+
+/** Medical safety boundary keywords that trigger handoff */
+const MEDICAL_KEYWORDS = [
+  'diagnos', 'diagnosis', 'treatment', 'prescri', 'medicat', 'surgery',
+  'operation', 'procedure', 'cure', 'therapy', 'symptom', 'disease',
+  'cancer', 'tumor', 'transplant', 'what is wrong with me',
+  'am i sick', 'do i have', 'should i take', 'tedavi', 'teşhis',
+  'ameliyat', 'ilaç', 'hastalık', 'kanser', 'tümör',
+  'علاج', 'تشخيص', 'مرض', 'جراحة', 'دواء',
+  'лечение', 'диагноз', 'болезнь', 'операция', 'лекарство',
+  'Behandlung', 'Diagnose', 'Krankheit', 'Operation', 'Medikament'
+];
+
+export interface HtAiChatSupabaseClient {
+  from(table: string): {
+    select(columns: string): {
+      eq(column: string, value: string): {
+        maybeSingle(): Promise<{ data: any; error?: unknown }>;
+      };
+    };
+    delete(): {
+      eq(column: string, value: string): Promise<{ error?: unknown }>;
+    };
+  };
+  rpc(fn: string, params?: Record<string, unknown>): Promise<{ data: any; error?: unknown }>;
+}
+
+export interface HtAiChatDeps {
+  getEnv?: (key: string) => string | undefined;
+  createSupabaseClient: (url: string, serviceKey: string) => HtAiChatSupabaseClient;
+  fetchImpl?: typeof fetch;
+}
+
+/** System prompt for the HT AI Lead Agent */
+export function buildSystemPrompt(language: string): string {
+  return `You are a helpful Health Tourism intake assistant for an international health tourism service. Your role is:
+
+CURRENTLY AVAILABLE THROUGH THIS ASSISTANT:
+1. Answer basic NON-MEDICAL health-tourism inquiry and process guidance
+2. Explain how to submit an inquiry or request
+3. Help with language and navigation on the platform
+4. Collect non-clinical context (preferred language, country, contact preferences, name, email, phone)
+5. Summarize user interest as an assistive summary for human coordinator review
+6. Offer/request human coordinator handoff when appropriate
+
+PRODUCT CAPABILITY GROUNDING — DO NOT CLAIM OR INVENT:
+Only describe capabilities explicitly listed as currently available above. Do not invent platform features, operational processes, integrations, communications, logistics, prices, timelines, or workflows. Do not convert generic health-tourism industry practices into claims about this platform.
+
+STRICTLY FORBIDDEN CLAIMS (DO NOT CLAIM OR IMPLY THAT THIS PLATFORM CURRENTLY):
+- Accepts passport, ID, or medical document/report uploads
+- Processes visas or handles visa documentation
+- Books flights, hotels, accommodations, or airport transfers/transportation
+- Takes payments, deposits, or provides payment plans
+- Sends automatic confirmation emails or automatic SMS messages
+- Performs real WhatsApp delivery or automated external messaging
+- Automatically matches users to partner clinics/providers
+- Guarantees response times, prices, or medical quotes
+- Performs appointment booking or Lead -> Booking -> Clinic conversion
+- Creates Clinic patient profiles or encounters
+- Provides medical treatment recommendations, diagnosis, prescriptions, suitability decisions, or medical outcome promises
+
+UNKNOWN OR UNSUPPORTED CAPABILITIES:
+If the user asks whether this platform supports something not listed in the currently available capabilities above (such as document uploads, flight/hotel booking, visa processing, automated payments, or specific response guarantees):
+- Do NOT say yes or speculate that it exists
+- State that you cannot confirm that capability through this assistant
+- Offer to collect their inquiry or connect them with a human coordinator instead
+
+STRICT MEDICAL BOUNDARY — YOU MUST NEVER:
+- Diagnose any condition
+- Recommend specific treatments or procedures
+- Prescribe medication
+- Claim medical suitability for any procedure
+- Make medical outcome promises
+- Replace qualified clinician review
+- Provide specific medical advice
+
+When a user asks for medical diagnosis, treatment advice, or clinical recommendations:
+- Clearly explain that you cannot provide medical advice
+- State that qualified medical professionals will review their inquiry
+- Offer to connect them with a human coordinator
+- Say: "I'm an intake assistant and cannot provide medical advice. Let me connect you with our medical coordination team who can properly address your health questions."
+
+Respond in ${language === 'tr' ? 'Turkish' : language === 'de' ? 'German' : language === 'ru' ? 'Russian' : language === 'ar' ? 'Arabic' : 'English'}.
+
+Keep responses concise, warm, and professional. Focus on helping the user navigate the health tourism inquiry process.`;
+}
+
+/** Deterministic Unsupported Product Capability Classifier */
+function containsUnsupportedCapabilityQuery(message: string): boolean {
+  const lower = message.toLowerCase();
+
+  const directActionPatterns = [
+    /(?<!\p{L})book\s+my\s+appointment(?!\p{L})/u,
+    /(?<!\p{L})randevu\s+al(?!\p{L})/u,
+    /(?<!\p{L})randevu\s+oluştur(?!\p{L})/u,
+    /(?<!\p{L})записаться(?!\p{L})/u,
+    /(?<!\p{L})حجز\s+موعد(?!\p{L})/u,
+    /(?<!\p{L})termin\s+buchen(?!\p{L})/u,
+
+    /(?<!\p{L})upload\s+my\s+passport(?!\p{L})/u,
+    /(?<!\p{L})pasaportumu\s+yükle(?!\p{L})/u,
+    /(?<!\p{L})загрузить\s+паспорт(?!\p{L})/u,
+    /(?<!\p{L})تحميل\s+جواز(?!\p{L})/u,
+    /(?<!\p{L})reisepass\s+hochladen(?!\p{L})/u,
+
+    /(?<!\p{L})upload\s+passport(?!\p{L})/u,
+    /(?<!\p{L})pasaport\s+yükle(?!\p{L})/u,
+    /(?<!\p{L})upload\s+id(?!\p{L})/u,
+    /(?<!\p{L})upload\s+document(?!\p{L})/u,
+    /(?<!\p{L})upload\s+report(?!\p{L})/u,
+    /(?<!\p{L})upload\s+file(?!\p{L})/u,
+
+    /(?<!\p{L})process\s+my\s+visa(?!\p{L})/u,
+    /(?<!\p{L})vizemi\s+işle(?!\p{L})/u,
+    /(?<!\p{L})vize\s+işle(?!\p{L})/u,
+    /(?<!\p{L})оформить\s+визу(?!\p{L})/u,
+    /(?<!\p{L})معالجة\s+التأشيرة(?!\p{L})/u,
+    /(?<!\p{L})visum\s+bearbeiten(?!\p{L})/u,
+
+    /(?<!\p{L})arrange\s+my\s+transfer(?!\p{L})/u,
+    /(?<!\p{L})transferimi\s+ayarla(?!\p{L})/u,
+    /(?<!\p{L})организовать\s+трансфер(?!\p{L})/u,
+    /(?<!\p{L})ترتيب\s+المواصلات(?!\p{L})/u,
+    /(?<!\p{L})transfer\s+arrangieren(?!\p{L})/u,
+
+    /(?<!\p{L})book\s+my\s+flight(?!\p{L})/u,
+    /(?<!\p{L})book\s+my\s+hotel(?!\p{L})/u,
+    /(?<!\p{L})uçak\s+bileti\s+al(?!\p{L})/u,
+    /(?<!\p{L})otel\s+ayarla(?!\p{L})/u,
+    /(?<!\p{L})забронировать\s+отель(?!\p{L})/u,
+    /(?<!\p{L})حجز\s+فندق(?!\p{L})/u
+  ];
+  if (directActionPatterns.some(pattern => pattern.test(lower))) {
+    return true;
+  }
+
+  const isDocumentCapabilityQuery = (
+    lower.includes('can i upload') || lower.includes('can you upload') || lower.includes('yükleyebilir miyim') || lower.includes('yükleme yapıyor musunuz') ||
+    lower.includes('kann ich hochladen') || lower.includes('могу ли я загрузить') || lower.includes('هل يمكنني تحميل') ||
+    (
+      (lower.includes('upload') || lower.includes('yükle') || lower.includes('загруз') || lower.includes('تحميل') || lower.includes('hochladen') || lower.includes('send')) &&
+      (lower.includes('passport') || lower.includes('pasaport') || lower.includes('паспорт') || lower.includes('جواز') || lower.includes('reisepass') || lower.includes('document') || lower.includes('belge') || lower.includes('file') || lower.includes('report') || lower.includes('pdf') || lower.includes('id')) &&
+      (lower.includes('here') || lower.includes('burada') || lower.includes('buradan') || lower.includes('hier') || lower.includes('здесь') || lower.includes('هنا') || lower.includes('can i') || lower.includes('can you') || lower.includes('do you'))
+    )
+  );
+
+  const isTravelCapabilityQuery = (
+    lower.includes('process my visa') || lower.includes('vize işliyor musunuz') || lower.includes('vize alıyor musunuz') ||
+    lower.includes('visum bearbeiten') || lower.includes('оформить визу') || lower.includes('معالجة التأشيرة') ||
+    (
+      (lower.includes('visa') || lower.includes('vize') || lower.includes('виз') || lower.includes('تأشيرة') || lower.includes('flight') || lower.includes('uçak') || lower.includes('hotel') || lower.includes('otel') || lower.includes('отель') || lower.includes('فندق') || lower.includes('transfer') || lower.includes('трансфер') || lower.includes('konaklama') || lower.includes('unterkunft')) &&
+      (lower.includes('can you process') || lower.includes('do you process') || lower.includes('can you book') || lower.includes('do you book') || lower.includes('can you arrange') || lower.includes('do you arrange') || lower.includes('do you provide') || lower.includes('ayarlıyor musunuz') || lower.includes('yapıyor musunuz') || lower.includes('organisieren sie') || lower.includes('bieten sie') || lower.includes('организуете ли') || lower.includes('هل ترتبون') || lower.includes('هل تحجزون'))
+    )
+  );
+
+  const isPaymentCapabilityQuery = (
+    lower.includes('can i pay') || lower.includes('can you accept payment') || lower.includes('ödeyecek miyim') || lower.includes('ödeme yapabilir miyim') || lower.includes('depozito yatırabilir miyim') ||
+    lower.includes('kann ich bezahlen') || lower.includes('могу ли я оплатить') || lower.includes('هل يمكنني الدفع') ||
+    (
+      (lower.includes('deposit') || lower.includes('depozito') || lower.includes('депозит') || lower.includes('عربون') || lower.includes('payment') || lower.includes('ödeme') || lower.includes('оплат') || lower.includes('bezahl') || lower.includes('price guarantee') || lower.includes('fiyat garantisi') || lower.includes('insurance') || lower.includes('sigorta') || lower.includes('versich') || lower.includes('страхов') || lower.includes('تأمين') || lower.includes('wire transfer') || lower.includes('bank transfer') || lower.includes('havale') || lower.includes('überweisung') || lower.includes('банковск') || lower.includes('تحويل')) &&
+      (lower.includes('can i pay') || lower.includes('can we pay') || lower.includes('do you take') || lower.includes('do you accept') || lower.includes('do you provide') || lower.includes('kabul ediyor musunuz') || lower.includes('alıyor musunuz') || lower.includes('yapabilir miyim') || lower.includes('veriyor musunuz') || lower.includes('akzeptieren sie') || lower.includes('принимаете') || lower.includes('هل تقبلون') || lower.includes('pay by') || lower.includes('payment by') || lower.includes('ile ödeme') || lower.includes('per banküberweisung') || lower.includes('оплатить банковским') || lower.includes('الدفع عن طريق'))
+    )
+  );
+
+  const isAutoCommunicationCapabilityQuery = (
+    (lower.includes('sms') || lower.includes('email') || lower.includes('eposta') || lower.includes('e-posta') || lower.includes('whatsapp') || lower.includes('mail')) &&
+    (lower.includes('automatic') || lower.includes('otomatik') || lower.includes('автомат') || lower.includes('تلقائي') || lower.includes('automatisch')) &&
+    (lower.includes('will i receive') || lower.includes('do you send') || lower.includes('will you send') || lower.includes('gönderiyor musunuz') || lower.includes('alacak mıyım') || lower.includes('gelemeyecek mi') || lower.includes('senden sie') || lower.includes('получу ли я') || lower.includes('отправляете ли') || lower.includes('هل ترسلون') || lower.includes('هل سأستلم'))
+  );
+
+  const isAppointmentCapabilityQuery = (
+    (lower.includes('appointment') || lower.includes('randevu') || lower.includes('termin') || lower.includes('запись') || lower.includes('موعد')) &&
+    (lower.includes('can you book') || lower.includes('can i book') || lower.includes('do you book') || lower.includes('randevu alabilir miyim') || lower.includes('randevu oluşturuyor musunuz') || lower.includes('können sie buchen') || lower.includes('можете ли вы записать') || lower.includes('هل يمكنك حجز'))
+  );
+
+  const isClinicMatchingCapabilityQuery = (
+    (lower.includes('match') || lower.includes('matching') || lower.includes('eşleş') || lower.includes('eşleştir') || lower.includes('zuordnen') || lower.includes('подбор') || lower.includes('مطابقة')) &&
+    (lower.includes('clinic') || lower.includes('clinics') || lower.includes('klinik') || lower.includes('klinikler') || lower.includes('provider') || lower.includes('hospital') || lower.includes('клиник') || lower.includes('عياد')) &&
+    (lower.includes('automatic') || lower.includes('otomatik') || lower.includes('автомат') || lower.includes('تلقائي') || lower.includes('automatisch') || lower.includes('can you') || lower.includes('does the platform') || lower.includes('do you') || lower.includes('musunuz') || lower.includes('bieten sie') || lower.includes('подбираете ли') || lower.includes('هل تطابقون'))
+  );
+
+  if (isDocumentCapabilityQuery || isTravelCapabilityQuery || isPaymentCapabilityQuery || isAutoCommunicationCapabilityQuery || isAppointmentCapabilityQuery || isClinicMatchingCapabilityQuery) {
+    return true;
+  }
+
+  const isCatalogOfferingQuery = (
+    (lower.includes('which') || lower.includes('what') || lower.includes('hangi') || lower.includes('какие') || lower.includes('какой') || lower.includes('أي') || lower.includes('welche')) &&
+    (lower.includes('platform') || lower.includes('system') || lower.includes('available') || lower.includes('mevcut') || lower.includes('offer') || lower.includes('доступн') || lower.includes('متاح') || lower.includes('verfügbar')) &&
+    (lower.includes('country') || lower.includes('countries') || lower.includes('ülke') || lower.includes('страны') || lower.includes('دول') || lower.includes('länder') ||
+     lower.includes('clinic') || lower.includes('clinics') || lower.includes('klinik') || lower.includes('клиники') || lower.includes('عيادات') || lower.includes('kliniken') ||
+     lower.includes('treatment') || lower.includes('treatments') || lower.includes('procedure') || lower.includes('tedavi') || lower.includes('процедур') || lower.includes('علاج') || lower.includes('behandlung'))
+  ) || lower.includes('available on this platform') || lower.includes('bu platformda mevcut') || lower.includes('доступны на этой платформе') || lower.includes('المتاحة على هذه المنصة');
+
+  return isCatalogOfferingQuery;
+}
+
+/** Localized Safe Product-Capability Response Helper */
+function buildUnsupportedCapabilityResponse(language: string): string {
+  switch (language) {
+    case "tr":
+      return "Bu asistan üzerinden talep ettiğiniz özelliğin veya seçeneğin şu anda aktif olarak sunulduğunu doğrudan teyit edemiyorum. İhtiyacınızı kayıt altına alabilir ve detaylı bilgi için sizi uzman hasta koordinatörümüze yönlendirebilirim.";
+    case "de":
+      return "Ich kann über diesen Assistenten nicht direkt bestätigen, dass diese Funktion oder Option derzeit verfügbar ist. Ich kann Ihre Anfrage gerne aufnehmen und Sie für weitere Details an unseren Koordinatoren weiterleiten.";
+    case "ru":
+      return "Я не могу напрямую подтвердить через этого ассистента, доступна ли эта функция или опция в настоящее время. Я могу зафиксировать ваш запрос и передать его нашему координатору для уточнения деталей.";
+    case "ar":
+      return "لا يمكنني التأكيد مباشرة من خلال هذا المساعد ما إذا كانت هذه الميزة أو الخيار متاحًا حاليًا. يمكنني تسجيل استفسارك وتوصيلك بـ منسق المرضى للحصول على التفاصيل الكاملة.";
+    default:
+      return "I cannot directly confirm through this assistant whether that specific capability or option is currently available on the platform. I can record your inquiry details and connect you with a human coordinator to assist you further.";
+  }
+}
+
+function containsMedicalQuery(message: string): boolean {
+  const lower = message.toLowerCase();
+  return MEDICAL_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+function jsonError(code: string, message: string, status: number): Response {
+  return new Response(
+    JSON.stringify({ success: false, error: { code, message } }),
+    { status, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+  );
+}
+
+function jsonSuccess(data: Record<string, unknown>): Response {
+  return new Response(
+    JSON.stringify({ success: true, ...data }),
+    { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+  );
+}
+
+export async function handleHtAiChatRequest(req: Request, deps: HtAiChatDeps): Promise<Response> {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: CORS_HEADERS });
+  }
+
+  if (req.method !== "POST") {
+    return jsonError("METHOD_NOT_ALLOWED", "POST required", 405);
+  }
+
+  try {
+    const getEnv = deps.getEnv ?? readEdgeEnv;
+
+    // -----------------------------------------------------------------------
+    // 0. Server-Only Live Activation Gate (0-TL / EXTERNAL_HOLD Guard)
+    // Must execute BEFORE any service-role DB mutations/RPCs or provider fetch.
+    // -----------------------------------------------------------------------
+    if (getEnv("HT_AI_CHAT_LIVE_ENABLED") !== "true") {
+      return jsonError(
+        "DISABLED_EXTERNAL_HOLD",
+        "Health Tourism AI chat is disabled in 0-TL / EXTERNAL_HOLD mode until HT_AI_CHAT_LIVE_ENABLED=true is enabled server-side.",
+        503
+      );
+    }
+
+    // -----------------------------------------------------------------------
+    // 1. Environment & Supabase service client
+    // -----------------------------------------------------------------------
+    const supabaseUrl = getEnv("SUPABASE_URL");
+    const supabaseServiceKey = getEnv("SUPABASE_SERVICE_ROLE_KEY");
+    const rateLimitHashKey = getEnv("HT_RATE_LIMIT_HASH_KEY");
+
+    if (!supabaseUrl || !supabaseServiceKey || !rateLimitHashKey) {
+      return jsonError("SERVER_CONFIG_ERROR", "Server configuration incomplete.", 500);
+    }
+
+    const providerConfig = resolveHtAiProviderConfig(getEnv);
+
+    // Service role client for server-authoritative operations
+    const supabase = deps.createSupabaseClient(supabaseUrl, supabaseServiceKey);
+
+    // -----------------------------------------------------------------------
+    // 2. Parse request
+    // -----------------------------------------------------------------------
+    const body = await req.json();
+    const {
+      session_token, message, tenant_slug, preferred_language,
+      full_name, email, phone, country_code, source_channel, referring_agency_id
+    } = body;
+
+    if (!message || typeof message !== "string" || message.trim().length === 0) {
+      return jsonError("INVALID_INPUT", "Message is required.", 400);
+    }
+
+    if (message.length > MAX_MESSAGE_LENGTH) {
+      return jsonError("INVALID_INPUT", `Message exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters.`, 400);
+    }
+
+    if (!tenant_slug || typeof tenant_slug !== "string") {
+      return jsonError("INVALID_INPUT", "Tenant slug is required.", 400);
+    }
+
+    const isHandoffRequest = message.startsWith("__HANDOFF_REQUEST__:");
+    const isContactSubmission = Boolean(!isHandoffRequest && session_token && full_name && (email || phone));
+    const isHandoffOrContactProtocol = isHandoffRequest || isContactSubmission;
+
+    // -----------------------------------------------------------------------
+    // 3. Resolve tenant from slug using canonical tenant authority
+    // -----------------------------------------------------------------------
+    const { data: tenantData } = await supabase
+      .from("tenants")
+      .select("id, status, verification_status, public_site_status")
+      .eq("slug", tenant_slug.toLowerCase().trim())
+      .maybeSingle();
+
+    if (!tenantData?.id) {
+      return jsonError("NOT_FOUND", "Health tourism service not found.", 404);
+    }
+
+    if (tenantData.status !== "active") {
+      return jsonError("NOT_FOUND", "Tenant is not active.", 404);
+    }
+
+    if (tenantData.verification_status === "suspended") {
+      return jsonError("FORBIDDEN", "Tenant service is suspended.", 403);
+    }
+
+    if (tenantData.public_site_status && tenantData.public_site_status !== "published") {
+      return jsonError("FORBIDDEN", "Health tourism public site is not published.", 403);
+    }
+
+    const tenantId = tenantData.id;
+
+    // -----------------------------------------------------------------------
+    // 3B. Server-Side Anti-Abuse Rate Limit Enforcement
+    // -----------------------------------------------------------------------
+    const rawIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+                  req.headers.get("cf-connecting-ip")?.trim() ||
+                  req.headers.get("x-real-ip")?.trim() ||
+                  "127.0.0.1";
+
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(rateLimitHashKey);
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      keyData,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const messageData = encoder.encode(`${tenantId}:${rawIp}`);
+    const signatureBuffer = await crypto.subtle.sign("HMAC", cryptoKey, messageData);
+    const hashArray = Array.from(new Uint8Array(signatureBuffer));
+    const hashedRequester = hashArray.map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 24);
+
+    const isNewSession = !session_token;
+    let rateLimitAllowed = false;
+
+    if (isNewSession) {
+      const bucketKey = `ht:rl:conv:${tenantId}:${hashedRequester}`;
+      const { data: rlResult, error: rlErr } = await supabase.rpc("ht_check_rate_limit", {
+        p_bucket_key: bucketKey,
+        p_max_requests: 5,
+        p_window_seconds: 3600,
+      });
+
+      if (rlErr) {
+        console.error("ht_check_rate_limit error:", rlErr);
+        return jsonError("ANTI_ABUSE_UNAVAILABLE", "Service temporarily unavailable. Please try again later.", 503);
+      }
+
+      if (!rlResult || typeof rlResult.allowed !== "boolean") {
+        console.error("ht_check_rate_limit returned malformed response:", rlResult);
+        return jsonError("ANTI_ABUSE_UNAVAILABLE", "Service temporarily unavailable. Please try again later.", 503);
+      }
+
+      if (rlResult.allowed === false) {
+        const retryAfter = rlResult.retry_after_seconds || 60;
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: {
+              code: "RATE_LIMITED",
+              message: "Too many requests. Please wait a moment before trying again.",
+            },
+          }),
+          {
+            status: 429,
+            headers: {
+              "Content-Type": "application/json",
+              "Retry-After": String(retryAfter),
+              ...CORS_HEADERS,
+            },
+          }
+        );
+      }
+
+      if (rlResult.allowed === true) {
+        rateLimitAllowed = true;
+      }
+    } else if (isHandoffOrContactProtocol) {
+      rateLimitAllowed = true;
+    } else {
+      const bucketKey = `ht:rl:msg:${tenantId}:${hashedRequester}`;
+      const { data: rlResult, error: rlErr } = await supabase.rpc("ht_check_rate_limit", {
+        p_bucket_key: bucketKey,
+        p_max_requests: 30,
+        p_window_seconds: 3600,
+      });
+
+      if (rlErr) {
+        console.error("ht_check_rate_limit error:", rlErr);
+        return jsonError("ANTI_ABUSE_UNAVAILABLE", "Service temporarily unavailable. Please try again later.", 503);
+      }
+
+      if (!rlResult || typeof rlResult.allowed !== "boolean") {
+        console.error("ht_check_rate_limit returned malformed response:", rlResult);
+        return jsonError("ANTI_ABUSE_UNAVAILABLE", "Service temporarily unavailable. Please try again later.", 503);
+      }
+
+      if (rlResult.allowed === false) {
+        const retryAfter = rlResult.retry_after_seconds || 60;
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: {
+              code: "RATE_LIMITED",
+              message: "Too many requests. Please wait a moment before trying again.",
+            },
+          }),
+          {
+            status: 429,
+            headers: {
+              "Content-Type": "application/json",
+              "Retry-After": String(retryAfter),
+              ...CORS_HEADERS,
+            },
+          }
+        );
+      }
+
+      if (rlResult.allowed === true) {
+        rateLimitAllowed = true;
+      }
+    }
+
+    if (!rateLimitAllowed) {
+      return jsonError("ANTI_ABUSE_UNAVAILABLE", "Service temporarily unavailable. Please try again later.", 503);
+    }
+
+    // -----------------------------------------------------------------------
+    // 5. Resolve or create conversation
+    // -----------------------------------------------------------------------
+    let conversationId: string;
+    let currentSessionToken: string;
+    let existingLeadId: string | null = null;
+    let conversationMessages: Array<{ role: string; content: string }> = [];
+
+    if (session_token) {
+      const { data: convData, error: getConvErr } = await supabase.rpc("ht_get_ai_conversation_by_session", {
+        p_session_token: session_token,
+      });
+
+      if (getConvErr || !convData?.success || !convData?.conversation) {
+        return jsonError("INVALID_SESSION", "Invalid or expired conversation session.", 401);
+      }
+
+      if (convData.conversation.tenant_id !== tenantId) {
+        return jsonError("FORBIDDEN", "Cross-tenant conversation access denied.", 403);
+      }
+
+      conversationId = convData.conversation.id;
+      currentSessionToken = session_token;
+      existingLeadId = convData.conversation.lead_id || null;
+      conversationMessages = (convData.messages || []).map((m: { role: string; content: string }) => ({
+        role: m.role,
+        content: m.content,
+      }));
+    } else {
+      const { data: newConv, error: createConvErr } = await supabase.rpc("ht_create_ai_conversation", {
+        p_tenant_id: tenantId,
+        p_preferred_language: preferred_language || "en",
+      });
+
+      if (createConvErr || !newConv?.success) {
+        console.error("ht_create_ai_conversation error:", createConvErr || newConv);
+        return jsonError("CONVERSATION_CREATE_FAILED", "Unable to start conversation. Please try again.", 500);
+      }
+
+      conversationId = newConv.conversation_id;
+      currentSessionToken = newConv.session_token;
+    }
+
+    // -----------------------------------------------------------------------
+    // 5B. Handle Lead Creation & Linking if Contact Info Provided
+    // -----------------------------------------------------------------------
+    let activeLeadId: string | null = existingLeadId;
+
+    if (!activeLeadId && full_name && (email || phone)) {
+      const { data: leadResult, error: leadErr } = await supabase.rpc("ht_create_public_lead", {
+        p_slug: tenant_slug.toLowerCase().trim(),
+        p_full_name: full_name,
+        p_email: email || null,
+        p_phone: phone || null,
+        p_preferred_language: preferred_language || "en",
+        p_country_code: country_code || null,
+        p_passport_number: null,
+        p_source_channel: source_channel || "web",
+        p_referring_agency_id: referring_agency_id || null,
+      });
+
+      if (leadErr || !leadResult?.success || !leadResult?.lead_id) {
+        console.error("ht_create_public_lead error:", leadErr || leadResult);
+        return jsonError("LEAD_CREATION_FAILED", "Unable to process contact details. Please try again.", 500);
+      }
+
+      activeLeadId = leadResult.lead_id;
+
+      const { data: linkResult, error: linkErr } = await supabase.rpc("ht_link_ai_conversation_to_lead", {
+        p_conversation_id: conversationId,
+        p_lead_id: activeLeadId,
+      });
+
+      if (linkErr || !linkResult?.success) {
+        console.error("ht_link_ai_conversation_to_lead error:", linkErr || linkResult);
+        return jsonError("CONVERSATION_LINK_FAILED", "Unable to connect conversation to lead record.", 500);
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // 5C. Check message limit (with server-authoritative handoff persistence)
+    // -----------------------------------------------------------------------
+    if (conversationMessages.length >= MAX_CONVERSATION_MESSAGES) {
+      if (!activeLeadId) {
+        return jsonSuccess({
+          session_token: currentSessionToken,
+          reply: null,
+          conversation_id: conversationId,
+          handoff_triggered: false,
+          requires_contact: true,
+          handoff_reason: "conversation_limit_reached",
+          outcome_code: "LIMIT_REACHED_REQUIRES_CONTACT",
+        });
+      }
+
+      const { data: limitHandoffRes, error: limitHandoffErr } = await supabase.rpc("ht_request_handoff", {
+        p_conversation_id: conversationId,
+        p_reason: "conversation_limit_reached",
+      });
+
+      if (limitHandoffErr || !limitHandoffRes?.success) {
+        console.error("ht_request_handoff (limit reached) error:", limitHandoffErr || limitHandoffRes);
+        return jsonError("HANDOFF_REQUEST_FAILED", "Unable to process conversation limit handoff.", 500);
+      }
+
+      return jsonSuccess({
+        session_token: currentSessionToken,
+        reply: null,
+        conversation_id: conversationId,
+        handoff_triggered: true,
+        requires_contact: false,
+        handoff_reason: "conversation_limit_reached",
+        outcome_code: "LIMIT_REACHED_HANDOFF_COMPLETED",
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // 6. Handle handoff
+    // -----------------------------------------------------------------------
+    if (isHandoffRequest) {
+      const reason = message.replace("__HANDOFF_REQUEST__:", "").trim() || "user_requested";
+
+      if (!activeLeadId) {
+        return jsonSuccess({
+          session_token: currentSessionToken,
+          reply: null,
+          conversation_id: conversationId,
+          handoff_triggered: false,
+          requires_contact: true,
+          handoff_reason: reason,
+          outcome_code: "CONTACT_REQUIRED",
+        });
+      }
+
+      const { data: handoffRes, error: handoffErr } = await supabase.rpc("ht_request_handoff", {
+        p_conversation_id: conversationId,
+        p_reason: reason,
+      });
+
+      if (handoffErr || !handoffRes?.success) {
+        console.error("ht_request_handoff error:", handoffErr || handoffRes);
+        return jsonError("HANDOFF_REQUEST_FAILED", "Unable to process handoff request. Please try again.", 500);
+      }
+
+      return jsonSuccess({
+        session_token: currentSessionToken,
+        reply: null,
+        conversation_id: conversationId,
+        handoff_triggered: true,
+        requires_contact: false,
+        handoff_reason: reason,
+        outcome_code: "HANDOFF_COMPLETED",
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // 7. Check deterministic unsupported product capability boundary
+    // -----------------------------------------------------------------------
+    const isUnsupportedCapabilityQuery = containsUnsupportedCapabilityQuery(message);
+
+    if (isUnsupportedCapabilityQuery) {
+      const { data: userMsgRes, error: userMsgErr } = await supabase.rpc("ht_add_ai_message", {
+        p_session_token: currentSessionToken,
+        p_role: "user",
+        p_content: message.trim(),
+      });
+
+      if (userMsgErr || !userMsgRes?.success) {
+        console.error("ht_add_ai_message (user) error:", userMsgErr || userMsgRes);
+        return jsonError("MESSAGE_PERSIST_FAILED", "Unable to record message. Please try again.", 500);
+      }
+
+      const capabilityResponse = buildUnsupportedCapabilityResponse(preferred_language || "en");
+
+      const { data: capMsgRes, error: capMsgErr } = await supabase.rpc("ht_add_ai_message", {
+        p_session_token: currentSessionToken,
+        p_role: "assistant",
+        p_content: capabilityResponse,
+      });
+
+      if (capMsgErr || !capMsgRes?.success) {
+        console.error("ht_add_ai_message (capability assistant) error:", capMsgErr || capMsgRes);
+        return jsonError("MESSAGE_PERSIST_FAILED", "Unable to record response. Please try again.", 500);
+      }
+
+      return jsonSuccess({
+        session_token: currentSessionToken,
+        reply: capabilityResponse,
+        conversation_id: conversationId,
+        handoff_triggered: false,
+        requires_contact: !activeLeadId,
+        outcome_code: "UNSUPPORTED_CAPABILITY",
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // 8. Check medical safety boundary
+    // -----------------------------------------------------------------------
+    const isMedicalQuery = containsMedicalQuery(message);
+
+    if (isMedicalQuery) {
+      const { data: userMsgRes, error: userMsgErr } = await supabase.rpc("ht_add_ai_message", {
+        p_session_token: currentSessionToken,
+        p_role: "user",
+        p_content: message.trim(),
+      });
+
+      if (userMsgErr || !userMsgRes?.success) {
+        console.error("ht_add_ai_message (user) error:", userMsgErr || userMsgRes);
+        return jsonError("MESSAGE_PERSIST_FAILED", "Unable to record message. Please try again.", 500);
+      }
+
+      const safetyResponse = "[Medical Safety Deferral]";
+
+      const { data: safetyMsgRes, error: safetyMsgErr } = await supabase.rpc("ht_add_ai_message", {
+        p_session_token: currentSessionToken,
+        p_role: "assistant",
+        p_content: safetyResponse,
+      });
+
+      if (safetyMsgErr || !safetyMsgRes?.success) {
+        console.error("ht_add_ai_message (safety assistant) error:", safetyMsgErr || safetyMsgRes);
+        return jsonError("MESSAGE_PERSIST_FAILED", "Unable to record response. Please try again.", 500);
+      }
+
+      const { data: medHandoffRes, error: medHandoffErr } = await supabase.rpc("ht_request_handoff", {
+        p_conversation_id: conversationId,
+        p_reason: "medical_advice_boundary",
+      });
+
+      if (medHandoffErr || !medHandoffRes?.success) {
+        console.error("ht_request_handoff (medical boundary) error:", medHandoffErr || medHandoffRes);
+        return jsonError("HANDOFF_REQUEST_FAILED", "Unable to record medical safety handoff. Please try again.", 500);
+      }
+
+      return jsonSuccess({
+        session_token: currentSessionToken,
+        reply: null,
+        conversation_id: conversationId,
+        handoff_triggered: true,
+        requires_contact: !activeLeadId,
+        handoff_reason: "medical_advice_boundary",
+        outcome_code: "MEDICAL_SAFETY_BOUNDARY",
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // 9. NORMAL PROVIDER PATH — Validate Allowlisted Provider & Execute
+    // -----------------------------------------------------------------------
+    if (!providerConfig.supported || !providerConfig.provider || !providerConfig.apiKey) {
+      return jsonError(
+        "AI_PROVIDER_UNAVAILABLE",
+        "AI provider service is currently unavailable.",
+        503
+      );
+    }
+
+    const providerResult = await executeProviderCall({
+      aiApiKey: providerConfig.apiKey,
+      aiProvider: providerConfig.provider,
+      aiModel: providerConfig.model,
+      preferredLanguage: preferred_language || "en",
+      message: message.trim(),
+      conversationMessages,
+      fetchImpl: deps.fetchImpl,
+      buildSystemPrompt
+    });
+
+    if (!providerResult.success || !providerResult.rawReply) {
+      return jsonError(
+        "AI_PROVIDER_UNAVAILABLE",
+        "AI provider service is currently unavailable.",
+        503
+      );
+    }
+
+    const rawProviderReply = providerResult.rawReply;
+
+    // -----------------------------------------------------------------------
+    // 9B. Deterministic Server-Side Provider Grounding Guard
+    // -----------------------------------------------------------------------
+    let finalAiReply = rawProviderReply;
+    let providerResponseSanitized = false;
+    let outcomeCode = "SUCCESS";
+
+    const groundedPass = isProviderReplyGrounded(rawProviderReply);
+
+    if (!groundedPass) {
+      providerResponseSanitized = true;
+      outcomeCode = "PROVIDER_RESPONSE_GROUNDED";
+      finalAiReply = buildGroundedReplacementResponse(preferred_language || "en");
+    }
+
+    // -----------------------------------------------------------------------
+    // 10. Store User Message AFTER Provider Success
+    // -----------------------------------------------------------------------
+    const { data: userMsgRes, error: userMsgErr } = await supabase.rpc("ht_add_ai_message", {
+      p_session_token: currentSessionToken,
+      p_role: "user",
+      p_content: message.trim(),
+    });
+
+    if (userMsgErr || !userMsgRes?.success) {
+      console.error("ht_add_ai_message (user) error:", userMsgErr || userMsgRes);
+      return jsonError("MESSAGE_PERSIST_FAILED", "Unable to record message. Please try again.", 500);
+    }
+
+    const insertedUserMessageId = userMsgRes.message_id;
+
+    // -----------------------------------------------------------------------
+    // 10B. Store Assistant AI response (with explicit user message cleanup on error)
+    // -----------------------------------------------------------------------
+    const { data: aiMsgRes, error: aiMsgErr } = await supabase.rpc("ht_add_ai_message", {
+      p_session_token: currentSessionToken,
+      p_role: "assistant",
+      p_content: finalAiReply,
+    });
+
+    if (aiMsgErr || !aiMsgRes?.success) {
+      console.error("ht_add_ai_message (assistant) error:", aiMsgErr || aiMsgRes);
+      if (insertedUserMessageId) {
+        const { error: cleanupError } = await supabase
+          .from("ht_ai_messages")
+          .delete()
+          .eq("id", insertedUserMessageId);
+        if (cleanupError) {
+          console.error("Failed to clean up user message after assistant persist failure:", cleanupError);
+        }
+      }
+      return jsonError("MESSAGE_PERSIST_FAILED", "Unable to record AI response. Please try again.", 500);
+    }
+
+    // -----------------------------------------------------------------------
+    // 11. Generate and persist summary for coordinator
+    // -----------------------------------------------------------------------
+    let summary: string | undefined;
+    const totalMessages = conversationMessages.length + 2;
+    if (totalMessages >= 4) {
+      const userMsgs = [...conversationMessages.filter(m => m.role === "user").map(m => m.content), message.trim()];
+      summary = `[AI-generated assistive summary — not verified clinical fact] User interests: ${userMsgs.slice(-3).join("; ").substring(0, 300)}`;
+
+      const { data: summaryRes, error: summaryErr } = await supabase.rpc("ht_update_ai_conversation_summary", {
+        p_conversation_id: conversationId,
+        p_summary: summary,
+      });
+
+      if (summaryErr || !summaryRes?.success) {
+        console.error("ht_update_ai_conversation_summary error:", summaryErr || summaryRes);
+        return jsonError("SUMMARY_PERSIST_FAILED", "Unable to update conversation summary. Please try again.", 500);
+      }
+    }
+
+    return jsonSuccess({
+      session_token: currentSessionToken,
+      reply: finalAiReply,
+      conversation_id: conversationId,
+      handoff_triggered: false,
+      summary,
+      outcome_code: outcomeCode,
+      provider_response_sanitized: providerResponseSanitized,
+    });
+  } catch (err) {
+    console.error("ht-ai-chat unhandled internal error:", err);
+    return jsonError("INTERNAL_ERROR", "An unexpected error occurred in the AI chat service. Please try again.", 500);
+  }
+}
