@@ -101,6 +101,9 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 91. **`20261005_phase5_vertical_skus_commercial_packaging.sql`** — V2 Faz E1 (from `72911e4:20260927`): Vertical feature definitions, published v1 vertical SKUs (`clinic_starter`, `clinic_pro`, `ht_starter`, `ht_enterprise`), cross-tenant-guarded `resolve_tenant_vertical_context`, and advisory-locked practitioner/coordinator quota triggers.
 92. **`20261006_phase5_clinic_practitioners_workspace_hardening.sql`** — V2 Faz E1 (from `72911e4:20260928`): Hardens `clinic_set_staff_profile` and `clinic_get_my_context` against vertical commercial entitlement and `staff_branches` membership.
 93. **`20261007_phase5_ht_treatment_journey_quote_itinerary.sql`** — V2 Faz E1 (from `72911e4:20260928`): `ht_treatment_journeys`, `ht_journey_quotes`, `ht_journey_itinerary_events`, table privilege revocation + fail-closed RLS, `ht_assert_caller_ht_authority` (`service_role` only), and concurrency-safe journey/quote/itinerary RPCs.
+94. **`20261008_phase7_node1_verified_reviews_foundation.sql`** — V2 Faz F1 (from `72911e4:20261004` + self-service manage-token path): `reviews` and `review_idempotency_keys` tables with direct DML revoked, `create_verified_review`, `create_verified_review_by_manage_token` (SHA-256 token + `20260904` rate-limit protection + completed-only + cross-tenant fail-closed), `get_public_reviews`, `get_tenant_reviews`, and `moderate_review`.
+95. **`20261009_phase7_node2_discovery_marketplace_projection.sql`** — V2 Faz F1 (from `72911e4:20261005`): Server-authoritative public Discovery Marketplace projections (`get_discovery_marketplace_listings`, `get_discovery_marketplace_detail`) reusing `evaluate_public_booking_eligibility_internal` and aggregating strictly `reviews.is_published = true` without duplicating business truth tables.
+96. **`20261010_phase7_node3_favorites_fast_rebooking.sql`** — V2 Faz F1 (from `72911e4:20261006`): `customer_favorites` relationship table with direct DML revoked, `set_customer_favorite`, `get_customer_favorites`, and `get_fast_rebooking_seed_by_manage_token` (binding rebooking strictly to `evaluate_booking_slot` and `create_public_booking`).
 
 ---
 
@@ -230,6 +233,9 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 | `ht_treatment_journeys` | `20261007_phase5_ht_treatment_journey_quote_itinerary.sql` | — | `20261007_phase5_ht_treatment_journey_quote_itinerary.sql` |
 | `ht_journey_quotes` | `20261007_phase5_ht_treatment_journey_quote_itinerary.sql` | — | `20261007_phase5_ht_treatment_journey_quote_itinerary.sql` |
 | `ht_journey_itinerary_events` | `20261007_phase5_ht_treatment_journey_quote_itinerary.sql` | — | `20261007_phase5_ht_treatment_journey_quote_itinerary.sql` |
+| `reviews` | `20261008_phase7_node1_verified_reviews_foundation.sql` | — | `20261008_phase7_node1_verified_reviews_foundation.sql` |
+| `review_idempotency_keys` | `20261008_phase7_node1_verified_reviews_foundation.sql` | — | `20261008_phase7_node1_verified_reviews_foundation.sql` |
+| `customer_favorites` | `20261010_phase7_node3_favorites_fast_rebooking.sql` | — | `20261010_phase7_node3_favorites_fast_rebooking.sql` |
 
 ---
 
@@ -346,4 +352,16 @@ After the migrations have successfully been applied:
 * **`EXTERNAL_HOLD` Classification**:
   * Live payment capture for deposits, gift-card purchases, and package/membership billing remains `EXTERNAL_HOLD` (`LIVE_PAYMENT_PROVIDER_CREDENTIALS_REQUIRED`, `PRODUCTION = NO_GO`).
   * Live marketing/reactivation SMS, WhatsApp, and email dispatch remains `EXTERNAL_HOLD` (`NO_NETWORK_SEND`; `scan_customer_reactivation_cohorts` queues via `enqueue_communication_outbox` with `synthetic_outbox_only`).
+
+---
+
+## 13. V2 Faz F1 — Discovery Marketplace, Verified Reviews & Favorites / Fast-Rebooking Port (ADIM-037)
+
+* **Conflict-Free Sequential Timestamps (`20261008..20261010`)**: Ported from historical V2 branch (`72911e4`: `20261004`..`20261006`) without modifying `20260901..20261007`.
+* **V1 Direct Storefront URL Independence**:
+  * V1 direct tenant storefront URLs (`/#/s/:slug`, `/#/book?tenant=:slug`, `/#/booking/:slug`, `/#/:slug`, and `slug.randevulari.com` subdomains / custom domains) operate independently of Discovery Marketplace activation. Omitting or disabling Discovery visibility never affects V1 direct storefront routing.
+* **Verified Review & Fast-Rebooking Authority**:
+  * Direct table access on `reviews`, `review_idempotency_keys`, and `customer_favorites` is revoked from `PUBLIC`, `anon`, and `authenticated`.
+  * `create_verified_review` (authenticated `auth.uid()` customer ownership) and `create_verified_review_by_manage_token` (SHA-256 token ownership + `20260904` brute-force lockout protection) both fail closed on non-completed appointments, cross-tenant mismatches, forged/expired/used tokens, and payload conflicts, and always insert reviews unpublished (`is_published = false`) pending moderation.
+  * `get_fast_rebooking_seed_by_manage_token` resolves current canonical tenant/branch/service/staff eligibility and binds rebooking to `evaluate_booking_slot` + `create_public_booking` without leaking PII.
 

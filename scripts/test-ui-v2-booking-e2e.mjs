@@ -284,6 +284,42 @@ async function run() {
     check('Top-level ?ui=v2 query param activates V2 with HashRouter', true, 'Rendered Service Offerings on /?ui=v2#/pilot/customer');
     report.journey.push('Verified /?ui=v2#/pilot/customer also activates UI-V2');
 
+    // 4. Verify direct V1 tenant storefront routes remain intact and independent of Discovery Marketplace.
+    await page.goto(`${baseUrl}/#/s/tenant_pilot_demo`, { waitUntil: 'domcontentloaded' });
+    await page.getByTestId('public-booking-ready').waitFor({ timeout: 20_000 });
+    await page.getByRole('heading', { name: 'Popular Services' }).waitFor({ timeout: 15_000 });
+    const legacySV2Count = await page.getByRole('heading', { name: 'Service Offerings' }).count();
+    check(
+      'V1 canonical /#/s/:slug storefront (/#/s/tenant_pilot_demo) renders V1 Popular Services with zero V2 leak',
+      legacySV2Count === 0,
+      `Service Offerings heading count=${legacySV2Count}`
+    );
+    report.journey.push('Verified canonical /#/s/tenant_pilot_demo V1 storefront and zero Service Offerings leakage');
+
+    await page.goto(`${baseUrl}/#/tenant_pilot_demo`, { waitUntil: 'domcontentloaded' });
+    await page.getByTestId('public-booking-ready').waitFor({ timeout: 20_000 });
+    await page.getByRole('heading', { name: 'Popular Services' }).waitFor({ timeout: 15_000 });
+    check('V1 direct slug storefront (/#/tenant_pilot_demo) works independently of Discovery Marketplace', true, 'Rendered V1 Popular Services on /#/tenant_pilot_demo');
+    report.journey.push('Verified direct /#/tenant_pilot_demo V1 storefront independence');
+
+    await page.goto(`${baseUrl}/#/booking/tenant_pilot_demo?ui=v2`, { waitUntil: 'domcontentloaded' });
+    await page.getByTestId('public-booking-ready').waitFor({ timeout: 20_000 });
+    await page.getByRole('heading', { name: 'Service Offerings' }).waitFor({ timeout: 15_000 });
+    check('Direct tenant booking slug with ?ui=v2 (/#/booking/tenant_pilot_demo?ui=v2) renders V2', true, 'Rendered Service Offerings on /#/booking/tenant_pilot_demo?ui=v2');
+    report.journey.push('Verified /#/booking/tenant_pilot_demo?ui=v2 renders UI-V2 independently');
+
+    await page.goto(`${baseUrl}/#/discovery/tenant_pilot_demo`, { waitUntil: 'domcontentloaded' });
+    const discoveryNode = page.getByTestId('discovery-marketplace-view');
+    await discoveryNode.waitFor({ timeout: 15_000 });
+    const routeSlugAttr = await discoveryNode.getAttribute('data-discovery-route-slug');
+    const failClosedAlert = await page.getByRole('alert').textContent();
+    check(
+      'Discovery deep-link route (/#/discovery/:tenantSlug) binds tenantSlug via useParams and fails closed in local mode',
+      routeSlugAttr === 'tenant_pilot_demo' && Boolean(failClosedAlert?.includes('Supabase')),
+      `routeSlug=${routeSlugAttr}; alert=${failClosedAlert?.trim()}`
+    );
+    report.journey.push('Verified /#/discovery/tenant_pilot_demo route param binding and fail-closed local detail state');
+
     check('No remote Supabase or payment request was attempted', forbiddenRequests.length === 0, JSON.stringify(forbiddenRequests));
     check('No page exception, console error, or unexpected dialog occurred', browserErrors.length === 0, JSON.stringify(browserErrors));
 

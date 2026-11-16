@@ -75,7 +75,7 @@ async function runPgTests() {
     await client.query(bootstrapSql);
 
     const migrationFiles = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
-    assert.equal(migrationFiles.length, 93, `Expected 93 total migrations, got ${migrationFiles.length}`);
+    assert.equal(migrationFiles.length, 96, `Expected 96 total migrations, got ${migrationFiles.length}`);
 
     const bridgeSql = fs.readFileSync(
       path.join(testsDir, 'fixtures', 'p2a_historical_replay_bridge_before_migration_38.sql'),
@@ -2691,7 +2691,344 @@ async function runPgTests() {
     await client.query(`RESET ROLE;`);
     console.log('[PASS] ADIM036-ONBOARDING-014 pending_onboarding branch quota + package_branch_server_authority_tests.sql verified on PG17');
 
-    console.log('\nALL ADIM-033 + ADIM-034 + ADIM-035 + ADIM-036 DISPOSABLE PG17 TESTS PASSED.');
+    // =========================================================================
+    // ADIM-037 Faz F1: Discovery Marketplace, Verified Reviews & Favorites / Fast-Rebooking
+    // =========================================================================
+    console.log('\n── ADIM-037 Faz F1 PG17 Behavioral & Negative RLS Matrix ──');
+    await setAuthenticatedRole(null);
+    await client.query(`UPDATE public.platform_global_release_control SET release_phase = 'full_production' WHERE id = 1;`);
+
+    const f1TenantA = 'f1000001-0000-4000-8000-000000000001';
+    const f1TenantB = 'f1000001-0000-4000-8000-000000000002';
+    const f1TenantDraft = 'f1000001-0000-4000-8000-000000000003';
+    const f1TenantDisabledProf = 'f1000001-0000-4000-8000-000000000004';
+    const f1BranchA = 'f1000002-0000-4000-8000-000000000001';
+    const f1BranchB = 'f1000002-0000-4000-8000-000000000002';
+    const f1ServiceA = 'f1000003-0000-4000-8000-000000000001';
+    const f1ServiceB = 'f1000003-0000-4000-8000-000000000002';
+    const f1StaffA = 'f1000004-0000-4000-8000-000000000001';
+    const f1StaffB = 'f1000004-0000-4000-8000-000000000002';
+    const f1OwnerAUid = 'f1000005-0000-4000-8000-000000000001';
+    const f1CustAUid = 'f1000005-0000-4000-8000-000000000002';
+    const f1CustBUid = 'f1000005-0000-4000-8000-000000000003';
+    const f1CustAId = 'f1000006-0000-4000-8000-000000000001';
+    const f1CustBId = 'f1000006-0000-4000-8000-000000000002';
+    const f1ApptCompletedA = 'f1000007-0000-4000-8000-000000000001';
+    const f1ApptConfirmedA = 'f1000007-0000-4000-8000-000000000002';
+    const f1ApptTokenCompletedA = 'f1000007-0000-4000-8000-000000000003';
+    const f1ApptCompletedB = 'f1000007-0000-4000-8000-000000000004';
+
+    await client.query(`
+      INSERT INTO auth.users (id, email)
+      VALUES
+        ($1, 'f1-owner-a@example.test'),
+        ($2, 'f1-cust-a@example.test'),
+        ($3, 'f1-cust-b@example.test')
+      ON CONFLICT DO NOTHING;
+    `, [f1OwnerAUid, f1CustAUid, f1CustBUid]);
+
+    await client.query(`
+      INSERT INTO public.tenants (id, slug, name, status, onboarding_status, public_site_status)
+      VALUES
+        ($1, 'f1-salon-alpha', 'F1 Salon Alpha', 'active', 'completed', 'published'),
+        ($2, 'f1-salon-beta', 'F1 Salon Beta', 'active', 'completed', 'published'),
+        ($3, 'f1-salon-draft', 'F1 Salon Draft', 'active', 'completed', 'draft'),
+        ($4, 'f1-salon-hidden', 'F1 Salon Hidden', 'active', 'completed', 'published');
+    `, [f1TenantA, f1TenantB, f1TenantDraft, f1TenantDisabledProf]);
+
+    await client.query(`
+      INSERT INTO public.tenant_business_profiles (tenant_id, business_category, city, district, short_description, is_public_profile_enabled)
+      VALUES
+        ($1, 'Kuaför', 'İstanbul', 'Şişli', 'Nişantaşı stüdyosu', true),
+        ($2, 'Spa', 'Ankara', 'Çankaya', 'Spa merkezi', true),
+        ($3, 'Kuaför', 'İzmir', 'Konak', 'Taslak salon', true),
+        ($4, 'Kuaför', 'İstanbul', 'Kadıköy', 'Gizli profil', false);
+    `, [f1TenantA, f1TenantB, f1TenantDraft, f1TenantDisabledProf]);
+
+    await client.query(`
+      INSERT INTO public.users_profile (id, tenant_id, name, role, active)
+      VALUES
+        ($1, $4, 'F1 Owner A', 'tenant_owner', true),
+        ($2, $4, 'F1 Cust A', 'customer', true),
+        ($3, $5, 'F1 Cust B', 'customer', true);
+    `, [f1OwnerAUid, f1CustAUid, f1CustBUid, f1TenantA, f1TenantB]);
+
+    await client.query(`
+      INSERT INTO public.subscriptions (tenant_id, plan_id, plan_version_id, status, billing_mode, current_period_start, current_period_end)
+      SELECT tid, sub.code, sub.id, 'active', 'manual', now(), now() + interval '1 year'
+      FROM unnest(ARRAY[$1::uuid, $2::uuid, $3::uuid, $4::uuid]) AS tid
+      CROSS JOIN LATERAL (
+        SELECT pv.id, p.code
+        FROM public.plan_versions pv
+        JOIN public.plans p ON p.id = pv.plan_id
+        WHERE p.code = 'kurumsal' AND pv.lifecycle_status = 'published'
+        LIMIT 1
+      ) sub;
+    `, [f1TenantA, f1TenantB, f1TenantDraft, f1TenantDisabledProf]);
+
+    await client.query(`
+      INSERT INTO public.branches (id, tenant_id, name, slug, is_active, is_primary, timezone)
+      VALUES
+        ($1, $3, 'Alpha Merkez', 'alpha-merkez', true, true, 'Europe/Istanbul'),
+        ($2, $4, 'Beta Merkez', 'beta-merkez', true, true, 'Europe/Istanbul');
+    `, [f1BranchA, f1BranchB, f1TenantA, f1TenantB]);
+
+    await client.query(`
+      INSERT INTO public.services (id, tenant_id, name, name_tr, duration, price, active)
+      VALUES
+        ($1, $3, 'F1 Haircut', 'F1 Saç Kesimi', 45, 750, true),
+        ($2, $4, 'F1 Massage', 'F1 Masaj', 60, 1200, true);
+    `, [f1ServiceA, f1ServiceB, f1TenantA, f1TenantB]);
+
+    await client.query(`
+      INSERT INTO public.staff (id, tenant_id, name, active)
+      VALUES
+        ($1, $3, 'F1 Stylist A', true),
+        ($2, $4, 'F1 Therapist B', true);
+    `, [f1StaffA, f1StaffB, f1TenantA, f1TenantB]);
+
+    await client.query(`INSERT INTO public.staff_branches (tenant_id, staff_id, branch_id) VALUES ($1, $2, $3), ($4, $5, $6);`, [f1TenantA, f1StaffA, f1BranchA, f1TenantB, f1StaffB, f1BranchB]);
+    await client.query(`INSERT INTO public.service_branches (tenant_id, service_id, branch_id) VALUES ($1, $2, $3), ($4, $5, $6);`, [f1TenantA, f1ServiceA, f1BranchA, f1TenantB, f1ServiceB, f1BranchB]);
+    await client.query(`INSERT INTO public.staff_services (staff_id, service_id) VALUES ($1, $2), ($3, $4);`, [f1StaffA, f1ServiceA, f1StaffB, f1ServiceB]);
+
+    await client.query(`
+      INSERT INTO public.customers (id, tenant_id, user_profile_id, name, email, phone)
+      VALUES
+        ($1, $3, $5, 'F1 Müşteri A', 'f1-cust-a@example.test', '+905551110001'),
+        ($2, $4, $6, 'F1 Müşteri B', 'f1-cust-b@example.test', '+905551110002');
+    `, [f1CustAId, f1CustBId, f1TenantA, f1TenantB, f1CustAUid, f1CustBUid]);
+
+    await client.query(`
+      INSERT INTO public.appointments (id, tenant_id, branch_id, customer_id, service_id, staff_id, user_name, user_email, phone, appointment_date, appointment_time, duration_minutes, status)
+      VALUES
+        ($1, $5, $7, $9, $11, $13, 'F1 Müşteri A', 'f1-cust-a@example.test', '+905551110001', CURRENT_DATE - 3, '10:00', 45, 'completed'),
+        ($2, $5, $7, $9, $11, $13, 'F1 Müşteri A', 'f1-cust-a@example.test', '+905551110001', CURRENT_DATE + 3, '11:00', 45, 'confirmed'),
+        ($3, $5, $7, $9, $11, $13, 'F1 Müşteri A', 'f1-cust-a@example.test', '+905551110001', CURRENT_DATE - 1, '12:00', 45, 'completed'),
+        ($4, $6, $8, $10, $12, $14, 'F1 Müşteri B', 'f1-cust-b@example.test', '+905551110002', CURRENT_DATE - 2, '14:00', 60, 'completed');
+    `, [
+      f1ApptCompletedA, f1ApptConfirmedA, f1ApptTokenCompletedA, f1ApptCompletedB,
+      f1TenantA, f1TenantB, f1BranchA, f1BranchB, f1CustAId, f1CustBId, f1ServiceA, f1ServiceB, f1StaffA, f1StaffB
+    ]);
+
+    const rawTokenCompleted = 'f1_valid_completed_token_' + 'a'.repeat(40);
+    const rawTokenConfirmed = 'f1_valid_confirmed_token_' + 'b'.repeat(40);
+    const rawTokenExpired = 'f1_expired_token_' + 'c'.repeat(48);
+    const rawTokenUsed = 'f1_used_token_' + 'd'.repeat(51);
+
+    await client.query(`
+      INSERT INTO public.appointment_access_tokens (tenant_id, appointment_id, token_hash, expires_at, used_at)
+      VALUES
+        ($1, $2, encode(sha256($3::bytea), 'hex'), now() + interval '7 days', NULL),
+        ($1, $4, encode(sha256($5::bytea), 'hex'), now() + interval '7 days', NULL),
+        ($1, $2, encode(sha256($6::bytea), 'hex'), now() - interval '1 hour', NULL),
+        ($1, $2, encode(sha256($7::bytea), 'hex'), now() + interval '7 days', now());
+    `, [f1TenantA.toString(), f1ApptTokenCompletedA, rawTokenCompleted, f1ApptConfirmedA, rawTokenConfirmed, rawTokenExpired, rawTokenUsed]);
+
+    // 1. Direct table access must be denied for anon and authenticated across Phase 7 tables
+    await client.query(`SELECT set_config('request.jwt.claim.sub', '', false); SET ROLE anon;`);
+    for (const tbl of ['reviews', 'review_idempotency_keys', 'customer_favorites']) {
+      await assert.rejects(
+        async () => client.query(`SELECT * FROM public.${tbl};`),
+        (err) => err && err.message.includes('permission denied'),
+        `anon direct SELECT on ${tbl} must be denied`
+      );
+    }
+    await assert.rejects(
+      async () => client.query(`SELECT public.create_verified_review($1, 5, 'Anon', 'Fail', 'anon-k1');`, [f1ApptCompletedA]),
+      (err) => err && (err.message.includes('permission denied') || err.message.includes('UNAUTHENTICATED')),
+      'anon cannot execute create_verified_review'
+    );
+    await assert.rejects(
+      async () => client.query(`SELECT public.set_customer_favorite($1, true) AS res;`, [f1TenantA]),
+      (err) => err && (err.message.includes('permission denied') || err.message.includes('UNAUTHENTICATED')),
+      'anon cannot execute set_customer_favorite'
+    );
+    await assert.rejects(
+      async () => client.query(`SELECT public.get_customer_favorites() AS res;`),
+      (err) => err && (err.message.includes('permission denied') || err.message.includes('UNAUTHENTICATED')),
+      'anon cannot execute get_customer_favorites'
+    );
+    await client.query(`RESET ROLE;`);
+
+    await setAuthenticatedRole(null);
+    await client.query(`SELECT set_config('request.jwt.claim.sub', '', false); SET ROLE authenticated;`);
+    const unauthFav = (await client.query(`SELECT public.set_customer_favorite($1, true) AS res;`, [f1TenantA])).rows[0].res;
+    assert.equal(unauthFav.success, false);
+    assert.equal(unauthFav.reason_code, 'UNAUTHENTICATED');
+    const unauthFavList = (await client.query(`SELECT public.get_customer_favorites() AS res;`)).rows[0].res;
+    assert.equal(unauthFavList.success, false);
+    assert.equal(unauthFavList.reason_code, 'UNAUTHENTICATED');
+    await client.query(`RESET ROLE;`);
+
+    await setAuthenticatedRole(f1CustAUid);
+    for (const tbl of ['reviews', 'review_idempotency_keys', 'customer_favorites']) {
+      await assert.rejects(
+        async () => client.query(`SELECT * FROM public.${tbl};`),
+        (err) => err && err.message.includes('permission denied'),
+        `authenticated direct SELECT on ${tbl} must be denied`
+      );
+    }
+
+    // 2. Authenticated verified review: rejects confirmed appointment & cross-tenant appointment, succeeds for completed
+    const revNonComp = (await client.query(`SELECT public.create_verified_review($1, 5, 'Early', 'Not done', 'f1-k-uncomp') AS res;`, [f1ApptConfirmedA])).rows[0].res;
+    assert.equal(revNonComp.success, false);
+    assert.equal(revNonComp.reason_code, 'appointment_not_completed');
+
+    await assert.rejects(
+      async () => client.query(`SELECT public.create_verified_review($1, 5, 'Cross', 'Steal', 'f1-k-cross');`, [f1ApptCompletedB]),
+      (err) => err && (err.message.includes('FORBIDDEN') || err.message.includes('CROSS_TENANT_VIOLATION')),
+      'Customer A must be forbidden from reviewing Tenant B appointment'
+    );
+
+    const revOk = (await client.query(`SELECT public.create_verified_review($1, 5, 'Harika Hizmet', 'Çok profesyonel', 'f1-k-ok-1') AS res;`, [f1ApptCompletedA])).rows[0].res;
+    assert.equal(revOk.success, true);
+    assert.equal(revOk.idempotent_replay, false);
+
+    const revReplay = (await client.query(`SELECT public.create_verified_review($1, 5, 'Harika Hizmet', 'Çok profesyonel', 'f1-k-ok-1') AS res;`, [f1ApptCompletedA])).rows[0].res;
+    assert.equal(revReplay.success, true);
+    assert.equal(revReplay.idempotent_replay, true);
+    assert.equal(revReplay.review_id, revOk.review_id);
+
+    await assert.rejects(
+      async () => client.query(`SELECT public.create_verified_review($1, 3, 'Harika Hizmet', 'Çok profesyonel', 'f1-k-ok-1');`, [f1ApptCompletedA]),
+      (err) => err && err.message.includes('IDEMPOTENCY_CONFLICT')
+    );
+
+    const revDup = (await client.query(`SELECT public.create_verified_review($1, 4, 'Dup', 'Second try', 'f1-k-ok-2') AS res;`, [f1ApptCompletedA])).rows[0].res;
+    assert.equal(revDup.success, false);
+    assert.equal(revDup.reason_code, 'duplicate_review');
+
+    // 3. Manage-token verified review: bogus/expired/used/cross-tenant/confirmed rejected; completed succeeds; 5-failure lockout works
+    await setAuthenticatedRole(null);
+    await client.query(`SET ROLE anon;`);
+    const tokBad = (await client.query(`SELECT public.create_verified_review_by_manage_token('forged-short-token', 5, 'T', 'C', 'tk-1', NULL, 'fp-rev-bad', '10.20.30.40') AS res;`)).rows[0].res;
+    assert.equal(tokBad.success, false);
+    assert.equal(tokBad.reason_code, 'invalid_token');
+
+    const tokExp = (await client.query(`SELECT public.create_verified_review_by_manage_token($1, 5, 'T', 'C', 'tk-2', NULL, 'fp-rev-exp', '10.20.30.41') AS res;`, [rawTokenExpired])).rows[0].res;
+    assert.equal(tokExp.success, false);
+    assert.equal(tokExp.reason_code, 'TOKEN_EXPIRED');
+
+    const tokUsed = (await client.query(`SELECT public.create_verified_review_by_manage_token($1, 5, 'T', 'C', 'tk-3', NULL, 'fp-rev-used', '10.20.30.42') AS res;`, [rawTokenUsed])).rows[0].res;
+    assert.equal(tokUsed.success, false);
+    assert.equal(tokUsed.reason_code, 'TOKEN_EXPIRED');
+
+    // Brute-force 5 failures lockout check
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await client.query(`SELECT public.create_verified_review_by_manage_token($1, 5, 'T', 'C', 'tk-bf', NULL, 'fp-rev-bf', '10.20.30.99');`, ['z'.repeat(64)]);
+    }
+    const tokLocked = (await client.query(`SELECT public.create_verified_review_by_manage_token($1, 5, 'T', 'C', 'tk-bf-6', NULL, 'fp-rev-bf', '10.20.30.99') AS res;`, [rawTokenCompleted])).rows[0].res;
+    assert.equal(tokLocked.success, false);
+    assert.equal(tokLocked.reason_code, 'TOKEN_LOOKUP_RATE_LIMITED');
+
+    // Cross-tenant expected slug mismatch must fail closed
+    await assert.rejects(
+      async () => client.query(`SELECT public.create_verified_review_by_manage_token($1, 5, 'T', 'C', 'tk-cross', 'f1-salon-beta', 'fp-rev-ok', '10.20.30.50');`, [rawTokenCompleted]),
+      (err) => err && err.message.includes('CROSS_TENANT_VIOLATION')
+    );
+
+    // Non-completed appointment token rejected
+    const tokConf = (await client.query(`SELECT public.create_verified_review_by_manage_token($1, 5, 'T', 'C', 'tk-conf', 'f1-salon-alpha', 'fp-rev-ok', '10.20.30.50') AS res;`, [rawTokenConfirmed])).rows[0].res;
+    assert.equal(tokConf.success, false);
+    assert.equal(tokConf.reason_code, 'appointment_not_completed');
+
+    // Valid completed appointment token succeeds (initially unpublished)
+    const tokOk = (await client.query(`SELECT public.create_verified_review_by_manage_token($1, 4, 'Token Yorumu', 'Gayet iyi', 'tk-ok-1', 'f1-salon-alpha', 'fp-rev-ok', '10.20.30.50') AS res;`, [rawTokenCompleted])).rows[0].res;
+    assert.equal(tokOk.success, true);
+    assert.equal(tokOk.idempotent_replay, false);
+
+    // Before moderation publish, public reviews and discovery listing must report 0 reviews; draft tenant returns tenant_not_found
+    const pubBeforeMod = (await client.query(`SELECT public.get_public_reviews('f1-salon-alpha') AS res;`)).rows[0].res;
+    assert.equal(pubBeforeMod.aggregate.total_count, 0);
+    const pubDraft = (await client.query(`SELECT public.get_public_reviews('f1-salon-draft') AS res;`)).rows[0].res;
+    assert.equal(pubDraft.success, false);
+    assert.equal(pubDraft.reason_code, 'tenant_not_found');
+    await client.query(`RESET ROLE;`);
+
+    // 4. Moderation: customer & cross-tenant owner cannot moderate; owner publishes revOk (5★); unpublished tokOk stays hidden
+    await setAuthenticatedRole(f1CustAUid);
+    await assert.rejects(
+      async () => client.query(`SELECT public.moderate_review($1, 'publish');`, [revOk.review_id]),
+      (err) => err && err.message.includes('FORBIDDEN')
+    );
+
+    await setAuthenticatedRole(f1CustBUid);
+    await assert.rejects(
+      async () => client.query(`SELECT public.moderate_review($1, 'publish');`, [revOk.review_id]),
+      (err) => err && (err.message.includes('FORBIDDEN') || err.message.includes('CROSS_TENANT_VIOLATION'))
+    );
+
+    await setAuthenticatedRole(f1OwnerAUid);
+    const modPub = (await client.query(`SELECT public.moderate_review($1, 'publish') AS res;`, [revOk.review_id])).rows[0].res;
+    assert.equal(modPub.success, true);
+
+    // 5. Discovery Marketplace: eligible tenants visible, draft & disabled profile omitted, published review aggregate accurate, zero PII leaked
+    await setAuthenticatedRole(null);
+    await client.query(`SET ROLE anon;`);
+    const listF1 = (await client.query(`SELECT public.get_discovery_marketplace_listings('F1 Salon') AS res;`)).rows[0].res;
+    assert.equal(listF1.total_count, 2, 'Only published & profile-enabled F1 salons should appear');
+    const alphaListing = listF1.listings.find((l) => l.slug === 'f1-salon-alpha');
+    const betaListing = listF1.listings.find((l) => l.slug === 'f1-salon-beta');
+    assert.ok(alphaListing);
+    assert.ok(betaListing);
+    assert.equal(alphaListing.review_count, 1, 'Unpublished token review must not inflate aggregate');
+    assert.equal(Number(alphaListing.average_rating), 5);
+    assert.equal(betaListing.review_count, 0);
+    assert.equal(Number(betaListing.average_rating), 0);
+    assert.equal(JSON.stringify(listF1).includes('f1-cust-a@example.test'), false, 'Customer PII must never leak in discovery');
+
+    const draftDetail = (await client.query(`SELECT public.get_discovery_marketplace_detail('f1-salon-draft') AS res;`)).rows[0].res;
+    assert.equal(draftDetail.success, false);
+    assert.equal(draftDetail.reason_code, 'NOT_ELIGIBLE');
+
+    const hiddenDetail = (await client.query(`SELECT public.get_discovery_marketplace_detail('f1-salon-hidden') AS res;`)).rows[0].res;
+    assert.equal(hiddenDetail.success, false);
+    assert.equal(hiddenDetail.reason_code, 'NOT_ELIGIBLE');
+    await client.query(`RESET ROLE;`);
+
+    // 6. Favorites & Fast-Rebooking Seed
+    await setAuthenticatedRole(f1CustAUid);
+    const favBad = (await client.query(`SELECT public.set_customer_favorite($1, true) AS res;`, [f1TenantDraft])).rows[0].res;
+    assert.equal(favBad.success, false);
+    assert.equal(favBad.reason_code, 'TARGET_NOT_ELIGIBLE');
+
+    const favAdd = (await client.query(`SELECT public.set_customer_favorite($1, true) AS res;`, [f1TenantA])).rows[0].res;
+    assert.equal(favAdd.success, true);
+    assert.equal(favAdd.action, 'ADDED');
+
+    const favListA = (await client.query(`SELECT public.get_customer_favorites() AS res;`)).rows[0].res;
+    assert.equal(favListA.total, 1);
+    assert.equal(favListA.favorites[0].tenant_slug, 'f1-salon-alpha');
+
+    await setAuthenticatedRole(f1CustBUid);
+    const favListB = (await client.query(`SELECT public.get_customer_favorites() AS res;`)).rows[0].res;
+    assert.equal(favListB.total, 0, 'Customer B must not see Customer A favorites');
+
+    await setAuthenticatedRole(null);
+    await client.query(`SET ROLE anon;`);
+    const seedInvalid = (await client.query(`SELECT public.get_fast_rebooking_seed_by_manage_token('bad') AS res;`)).rows[0].res;
+    assert.equal(seedInvalid.success, false);
+    assert.equal(seedInvalid.reason_code, 'INVALID_TOKEN');
+
+    const seedUsed = (await client.query(`SELECT public.get_fast_rebooking_seed_by_manage_token($1) AS res;`, [rawTokenUsed])).rows[0].res;
+    assert.equal(seedUsed.success, false);
+    assert.equal(seedUsed.reason_code, 'INVALID_TOKEN');
+
+    const seedNotComp = (await client.query(`SELECT public.get_fast_rebooking_seed_by_manage_token($1) AS res;`, [rawTokenConfirmed])).rows[0].res;
+    assert.equal(seedNotComp.success, false);
+    assert.equal(seedNotComp.reason_code, 'APPOINTMENT_NOT_REBOOKABLE');
+
+    const seedOk = (await client.query(`SELECT public.get_fast_rebooking_seed_by_manage_token($1) AS res;`, [rawTokenCompleted])).rows[0].res;
+    assert.equal(seedOk.success, true);
+    assert.equal(seedOk.seed.tenant_slug, 'f1-salon-alpha');
+    assert.equal(seedOk.seed.canonical_booking_required, true);
+    assert.equal(seedOk.seed.availability_authority, 'evaluate_booking_slot');
+    assert.equal(seedOk.seed.booking_authority, 'create_public_booking');
+    assert.equal(JSON.stringify(seedOk).includes('f1-cust-a@example.test'), false, 'Fast-rebooking seed must not leak customer PII');
+    await client.query(`RESET ROLE;`);
+
+    console.log('[PASS] ADIM-037 Faz F1 Discovery Marketplace, Verified Reviews & Favorites / Fast-Rebooking verified on PG17');
+    console.log('\nALL ADIM-033 + ADIM-034 + ADIM-035 + ADIM-036 + ADIM-037 DISPOSABLE PG17 TESTS PASSED.');
   } finally {
     if (client) {
       try { await client.end(); } catch {}
@@ -2734,3 +3071,30 @@ function runAdim036BehavioralSuites() {
 }
 
 runAdim036BehavioralSuites();
+
+function runAdim037BehavioralSuites() {
+  const rootDir = process.cwd();
+  const tsxCli = path.join(rootDir, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+  const suites = [
+    'services/discoveryMarketplaceService.test.ts',
+    'services/publicLinkService.test.ts',
+    'components/DiscoveryPortfolio.test.tsx',
+  ];
+
+  console.log('\n── Running ADIM-037 Behavioral Discovery, Verified Reviews, Public Link & Portfolio Tests ──');
+  for (const relPath of suites) {
+    const absPath = path.join(rootDir, relPath);
+    const result = spawnSync(process.execPath, [tsxCli, absPath], {
+      cwd: rootDir,
+      stdio: 'inherit',
+      env: process.env,
+    });
+    if (result.error) {
+      throw result.error;
+    }
+    assert.equal(result.status, 0, `${relPath} must exit with code 0 (got ${result.status})`);
+  }
+  console.log(`[PASS] All ${suites.length} ADIM-037 behavioral suites passed.`);
+}
+
+runAdim037BehavioralSuites();
