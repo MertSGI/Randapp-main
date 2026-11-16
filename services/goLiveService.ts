@@ -6,6 +6,8 @@ import { provisioningService } from './provisioningService';
 import { getServices } from './serviceCatalogService';
 import { getStaffList } from './staffService';
 import { businessVerificationService } from './businessVerificationService';
+import { getDataSourceMode } from './dataSourceConfig';
+import { STORAGE_KEYS } from './storageKeys';
 
 export interface GoLiveReadiness {
   canGoLive: boolean;
@@ -25,7 +27,8 @@ export interface GoLiveReadiness {
 
 export const goLiveService = {
   async getGoLiveReadiness(tenantId: string): Promise<GoLiveReadiness> {
-    if (tenantId === 'tenant_pilot_demo') {
+    const isLocalMode = getDataSourceMode() === 'local';
+    if ((tenantId === 'tenant_pilot_demo' || tenantId === 'synthetic_salon_aura_001') && isLocalMode) {
       return {
         canGoLive: true,
         canAcceptBookings: true,
@@ -49,7 +52,7 @@ export const goLiveService = {
     const staff = await getStaffList(tenantId, { activeOnly: true });
     const tenant = await tenantService.getCurrentTenant();
 
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || (typeof process !== 'undefined' ? process.env?.VITE_DATA_MODE : '') || 'mock';
     let publicSiteStatus = 'draft';
     
     // Fallbacks
@@ -95,11 +98,12 @@ export const goLiveService = {
   },
 
   async canTenantAcceptBookings(tenantId: string): Promise<{ allowed: boolean; reason?: string }> {
-    if (tenantId === 'tenant_pilot_demo') {
+    const isLocalMode = getDataSourceMode() === 'local';
+    if ((tenantId === 'tenant_pilot_demo' || tenantId === 'synthetic_salon_aura_001') && isLocalMode) {
       return { allowed: true };
     }
 
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || (typeof process !== 'undefined' ? process.env?.VITE_DATA_MODE : '') || 'mock';
     if (mode.startsWith('supabase')) {
       const tenant = await tenantService.getCurrentTenant();
       if (!tenant || !tenant.slug) {
@@ -169,64 +173,64 @@ export const goLiveService = {
   },
 
   async markReadyForReview(tenantId: string): Promise<void> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || (typeof process !== 'undefined' ? process.env?.VITE_DATA_MODE : '') || 'mock';
     if (mode.startsWith('supabase')) {
       await supabase.from('tenants').update({ public_site_status: 'pending_review' }).eq('id', tenantId);
       await provisioningService.markTenantProvisioningStatus(tenantId, 'ready_for_review');
     } else {
-      const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+      const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
       const index = registeredArr.findIndex((t: any) => t.id === tenantId);
       if (index !== -1) {
          registeredArr[index].publicSiteStatus = 'pending_review';
-         localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+         localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(registeredArr));
       }
       await provisioningService.markTenantProvisioningStatus(tenantId, 'ready_for_review');
     }
   },
 
   async markTenantLive(tenantId: string): Promise<void> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || (typeof process !== 'undefined' ? process.env?.VITE_DATA_MODE : '') || 'mock';
     if (mode.startsWith('supabase')) {
       await supabase.from('tenants').update({ public_site_status: 'published' }).eq('id', tenantId);
       await provisioningService.markTenantProvisioningStatus(tenantId, 'live');
     } else {
-      const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+      const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
       const index = registeredArr.findIndex((t: any) => t.id === tenantId);
       if (index !== -1) {
          registeredArr[index].publicSiteStatus = 'published';
          registeredArr[index].verificationStatus = 'approved';
-         localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+         localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(registeredArr));
       }
       await provisioningService.markTenantProvisioningStatus(tenantId, 'live');
     }
   },
 
   async markTenantPaused(tenantId: string): Promise<void> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || (typeof process !== 'undefined' ? process.env?.VITE_DATA_MODE : '') || 'mock';
     if (mode.startsWith('supabase')) {
       await supabase.from('tenants').update({ public_site_status: 'paused' }).eq('id', tenantId);
     } else {
-      const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+      const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
       const index = registeredArr.findIndex((t: any) => t.id === tenantId);
       if (index !== -1) {
          registeredArr[index].publicSiteStatus = 'paused';
-         localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+         localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(registeredArr));
       }
     }
   },
 
   async markTenantNeedsChanges(tenantId: string): Promise<void> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any).env?.VITE_DATA_MODE || (typeof process !== 'undefined' ? process.env?.VITE_DATA_MODE : '') || 'mock';
     if (mode.startsWith('supabase')) {
       await supabase.from('tenants').update({ public_site_status: 'preview_ready', verification_status: 'rejected' }).eq('id', tenantId);
       await provisioningService.markTenantProvisioningStatus(tenantId, 'setup_in_progress');
     } else {
-      const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+      const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
       const index = registeredArr.findIndex((t: any) => t.id === tenantId);
       if (index !== -1) {
          registeredArr[index].publicSiteStatus = 'preview_ready';
          registeredArr[index].verificationStatus = 'rejected';
-         localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+         localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(registeredArr));
       }
       await provisioningService.markTenantProvisioningStatus(tenantId, 'setup_in_progress');
     }

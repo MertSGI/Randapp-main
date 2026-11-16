@@ -1,30 +1,56 @@
 import { getStaffList } from './staffService';
-import { Staff } from '../types';
 import { getAppointments } from './appointmentService';
-import { getAvailabilityRepository, getBookingRepository, getServiceCatalogRepository } from './repositories';
+import { getAvailabilityRepository, getBookingRepository, getServiceCatalogRepository } from './repositories/index.ts';
 
 export interface TimeSlot {
   time: string; // HH:mm
   available: boolean;
 }
 
+export function assertTenantId(tenantId?: string, operation: string = 'operation'): string {
+  if (tenantId !== undefined && (typeof tenantId !== 'string' || !tenantId.trim())) {
+    throw new Error(`[availabilityService] Security error: invalid or empty tenantId provided for ${operation}`);
+  }
+  return tenantId?.trim() || '';
+}
+
+export function requireTenantId(tenantId: string, operation: string = 'operation'): string {
+  if (!tenantId || typeof tenantId !== 'string' || !tenantId.trim()) {
+    throw new Error(`[availabilityService] Security error: non-empty tenantId is required for ${operation}`);
+  }
+  return tenantId.trim();
+}
+
 export const availabilityService = {
   async getWorkingHours(tenantId: string): Promise<any> {
+    const validTenantId = requireTenantId(tenantId, 'getWorkingHours');
     const repo = getAvailabilityRepository();
-    return repo.getAvailability(tenantId);
+    return repo.getAvailability(validTenantId);
   },
 
   async updateWorkingHours(tenantId: string, input: any): Promise<any> {
+    const validTenantId = requireTenantId(tenantId, 'updateWorkingHours');
     const repo = getAvailabilityRepository();
-    return repo.updateAvailability(tenantId, input);
+    return repo.updateAvailability(validTenantId, input);
   },
 
   async getPublicWorkingHoursBySlug(slug: string): Promise<any> {
+    if (!slug || typeof slug !== 'string' || !slug.trim()) {
+      throw new Error('[availabilityService] Security error: non-empty slug is required for getPublicWorkingHoursBySlug');
+    }
     const repo = getAvailabilityRepository();
-    return repo.getPublicAvailabilityByTenantSlug(slug);
+    return repo.getPublicAvailabilityByTenantSlug(slug.trim());
   },
 
   async getAvailableSlotsForStaff(tenantId: string, staffId: string, serviceId: string, dateStr: string): Promise<TimeSlot[]> {
+     const validTenantId = requireTenantId(tenantId, 'getAvailableSlotsForStaff');
+     if (!staffId || typeof staffId !== 'string' || !staffId.trim()) {
+       throw new Error('[availabilityService] Security error: non-empty staffId is required for getAvailableSlotsForStaff');
+     }
+     if (!dateStr || typeof dateStr !== 'string' || !dateStr.trim()) {
+       throw new Error('[availabilityService] Security error: non-empty dateStr is required for getAvailableSlotsForStaff');
+     }
+
      try {
        const { getDataSourceMode } = await import('./dataSourceConfig');
        const isSupabaseMode = getDataSourceMode() === 'supabase';
@@ -40,7 +66,7 @@ export const availabilityService = {
 
            // Resolve tenant slug from tenantId via supabase REST.
            // The RPC requires slug not tenantId.
-           const tenantRes = await fetchSupabase(`/rest/v1/tenants?id=eq.${tenantId}&select=slug`);
+           const tenantRes = await fetchSupabase(`/rest/v1/tenants?id=eq.${encodeURIComponent(validTenantId)}&select=slug`);
            if (!tenantRes.ok) return [];
            const tenantData = await tenantRes.json();
            const slug = tenantData?.[0]?.slug;
@@ -90,8 +116,35 @@ export const availabilityService = {
        const catalogRepo = getAvailabilityRepository();
        const bookingRepo = getBookingRepository();
 
+       // Verify staff exists, belongs to this tenant, and is active
+       const allStaff = await getStaffList(validTenantId);
+       const staffMatch = allStaff.find(s => s.id === staffId);
+       if (!staffMatch || staffMatch.active === false) {
+         return []; // Unknown, inactive, or another tenant's staff
+       }
+
+       // Verify service exists, belongs to this tenant, and is active
+       if (!serviceId || typeof serviceId !== 'string' || !serviceId.trim()) {
+         return [];
+       }
+       let service = null;
+       try {
+         service = await (getServiceCatalogRepository() as any).getServiceById(serviceId, validTenantId);
+       } catch {
+         return [];
+       }
+       if (!service || (service.tenantId && service.tenantId !== validTenantId) || service.active === false) {
+         return []; // Unknown or another tenant's service or inactive
+       }
+
+       // Check staff eligibility for the requested service (treat absent/empty mappings as ineligible)
+       const eligibleStaff = await catalogRepo.listStaffForService(validTenantId, serviceId);
+       if (!eligibleStaff || !eligibleStaff.some(s => s.id === staffId)) {
+         return []; // Staff is not eligible for this service
+       }
+
        // 1. Fetch staff availability rules
-       const rules = await catalogRepo.listAvailabilityRules(tenantId, staffId);
+       const rules = await catalogRepo.listAvailabilityRules(validTenantId, staffId);
        
        // Parse local weekday from dateStr (YYYY-MM-DD)
        // Standard weekday calculation: Monday=1, ..., Sunday=7
@@ -99,15 +152,17 @@ export const availabilityService = {
        let weekday = localDate.getDay(); // 0=Sunday, 1=Monday, ..., 6=Saturday
        if (weekday === 0) weekday = 7;
 
-       const rule = rules.find((r) => r.weekday === weekday && r.is_active);
-       if (!rule) return [];
+       // Prioritize staff-specific rule over tenant-wide rule
+       const staffRule = rules.find((r) => r.staffId === staffId && r.weekday === weekday);
+       const salonRule = rules.find((r) => (r.staffId == null || r.staffId === '') && r.weekday === weekday);
+       const rule = staffRule || salonRule;
+       if (!rule || !rule.is_active) return [];
 
        // 2. Fetch service duration
-       const service = await getServiceCatalogRepository().getServiceById(serviceId);
-       const duration = service?.duration || 30;
+       const duration = service.duration || 30;
 
        // 3. Fetch non-cancelled booked slots for this date and staff
-       const appointments = await bookingRepo.listAppointments(tenantId, { date: dateStr });
+       const appointments = await bookingRepo.listAppointments(validTenantId, { date: dateStr });
        const booked = appointments.filter((apt) => {
          const st = (apt.status as string);
          return st !== 'cancelled' && 
@@ -152,7 +207,7 @@ export const availabilityService = {
            // Fallback to 30 mins if not resolvable.
            let aptDuration = 30;
            if (apt.serviceId) {
-             const s = await getServiceCatalogRepository().getServiceById(apt.serviceId);
+             const s = await (getServiceCatalogRepository() as any).getServiceById(apt.serviceId, validTenantId);
              if (s?.duration) aptDuration = s.duration;
            }
 
@@ -175,46 +230,103 @@ export const availabilityService = {
        }
 
        return slots;
-     } catch (err) {
+     } catch (err: any) {
+       if (err.message && err.message.includes('Security error')) {
+         throw err;
+       }
        console.error('Error generating slots:', err);
        return [];
      }
   },
 
-  getNextAvailableSlotForStaff(tenantId: string, staffId: string, serviceId: string): Promise<{date: string, time: string} | null> {
-    return new Promise((resolve) => {
-       // Mock: Return a synthetic early slot for this staff
-       // Normally we scan forward from today to find the first open slot.
-       const now = new Date();
-       resolve({
-          date: now.toISOString().split('T')[0],
-          time: staffId === 'staff_1' ? '10:00' : '11:00'
-       });
-    });
+  async getNextAvailableSlotForStaff(tenantId: string, staffId: string, serviceId: string): Promise<{date: string, time: string} | null> {
+    const validTenantId = requireTenantId(tenantId, 'getNextAvailableSlotForStaff');
+    if (!staffId || typeof staffId !== 'string' || !staffId.trim()) return null;
+    if (!serviceId || typeof serviceId !== 'string' || !serviceId.trim()) return null;
+
+    try {
+      const catalogRepo = getServiceCatalogRepository() as any;
+      const service = await catalogRepo.getServiceById(serviceId, validTenantId);
+      if (!service || (service.tenantId && service.tenantId !== validTenantId) || service.active === false) {
+        return null;
+      }
+
+      const staff = await catalogRepo.getStaffById(staffId, validTenantId);
+      if (!staff || (staff.tenantId && staff.tenantId !== validTenantId) || staff.active === false) {
+        return null;
+      }
+
+      const eligibleStaff = await catalogRepo.listStaffForService(validTenantId, serviceId);
+      if (!eligibleStaff || !eligibleStaff.some((s: any) => s.id === staffId)) {
+        return null;
+      }
+
+      const now = new Date();
+      for (let dayOffset = 0; dayOffset < 14; dayOffset++) {
+        const targetDate = new Date(now.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+        const dateStr = targetDate.toISOString().split('T')[0];
+        const slots = await this.getAvailableSlotsForStaff(validTenantId, staffId, serviceId, dateStr);
+        if (slots && slots.length > 0) {
+          return {
+            date: dateStr,
+            time: slots[0].time
+          };
+        }
+      }
+      return null;
+    } catch (err: any) {
+      if (err.message && err.message.includes('Security error')) throw err;
+      return null;
+    }
   },
 
-  getEarliestAvailableStaff(tenantId: string, serviceId: string): Promise<{staffId: string, date: string, time: string} | null> {
-    return new Promise(async (resolve) => {
-       // Find all staff who can perform this service
-       // Mock approach: just pick the first available staff
-       try {
-         const staff = await getStaffList(tenantId);
-         const serviceStaff = staff;
-         
-         if (serviceStaff.length === 0) {
-            resolve(null);
-            return;
-         }
+  async getEarliestAvailableStaff(tenantId: string, serviceId: string): Promise<{staffId: string, date: string, time: string} | null> {
+    const validTenantId = requireTenantId(tenantId, 'getEarliestAvailableStaff');
+    if (!serviceId || typeof serviceId !== 'string' || !serviceId.trim()) return null;
 
-         const first = serviceStaff[0];
-         resolve({
-            staffId: first.id,
-            date: new Date().toISOString().split('T')[0],
-            time: '10:00'
-         });
-       } catch (err) {
-         resolve(null);
-       }
-    });
+    try {
+      const catalogRepo = getServiceCatalogRepository() as any;
+      const service = await catalogRepo.getServiceById(serviceId, validTenantId);
+      if (!service || (service.tenantId && service.tenantId !== validTenantId) || service.active === false) {
+        return null;
+      }
+
+      const eligibleStaff = await catalogRepo.listStaffForService(validTenantId, serviceId);
+      if (!eligibleStaff || eligibleStaff.length === 0) {
+        return null;
+      }
+
+      let earliest: { staffId: string; date: string; time: string; timestamp: number } | null = null;
+      const now = new Date();
+      for (let dayOffset = 0; dayOffset < 14; dayOffset++) {
+        const targetDate = new Date(now.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+        const dateStr = targetDate.toISOString().split('T')[0];
+        for (const st of eligibleStaff) {
+          const slots = await this.getAvailableSlotsForStaff(validTenantId, st.id, serviceId, dateStr);
+          if (slots && slots.length > 0) {
+            const firstSlotTime = slots[0].time;
+            const [h, m] = firstSlotTime.split(':').map(Number);
+            const slotTimestamp = targetDate.getTime() + (h * 60 + m) * 60 * 1000;
+            if (!earliest || slotTimestamp < earliest.timestamp) {
+              earliest = {
+                staffId: st.id,
+                date: dateStr,
+                time: firstSlotTime,
+                timestamp: slotTimestamp
+              };
+            }
+          }
+        }
+        if (earliest) break;
+      }
+
+      if (earliest) {
+        return { staffId: earliest.staffId, date: earliest.date, time: earliest.time };
+      }
+      return null;
+    } catch (err: any) {
+      if (err.message && err.message.includes('Security error')) throw err;
+      return null;
+    }
   }
 };

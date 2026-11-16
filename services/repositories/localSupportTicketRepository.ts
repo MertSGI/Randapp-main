@@ -1,13 +1,14 @@
 import { SupportTicketRepository } from './types';
+import { STORAGE_KEYS } from '../storageKeys';
 
 export class LocalSupportTicketRepository implements SupportTicketRepository {
   private getStoredTickets(): any[] {
-    const raw = localStorage.getItem('lari_support_tickets_v1');
+    const raw = localStorage.getItem(STORAGE_KEYS.SUPPORT_TICKETS);
     return raw ? JSON.parse(raw) : [];
   }
 
   private saveStoredTickets(tickets: any[]) {
-    localStorage.setItem('lari_support_tickets_v1', JSON.stringify(tickets));
+    localStorage.setItem(STORAGE_KEYS.SUPPORT_TICKETS, JSON.stringify(tickets));
   }
 
   async listTickets(tenantId?: string): Promise<any[]> {

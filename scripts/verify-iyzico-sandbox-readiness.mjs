@@ -21,13 +21,28 @@ const cwd = process.cwd();
 // 1. Documentation Verification
 const expectedDocFiles = [
   'IYZICO_SANDBOX_PAYMENT_REHEARSAL.md',
+  'IYZICO_SANDBOX_SETUP.md',
   'PAYMENT_PROVIDER_CONTRACT_MATRIX.md',
-  'PAYMENT_WEBHOOK_IDEMPOTENCY_AND_RECONCILIATION.md'
+  'PAYMENT_WEBHOOK_IDEMPOTENCY_AND_RECONCILIATION.md',
+  'V1B_SOURCE_READY_REPORT.md'
 ];
 
 for (const docFile of expectedDocFiles) {
   const fullPath = path.join(cwd, 'docs', docFile);
   assert(fs.existsSync(fullPath), `Documentation file docs/${docFile} exists`);
+}
+
+const sandboxSetupPath = path.join(cwd, 'docs', 'IYZICO_SANDBOX_SETUP.md');
+if (fs.existsSync(sandboxSetupPath)) {
+  const setupDoc = fs.readFileSync(sandboxSetupPath, 'utf8');
+  assert(!setupDoc.includes('IYZICO_WEBHOOK_VERIFY_MODE=sandbox_bypass'), 'docs/IYZICO_SANDBOX_SETUP.md does not recommend removed sandbox_bypass mode');
+  assert(setupDoc.includes('IYZICO_MERCHANT_ID') && setupDoc.includes('x-iyz-signature-v3'), 'docs/IYZICO_SANDBOX_SETUP.md requires IYZICO_MERCHANT_ID and x-iyz-signature-v3 HMAC verification');
+}
+
+const iyzicoClientPath = path.join(cwd, 'supabase', 'functions', '_shared', 'iyzicoClient.ts');
+if (fs.existsSync(iyzicoClientPath)) {
+  const iyzicoClientCode = fs.readFileSync(iyzicoClientPath, 'utf8');
+  assert(!iyzicoClientCode.includes('IYZICO_WEBHOOK_VERIFY_MODE'), 'iyzicoClient.ts does not honor IYZICO_WEBHOOK_VERIFY_MODE bypass');
 }
 
 // 2. Code Component Presence & Integrity
@@ -95,9 +110,11 @@ const checkFrontendSafety = (dirPath) => {
 
 const componentsDir = path.join(cwd, 'components');
 const pagesDir = path.join(cwd, 'pages');
+const servicesDir = path.join(cwd, 'services');
 
 if (fs.existsSync(componentsDir)) checkFrontendSafety(componentsDir);
 if (fs.existsSync(pagesDir)) checkFrontendSafety(pagesDir);
+if (fs.existsSync(servicesDir)) checkFrontendSafety(servicesDir);
 
 assert(!hasRawCardInputs, 'Verification succeeds: Frontend relies on secure provider callback forms, no raw card exposure');
 assert(!containsLeakedSecrets, 'Verification succeeds: No committed server keys, AWS or provider secret credentials found in frontend codebase');

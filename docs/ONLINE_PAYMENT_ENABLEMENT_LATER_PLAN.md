@@ -59,3 +59,18 @@ Abonelik sistemini tamamen otomatiğe geçirmek için şu 4 onay kutusunun yeşi
 *   [ ] Sandbox provasında 10 başarılı ve 5 hatalı ödeme senaryosu sorunsuz simüle edildi.
 *   [ ] Mevcut tüm aktif salon sahipleri geçiş süreci hakkında bizzat bilgilendirildi.
 *   [ ] Şirket muhasebecisi, otomatik iyzico faturalandırılması süreçlerini onayladı.
+
+
+---
+
+## 5. Mevcut Geliştirme Durumu (Controller Raporu 20261024)
+
+| Bileşen | Durum | Doğrulama |
+| :--- | :--- | :--- |
+| Ödeme Çalışma Modu Güvenliği | `SOURCE_READY` / `MOCK_TESTED` | `qa:payment-mode-safety` |
+| Webhook HMAC-SHA256 Doğrulaması | `SOURCE_READY` / `MOCK_TESTED` | `qa:payment-security`, `qa:iyzico-webhook-cryptography` |
+| Webhook Mükerrerlik (Idempotency) | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` |
+| Müşteri / Kiracı Ayrımı Güvenliği | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` |
+| Ters Sıralı / İptal Edilmiş Olay Koruması | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` |
+| iyzico Canlı Sandbox Entegrasyonu | `PROVIDER_INTEGRATION_PENDING` | Dış kurumsal ticari hesap onayı bekleniyor |
+| Canlı Sanal POS / Kredi Kartı Tahsilatı | `NOT_TESTED` | Issue #10 (Veritabanı Kurtarma) çözülene kadar engellidir |

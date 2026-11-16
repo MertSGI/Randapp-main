@@ -1,7 +1,8 @@
 import { LegalDocumentVersion, LegalDocumentType, LegalDocumentStatus } from '../types';
 import { auditLogService } from './auditLogService';
+import { STORAGE_KEYS } from './storageKeys';
 
-const LEGAL_STORAGE_KEY = 'lari_legal_documents_v1';
+const LEGAL_STORAGE_KEY = STORAGE_KEYS.LEGAL_DOCUMENTS;
 
 export interface CreateLegalDocumentInput {
   type: LegalDocumentType;

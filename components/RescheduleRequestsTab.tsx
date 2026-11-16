@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { adminRescheduleService, PendingRescheduleRequestItem } from '../services/adminRescheduleService';
 import { formatTurkishDate, getStatusDisplayLabel } from '../pages/AppointmentSelfServicePage';
+import { generateSecureId } from '../services/appointmentSelfServiceService';
 
 interface RescheduleRequestsTabProps {
   userRole?: string;
@@ -118,7 +119,7 @@ export const RescheduleRequestsTab: React.FC<RescheduleRequestsTabProps> = ({
     if (!idempotencyKeysRef.current[reqId]) {
       idempotencyKeysRef.current[reqId] = typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
-        : `admin_dec_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        : generateSecureId('admin_dec_');
     }
 
     try {

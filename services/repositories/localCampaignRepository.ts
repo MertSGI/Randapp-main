@@ -1,38 +1,39 @@
 import { CampaignRepository } from './types';
 import { BusinessCustomerCampaign, BusinessCustomerReferral, CustomerCampaignReward } from '../../types';
+import { STORAGE_KEYS } from '../storageKeys';
 
 export class LocalCampaignRepository implements CampaignRepository {
   private getCampaigns(): BusinessCustomerCampaign[] {
-    const raw = localStorage.getItem('lari_customer_campaigns_by_tenant');
+    const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_CAMPAIGNS_BY_TENANT);
     return raw ? JSON.parse(raw) : [];
   }
 
   private setCampaigns(campaigns: BusinessCustomerCampaign[]) {
-    localStorage.setItem('lari_customer_campaigns_by_tenant', JSON.stringify(campaigns));
+    localStorage.setItem(STORAGE_KEYS.CUSTOMER_CAMPAIGNS_BY_TENANT, JSON.stringify(campaigns));
     // Also sync to lari_business_campaigns for compatibility
-    localStorage.setItem('lari_business_campaigns', JSON.stringify(campaigns));
+    localStorage.setItem(STORAGE_KEYS.BUSINESS_CAMPAIGNS, JSON.stringify(campaigns));
   }
 
   private getReferrals(): BusinessCustomerReferral[] {
-    const raw = localStorage.getItem('lari_customer_referrals_by_tenant');
+    const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT);
     return raw ? JSON.parse(raw) : [];
   }
 
   private setReferrals(referrals: BusinessCustomerReferral[]) {
-    localStorage.setItem('lari_customer_referrals_by_tenant', JSON.stringify(referrals));
+    localStorage.setItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT, JSON.stringify(referrals));
     // Also sync to lari_business_referrals
-    localStorage.setItem('lari_business_referrals', JSON.stringify(referrals));
+    localStorage.setItem(STORAGE_KEYS.BUSINESS_REFERRALS, JSON.stringify(referrals));
   }
 
   private getRewards(): CustomerCampaignReward[] {
-    const raw = localStorage.getItem('lari_customer_campaign_rewards_by_tenant');
+    const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT);
     return raw ? JSON.parse(raw) : [];
   }
 
   private setRewards(rewards: CustomerCampaignReward[]) {
-    localStorage.setItem('lari_customer_campaign_rewards_by_tenant', JSON.stringify(rewards));
+    localStorage.setItem(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT, JSON.stringify(rewards));
     // Also sync for compatibility if needed
-    localStorage.setItem('lari_customer_rewards', JSON.stringify(rewards));
+    localStorage.setItem(STORAGE_KEYS.CUSTOMER_REWARDS, JSON.stringify(rewards));
   }
 
   async listCampaigns(tenantId: string): Promise<BusinessCustomerCampaign[]> {

@@ -1,0 +1,654 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import net from 'net';
+import crypto from 'crypto';
+import { spawnSync } from 'child_process';
+import { fileURLToPath } from 'url';
+
+if (!process.execArgv.some(a => a.includes('tsx')) && !process.env._TSX_RESPAWNED) {
+  const result = spawnSync(process.execPath, ['--import', 'tsx', fileURLToPath(import.meta.url), ...process.argv.slice(2)], {
+    stdio: 'inherit',
+    env: { ...process.env, _TSX_RESPAWNED: '1' }
+  });
+  process.exit(result.status ?? 0);
+}
+
+const { SYNTHETIC_SALON_AURA, SyntheticSalonFixtureService } = await import('../services/syntheticSalonFixtureService.ts');
+const { CommunicationDeliveryService } = await import('../services/communicationDeliveryService.ts');
+const { OfflineCommunicationProviderSimulator } = await import('../services/offlineCommunicationProviderSimulator.ts');
+const { superAdminService } = await import('../services/superAdminService.ts');
+
+let passCount = 0;
+let failCount = 0;
+
+const assert = (condition, message) => {
+  if (condition) {
+    console.log(`✅ PASS: ${message}`);
+    passCount++;
+  } else {
+    console.error(`❌ FAIL: ${message}`);
+    failCount++;
+  }
+};
+
+console.log('============================================================================');
+console.log('LARI — PHASE F: FIRST-SALON SYNTHETIC ONBOARDING REHEARSAL QA');
+console.log('============================================================================\n');
+
+const fixture = SyntheticSalonFixtureService.getFixture();
+
+// ----------------------------------------------------------------------------
+// STEP 1: Salon Profile Creation & Branding
+// ----------------------------------------------------------------------------
+console.log('[Step 1] Salon Profile Creation & Branding...');
+assert(fixture.tenantId === 'synthetic_salon_aura_001', 'Step 1: Tenant ID matches synthetic convention');
+assert(fixture.slug === 'aura-nisantasi', 'Step 1: Slug is aura-nisantasi');
+assert(fixture.businessName === 'Aura Kuaför & Güzellik', 'Step 1: Business name is Aura Kuaför & Güzellik');
+assert(fixture.officialBusinessName.includes('Tic. Ltd. Şti.'), 'Step 1: Official business entity name defined');
+assert(fixture.category === 'hair_and_beauty', 'Step 1: Category is hair_and_beauty');
+
+// ----------------------------------------------------------------------------
+// STEP 2: Single Branch Configuration
+// ----------------------------------------------------------------------------
+console.log('\n[Step 2] Single Branch Configuration...');
+const branch = fixture.branch;
+assert(branch.id === 'branch_aura_nisantasi_01', 'Step 2: Branch ID is defined');
+assert(branch.name === 'Aura Nişantaşı', 'Step 2: Branch name is Aura Nişantaşı');
+assert(branch.address.includes('Teşvikiye'), 'Step 2: Branch street address is valid');
+assert(branch.district === 'Şişli' && branch.city === 'İstanbul', 'Step 2: District and City verified');
+assert(branch.phone.startsWith('+90 212'), 'Step 2: Branch landline phone verified');
+
+// ----------------------------------------------------------------------------
+// STEP 3: Staff Creation (2 Staff Members)
+// ----------------------------------------------------------------------------
+console.log('\n[Step 3] Staff Creation (2 Staff Members)...');
+assert(fixture.staff.length === 2, 'Step 3: Exactly 2 staff members created');
+const staffElif = fixture.staff.find(s => s.name === 'Elif Yılmaz');
+const staffCan = fixture.staff.find(s => s.name === 'Can Demir');
+assert(staffElif !== undefined && staffElif.role.includes('Stylist'), 'Step 3: Elif Yılmaz registered as Senior Stylist');
+assert(staffCan !== undefined && staffCan.role.includes('Estetisyen'), 'Step 3: Can Demir registered as Esthetician');
+
+// ----------------------------------------------------------------------------
+// STEP 4: Service Catalog Configuration (6 Services)
+// ----------------------------------------------------------------------------
+console.log('\n[Step 4] Service Catalog Configuration (6 Services)...');
+assert(fixture.services.length === 6, 'Step 4: Exactly 6 distinct services configured');
+const prices = fixture.services.map(s => s.price);
+const durations = fixture.services.map(s => s.durationMinutes);
+assert(prices.every(p => p > 0), 'Step 4: All services have positive pricing');
+assert(durations.every(d => d >= 30), 'Step 4: All service durations are at least 30 minutes');
+assert(fixture.services.some(s => s.name.includes('Saç Kesimi')), 'Step 4: Haircut service present');
+assert(fixture.services.some(s => s.name.includes('Cilt Bakımı')), 'Step 4: Skincare service present');
+assert(fixture.services.some(s => s.name.includes('Manikür')), 'Step 4: Manicure service present');
+
+// ----------------------------------------------------------------------------
+// STEP 5: Staff-Service Association & Branch Assignment
+// ----------------------------------------------------------------------------
+console.log('\n[Step 5] Staff-Service Association...');
+assert(staffElif.serviceIds.length >= 3, 'Step 5: Elif assigned to multiple styling services');
+assert(staffCan.serviceIds.length >= 3, 'Step 5: Can assigned to multiple aesthetic services');
+assert(staffElif.branchId === branch.id, 'Step 5: Elif assigned to Aura Nişantaşı branch');
+assert(staffCan.branchId === branch.id, 'Step 5: Can assigned to Aura Nişantaşı branch');
+
+// ----------------------------------------------------------------------------
+// STEP 6: Weekly Operating Hours & Schedule Setup
+// ----------------------------------------------------------------------------
+console.log('\n[Step 6] Weekly Operating Hours & Schedule...');
+assert(fixture.weeklyHours.length === 7, 'Step 6: All 7 days configured in schedule');
+const workDays = fixture.weeklyHours.filter(h => h.isOpen);
+const offDays = fixture.weeklyHours.filter(h => !h.isOpen);
+assert(workDays.length === 6, 'Step 6: Mon-Sat are open (6 days)');
+assert(offDays.length === 1 && offDays[0].weekday === 7, 'Step 6: Sunday is closed');
+assert(workDays[0].openTime === '09:00' && workDays[0].closeTime === '19:00', 'Step 6: Operating hours are 09:00 - 19:00');
+
+// ----------------------------------------------------------------------------
+// STEP 7: Staff Leave Exception Scheduling
+// ----------------------------------------------------------------------------
+console.log('\n[Step 7] Staff Leave Scheduling...');
+assert(fixture.staffLeave.length === 1, 'Step 7: Staff leave exception exists');
+const leave = fixture.staffLeave[0];
+assert(leave.staffName === 'Can Demir', 'Step 7: Leave assigned to Can Demir');
+assert(leave.startDate === '2026-10-27', 'Step 7: Leave date is 2026-10-27');
+assert(leave.reason.includes('Seminer'), 'Step 7: Leave reason recorded');
+
+// ----------------------------------------------------------------------------
+// STEP 8: Public Booking Link & QR Token Generation
+// ----------------------------------------------------------------------------
+console.log('\n[Step 8] Public Booking Link & QR Token Generation...');
+assert(fixture.publicBookingUrl === 'https://randevulari.com/b/aura-nisantasi', 'Step 8: Public booking link formatted accurately');
+assert(fixture.qrPayload.startsWith('LARI:V1:BOOKING:aura-nisantasi:'), 'Step 8: QR code token payload properly structured');
+
+// ----------------------------------------------------------------------------
+// STEP 9: Customer Booking Flow (Consent Granted)
+// ----------------------------------------------------------------------------
+console.log('\n[Step 9] Customer Booking (Consent Granted)...');
+const booking1 = fixture.bookings[0];
+assert(booking1.customerName === 'Selin Arslan', 'Step 9: Customer 1 is Selin Arslan');
+assert(booking1.status === 'confirmed', 'Step 9: Booking 1 is confirmed');
+assert(booking1.contactConsent === true, 'Step 9: Customer 1 gave contact consent');
+
+// ----------------------------------------------------------------------------
+// STEP 10: Customer Booking Flow (Consent Denied)
+// ----------------------------------------------------------------------------
+console.log('\n[Step 10] Customer Booking (Consent Denied)...');
+const booking2 = fixture.bookings[1];
+assert(booking2.customerName === 'Merve Çelik', 'Step 10: Customer 2 is Merve Çelik');
+assert(booking2.status === 'confirmed', 'Step 10: Booking 2 confirmed in calendar');
+assert(booking2.contactConsent === false, 'Step 10: Customer 2 explicitly denied contact consent');
+
+// ----------------------------------------------------------------------------
+// STEP 11: Customer Reschedule Flow via Token
+// ----------------------------------------------------------------------------
+console.log('\n[Step 11] Customer Reschedule via Token...');
+const booking3 = fixture.bookings[2];
+assert(booking3.status === 'rescheduled', 'Step 11: Booking 3 status is rescheduled');
+assert(booking3.manageToken.startsWith('tok_'), 'Step 11: Booking 3 has secure manage token');
+
+// ----------------------------------------------------------------------------
+// STEP 12: Appointment Cancellation Flow
+// ----------------------------------------------------------------------------
+console.log('\n[Step 12] Appointment Cancellation Flow...');
+const booking4 = fixture.bookings[3];
+assert(booking4.status === 'cancelled', 'Step 12: Booking 4 status is cancelled');
+assert(booking4.cancellationReason && booking4.cancellationReason.length > 5, 'Step 12: Cancellation reason preserved');
+
+// ----------------------------------------------------------------------------
+// STEP 13: Communication Outbox Audit (Phase E Integration)
+// ----------------------------------------------------------------------------
+console.log('\n[Step 13] Communication Outbox Audit...');
+const deliveryService = new CommunicationDeliveryService();
+
+// Intent 1 for Booking 1 (Consent Granted)
+const intent1 = deliveryService.createIntent({
+  intentId: 'intent_rehearsal_selin_01',
+  tenantId: fixture.tenantId,
+  branchId: branch.id,
+  channel: 'sms',
+  recipient: booking1.customerPhone,
+  templateId: 'booking_confirmed',
+  templateArgs: { customerName: booking1.customerName, salonName: fixture.businessName },
+  body: `Sayın ${booking1.customerName}, ${fixture.businessName} randevunuz onaylandı.`,
+  consentGranted: true
+});
+assert(intent1.status === 'rendered', 'Step 13: Consent-granted intent defaults to rendered (fails closed, no auto-dispatch)');
+
+// Intent 2 for Booking 2 (Consent Denied)
+const intent2 = deliveryService.createIntent({
+  intentId: 'intent_rehearsal_merve_02',
+  tenantId: fixture.tenantId,
+  branchId: branch.id,
+  channel: 'sms',
+  recipient: booking2.customerPhone,
+  templateId: 'booking_confirmed',
+  templateArgs: { customerName: booking2.customerName, salonName: fixture.businessName },
+  body: `Sayın ${booking2.customerName}, randevunuz onaylandı.`,
+  consentGranted: false,
+  consentDenialReason: 'Customer denied contact consent during booking'
+});
+assert(intent2.status === 'skipped', 'Step 13: Consent-denied intent transitions directly to skipped');
+assert(deliveryService.getFailuresForIntent(intent2.intentId)[0].failureType === 'CONSENT_DENIED', 'Step 13: Failure record logged as CONSENT_DENIED');
+
+// ----------------------------------------------------------------------------
+// Negative Regression Suite (7 Negative Tests for Consent, Tenant Boundaries & Idempotency)
+// ----------------------------------------------------------------------------
+console.log('\n[Step 13 - Negative Regression Suite] Enforcing Consent & Tenant Boundaries...');
+
+// Negative Test 1: Skipped intent (consent denied) cannot be queued via queueIntent
+let neg1Error = null;
+try {
+  deliveryService.queueIntent(intent2.intentId);
+} catch (err) {
+  neg1Error = err;
+}
+assert(
+  neg1Error !== null && neg1Error.message.includes('Cannot queue skipped intent'),
+  'Step 13 (Negative 1): Skipped intent with denied consent cannot be queued via queueIntent'
+);
+
+// Negative Test 2: Mismatched/fake tenant cannot dispatch another tenant\'s intent
+let neg2Error = null;
+try {
+  deliveryService.recordDispatchAttempt({
+    intentId: intent1.intentId,
+    tenantId: 'fake_rogue_tenant_999',
+    channel: 'sms',
+    recipient: booking1.customerPhone,
+    status: 'in_flight',
+    providerName: 'rogue_provider'
+  });
+} catch (err) {
+  neg2Error = err;
+}
+assert(
+  neg2Error !== null && neg2Error.message.includes('Tenant mismatch'),
+  'Step 13 (Negative 2): recordDispatchAttempt with mismatched tenantId is rejected with Tenant mismatch error'
+);
+
+// Negative Test 3: Rogue provider delivery on skipped intent is rejected (illegal state transition)
+let neg3Error = null;
+try {
+  deliveryService.recordProviderDelivery({
+    receiptId: 'rcpt_rogue_delivery_01',
+    intentId: intent2.intentId,
+    tenantId: intent2.tenantId,
+    providerMessageId: 'pmsg_rogue_01',
+    providerName: 'mock_provider',
+    deliveredAt: new Date().toISOString(),
+    signatureVerified: true,
+    rawProviderStatus: 'DELIVERED'
+  });
+} catch (err) {
+  neg3Error = err;
+}
+assert(
+  neg3Error !== null && neg3Error.message.includes('Illegal state transition'),
+  'Step 13 (Negative 3): recordProviderDelivery on skipped intent is rejected with Illegal state transition'
+);
+
+// Negative Test 4: Provider delivery receipt with unverified signature is rejected with security violation
+let neg4Error = null;
+try {
+  deliveryService.recordProviderDelivery({
+    receiptId: 'rcpt_unverified_sig_01',
+    intentId: intent1.intentId,
+    tenantId: intent1.tenantId,
+    providerMessageId: 'pmsg_unverified_01',
+    providerName: 'mock_provider',
+    deliveredAt: new Date().toISOString(),
+    signatureVerified: false,
+    rawProviderStatus: 'DELIVERED'
+  });
+} catch (err) {
+  neg4Error = err;
+}
+assert(
+  neg4Error !== null && neg4Error.message.includes('Security violation'),
+  'Step 13 (Negative 4): Provider delivery receipt with unverified signature is rejected with Security violation'
+);
+
+// Negative Test 5: Post-rejection state immutability, zero fake delivery receipts, and strict isolation
+const intent1After = deliveryService.getIntent(intent1.intentId);
+const intent2After = deliveryService.getIntent(intent2.intentId);
+const intent1Receipt = deliveryService.getDeliveryReceipt(intent1.intentId);
+const intent2Receipt = deliveryService.getDeliveryReceipt(intent2.intentId);
+const intent1Attempts = deliveryService.getAttemptsForIntent(intent1.intentId);
+const intent2Attempts = deliveryService.getAttemptsForIntent(intent2.intentId);
+const rogueIntents = deliveryService.listIntentsForTenant('fake_rogue_tenant_999');
+
+assert(
+  intent1After?.status === 'rendered' &&
+  intent2After?.status === 'skipped' &&
+  intent1Receipt === undefined &&
+  intent2Receipt === undefined &&
+  intent1Attempts.length === 0 &&
+  intent2Attempts.length === 0 &&
+  rogueIntents.length === 0,
+  'Step 13 (Negative 5): Post-rejection intent states remain immutable, zero fake delivery receipts exist, and tenant boundaries are intact'
+);
+
+// Negative Test 6: Cross-tenant intent ID collision rejected (Salon B reusing Salon A intent ID)
+let neg6Error = null;
+try {
+  deliveryService.createIntent({
+    intentId: intent1.intentId,
+    tenantId: 'synthetic_salon_beta_002',
+    branchId: 'branch_beta_01',
+    channel: 'sms',
+    recipient: '+905559876543',
+    templateId: 'booking_confirmed',
+    templateArgs: { customerName: 'Ayşe Kaya', salonName: 'Beta Kuaför' },
+    body: 'Sayın Ayşe Kaya, Beta Kuaför randevunuz onaylandı.',
+    consentGranted: true
+  });
+} catch (err) {
+  neg6Error = err;
+}
+assert(
+  neg6Error !== null && neg6Error.message.includes('Security violation: Intent ID collision across tenant boundaries (tenant mismatch).'),
+  'Step 13 (Negative 6): Cross-tenant intent ID collision (Salon B reusing Salon A intent ID) is securely rejected'
+);
+
+const intent1AfterNeg6 = deliveryService.getIntent(intent1.intentId);
+const salonBIntents = deliveryService.listIntentsForTenant('synthetic_salon_beta_002');
+assert(
+  intent1AfterNeg6?.status === 'rendered' &&
+  intent1AfterNeg6?.consentVerified === true &&
+  intent1AfterNeg6?.tenantId === fixture.tenantId &&
+  salonBIntents.length === 0,
+  'Step 13 (Negative 6): Ret sonrasında salon A intent durumu ve iletişim onayı değişmedi, salon B izole kaldı'
+);
+
+// Negative Test 7: Legitimate idempotent intent replay by same salon preserves safe idempotency
+let neg7Error = null;
+let intent1Replay = null;
+try {
+  intent1Replay = deliveryService.createIntent({
+    intentId: intent1.intentId,
+    tenantId: fixture.tenantId,
+    branchId: branch.id,
+    channel: 'sms',
+    recipient: booking1.customerPhone,
+    templateId: 'booking_confirmed',
+    templateArgs: { customerName: booking1.customerName, salonName: fixture.businessName },
+    body: `Sayın ${booking1.customerName}, ${fixture.businessName} randevunuz onaylandı.`,
+    consentGranted: true
+  });
+} catch (err) {
+  neg7Error = err;
+}
+assert(
+  neg7Error === null && intent1Replay !== null && intent1Replay === intent1,
+  'Step 13 (Negative 7): Legitimate idempotent replay by same salon returns existing intent reference without error'
+);
+assert(
+  intent1Replay?.status === 'rendered' &&
+  intent1Replay?.consentVerified === true &&
+  intent1Replay?.createdAt === intent1.createdAt &&
+  intent1Replay?.tenantId === fixture.tenantId,
+  'Step 13 (Negative 7): Replayed intent preserves original status, consent verification, and creation timestamp'
+);
+
+// Negative Test 7b: Permuted key order in templateArgs for legitimate idempotent replay
+const permutedArgsReplay = deliveryService.createIntent({
+  intentId: intent1.intentId,
+  tenantId: fixture.tenantId,
+  branchId: branch.id,
+  channel: 'sms',
+  recipient: booking1.customerPhone,
+  templateId: 'booking_confirmed',
+  templateArgs: { salonName: fixture.businessName, customerName: booking1.customerName },
+  body: `Sayın ${booking1.customerName}, ${fixture.businessName} randevunuz onaylandı.`,
+  consentGranted: true
+});
+assert(
+  permutedArgsReplay === intent1,
+  'Step 13 (Negative 7): Canonical key-order equivalence in templateArgs preserves legitimate idempotency'
+);
+
+// Negative Test 7c: Same salon conflicting payload for existing intent is rejected and leaves state unmodified
+let neg7ConflictError = null;
+try {
+  deliveryService.createIntent({
+    intentId: intent1.intentId,
+    tenantId: fixture.tenantId,
+    branchId: branch.id,
+    channel: 'sms',
+    recipient: '+905559998877',
+    templateId: 'booking_confirmed',
+    templateArgs: { customerName: booking1.customerName, salonName: fixture.businessName },
+    body: `Sayın ${booking1.customerName}, ${fixture.businessName} randevunuz onaylandı.`,
+    consentGranted: true
+  });
+} catch (err) {
+  neg7ConflictError = err;
+}
+assert(
+  neg7ConflictError !== null && neg7ConflictError.message.includes('Conflict error: Conflicting intent payload for existing intent'),
+  'Step 13 (Negative 7): Same salon conflicting payload for existing intent is rejected'
+);
+
+const intent1Final = deliveryService.getIntent(intent1.intentId);
+const intent2Final = deliveryService.getIntent(intent2.intentId);
+assert(
+  intent1Final?.status === 'rendered' &&
+  intent1Final?.consentVerified === true &&
+  intent2Final?.status === 'skipped' &&
+  intent2Final?.consentVerified === false &&
+  deliveryService.getAttemptsForIntent(intent1.intentId).length === 0 &&
+  deliveryService.getDeliveryReceipt(intent1.intentId) === undefined,
+  'Step 13 (Negative 7): Salon A intent status and consent remain intact with zero dispatch attempts and zero delivery receipts'
+);
+
+// ----------------------------------------------------------------------------
+// STEP 14: SuperAdmin Review & Synthetic Go-Live Approval Guard
+// ----------------------------------------------------------------------------
+console.log('\n[Step 14] SuperAdmin Review & Go-Live Guard...');
+const approved = await superAdminService.approveGoLive(fixture.tenantId, { isRehearsal: true });
+assert(approved === true, 'Step 14: SuperAdmin synthetic rehearsal approval returned true');
+
+// Verify that the data provider has DEMO_REHEARSAL_APPROVED
+const { dataProvider } = await import('../services/dataProvider.ts');
+const provStatus = await dataProvider.get(`lari:${fixture.tenantId}:go_live_status`);
+assert(provStatus === 'DEMO_REHEARSAL_APPROVED', 'Step 14: Rehearsal guard stored DEMO_REHEARSAL_APPROVED without calling live RPC');
+
+// Negative Test (Finding 1): Verify that under Supabase mode without DB record, synthetic salon cannot accept bookings
+const originalMode = process.env.VITE_DATA_MODE;
+const originalUrl = process.env.VITE_SUPABASE_URL;
+const originalKey = process.env.VITE_SUPABASE_ANON_KEY;
+try {
+  process.env.VITE_DATA_MODE = 'supabase_staging';
+  process.env.VITE_SUPABASE_URL = 'http://127.0.0.1:54321';
+  process.env.VITE_SUPABASE_ANON_KEY = 'mock_anon_key_for_test';
+  const { goLiveService } = await import('../services/goLiveService.ts');
+  const supabaseCheck = await goLiveService.canTenantAcceptBookings(fixture.tenantId);
+  assert(supabaseCheck.allowed === false, 'Step 14 (Negative Finding 1): Under VITE_DATA_MODE=supabase_staging without DB record, synthetic salon cannot accept bookings');
+} finally {
+  process.env.VITE_DATA_MODE = originalMode;
+  if (originalUrl) process.env.VITE_SUPABASE_URL = originalUrl; else delete process.env.VITE_SUPABASE_URL;
+  if (originalKey) process.env.VITE_SUPABASE_ANON_KEY = originalKey; else delete process.env.VITE_SUPABASE_ANON_KEY;
+}
+
+// ----------------------------------------------------------------------------
+// STEP 15: Responsive UI Layout & Terminal State Assertion
+// ----------------------------------------------------------------------------
+console.log('\n[Step 15] Responsive Layout Verification (360px, 390px, 768px, 1024px)...');
+const viewports = [
+  { name: 'Mobile Small', width: 360, classExpected: 'grid-cols-1' },
+  { name: 'Mobile Standard', width: 390, classExpected: 'grid-cols-1' },
+  { name: 'Tablet', width: 768, classExpected: 'md:grid-cols' },
+  { name: 'Desktop', width: 1024, classExpected: 'lg:grid-cols-12' }
+];
+
+const outboxPanelSrc = fs.readFileSync(path.join(process.cwd(), 'components', 'CommunicationOutboxPanel.tsx'), 'utf8');
+for (const vp of viewports) {
+  assert(outboxPanelSrc.includes(vp.classExpected), `Step 15: ${vp.name} (${vp.width}px) responsive breakpoint rule "${vp.classExpected}" active in UI`);
+}
+
+const adminOnboardSrc = fs.readFileSync(path.join(process.cwd(), 'pages', 'super-admin', 'SuperAdminOnboardingPage.tsx'), 'utf8');
+assert(adminOnboardSrc.includes('md:hidden') && adminOnboardSrc.includes('hidden md:block'), 'Step 15: SuperAdminOnboardingPage defines separate mobile cards and desktop table views');
+
+// ----------------------------------------------------------------------------
+// STEP 16: P2A Atomic Provisioning/Onboarding Migration & Service Contracts (ADIM-032)
+// ----------------------------------------------------------------------------
+console.log('\n[Step 16] P2A Atomic Provisioning/Onboarding Migrations & Service Contracts...');
+const migrationsPath = path.join(process.cwd(), 'supabase', 'migrations');
+const preservedHeadSecurityMigrations = [
+  '20260901_payment_webhook_idempotency_and_replay_security.sql',
+  '20260902_subscription_sync_transaction.sql',
+  '20260903_public_booking_ratelimit_spam_and_otp_contract.sql',
+  '20260904_self_service_token_security_and_ratelimit.sql'
+];
+for (const file of preservedHeadSecurityMigrations) {
+  assert(fs.existsSync(path.join(migrationsPath, file)), `Step 16: Preserved HEAD security migration exists (${file})`);
+}
+
+const portedP2AMigrations = [
+  '20260905_p2a_atomic_tenant_provisioning_rpc.sql',
+  '20260906_p2a_publish_commercial_contract_alignment.sql',
+  '20260907_p2a_owner_onboarding_contracts.sql',
+  '20260908_authenticated_owner_branch_mutations_rpc.sql'
+];
+const manifestContent = fs.readFileSync(path.join(process.cwd(), 'supabase', 'MIGRATION_APPLY_MANIFEST.md'), 'utf8');
+for (const file of portedP2AMigrations) {
+  assert(fs.existsSync(path.join(migrationsPath, file)), `Step 16: Ported P2A migration exists (${file})`);
+  assert(manifestContent.includes(file), `Step 16: MIGRATION_APPLY_MANIFEST.md documents ${file}`);
+}
+
+const p2aSqlTestsAndFixtures = [
+  'supabase/tests/p2a_tenant_provisioning_static_test.sql',
+  'supabase/tests/p2a_tenant_provisioning_integration_tests.sql',
+  'supabase/tests/p2a_onboarding_integration_tests.sql',
+  'supabase/tests/package_branch_server_authority_tests.sql',
+  'supabase/tests/fixtures/p2a_historical_replay_bridge_before_migration_38.sql',
+  'supabase/tests/fixtures/p2a_managed_runtime_bootstrap.sql'
+];
+for (const relPath of p2aSqlTestsAndFixtures) {
+  assert(fs.existsSync(path.join(process.cwd(), relPath)), `Step 16: P2A SQL test/fixture exists (${relPath})`);
+}
+
+const { runTenantOnboardingFlowServiceTests } = await import('../services/tenantOnboardingFlowService.test.ts');
+try {
+  await runTenantOnboardingFlowServiceTests();
+  assert(true, 'Step 16: tenantOnboardingFlowService local & Supabase RPC boundary suite passed');
+} catch (err) {
+  assert(false, `Step 16: tenantOnboardingFlowService suite failed: ${err?.message || err}`);
+}
+
+// Step 16b: Disposable PostgreSQL Full Migration Chain Replay & P2A SQL Suites Execution
+function ensureWindowsVcRuntimeOnPathForPg() {
+  if (process.platform !== 'win32') return;
+  const sysRoot = process.env.SystemRoot || 'C:\\Windows';
+  const sys32 = path.join(sysRoot, 'System32');
+  const requiredDlls = ['vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll'];
+  const hasAll = (dir) => Boolean(dir) && requiredDlls.every((dll) => fs.existsSync(path.join(dir, dll)));
+  if (hasAll(sys32)) return;
+  const currentEntries = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  if (currentEntries.some((entry) => hasAll(entry))) return;
+  const candidates = [
+    path.join(sys32, 'Microsoft-Edge-WebView'),
+    path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'EdgeWebView', 'Application'),
+  ];
+  const foundDir = candidates.find((dir) => hasAll(dir));
+  if (foundDir) {
+    process.env.PATH = `${foundDir}${path.delimiter}${process.env.PATH || ''}`;
+  }
+}
+
+function getAvailablePortForPg() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const port = server.address().port;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+async function runP2aDisposablePostgresReplay() {
+  process.env.LC_ALL = 'C';
+  process.env.LANG = 'C';
+  ensureWindowsVcRuntimeOnPathForPg();
+
+  const sqlRoot = process.env.LARI_DISPOSABLE_SQL_ROOT
+    ? path.resolve(process.env.LARI_DISPOSABLE_SQL_ROOT)
+    : process.cwd();
+  const replayMigrationsDir = path.join(sqlRoot, 'supabase', 'migrations');
+  const replayTestsDir = path.join(sqlRoot, 'supabase', 'tests');
+
+  const tmpDir = path.join(os.tmpdir(), `lari-p2a-pg-replay-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`);
+  const pgDataDir = path.join(tmpDir, 'pgdata');
+  fs.mkdirSync(pgDataDir, { recursive: true });
+
+  let pgInstance = null;
+  let pgClient = null;
+  try {
+    const port = await getAvailablePortForPg();
+    const EmbeddedPostgres = (await import('embedded-postgres')).default;
+    pgInstance = new EmbeddedPostgres({
+      databaseDir: pgDataDir,
+      user: 'postgres',
+      password: 'password',
+      port,
+      initdbFlags: ['--locale=C', '--encoding=UTF8', '--no-sync'],
+      postgresFlags: ['-F'],
+      persistent: false
+    });
+    await pgInstance.initialise();
+    await pgInstance.start();
+
+    pgClient = pgInstance.getPgClient('postgres', '127.0.0.1');
+    await pgClient.connect();
+    await pgClient.query(`ALTER DATABASE postgres SET synchronous_commit = 'off'; SET synchronous_commit = 'off';`);
+
+    // 1. Bootstrap managed runtime primitives (auth schema, roles, extensions)
+    await pgClient.query(`CREATE SCHEMA IF NOT EXISTS extensions;`);
+    const bootstrapSql = fs.readFileSync(path.join(replayTestsDir, 'fixtures', 'p2a_managed_runtime_bootstrap.sql'), 'utf8');
+    await pgClient.query(bootstrapSql);
+
+    // 2. Replay full active migration chain (001 .. 20260908)
+    const migrationFiles = fs.readdirSync(replayMigrationsDir).filter((f) => f.endsWith('.sql')).sort();
+    assert(migrationFiles.length >= 64, `Step 16 (PG Replay): Expected >= 64 migration files, found ${migrationFiles.length}`);
+
+    const bridgeSql = fs.readFileSync(
+      path.join(replayTestsDir, 'fixtures', 'p2a_historical_replay_bridge_before_migration_38.sql'),
+      'utf8'
+    );
+    for (const migFile of migrationFiles) {
+      if (migFile === '20260813_h1c_commercial_eligibility_and_quota_enforcement.sql') {
+        await pgClient.query(bridgeSql);
+      }
+      if (migFile === '20260901_payment_webhook_idempotency_and_replay_security.sql') {
+        await pgClient.query(`
+          ALTER TABLE public.subscriptions
+          ADD COLUMN IF NOT EXISTS provider_token TEXT,
+          ADD COLUMN IF NOT EXISTS provider_session_id TEXT;
+        `);
+      }
+      const migSql = fs.readFileSync(path.join(replayMigrationsDir, migFile), 'utf8');
+      try {
+        await pgClient.query(migSql);
+      } catch (migErr) {
+        throw new Error(`Migration failed during disposable PG replay (${migFile}): ${migErr?.message || migErr}`);
+      }
+    }
+    assert(true, `Step 16 (PG Replay): Full ${migrationFiles.length}-migration chain replayed cleanly on real PostgreSQL`);
+
+    // 3. Execute all 4 P2A SQL test suites on real PostgreSQL
+    const p2aSuites = [
+      { file: 'p2a_tenant_provisioning_static_test.sql', manageTx: true },
+      { file: 'p2a_tenant_provisioning_integration_tests.sql', manageTx: true },
+      { file: 'p2a_onboarding_integration_tests.sql', manageTx: true },
+      { file: 'package_branch_server_authority_tests.sql', manageTx: false }
+    ];
+
+    for (const suite of p2aSuites) {
+      const suiteSql = fs.readFileSync(path.join(replayTestsDir, suite.file), 'utf8');
+      try {
+        if (suite.manageTx) {
+          await pgClient.query('BEGIN;');
+        }
+        await pgClient.query(suiteSql);
+        if (suite.manageTx) {
+          await pgClient.query('ROLLBACK;');
+        }
+        assert(true, `Step 16 (PG Suite): ${suite.file} executed and PASSED on real PostgreSQL`);
+      } catch (suiteErr) {
+        try {
+          await pgClient.query('ROLLBACK;');
+        } catch {}
+        assert(false, `Step 16 (PG Suite): ${suite.file} FAILED on real PostgreSQL: ${suiteErr?.message || suiteErr}`);
+      }
+    }
+  } finally {
+    if (pgClient) {
+      try { await pgClient.end(); } catch {}
+    }
+    if (pgInstance) {
+      try { await pgInstance.stop(); } catch {}
+    }
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
+  }
+}
+
+try {
+  await runP2aDisposablePostgresReplay();
+} catch (pgErr) {
+  assert(false, `Step 16 (PG Replay): Disposable PostgreSQL replay failed: ${pgErr?.message || pgErr}`);
+}
+
+// Terminal State
+console.log('\n============================================================================');
+if (failCount > 0) {
+  console.error(`❌ Phase F Rehearsal QA Failed: ${failCount} errors.`);
+  process.exit(1);
+} else {
+  console.log(`🎉 SYNTHETIC_PILOT_REHEARSAL_PASSED (15/15 Journey Steps Verified, ${passCount} checks passed).`);
+  console.log('Terminal State: LARI_PHASE_E_COMMUNICATION_SOURCE_QUALIFIED_AND_PHASE_F_SYNTHETIC_ONBOARDING_READY');
+  console.log('============================================================================');
+  process.exit(0);
+}

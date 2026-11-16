@@ -7,15 +7,68 @@ import { tenantService } from './tenantService';
 import { appointmentSelfServiceService } from './appointmentSelfServiceService';
 import { bookingAbuseProtectionService } from './bookingAbuseProtectionService';
 import { auditLogService } from './auditLogService';
+import { DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
-export const getAppointmentsKey = (tenantId: string) => `lari:${tenantId}:appointments`;
+export const getAppointmentsKey = (tenantId: string) => DYNAMIC_STORAGE_KEYS.tenantAppointments(tenantId);
+
+export class AppointmentSlotConflictError extends Error {
+  readonly code = 'SLOT_ALREADY_BOOKED';
+  readonly statusCode = 409;
+  constructor(message = 'Bu randevu saat aralığı için seçilen personel zaten doludur (SLOT_ALREADY_BOOKED).') {
+    super(message);
+    this.name = 'AppointmentSlotConflictError';
+  }
+}
+
+export interface SafeAppointmentResult {
+  success: boolean;
+  statusCode: 201 | 409 | 400 | 500;
+  code: 'APPOINTMENT_CREATED' | 'SLOT_ALREADY_BOOKED' | 'INVALID_INPUT' | 'INTERNAL_ERROR';
+  appointment?: Appointment;
+  error?: string;
+  reasonCode?: string;
+}
 
 export const getAppointments = async (tenantId: string): Promise<Appointment[]> => {
   return getBookingRepository().listAppointments(tenantId);
 };
 
+const appointmentTenantLocks = new Map<string, Promise<void>>();
+
+export async function withAppointmentLock<T>(tenantId: string, work: () => Promise<T>): Promise<T> {
+  const prev = appointmentTenantLocks.get(tenantId) ?? Promise.resolve();
+  let release!: () => void;
+  const next = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const queued = prev.then(() => next, () => next);
+  appointmentTenantLocks.set(tenantId, queued);
+  await prev;
+  try {
+    return await work();
+  } finally {
+    release();
+    if (appointmentTenantLocks.get(tenantId) === queued) {
+      appointmentTenantLocks.delete(tenantId);
+    }
+  }
+}
+
 export const createAppointment = async (tenantId: string, appointment: Omit<Appointment, 'id' | 'tenantId' | 'createdAt'>): Promise<Appointment> => {
-  const newApt = await getBookingRepository().createAppointment(tenantId, appointment);
+  return withAppointmentLock(tenantId, async () => {
+  let newApt: Appointment;
+  try {
+    newApt = await getBookingRepository().createAppointment(tenantId, appointment);
+  } catch (err: any) {
+    if (err instanceof AppointmentSlotConflictError) {
+      throw err;
+    }
+    const msg = err?.message || '';
+    if (msg.includes('Slot conflict') || msg.includes('SLOT_ALREADY_BOOKED') || err?.code === 'SLOT_ALREADY_BOOKED') {
+      throw new AppointmentSlotConflictError(msg || 'Bu randevu saat aralığı için seçilen personel zaten doludur (SLOT_ALREADY_BOOKED).');
+    }
+    throw err;
+  }
   
   // Create and queue Communication Events safely
   try {
@@ -25,7 +78,10 @@ export const createAppointment = async (tenantId: string, appointment: Omit<Appo
     
     // Generate self service token and path
     const token = await appointmentSelfServiceService.createAppointmentAccessToken(tenantId, newApt.id, 'view');
-    const manageUrl = `${window.location.protocol}//${window.location.host}/#/appointment/manage/${token}`;
+    const baseUrl = (typeof window !== 'undefined' && window.location)
+      ? `${window.location.protocol}//${window.location.host}`
+      : 'https://lari.app';
+    const manageUrl = `${baseUrl}/#/appointment/manage/${token}`;
 
     // Create customer notification event
     communicationEventService.queueCommunicationEvent({
@@ -132,6 +188,40 @@ export const createAppointment = async (tenantId: string, appointment: Omit<Appo
   }
 
   return newApt;
+  });
+};
+
+export const createAppointmentSafely = async (
+  tenantId: string,
+  appointment: Omit<Appointment, 'id' | 'tenantId' | 'createdAt'>
+): Promise<SafeAppointmentResult> => {
+  try {
+    const newApt = await createAppointment(tenantId, appointment);
+    return {
+      success: true,
+      statusCode: 201,
+      code: 'APPOINTMENT_CREATED',
+      appointment: newApt,
+      reasonCode: 'ok'
+    };
+  } catch (err: any) {
+    if (err instanceof AppointmentSlotConflictError || err?.code === 'SLOT_ALREADY_BOOKED' || err?.message?.includes('SLOT_ALREADY_BOOKED') || err?.message?.includes('Slot conflict')) {
+      return {
+        success: false,
+        statusCode: 409,
+        code: 'SLOT_ALREADY_BOOKED',
+        error: err.message || 'Slot already booked',
+        reasonCode: 'SLOT_ALREADY_BOOKED'
+      };
+    }
+    return {
+      success: false,
+      statusCode: 500,
+      code: 'INTERNAL_ERROR',
+      error: err?.message || 'Unknown error',
+      reasonCode: 'internal_error'
+    };
+  }
 };
 
 export const updateAppointmentStatus = async (
@@ -142,10 +232,10 @@ export const updateAppointmentStatus = async (
   cancelledBy?: 'customer' | 'salon' | 'system'
 ): Promise<Appointment | null> => {
   if (status.includes('cancel')) {
-    await getBookingRepository().cancelAppointment(appointmentId, cancelReason, cancelledBy);
+    await (getBookingRepository() as any).cancelAppointment(appointmentId, cancelReason, cancelledBy, tenantId);
   }
   
-  const updatedApt = await getBookingRepository().updateAppointment(appointmentId, { status });
+  const updatedApt = await (getBookingRepository() as any).updateAppointment(appointmentId, { status }, tenantId);
 
   // Hook Communication events on successful status transitions
   if (updatedApt) {
@@ -241,7 +331,7 @@ export const updateAppointmentStatus = async (
         let matchedReferral = referrals.find(r => r.appointmentId === appointmentId);
         
         if (!matchedReferral) {
-          const appointmentDetails = await getBookingRepository().getAppointmentById(appointmentId);
+          const appointmentDetails = await (getBookingRepository() as any).getAppointmentById(appointmentId, tenantId);
           if (appointmentDetails) {
             const clientPhone = appointmentDetails.phone ? appointmentDetails.phone.replace(/\s+/g, '') : '';
             const clientName = appointmentDetails.user_name ? appointmentDetails.user_name.toLowerCase().trim() : '';
@@ -280,7 +370,7 @@ export const deleteAppointment = async (tenantId: string, appointmentId: string)
   // but if hard delete is required by some tests:
   // For safety, cancel instead if it's not truly hard-deleted by repos, but we can't delete directly without exposing a delete interface.
   // We'll update the status to "cancelled"
-  return await getBookingRepository().cancelAppointment(appointmentId, 'Deleted', 'system');
+  return await (getBookingRepository() as any).cancelAppointment(appointmentId, 'Deleted', 'system', tenantId);
 };
 
 export const getBookedSlots = async (tenantId: string, date: string, staffId?: string): Promise<string[]> => {

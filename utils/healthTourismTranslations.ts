@@ -1,0 +1,651 @@
+import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams, useLocation } from 'react-router-dom';
+import { HtLanguage, HtTranslationDictionary } from '../types/healthTourismPublic';
+
+const VALID_LANGUAGES: HtLanguage[] = ['tr', 'en', 'de', 'ru', 'ar'];
+
+export const HT_TRANSLATIONS: Record<HtLanguage, HtTranslationDictionary> = {
+  tr: {
+    brandName: 'LARİ Health Tourism',
+    brandTagline: 'Uluslararası Hasta Sağlık ve İletişim Danışmanlığı',
+    selectLanguage: 'Dil Seçin',
+    inquireNow: 'Talep Gönder',
+
+    heroBadge: 'Uluslararası Hasta Hizmetleri',
+    heroTitle: 'Uluslararası Hasta Danışmanlık ve Koordinasyon Portalı',
+    heroSubtitle: 'Tedavi süreçleriniz, seyahat planlamanız ve iletişiminiz koordinasyon ekibimiz tarafından desteklenmektedir.',
+    getStartedBtn: 'Başvuru Yap',
+    learnMoreBtn: 'Süreç Hakkında Bilgi',
+
+    processSectionTitle: 'Nasıl Çalışır?',
+    processSectionSubtitle: 'Uluslararası hasta koordinasyon sürecimiz 3 adımdan oluşur',
+    processStep1Title: '1. Talebinizi İletin',
+    step1Desc: 'İletişim bilgilerinizi ve tercih ettiğiniz dili form üzerinden iletin.',
+    processStep2Title: '2. Koordinatör İncelemesi',
+    step2Desc: 'Sağlık turizmi koordinatörümüz başvurunuzu inceleyip sizinle iletiime geçer.',
+    processStep3Title: '3. Randevu ve Planlama',
+    step3Desc: 'Klinik randevunuz ve seyahat detaylarınız hakkında bilgilendirilirsiniz.',
+
+    aboutClinicTitle: 'Klinik Bilgileri',
+    addressLabel: 'Adres',
+    getDirectionsBtn: 'Yol Tarifi Al',
+    contactTitle: 'İletişim',
+
+    intakeFormTitle: 'Uluslararası Hasta Ön Başvuru Formu',
+    intakeFormSubtitle: 'Lütfen bilgilerinizi eksiksiz doldurunuz.',
+    step1Tab: 'Dil & Ülke',
+    step2Tab: 'İletişim',
+    step3Tab: 'Detaylar',
+    step4Tab: 'Özet & Gönder',
+    nextBtn: 'İleri →',
+    backBtn: '← Geri',
+    homeBtn: 'Ana Sayfa',
+
+    intakeStep1Title: 'Tercih Edilen Dil ve Ülke',
+    preferredLanguageLabel: 'Tercih Ettiğiniz Dil',
+    countryLabel: 'İkamet Ettiğiniz Ülke',
+    countrySelectPlaceholder: 'Ülke seçiniz...',
+
+    intakeStep2Title: 'İletişim Bilgileri',
+    fullNameLabel: 'Adınız ve Soyadınız',
+    fullNamePlaceholder: 'Örn. Ahmet Yılmaz',
+    emailLabel: 'E-posta Adresi',
+    emailPlaceholder: 'ornek@email.com',
+    phoneLabel: 'Telefon Numarası (Uluslararası kod ile)',
+    phonePlaceholder: '+90 555 123 45 67',
+    contactNotice: 'En az bir iletişim yöntemi (E-posta veya Telefon) girilmelidir.',
+
+    intakeStep3Title: 'Ek Bilgiler & Pasaport',
+    passportLabel: 'Pasaport Numarası (İsteğe Bağlı)',
+    passportPlaceholder: 'Pasaport numarası',
+    passportNotice: 'İsteğe Bağlı. Sadece klinik talebi doğrultusunda ön inceleme için girilebilir.',
+    agencyReferralNotice: 'Acente yönlendirme kodu tespit edildi ve başvurunuza eklendi.',
+    invalidAgencyWarning: 'Yönlendirme bağlantı kodu geçersizdir. Başvurunuz acente referansı olmadan devam edecektir.',
+    additionalInfoEmptyText: 'Ek bir bilgi veya acente referansı seçilmedi.',
+
+    intakeStep4Title: 'Bilgilerinizi Gözden Geçirin',
+    reviewNotice: 'Lütfen gönderim yapmadan önce girdiğiniz bilgilerin doğruluğunu kontrol ediniz.',
+    fullNameSummary: 'Ad Soyad',
+    contactSummary: 'İletişim Durumu',
+    emailSummary: 'E-posta',
+    phoneSummary: 'Telefon',
+    countrySummary: 'Ülke',
+    languageSummary: 'Tercih Edilen Dil',
+    passportSummary: 'Pasaport Numarası',
+    agencySummary: 'Acente Referansı',
+    providedStatus: 'Belirtildi',
+    notProvidedStatus: 'Belirtilmedi',
+    agencyDetectedStatus: 'Acente referans kodu eklendi',
+    noAgencyStatus: 'Doğrudan başvuru',
+    submitBtn: 'Talebi Gönder',
+    submittingBtn: 'İletiliyor...',
+    submitErrorGeneric: 'Talebiniz iletilirken bir hata oluştu. Lütfen tekrar deneyiniz.',
+
+    successTitle: 'Talebiniz Başarıyla Alındı!',
+    successMessage: 'Sağlık turizmi koordinatörümüz en kısa sürede belirttiğiniz iletişim kanalı üzerinden sizinle bağlantı kuracaktır.',
+    referenceCodeLabel: 'Başvuru Referans Kodu',
+    newInquiryBtn: 'Yeni Talep Oluştur',
+
+    fullNameRequiredErr: 'Ad ve soyad alanı zorunludur.',
+    contactRequiredErr: 'E-posta veya telefon numaralarından en az biri girilmelidir.',
+    invalidCountryErr: 'Geçersiz ülke seçimi. Lütfen listeden geçerli bir ülke seçin.',
+    invalidAgencyErr: 'Geçersiz acente referans kodu.',
+    tenantNotFoundTitle: 'Klinik Bulunamadı',
+    tenantNotFoundDesc: 'Aradığınız sağlık turizmi hizmeti mevcut değil veya bağlantı adresi hatalı.',
+    tenantSuspendedTitle: 'Hizmet Geçici Olarak Kullanılamıyor',
+    tenantSuspendedDesc: 'Bu kliniğin sağlık turizmi portalı şu anda yayında değildir.',
+    loadingTenantText: 'Klinik bilgileri yükleniyor...',
+
+    contactFormIntro: 'Koordinatör iletişimi için bilgilerinizi girin:',
+    nameRequiredErr: 'Lütfen adınızı ve soyadınızı girin.',
+    contactRequiredFormErr: 'Lütfen e-posta veya telefon numarası girin.',
+    submitToCoordinatorBtn: 'Koordinatöre Gönder',
+    handoffSubmittedSuccess: '✓ Bir koordinatör en kısa sürede sizinle iletişime geçecektir.',
+    contactCaptureFailedErr: 'Kayıt başarısız.',
+    genericConnectionErr: 'Bağlantı hatası.',
+    contactDetailsRequiredReply: 'Sizi bir koordinatörle buluşturmak için lütfen iletişim bilgilerinizi girin.',
+    chatMedicalSafetyDeferral: 'Tıbbi teşhis veya tedavi önerisi verememekteyim. Talebiniz uzman sağlık turizmi koordinatörümüze iletilmiştir.',
+    rateLimitedErr: 'Çok fazla istek gönderildi. Lütfen bir süre sonra tekrar deneyiniz.',
+
+    footerCopyright: 'LARİ Health Tourism Platform.',
+    footerRights: 'Tüm hakları saklıdır.',
+
+    metaTitle: 'Sağlık Turizmi Danışmanlığı & Uluslararası Hasta Hizmetleri | LARİ',
+    metaDescription: 'Uluslararası hastalar için başvuru, danışmanlık ve koordinasyon portalı.',
+  },
+
+  en: {
+    brandName: 'LARİ Health Tourism',
+    brandTagline: 'International Patient Advisory & Coordination',
+    selectLanguage: 'Select Language',
+    inquireNow: 'Send Inquiry',
+
+    heroBadge: 'International Patient Services',
+    heroTitle: 'International Patient Inquiry & Coordination Portal',
+    heroSubtitle: 'Submit your inquiry to connect with our international patient coordinators for treatment details and appointment planning.',
+    getStartedBtn: 'Submit Inquiry',
+    learnMoreBtn: 'Learn About Process',
+
+    processSectionTitle: 'How It Works',
+    processSectionSubtitle: 'Our international patient coordination consists of 3 simple steps',
+    processStep1Title: '1. Send Inquiry',
+    step1Desc: 'Submit your contact details and preferred language through the form.',
+    processStep2Title: '2. Coordinator Review',
+    step2Desc: 'Our health tourism coordinator reviews your request and gets in touch promptly.',
+    processStep3Title: '3. Appointment & Travel Planning',
+    step3Desc: 'Your clinic appointment details and travel arrangements are discussed.',
+
+    aboutClinicTitle: 'Clinic Overview',
+    addressLabel: 'Address',
+    getDirectionsBtn: 'Get Directions',
+    contactTitle: 'Contact',
+
+    intakeFormTitle: 'International Patient Intake Form',
+    intakeFormSubtitle: 'Please provide your details below.',
+    step1Tab: 'Language & Country',
+    step2Tab: 'Contact Details',
+    step3Tab: 'Additional Details',
+    step4Tab: 'Review & Submit',
+    nextBtn: 'Next →',
+    backBtn: '← Back',
+    homeBtn: 'Home',
+
+    intakeStep1Title: 'Preferred Language and Country',
+    preferredLanguageLabel: 'Preferred Language',
+    countryLabel: 'Country of Residence',
+    countrySelectPlaceholder: 'Select country...',
+
+    intakeStep2Title: 'Contact Details',
+    fullNameLabel: 'Full Name',
+    fullNamePlaceholder: 'e.g. John Smith',
+    emailLabel: 'Email Address',
+    emailPlaceholder: 'name@example.com',
+    phoneLabel: 'Phone Number (With country code)',
+    phonePlaceholder: '+1 555 123 4567',
+    contactNotice: 'At least one contact method (Email or Phone) is required.',
+
+    intakeStep3Title: 'Additional Details & Passport',
+    passportLabel: 'Passport Number (Optional)',
+    passportPlaceholder: 'Passport number',
+    passportNotice: "Optional. Only enter this information when requested as part of the clinic's intake process.",
+    agencyReferralNotice: 'Agency referral code detected and attached to your inquiry.',
+    invalidAgencyWarning: 'The referral link code is invalid. Your inquiry will proceed without agency referral.',
+    additionalInfoEmptyText: 'No additional details or agency referral selected.',
+
+    intakeStep4Title: 'Review Your Details',
+    reviewNotice: 'Please verify your details before submitting.',
+    fullNameSummary: 'Full Name',
+    contactSummary: 'Contact Status',
+    emailSummary: 'Email',
+    phoneSummary: 'Phone',
+    countrySummary: 'Country',
+    languageSummary: 'Preferred Language',
+    passportSummary: 'Passport Number',
+    agencySummary: 'Agency Referral',
+    providedStatus: 'Provided',
+    notProvidedStatus: 'Not provided',
+    agencyDetectedStatus: 'Agency referral code attached',
+    noAgencyStatus: 'Direct inquiry',
+    submitBtn: 'Submit Inquiry',
+    submittingBtn: 'Sending...',
+    submitErrorGeneric: 'An error occurred while sending your request. Please try again.',
+
+    successTitle: 'Inquiry Submitted Successfully!',
+    successMessage: 'Our health tourism coordinator will connect with you shortly via your provided contact details.',
+    referenceCodeLabel: 'Inquiry Reference ID',
+    newInquiryBtn: 'Create Another Inquiry',
+
+    fullNameRequiredErr: 'Full name is required.',
+    contactRequiredErr: 'Please provide at least one contact method (Email or Phone).',
+    invalidCountryErr: 'Invalid country selection. Please select a valid country from the list.',
+    invalidAgencyErr: 'Invalid agency referral code.',
+    tenantNotFoundTitle: 'Clinic Not Found',
+    tenantNotFoundDesc: 'The requested health tourism service is not available or URL is incorrect.',
+    tenantSuspendedTitle: 'Service Temporarily Unavailable',
+    tenantSuspendedDesc: 'This clinic health tourism portal is currently offline.',
+    loadingTenantText: 'Loading clinic information...',
+
+    contactFormIntro: 'Please provide your details to connect with a coordinator:',
+    nameRequiredErr: 'Please enter your full name.',
+    contactRequiredFormErr: 'Please provide an email address or phone number.',
+    submitToCoordinatorBtn: 'Send to Coordinator',
+    handoffSubmittedSuccess: '✓ A coordinator will review your inquiry and reach out shortly.',
+    contactCaptureFailedErr: 'Unable to save contact details.',
+    genericConnectionErr: 'Connection error.',
+    contactDetailsRequiredReply: 'To connect you with a coordinator, please provide your contact details.',
+    chatMedicalSafetyDeferral: 'I cannot provide medical diagnosis or treatment advice. Your request has been directed to our qualified health tourism coordinator.',
+    rateLimitedErr: 'Too many requests. Please wait a moment before trying again.',
+
+    footerCopyright: 'LARİ Health Tourism Platform.',
+    footerRights: 'All rights reserved.',
+
+    metaTitle: 'Health Tourism Advisory & International Patient Services | LARİ',
+    metaDescription: 'International patient inquiry, advisory, and coordination portal.',
+  },
+
+  de: {
+    brandName: 'LARİ Health Tourism',
+    brandTagline: 'Internationale Patientenberatung & Koordination',
+    selectLanguage: 'Sprache wählen',
+    inquireNow: 'Anfrage senden',
+
+    heroBadge: 'Internationale Patientendienste',
+    heroTitle: 'Portal für internationale Patientenbetreuung',
+    heroSubtitle: 'Senden Sie Ihre Anfrage für Behandlungsdetails und Terminplanung an unser Koordinatoren-Team.',
+    getStartedBtn: 'Anfrage erstellen',
+    learnMoreBtn: 'Ablauf erfahren',
+
+    processSectionTitle: 'Wie es funktioniert',
+    processSectionSubtitle: 'Unsere Patientenbetreuung verläuft in 3 einfachen Schritten',
+    processStep1Title: '1. Anfrage senden',
+    step1Desc: 'Übermitteln Sie Ihre Kontaktdaten und bevorzugte Sprache über unser Formular.',
+    processStep2Title: '2. Koordinator-Prüfung',
+    step2Desc: 'Unser Koordinator prüft Ihre Anfrage und nimmt zeitnah Kontakt auf.',
+    processStep3Title: '3. Termin & Reiseplanung',
+    step3Desc: 'Kliniktermine und Reiseplanung werden gemeinsam besprochen.',
+
+    aboutClinicTitle: 'Über die Klinik',
+    addressLabel: 'Adresse',
+    getDirectionsBtn: 'Route berechnen',
+    contactTitle: 'Kontakt',
+
+    intakeFormTitle: 'Anmeldeformular für internationale Patienten',
+    intakeFormSubtitle: 'Bitte füllen Sie Ihre Angaben vollständig aus.',
+    step1Tab: 'Sprache & Land',
+    step2Tab: 'Kontaktdaten',
+    step3Tab: 'Zusatzangaben',
+    step4Tab: 'Übersicht & Senden',
+    nextBtn: 'Weiter →',
+    backBtn: '← Zurück',
+    homeBtn: 'Startseite',
+
+    intakeStep1Title: 'Bevorzugte Sprache und Land',
+    preferredLanguageLabel: 'Bevorzugte Sprache',
+    countryLabel: 'Wohnsitzland',
+    countrySelectPlaceholder: 'Land auswählen...',
+
+    intakeStep2Title: 'Kontaktdaten',
+    fullNameLabel: 'Vor- und Nachname',
+    fullNamePlaceholder: 'z.B. Max Mustermann',
+    emailLabel: 'E-Mail-Adresse',
+    emailPlaceholder: 'name@beispiel.de',
+    phoneLabel: 'Telefonnummer (mit Ländervorwahl)',
+    phonePlaceholder: '+49 170 1234567',
+    contactNotice: 'Mindestens eine Kontaktmöglichkeit (E-Mail oder Telefon) ist erforderlich.',
+
+    intakeStep3Title: 'Zusatzangaben & Passnummer',
+    passportLabel: 'Passnummer (Optional)',
+    passportPlaceholder: 'Passnummer',
+    passportNotice: 'Optional. Geben Sie diese Information nur ein, wenn Sie im Rahmen der Aufnahme darum gebeten werden.',
+    agencyReferralNotice: 'Agentur-Referenzcode erkannt und Ihrer Anfrage hinzugefügt.',
+    invalidAgencyWarning: 'Der Referenzlink-Code ist ungültig. Ihre Anfrage wird ohne Agentur-Referenz fortgesetzt.',
+    additionalInfoEmptyText: 'Keine Zusatzangaben oder Agentur-Referenz ausgewählt.',
+
+    intakeStep4Title: 'Angaben überprüfen',
+    reviewNotice: 'Bitte überprüfen Sie Ihre Angaben vor dem Absenden.',
+    fullNameSummary: 'Vollständiger Name',
+    contactSummary: 'Kontaktstatus',
+    emailSummary: 'E-Mail',
+    phoneSummary: 'Telefon',
+    countrySummary: 'Land',
+    languageSummary: 'Bevorzugte Sprache',
+    passportSummary: 'Passnummer',
+    agencySummary: 'Agentur-Referenz',
+    providedStatus: 'Angegeben',
+    notProvidedStatus: 'Nicht angegeben',
+    agencyDetectedStatus: 'Agentur-Referenzcode beigefügt',
+    noAgencyStatus: 'Direkte Anfrage',
+    submitBtn: 'Anfrage absenden',
+    submittingBtn: 'Wird gesendet...',
+    submitErrorGeneric: 'Beim Senden Ihrer Anfrage ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.',
+
+    successTitle: 'Anfrage erfolgreich übermittelt!',
+    successMessage: 'Unser Koordinator wird sich in Kürze über Ihre angegebenen Kontaktdaten bei Ihnen melden.',
+    referenceCodeLabel: 'Referenz-ID',
+    newInquiryBtn: 'Neue Anfrage erstellen',
+
+    fullNameRequiredErr: 'Vollständiger Name ist erforderlich.',
+    contactRequiredErr: 'Geben Sie mindestens eine Kontaktmethode (E-Mail oder Telefon) an.',
+    invalidCountryErr: 'Ungültige Länderauswahl. Bitte wählen Sie ein gültiges Land aus der Liste.',
+    invalidAgencyErr: 'Ungültiger Agentur-Referenzcode.',
+    tenantNotFoundTitle: 'Klinik nicht gefunden',
+    tenantNotFoundDesc: 'Der angeforderte Dienst ist nicht verfügbar oder die URL ist fehlerhaft.',
+    tenantSuspendedTitle: 'Dienst vorübergehend nicht verfügbar',
+    tenantSuspendedDesc: 'Das Portal dieser Klinik ist derzeit offline.',
+    loadingTenantText: 'Klinikinformationen werden geladen...',
+
+    contactFormIntro: 'Bitte geben Sie Ihre Kontaktdaten für den Koordinator ein:',
+    nameRequiredErr: 'Bitte geben Sie Ihren vollständigen Namen ein.',
+    contactRequiredFormErr: 'Bitte geben Sie eine E-Mail-Adresse oder Telefonnummer an.',
+    submitToCoordinatorBtn: 'An Koordinator senden',
+    handoffSubmittedSuccess: '✓ Ein Koordinator wird Ihre Anfrage prüfen und sich in Kürze melden.',
+    contactCaptureFailedErr: 'Kontaktdaten konnten nicht gespeichert werden.',
+    genericConnectionErr: 'Verbindungsfehler.',
+    contactDetailsRequiredReply: 'Um Sie mit einem Koordinator zu verbinden, geben Sie bitte Ihre Kontaktdaten an.',
+    chatMedicalSafetyDeferral: 'Ich kann keine medizinische Diagnose oder Behandlungsempfehlung abgeben. Ihre Anfrage wurde an unseren Koordinator weitergeleitet.',
+    rateLimitedErr: 'Zu viele Anfragen. Bitte warten Sie einen Moment.',
+
+    footerCopyright: 'LARİ Health Tourism Platform.',
+    footerRights: 'Alle Rechte vorbehalten.',
+
+    metaTitle: 'Gesundheitstourismus & Internationale Betreuung | LARİ',
+    metaDescription: 'Portal für internationale Patientenanfragen und Koordination.',
+  },
+
+  ru: {
+    brandName: 'LARİ Health Tourism',
+    brandTagline: 'Международные консультации и координация пациентов',
+    selectLanguage: 'Выберите язык',
+    inquireNow: 'Отправить запрос',
+
+    heroBadge: 'Международный отдел',
+    heroTitle: 'Портал координации и обслуживания иностранных пациентов',
+    heroSubtitle: 'Отправьте заявку, чтобы связаться с координатором для уточнения деталей и записи.',
+    getStartedBtn: 'Оформить заявку',
+    learnMoreBtn: 'Подробнее о процессе',
+
+    processSectionTitle: 'Как это работает',
+    processSectionSubtitle: 'Процесс координации международных пациентов состоит из 3 простых шагов',
+    processStep1Title: '1. Отправьте запрос',
+    step1Desc: 'Укажите свои контактные данные и предпочитаемый язык в форме.',
+    processStep2Title: '2. Рассмотрение координатором',
+    step2Desc: 'Наш координатор по медицинскому туризму изучит запрос и оперативно свяжется с вами.',
+    processStep3Title: '3. Запись и планирование',
+    step3Desc: 'Согласование приема в клинике и деталей поездки.',
+
+    aboutClinicTitle: 'О клинике',
+    addressLabel: 'Адрес',
+    getDirectionsBtn: 'Проложить маршрут',
+    contactTitle: 'Контакты',
+
+    intakeFormTitle: 'Форма заявки для иностранных пациентов',
+    intakeFormSubtitle: 'Пожалуйста, заполните необходимые данные.',
+    step1Tab: 'Язык и страна',
+    step2Tab: 'Контакты',
+    step3Tab: 'Детали',
+    step4Tab: 'Проверка и отправка',
+    nextBtn: 'Далее →',
+    backBtn: '← Назад',
+    homeBtn: 'Главная',
+
+    intakeStep1Title: 'Предпочитаемый язык и страна',
+    preferredLanguageLabel: 'Предпочитаемый язык',
+    countryLabel: 'Страна проживания',
+    countrySelectPlaceholder: 'Выберите страну...',
+
+    intakeStep2Title: 'Контактные данные',
+    fullNameLabel: 'Имя и фамилия',
+    fullNamePlaceholder: 'Например, Иван Иванов',
+    emailLabel: 'Электронная почта',
+    emailPlaceholder: 'example@mail.ru',
+    phoneLabel: 'Номер телефона (с кодом страны)',
+    phonePlaceholder: '+7 999 123 45 67',
+    contactNotice: 'Требуется указать хотя бы один способ связи (Email или Телефон).',
+
+    intakeStep3Title: 'Дополнительные детали и паспорт',
+    passportLabel: 'Номер паспорта (Необязательно)',
+    passportPlaceholder: 'Номер паспорта',
+    passportNotice: 'Необязательно. Указывается только по запросу клиники в рамках оформления.',
+    agencyReferralNotice: 'Код агентства обнаружен и прикреплен к вашему запросу.',
+    invalidAgencyWarning: 'Недействительный код реферальной ссылки. Ваш запрос будет обработан без ссылки на агентство.',
+    additionalInfoEmptyText: 'Дополнительные данные или реферальная ссылка не выбраны.',
+
+    intakeStep4Title: 'Проверьте введенные данные',
+    reviewNotice: 'Пожалуйста, убедитесь в правильности информации перед отправкой.',
+    fullNameSummary: 'ФИО',
+    contactSummary: 'Статус контактов',
+    emailSummary: 'Email',
+    phoneSummary: 'Телефон',
+    countrySummary: 'Страна',
+    languageSummary: 'Предпочитаемый язык',
+    passportSummary: 'Номер паспорта',
+    agencySummary: 'Ссылка агентства',
+    providedStatus: 'Указано',
+    notProvidedStatus: 'Не указано',
+    agencyDetectedStatus: 'Код агентства прикреплен',
+    noAgencyStatus: 'Прямой запрос',
+    submitBtn: 'Отправить заявку',
+    submittingBtn: 'Отправка...',
+    submitErrorGeneric: 'Произошла ошибка при отправке заявки. Пожалуйста, попробуйте еще раз.',
+
+    successTitle: 'Заявка успешно отправлена!',
+    successMessage: 'Наш координатор свяжется с вами в ближайшее время по указанным контактам.',
+    referenceCodeLabel: 'Код заявки',
+    newInquiryBtn: 'Подать еще одну заявку',
+
+    fullNameRequiredErr: 'Поле Имя и фамилия обязательно для заполнения.',
+    contactRequiredErr: 'Укажите хотя бы один контакт (Email или Телефон).',
+    invalidCountryErr: 'Недопустимый выбор страны. Выберите действительную страну из списка.',
+    invalidAgencyErr: 'Недействительный код агентства.',
+    tenantNotFoundTitle: 'Клиника не найдена',
+    tenantNotFoundDesc: 'Запрошенная услуга недоступна или указан неверный адрес.',
+    tenantSuspendedTitle: 'Сервис временно недоступен',
+    tenantSuspendedDesc: 'Портал данной клиники в настоящее время отключен.',
+    loadingTenantText: 'Загрузка информации о клинике...',
+
+    contactFormIntro: 'Укажите ваши данные для связи с координатором:',
+    nameRequiredErr: 'Пожалуйста, введите ваше имя и фамилию.',
+    contactRequiredFormErr: 'Пожалуйста, укажите email или номер телефона.',
+    submitToCoordinatorBtn: 'Отправить координатору',
+    handoffSubmittedSuccess: '✓ Координатор изучит ваш запрос и свяжется с вами в ближайшее время.',
+    contactCaptureFailedErr: 'Не удалось сохранить контактные данные.',
+    genericConnectionErr: 'Ошибка соединения.',
+    contactDetailsRequiredReply: 'Чтобы связать вас с координатором, пожалуйста, укажите ваши контактные данные.',
+    chatMedicalSafetyDeferral: 'Я не могу предоставить медицинский диагноз или рекомендации по лечению. Ваш запрос направлен нашему координатору.',
+    rateLimitedErr: 'Слишком много запросов. Пожалуйста, подождите немного.',
+
+    footerCopyright: 'LARİ Health Tourism Platform.',
+    footerRights: 'Все права защищены.',
+
+    metaTitle: 'Медицинский туризм и международное обслуживание пациентов | LARİ',
+    metaDescription: 'Портал заявок и координации для иностранных пациентов.',
+  },
+
+  ar: {
+    brandName: 'LARİ Health Tourism',
+    brandTagline: 'استشارات وتنسيق المرضى الدوليين',
+    selectLanguage: 'اختر اللغة',
+    inquireNow: 'إرسال طلب',
+
+    heroBadge: 'خدمات المرضى الدوليين',
+    heroTitle: 'بوابة تقديم استفسارات وتنسيق المرضى الدوليين',
+    heroSubtitle: 'قدّم طلبك للتواصل مع منسق المرضى الدوليين لمناقشة تفاصيل العلاج وتنسيق المواعيد.',
+    getStartedBtn: 'تقديم الطلب',
+    learnMoreBtn: 'معرفة المزيد عن العملية',
+
+    processSectionTitle: 'كيف تعمل الخدمة؟',
+    processSectionSubtitle: 'تتكون عملية تنسيق المرضى الدوليين من 3 خطوات بسيطة',
+    processStep1Title: '1. إرسال الطلب',
+    step1Desc: 'قم بإرسال تفاصيل الاتصال واللغة المفضلة من خلال النموذج.',
+    processStep2Title: '2. مراجعة المنسق',
+    step2Desc: 'يقوم منسق السياحة العلاجية بمراجعة طلبك والتواصل معك في أقرب وقت.',
+    processStep3Title: '3. الموعد والتنسيق',
+    step3Desc: 'يتم مناقشة تفاصيل موعد العيادة وترتيبات السفر.',
+
+    aboutClinicTitle: 'معلومات العيادة',
+    addressLabel: 'العنوان',
+    getDirectionsBtn: 'الحصول على الاتجاهات',
+    contactTitle: 'الاتصال',
+
+    intakeFormTitle: 'نموذج تقديم المرضى الدوليين',
+    intakeFormSubtitle: 'يرجى إدخال بياناتك بشكل كامل.',
+    step1Tab: 'اللغة والدولة',
+    step2Tab: 'بيانات الاتصال',
+    step3Tab: 'تفاصيل إضافية',
+    step4Tab: 'المراجعة والإرسال',
+    nextBtn: 'التالي ←',
+    backBtn: '← السابق',
+    homeBtn: 'الرئيسية',
+
+    intakeStep1Title: 'اللغة المفضلة والدولة',
+    preferredLanguageLabel: 'اللغة المفضلة',
+    countryLabel: 'بلد الإقامة',
+    countrySelectPlaceholder: 'اختر الدولة...',
+
+    intakeStep2Title: 'بيانات الاتصال',
+    fullNameLabel: 'الاسم الكامل',
+    fullNamePlaceholder: 'مثال: أحمد عبد الله',
+    emailLabel: 'البريد الإلكتروني',
+    emailPlaceholder: 'example@domain.com',
+    phoneLabel: 'رقم الهاتف (مع رمز الدولة)',
+    phonePlaceholder: '+966 50 123 4567',
+    contactNotice: 'يجب تقديم طريقة اتصال واحدة على الأقل (البريد الإلكتروني أو الهاتف).',
+
+    intakeStep3Title: 'تفاصيل إضافية وجواز السفر',
+    passportLabel: 'رقم جواز السفر (اختياري)',
+    passportPlaceholder: 'رقم جواز السفر',
+    passportNotice: 'اختياري. أدخل هذه المعلومات فقط عندما يُطلب منك ذلك كجزء من عملية التسجيل.',
+    agencyReferralNotice: 'تم اكتشاف رمز إحالة الوكالة وإرفاقه بطلبك.',
+    invalidAgencyWarning: 'رمز رابط الإحالة غير صالحة. سيتم المتابعة بدون إحالة الوكالة.',
+    additionalInfoEmptyText: 'لم يتم تحديد تفاصيل إضافية أو إحالة وكالة.',
+
+    intakeStep4Title: 'مراجعة بياناتك',
+    reviewNotice: 'يرجى التحقق من صحة بياناتك قبل الإرسال.',
+    fullNameSummary: 'الاسم الكامل',
+    contactSummary: 'حالة الاتصال',
+    emailSummary: 'البريد الإلكتروني',
+    phoneSummary: 'الهاتف',
+    countrySummary: 'الدولة',
+    languageSummary: 'اللغة المفضلة',
+    passportSummary: 'رقم جواز السفر',
+    agencySummary: 'إحالة الوكالة',
+    providedStatus: 'مُقدم',
+    notProvidedStatus: 'غير مُقدم',
+    agencyDetectedStatus: 'تم إرفاق رمز إحالة الوكالة',
+    noAgencyStatus: 'طلب مباشر',
+    submitBtn: 'إرسال الطلب',
+    submittingBtn: 'جاري الإرسال...',
+    submitErrorGeneric: 'حدث خطأ أثناء إرسال طلبك. يرجى المحاولة مرة أخرى.',
+
+    successTitle: 'تم إرسال طلبك بنجاح!',
+    successMessage: 'سيتواصل معك منسق السياحة العلاجية قريباً عبر بيانات الاتصال المرفقة.',
+    referenceCodeLabel: 'رمز مرجع الطلب',
+    newInquiryBtn: 'تقديم طلب جديد',
+
+    fullNameRequiredErr: 'الاسم الكامل مطلوب.',
+    contactRequiredErr: 'يرجى تقديم طريقة اتصال واحدة على الأقل (بريد إلكتروني أو هاتف).',
+    invalidCountryErr: 'اختيار البلد غير صالح. يرجى اختيار بلد صالح من القائمة.',
+    invalidAgencyErr: 'رمز إحالة الوكالة غير صالحة.',
+    tenantNotFoundTitle: 'العيادة غير موجودة',
+    tenantNotFoundDesc: 'خدمة السياحة العلاجية المطلوبة غير متوفرة أو الرابط غير صحيح.',
+    tenantSuspendedTitle: 'الخدمة غير متوفرة مؤقتاً',
+    tenantSuspendedDesc: 'بوابة السياحة العلاجية لهذه العيادة متوقفة حالياً.',
+    loadingTenantText: 'جاري تحميل معلومات العيادة...',
+
+    contactFormIntro: 'يرجى تقديم بياناتك للتواصل مع المنسق:',
+    nameRequiredErr: 'يرجى إدخال الاسم الكامل.',
+    contactRequiredFormErr: 'يرجى تقديم البريد الإلكتروني أو رقم الهاتف.',
+    submitToCoordinatorBtn: 'إرسال للمنسق',
+    handoffSubmittedSuccess: '✓ سيتواصل معك المنسق قريباً بعد مراجعة استفسارك.',
+    contactCaptureFailedErr: 'تعذر حفظ بيانات الاتصال.',
+    genericConnectionErr: 'خطأ في الاتصال.',
+    contactDetailsRequiredReply: 'لتوصيلك بالمنسق، يرجى تقديم بيانات الاتصال الخاصة بك.',
+    chatMedicalSafetyDeferral: 'لا يمكنني تقديم تشخيص طبي أو توصيات علاجية. تم توجيه طلبك إلى منسق السياحة العلاجية.',
+    rateLimitedErr: 'عدد كبير جداً من الطلبات. يرجى الانتظار قليلاً.',
+
+    footerCopyright: 'منصة LARİ للسياحة العلاجية.',
+    footerRights: 'جميع الحقوق محفوظة.',
+
+    metaTitle: 'استشارات السياحة العلاجية وخدمات المرضى الدوليين | LARİ',
+    metaDescription: 'بوابة تقديم استفسارات وتنسيق المرضى الدوليين.',
+  },
+};
+
+export function getHtTranslation(lang: HtLanguage): HtTranslationDictionary {
+  return HT_TRANSLATIONS[lang] || HT_TRANSLATIONS.en;
+}
+
+export function parseValidHtLanguage(raw: string | null | undefined): HtLanguage | null {
+  if (!raw) return null;
+  const lower = raw.trim().toLowerCase() as HtLanguage;
+  if (VALID_LANGUAGES.includes(lower)) {
+    return lower;
+  }
+  return null;
+}
+
+function determineLanguage(searchParamsLang?: string | null): HtLanguage {
+  try {
+    const fromParam = parseValidHtLanguage(searchParamsLang);
+    if (fromParam) return fromParam;
+
+    if (typeof window !== 'undefined') {
+      const windowParams = new URLSearchParams(window.location.search || '');
+      const urlLang = parseValidHtLanguage(windowParams.get('lang'));
+      if (urlLang) return urlLang;
+
+      if (window.location.hash && window.location.hash.includes('?')) {
+        const hashQuery = window.location.hash.split('?')[1];
+        const hashParams = new URLSearchParams(hashQuery);
+        const hashLang = parseValidHtLanguage(hashParams.get('lang'));
+        if (hashLang) return hashLang;
+      }
+
+      if (typeof navigator !== 'undefined' && navigator.language) {
+        const navLang = parseValidHtLanguage(navigator.language.slice(0, 2));
+        if (navLang) return navLang;
+      }
+    }
+  } catch {
+    // Ignore error and fall back to English
+  }
+  return 'en';
+}
+
+export interface UseHealthTourismLanguageResult {
+  language: HtLanguage;
+  setLanguage: (lang: HtLanguage) => void;
+  t: HtTranslationDictionary;
+  isRtl: boolean;
+  supportedLanguages: { code: HtLanguage; label: string }[];
+}
+
+export function useHealthTourismLanguage(): UseHealthTourismLanguageResult {
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+
+  const langFromQuery = useMemo(() => {
+    let raw = searchParams.get('lang');
+    if (!raw && location.search) {
+      const params = new URLSearchParams(location.search);
+      raw = params.get('lang');
+    }
+    return parseValidHtLanguage(raw);
+  }, [searchParams, location.search]);
+
+  const [language, setLanguageState] = useState<HtLanguage>(() => determineLanguage(langFromQuery));
+
+  useEffect(() => {
+    if (langFromQuery && langFromQuery !== language) {
+      setLanguageState(langFromQuery);
+    }
+  }, [langFromQuery, language]);
+
+  const setLanguage = (newLang: HtLanguage) => {
+    if (VALID_LANGUAGES.includes(newLang)) {
+      setLanguageState(newLang);
+    }
+  };
+
+  const isRtl = language === 'ar';
+  const t = useMemo(() => getHtTranslation(language), [language]);
+
+  const supportedLanguages = useMemo(
+    () => [
+      { code: 'tr' as HtLanguage, label: 'Türkçe' },
+      { code: 'en' as HtLanguage, label: 'English' },
+      { code: 'de' as HtLanguage, label: 'Deutsch' },
+      { code: 'ru' as HtLanguage, label: 'Русский' },
+      { code: 'ar' as HtLanguage, label: 'العربية' },
+    ],
+    []
+  );
+
+  return {
+    language,
+    setLanguage,
+    t,
+    isRtl,
+    supportedLanguages,
+  };
+}

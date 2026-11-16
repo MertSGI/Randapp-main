@@ -1,10 +1,11 @@
 import { ReferralCampaign, ReferralCode, ReferralLead } from '../types';
 import { createSuccess, createError, MutationResult } from '../utils/mutationResult';
+import { STORAGE_KEYS } from './storageKeys';
 
 // Mock storage keys
-const CAMPAIGNS_KEY = 'lari_referral_campaigns';
-const CODES_KEY = 'lari_referral_codes';
-const LEADS_KEY = 'lari_referral_leads';
+const CAMPAIGNS_KEY = STORAGE_KEYS.REFERRAL_CAMPAIGNS;
+const CODES_KEY = STORAGE_KEYS.REFERRAL_CODES;
+const LEADS_KEY = STORAGE_KEYS.REFERRAL_LEADS;
 
 const defaultPlatformCampaigns: ReferralCampaign[] = [
   {

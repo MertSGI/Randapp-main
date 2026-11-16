@@ -43,8 +43,12 @@ const SalonBookingLayout: React.FC = () => {
   const aiEnabled = entitlementService.canUseFeature(planId, 'ai_style_assistant_basic') || entitlementService.canUseFeature(planId, 'ai_style_assistant_full');
 
 
-  const isBookRoute = location.pathname === '/book' || 
-                      location.pathname === `/${tenant?.slug}` ||
+  const isBookRoute = location.pathname === '/book' ||
+                      Boolean(tenant?.slug && (
+                        location.pathname === `/${tenant.slug}` ||
+                        location.pathname === `/s/${tenant.slug}` ||
+                        location.pathname === `/booking/${tenant.slug}`
+                      )) ||
                       location.pathname.includes('/pilot/customer') ||
                       location.hash.includes('/pilot/customer');
 

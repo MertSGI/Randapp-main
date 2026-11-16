@@ -51,6 +51,7 @@ import CustomerPortalPage from './pages/customer/CustomerPortalPage';
 import AppointmentSelfServicePage from './pages/AppointmentSelfServicePage';
 
 import MobileAppPage from './pages/MobileAppPage';
+import DiscoveryMarketplaceView from './components/DiscoveryMarketplaceView';
 
 // Diagnostic tools
 import { MockDiagnosticTool } from './components/MockDiagnosticTool';
@@ -94,6 +95,8 @@ const AppFlowSwitcher: React.FC = () => {
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/support" element={<SupportPage />} />
+        <Route path="/discovery" element={<DiscoveryMarketplaceView />} />
+        <Route path="/discovery/:tenantSlug" element={<DiscoveryMarketplaceView />} />
       </Route>
 
       {/* 2. Self-Service Routes (Must precede dynamic /:tenantSlug) */}
@@ -108,6 +111,7 @@ const AppFlowSwitcher: React.FC = () => {
         {/* AI Tool - Now part of the salon booking flow */}
         <Route path="/ai-visualizer" element={<AIVisualizerPage />} />
         {/* Dynamic Tenant Routing */}
+        <Route path="/s/:tenantSlug" element={<BookingPage />} />
         <Route path="/booking/:tenantSlug" element={<BookingPage />} />
         <Route path="/:tenantSlug" element={<BookingPage />} />
       </Route>

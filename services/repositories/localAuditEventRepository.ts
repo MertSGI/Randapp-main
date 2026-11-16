@@ -1,13 +1,14 @@
 import { AuditEventRepository } from './types';
+import { STORAGE_KEYS } from '../storageKeys';
 
 export class LocalAuditEventRepository implements AuditEventRepository {
   private getStoredEvents(): any[] {
-    const raw = localStorage.getItem('lari_audit_events_v1');
+    const raw = localStorage.getItem(STORAGE_KEYS.AUDIT_EVENTS);
     return raw ? JSON.parse(raw) : [];
   }
 
   private saveStoredEvents(events: any[]) {
-    localStorage.setItem('lari_audit_events_v1', JSON.stringify(events));
+    localStorage.setItem(STORAGE_KEYS.AUDIT_EVENTS, JSON.stringify(events));
   }
 
   async listEvents(tenantId?: string): Promise<any[]> {

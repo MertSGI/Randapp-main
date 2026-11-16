@@ -1,4 +1,5 @@
 import { dataSourceConfig } from '../dataSourceConfig';
+import { STORAGE_KEYS } from '../storageKeys';
 
 // Repository Types
 import { 
@@ -84,8 +85,8 @@ const createPilotBypassProxy = <T extends object>(supabaseImpl: T, localImpl: ob
         return function(this: any, ...args: any[]) {
           let isPilot = false;
           try {
-            const activeTenantId = localStorage.getItem('lari_active_tenant_id');
-            const inPilotDemo = localStorage.getItem('lari_in_pilot_demo') === 'true';
+            const activeTenantId = localStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT_ID);
+            const inPilotDemo = localStorage.getItem(STORAGE_KEYS.IN_PILOT_DEMO) === 'true';
             const hashPilot = window.location.hash.includes('tenant_pilot_demo') || window.location.hash.includes('pilot/customer');
             const pathPilot = window.location.pathname.includes('tenant_pilot_demo') || window.location.pathname.includes('pilot/customer');
             

@@ -1,4 +1,4 @@
-import { CommunicationEventType } from '../types';
+﻿import { CommunicationEventType } from '../types';
 
 export interface TemplateDefinition {
   type: CommunicationEventType;
@@ -194,13 +194,13 @@ const TEMPLATES: Record<string, TemplateDefinition[]> = {
       type: 'trial_started',
       language: 'tr',
       subject: '14 Günlük Deneme Süreniz Başladı 📈',
-      body: 'Merhaba {ownerName}, {businessName} işletmesi için seçtiğiniz {planName} planına uygun 14 günlük deneme süreniz başarıyla başladı. Güvenli ödeme sağlayıcısı üzerinden doğrulama yapılmıştır. Deneme süresi boyunca kartınızdan herhangi bir tahsilat yapılmaz.'
+      body: 'Merhaba {ownerName}, {businessName} işletmesi için seçtiğiniz {planName} planına uygun 14 günlük deneme süreniz başarıyla başladı. Deneme süresi boyunca kartınızdan herhangi bir tahsilat yapılmaz. Deneme koşulları ve abonelik durumu hesabınızda görüntülenir. Ödeme veya otomatik tahsilat yalnız sağlayıcı aktivasyonu ve ayrıca onaylanan koşullar altında uygulanır.'
     },
     {
       type: 'trial_started',
       language: 'en',
       subject: 'Your 14-Day Trial Started 📈',
-      body: 'Hello {ownerName}, your 14-day trial for the {planName} plan is now active for {businessName}. Verification has been conducted securely via our checkout gateway. No charges are processed during the trial phase.'
+      body: 'Hello {ownerName}, your 14-day trial for the {planName} plan is now active for {businessName}. No charges are processed during the trial phase. Trial terms and subscription status are viewable in your account. Payment or automatic billing applies solely under verified provider activation and separately approved terms.'
     }
   ],
   // 14. Trial Ending
@@ -209,13 +209,13 @@ const TEMPLATES: Record<string, TemplateDefinition[]> = {
       type: 'trial_ending',
       language: 'tr',
       subject: 'Abonelik Deneme Döneminiz Sona Eriyor ⏳',
-      body: 'Sayın {ownerName}, {businessName} için aktif olan deneme dönemi {endDate} tarihinde sona erecektir. Süre bittiğinde, seçmiş olduğunuz {planName} üyeliği otomatik olarak süreklilik kazanacaktır.'
+      body: 'Sayın {ownerName}, {businessName} için aktif olan deneme dönemi {endDate} tarihinde sona erecektir. Deneme koşulları ve abonelik durumu hesabınızda görüntülenir. Ödeme veya otomatik tahsilat yalnız sağlayıcı aktivasyonu ve ayrıca onaylanan koşullar altında uygulanır.'
     },
     {
       type: 'trial_ending',
       language: 'en',
       subject: 'Your Subscription Trial Period is Ending ⏳',
-      body: 'Hello {ownerName}, your trial period for {businessName} will end on {endDate}. After this date, your {planName} subscription will resume automatically.'
+      body: 'Hello {ownerName}, your trial period for {businessName} will end on {endDate}. Trial terms and subscription status are viewable in your account. Payment or automatic billing applies solely under verified provider activation and separately approved terms.'
     }
   ],
   // 15. Subscription Past Due

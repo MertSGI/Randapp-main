@@ -1,12 +1,13 @@
 import { PlatformReferralProgram, PlatformReferral, ReferralRewardLedger, BusinessCustomerCampaign, BusinessCustomerReferral } from '../types';
+import { STORAGE_KEYS as CENTRAL_STORAGE_KEYS } from './storageKeys';
 
 // In-memory mock storage (simulate database)
 const STORAGE_KEYS = {
-  PROGRAMS: 'lari_platform_programs',
-  REFERRALS: 'lari_platform_referrals',
-  LEDGERS: 'lari_referral_ledgers',
-  BUSINESS_CAMPAIGNS: 'lari_business_campaigns',
-  BUSINESS_REFERRALS: 'lari_business_referrals'
+  PROGRAMS: CENTRAL_STORAGE_KEYS.PLATFORM_PROGRAMS,
+  REFERRALS: CENTRAL_STORAGE_KEYS.PLATFORM_REFERRALS,
+  LEDGERS: CENTRAL_STORAGE_KEYS.REFERRAL_LEDGERS,
+  BUSINESS_CAMPAIGNS: CENTRAL_STORAGE_KEYS.BUSINESS_CAMPAIGNS,
+  BUSINESS_REFERRALS: CENTRAL_STORAGE_KEYS.BUSINESS_REFERRALS
 };
 
 const defaultProgram: PlatformReferralProgram = {

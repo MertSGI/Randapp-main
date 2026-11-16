@@ -3,6 +3,7 @@ import { subscriptionService } from './subscriptionService';
 import { getServices } from './serviceCatalogService';
 import { getStaffList } from './staffService';
 import { businessProfileService } from './businessProfileService';
+import { DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
 export interface ChecklistStep {
   id: string;
@@ -68,7 +69,7 @@ export const onboardingChecklistService = {
     const hasStaff = staff.length > 0;
     
     // Check if availability configured (either default hour has been agreed or staff exists and is active)
-    const isAvailabilityConfigured = localStorage.getItem(`lari_availability_${tenantId}_configured`) === 'true' || hasStaff;
+    const isAvailabilityConfigured = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantAvailabilityConfigured(tenantId)) === 'true' || hasStaff;
 
     const hasLogo = !!(tenant?.branding?.logoUrl || profile?.logo_url);
     const hasGalleryOrCover = !!(profile?.cover_image_url || (profile?.cover_images && profile.cover_images.length > 0) || (profile?.gallery_images && profile.gallery_images.length > 0));

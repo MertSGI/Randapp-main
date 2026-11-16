@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Service, BUSINESS_HOURS, Staff } from '../types';
 import * as GeminiService from '../services/geminiService';
 import * as NotificationService from '../services/notificationService';
@@ -18,7 +19,24 @@ import { SalonBusinessProfile, BusinessBranch } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { canPreviewTenantSite } from '../utils/previewAuth';
 import SalonWebsiteView from '../components/SalonWebsiteView';
+import SalonWebsiteViewV2 from '../components/SalonWebsiteViewV2';
 import { getDataSourceMode } from '../services/dataSourceConfig';
+
+export const isUiV2Requested = (
+  windowSearch: string = '',
+  windowHash: string = '',
+  routerSearch: string = ''
+): boolean => {
+  const searchParams = new URLSearchParams(windowSearch);
+  const routerSearchParams = new URLSearchParams(routerSearch);
+  const hashSearch = windowHash.includes('?') ? windowHash.split('?')[1] : '';
+  const hashParams = new URLSearchParams(hashSearch);
+  return (
+    searchParams.get('ui') === 'v2' ||
+    routerSearchParams.get('ui') === 'v2' ||
+    hashParams.get('ui') === 'v2'
+  );
+};
 
 
 const generateTimeSlots = (): string[] => {
@@ -36,10 +54,25 @@ const generateTimeSlots = (): string[] => {
   return slots;
 };
 
+const getClientFingerprint = (): string => {
+  if (typeof window === 'undefined') return 'server_ssr';
+  try {
+    let fp = sessionStorage.getItem('lari_client_fingerprint');
+    if (!fp) {
+      fp = `fp_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+      sessionStorage.setItem('lari_client_fingerprint', fp);
+    }
+    return fp;
+  } catch {
+    return 'fallback_fp';
+  }
+};
+
 const BookingPage: React.FC = () => {
   const { t, language } = useLanguage();
   const { tenant, branding } = useTenant();
   const { currentUser } = useAuth();
+  const routerLocation = useLocation();
   const [step, setStep] = useState<number>(0);
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [servicesList, setServicesList] = useState<Service[]>([]);
@@ -67,6 +100,7 @@ const BookingPage: React.FC = () => {
   const [isMultiBranchEnabled, setIsMultiBranchEnabled] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState<BusinessBranch | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string>('');
+  const [otpVerificationToken, setOtpVerificationToken] = useState<string | null>(null);
   // Stored confirmation payload for durable post-booking display
   const [bookingConfirmation, setBookingConfirmation] = useState<{
     appointmentId: string;
@@ -85,16 +119,21 @@ const BookingPage: React.FC = () => {
 
 
   const [timeSlots, setTimeSlots] = useState<string[]>([]);
+  const [isLoadingSlots, setIsLoadingSlots] = useState<boolean>(false);
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState<boolean>(true);
   const [slotLoadingError, setSlotLoadingError] = useState<string | null>(null);
   const [slotRefreshKey, setSlotRefreshKey] = useState<number>(0);
+  const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     if (tenant && selectedStaff && selectedService && selectedDate) {
+      setIsLoadingSlots(true);
       setSlotLoadingError(null);
       availabilityService.getAvailableSlotsForStaff(tenant.id, selectedStaff.id, selectedService.id, selectedDate)
         .then(slots => {
           setTimeSlots(slots.map(s => s.time));
           setSlotLoadingError(null);
+          setIsLoadingSlots(false);
         })
         .catch(err => {
           console.error("Public slot RPC load error:", err);
@@ -102,16 +141,24 @@ const BookingPage: React.FC = () => {
           setSlotLoadingError(language === 'tr'
             ? 'Müsait saatler şu anda yüklenemiyor. Lütfen tekrar deneyin.'
             : 'Available slots could not be loaded right now. Please try again.');
+          setIsLoadingSlots(false);
         });
     } else {
       setTimeSlots([]);
       setSlotLoadingError(null);
+      setIsLoadingSlots(false);
     }
   }, [tenant?.id, selectedStaff?.id, selectedService?.id, selectedDate, slotRefreshKey]);
 
   const requestedPreview = new URLSearchParams(window.location.hash.split('?')[1]).get('preview') === 'true';
   const urlSource = new URLSearchParams(window.location.hash.split('?')[1]).get('source') || undefined;
   const isAuthorizedPreview = requestedPreview && canPreviewTenantSite(currentUser, tenant?.id);
+  const isUiV2 = typeof window !== 'undefined' && isUiV2Requested(
+    window.location.search,
+    window.location.hash,
+    routerLocation.search
+  );
+  const WebsiteComponent = isUiV2 ? SalonWebsiteViewV2 : SalonWebsiteView;
 
   // Regenerate PII-free idempotency key when booking selection parameters change
   useEffect(() => {
@@ -147,6 +194,9 @@ const BookingPage: React.FC = () => {
             setSubStatus(sub.status);
           }
           setIsCheckingSub(false);
+        }).catch(err => {
+          console.error('Subscription check failed:', err);
+          setIsCheckingSub(false);
         });
       } else {
         // In supabase staging/production mode, public booking relies strictly on the goLiveService canTenantAcceptBookings RPC.
@@ -154,9 +204,22 @@ const BookingPage: React.FC = () => {
         setSubStatus('active');
         setIsCheckingSub(false);
       }
-      getStaffList(tenant.id, { activeOnly: true }).then(setStaffList);
-      getServices(tenant.id, { activeOnly: true }).then(setServicesList);
-      businessProfileService.getPublicBusinessProfile(tenant.id).then(setBusinessProfile);
+      setIsLoadingCatalog(true);
+      Promise.allSettled([
+        getStaffList(tenant.id, { activeOnly: true }).then(setStaffList).catch(err => {
+          console.error('Staff list load failed:', err);
+          setStaffList([]);
+        }),
+        getServices(tenant.id, { activeOnly: true }).then(setServicesList).catch(err => {
+          console.error('Services list load failed:', err);
+          setServicesList([]);
+        })
+      ]).finally(() => {
+        setIsLoadingCatalog(false);
+      });
+      businessProfileService.getPublicBusinessProfile(tenant.id).then(setBusinessProfile).catch(err => {
+        console.error('Business profile load failed:', err);
+      });
       
       const requestedBranchSlug = new URLSearchParams(window.location.hash.split('?')[1]).get('branch');
       branchService.listPublicBranches(tenant.slug, tenant.id).then(branches => {
@@ -171,6 +234,9 @@ const BookingPage: React.FC = () => {
                // step skip logic is handled down below where step starts at 0 
             }
          }
+      }).catch(err => {
+         console.error('Branch list load failed:', err);
+         setBranches([]);
       });
       
       import('../services/goLiveService').then(({ goLiveService }) => {
@@ -179,6 +245,8 @@ const BookingPage: React.FC = () => {
              setSubStatus('expired'); // Reuse expired state UI for now
              setSetupError(status.reason || 'Online randevu sistemi henüz aktif değil.');
            }
+        }).catch(err => {
+           console.error('Booking eligibility check failed:', err);
         });
       });
 
@@ -189,6 +257,8 @@ const BookingPage: React.FC = () => {
          subscriptionService.getPlanForTenant(tenant.id).then(plan => {
             setIsAiEnabled(!!(plan && plan.id !== 'free'));
             setIsMultiBranchEnabled(plan?.multiBranchEnabled || false);
+         }).catch(err => {
+            console.error('Plan check failed:', err);
          });
       }
 
@@ -209,16 +279,25 @@ const BookingPage: React.FC = () => {
 
   useEffect(() => {
     if (tenant && selectedDate && selectedStaff) {
-      getBookedSlots(tenant.id, selectedDate, selectedStaff.id).then(setBookedSlots);
+      getBookedSlots(tenant.id, selectedDate, selectedStaff.id).then(setBookedSlots).catch(err => {
+        console.error('Booked slots load failed:', err);
+        setBookedSlots([]);
+      });
     }
   }, [tenant, selectedDate, selectedStaff]);
 
   useEffect(() => {
     if (tenant) {
       if (selectedService) {
-        getStaffListForService(tenant.id, selectedService.id).then(setStaffList);
+        getStaffListForService(tenant.id, selectedService.id).then(setStaffList).catch(err => {
+          console.error('Staff list for service load failed:', err);
+          setStaffList([]);
+        });
       } else {
-        getStaffList(tenant.id, { activeOnly: true }).then(setStaffList);
+        getStaffList(tenant.id, { activeOnly: true }).then(setStaffList).catch(err => {
+          console.error('Staff list load failed:', err);
+          setStaffList([]);
+        });
       }
     }
   }, [tenant, selectedService]);
@@ -230,6 +309,8 @@ const BookingPage: React.FC = () => {
           if (slot) {
             setStaffAvailability(prev => ({ ...prev, [staff.id]: slot }));
           }
+        }).catch(err => {
+          console.error('Next available slot check failed:', err);
         });
       });
     }
@@ -365,21 +446,41 @@ const BookingPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!selectedService || !selectedTime || !selectedStaff || !tenant) return;
     const isSupabaseMode = getDataSourceMode() === 'supabase';
     if (isSupabaseMode && (!selectedBranch || !selectedBranch.id)) {
-       alert(language === 'tr' ? 'İşletme şube bilgisi alınamadı. Lütfen sayfayı yenileyip tekrar deneyin.' : 'Salon branch information could not be resolved. Please refresh and try again.');
+       const msg = language === 'tr' ? 'İşletme şube bilgisi alınamadı. Lütfen sayfayı yenileyip tekrar deneyin.' : 'Salon branch information could not be resolved. Please refresh and try again.';
+       setFormError(msg);
+       return;
+    }
+    if (!formData.name.trim()) {
+       const msg = language === 'tr' ? 'Lütfen adınızı ve soyadınızı girin.' : 'Please enter your full name.';
+       setFormError(msg);
+       return;
+    }
+    if (!formData.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
+       const msg = language === 'tr' ? 'Lütfen geçerli bir e-posta adresi girin.' : 'Please enter a valid email address.';
+       setFormError(msg);
+       return;
+    }
+    const cleanPhone = formData.phone.replace(/[^0-9]/g, '');
+    if (cleanPhone.length < 10) {
+       const msg = language === 'tr' ? 'Lütfen en az 10 haneli geçerli bir telefon numarası girin.' : 'Please enter a valid phone number with at least 10 digits.';
+       setFormError(msg);
        return;
     }
     if (!consentForms.requiredBookingConsent) {
-       alert('Lütfen randevu işlemini tamamlamak için öncelikle kullanım iznini onaylayınız.');
+       const msg = language === 'tr' ? 'Lütfen randevu işlemini tamamlamak için öncelikle kullanım iznini onaylayınız.' : 'Please accept terms to proceed.';
+       setFormError(msg);
        return;
     }
 
     if (isSubmitting) return; // Prevent duplicate submission
     setIsSubmitting(true);
     
-    // Core Operation: Anti-Abuse Protection Check
+    // Core Operation: Anti-Abuse Protection Check (V1-WQ-07 / FINDING-ADIM010-005, 007)
+    const clientFp = getClientFingerprint();
     try {
       const { bookingAbuseProtectionService } = await import('../services/bookingAbuseProtectionService');
       const evaluation = await bookingAbuseProtectionService.evaluateBookingRequest({
@@ -387,7 +488,8 @@ const BookingPage: React.FC = () => {
         phone: formData.phone,
         email: formData.email,
         date: selectedDate,
-        serviceId: selectedService.id
+        serviceId: selectedService.id,
+        clientFingerprint: clientFp,
       });
 
       if (!evaluation.allowed) {
@@ -395,14 +497,20 @@ const BookingPage: React.FC = () => {
           tenantId: tenant.id,
           phone: formData.phone,
           email: formData.email,
+          clientFingerprint: clientFp,
           success: false
         });
-        alert(evaluation.reason || 'Rezervasyon talebiniz güvenlik politikaları gereğince onaylanamadı.');
+        const msg = evaluation.reason || (language === 'tr' ? 'Rezervasyon talebiniz güvenlik politikaları gereğince onaylanamadı.' : 'Booking request could not be approved due to security policies.');
+        setFormError(msg);
         setIsSubmitting(false);
         return;
       }
     } catch (err) {
       console.error('Abuse protection evaluation failed', err);
+      const msg = language === 'tr' ? 'Güvenlik doğrulaması sırasında bir hata oluştu. Lütfen tekrar deneyin.' : 'An error occurred during security verification. Please try again.';
+      setFormError(msg);
+      setIsSubmitting(false);
+      return;
     }
 
     // Determine data source mode early — needed to gate consent writes
@@ -567,6 +675,8 @@ const BookingPage: React.FC = () => {
             marketingConsent: consentForms.marketingConsent,
             reminderConsent: consentForms.reminderConsent,
             idempotencyKey,
+            otpVerificationToken: otpVerificationToken || undefined,
+            clientFingerprint: clientFp,
           });
         } catch (e) {
           console.error('create_public_booking RPC exception', e);
@@ -585,6 +695,14 @@ const BookingPage: React.FC = () => {
             invalid_staff:        language === 'tr' ? 'Seçilen uzman bu hizmeti şu an sunmuyor.' : 'Selected staff is not available for this service.',
             consent_required:     language === 'tr' ? 'Devam etmek için gerekli onayları vermeniz gerekiyor.' : 'Required consents must be granted to proceed.',
             invalid_customer_data: language === 'tr' ? 'Lütfen ad ve iletişim bilgilerinizi doldurun.' : 'Please fill in your name and contact details.',
+            invalid_phone:        language === 'tr' ? 'Lütfen geçerli bir telefon numarası girin.' : 'Please enter a valid phone number.',
+            rate_limit_exceeded:  language === 'tr' ? 'Çok fazla istek gönderildi. Lütfen biraz bekleyin ve tekrar deneyin.' : 'Rate limit exceeded. Please wait a moment and try again.',
+            duplicate_booking_same_day: language === 'tr' ? 'Seçilen tarih ve hizmet için zaten aktif bir randevunuz bulunmaktadır.' : 'You already have an active appointment for the selected date and service.',
+            otp_required:         language === 'tr' ? 'Randevuyu onaylamak için WhatsApp doğrulama kodu gereklidir.' : 'WhatsApp verification code is required to confirm booking.',
+            otp_invalid:          language === 'tr' ? 'Girdiğiniz doğrulama kodu geçersiz veya hatalı.' : 'The verification code entered is invalid or incorrect.',
+            otp_brute_force_locked: language === 'tr' ? 'Çok fazla hatalı doğrulama kodu girildi. Güvenlik nedeniyle bu işlem kilitlendi.' : 'Too many incorrect verification attempts. This request has been locked for security.',
+            otp_expired:          language === 'tr' ? 'Doğrulama kodunun süresi doldu. Lütfen yeni bir kod talep edin.' : 'Verification code has expired. Please request a new code.',
+            otp_token_invalid_or_consumed: language === 'tr' ? 'Doğrulama oturumu geçersiz veya daha önce kullanılmış. Lütfen tekrar doğrulayın.' : 'Verification session is invalid or already used. Please verify again.',
             temporary_failure:    language === 'tr' ? 'Randevu işlemi şu anda tamamlanamıyor. Lütfen kısa süre sonra tekrar deneyin.' : 'Booking could not be completed right now. Please try again shortly.',
           };
           throw new Error(messages[reasonCode] || messages['temporary_failure']);
@@ -641,6 +759,7 @@ const BookingPage: React.FC = () => {
           tenantId: tenant.id,
           phone: formData.phone,
           email: formData.email,
+          clientFingerprint: clientFp,
           success: true
         });
       } catch (err) {}
@@ -700,8 +819,8 @@ const BookingPage: React.FC = () => {
 
       let isWaDelivered = false;
       if (sideEffectPolicy.allowMockWhatsApp) {
-        await NotificationService.sendAutomatedWhatsApp(newAppointment, waText).catch(e => console.error("WhatsApp send fail", e));
-        isWaDelivered = true;
+        const waDelivered = await NotificationService.sendAutomatedWhatsApp(newAppointment, waText).catch(e => { console.error('WhatsApp send fail', e); return false; });
+isWaDelivered = waDelivered === true;
       }
       setWhatsappSent(isWaDelivered);
 
@@ -733,7 +852,8 @@ const BookingPage: React.FC = () => {
 
     } catch (e: any) {
       console.error("Critical booking failure", e);
-      alert(e.message || (language === 'tr' ? 'Randevu oluşturulurken beklenmedik bir hata oluştu.' : 'An unexpected error occurred while booking.'));
+      const errorMsg = e.message || (language === 'tr' ? 'Randevu oluşturulurken beklenmedik bir hata oluştu.' : 'An unexpected error occurred while booking.');
+      setFormError(errorMsg);
     } finally {
       setIsSubmitting(false);
     }
@@ -803,7 +923,7 @@ const BookingPage: React.FC = () => {
          </div>
       ) : (
       <div data-testid="public-booking-ready">
-        <SalonWebsiteView 
+        <WebsiteComponent
           tenant={tenant}
           businessProfile={businessProfile}
           staffList={staffList}
@@ -857,9 +977,14 @@ const BookingPage: React.FC = () => {
               <button onClick={() => setStep(0)} className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white underline transition-colors duration-300">{language === 'tr' ? 'Geri Dön' : 'Go Back'}</button>
             </div>
             
-            {filteredServices.length === 0 ? (
-              <div className="text-center py-12">
-                <p className="mt-4 text-gray-500 dark:text-gray-400 text-lg">Şu anda seçilebilir aktif hizmet bulunmuyor.</p>
+            {isLoadingCatalog ? (
+              <div role="status" aria-live="polite" data-testid="booking-catalog-loading" className="text-center py-12 flex flex-col items-center justify-center">
+                <div className="w-8 h-8 border-2 border-accent/20 border-t-accent rounded-full animate-spin mb-3" aria-hidden="true" />
+                <span className="text-gray-500 dark:text-gray-400 text-sm font-medium">{language === 'tr' ? 'Hizmetler yükleniyor...' : 'Loading services...'}</span>
+              </div>
+            ) : filteredServices.length === 0 ? (
+              <div role="status" data-testid="booking-services-empty" className="text-center py-12">
+                <p className="mt-4 text-gray-500 dark:text-gray-400 text-lg">{language === 'tr' ? 'Şu anda seçilebilir aktif hizmet bulunmuyor.' : 'No active services available at the moment.'}</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-4">
@@ -912,7 +1037,12 @@ const BookingPage: React.FC = () => {
                <span className="font-bold text-gray-900 dark:text-white">{language === 'tr' ? selectedService?.name_tr : selectedService?.name}</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {filteredStaff.length === 0 ? (
+              <div role="status" data-testid="booking-staff-empty" className="text-center py-12">
+                <p className="mt-4 text-gray-500 dark:text-gray-400 text-lg">{language === 'tr' ? 'Bu hizmet için aktif uzman bulunmuyor.' : 'No active staff available for this service.'}</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <button
                  onClick={() => {
                      // For "Bana Fark Etmez", simply select the first staff 
@@ -958,6 +1088,7 @@ const BookingPage: React.FC = () => {
                 </button>
               ))}
             </div>
+            )}
           </div>
         )}
 
@@ -988,7 +1119,12 @@ const BookingPage: React.FC = () => {
 
               <div className="flex-grow">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 transition-colors duration-300">{t.booking.step2_slots} ({selectedDate})</label>
-                {slotLoadingError ? (
+                {isLoadingSlots ? (
+                  <div role="status" aria-live="polite" data-testid="booking-slots-loading" className="py-8 text-center text-gray-500 dark:text-gray-400 flex flex-col items-center bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700">
+                     <div className="w-8 h-8 border-2 border-accent/20 border-t-accent rounded-full animate-spin mb-3" aria-hidden="true" />
+                     <span className="text-sm font-medium">{language === 'tr' ? 'Müsait saatler yükleniyor...' : 'Loading available slots...'}</span>
+                  </div>
+                ) : slotLoadingError ? (
                   <div className="py-8 text-center text-red-600 dark:text-red-400 flex flex-col items-center bg-red-50 dark:bg-slate-800 rounded-xl border border-red-100 dark:border-slate-700">
                      <p className="mb-3 font-medium">{slotLoadingError}</p>
                      <button
@@ -999,7 +1135,7 @@ const BookingPage: React.FC = () => {
                      </button>
                   </div>
                 ) : timeSlots.length === 0 || timeSlots.every(time => bookedSlots.includes(time)) ? (
-                  <div className="py-8 text-center text-gray-500 dark:text-gray-400 flex flex-col items-center bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700">
+                  <div role="status" data-testid="booking-slots-empty" className="py-8 text-center text-gray-500 dark:text-gray-400 flex flex-col items-center bg-white dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700">
                      <svg className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                      <span>{language === 'tr' ? 'Bu gün için uygun saat yok. Başka bir gün seçebilirsiniz.' : 'No available slots for this day. Please select another day.'}</span>
                   </div>
@@ -1051,6 +1187,20 @@ const BookingPage: React.FC = () => {
               </div>
               <span className="font-semibold bg-white dark:bg-slate-800 px-3 py-1 rounded-md border border-gray-200 dark:border-slate-600 transition-colors duration-300">{selectedDate} @ {selectedTime}</span>
             </div>
+
+            {formError && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                data-testid="booking-form-error"
+                className="p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-xl text-sm font-medium text-red-700 dark:text-red-300 flex items-start gap-3"
+              >
+                <svg className="w-5 h-5 text-red-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>{formError}</span>
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
               {hasSavedProfile && (

@@ -1,7 +1,8 @@
 import { Incident, IncidentStatus, IncidentSeverity, AuditEventCategory } from '../types';
 import { auditLogService } from './auditLogService';
+import { STORAGE_KEYS } from './storageKeys';
 
-const INCIDENT_STORAGE_KEY = 'lari_incidents_v1';
+const INCIDENT_STORAGE_KEY = STORAGE_KEYS.INCIDENTS;
 
 export const incidentResponseService = {
   createIncident(input: {

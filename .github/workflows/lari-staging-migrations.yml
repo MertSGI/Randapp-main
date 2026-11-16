@@ -19,6 +19,16 @@ jobs:
       SUPABASE_PROJECT_ID: "rwedeejhjazwjthdjzrt"
 
     steps:
+      # Fail closed at the entrypoint, BEFORE checkout/link/remote migration.
+      # Owner-local recovery receipt and a separate exact-run SQL authorization
+      # have NOT been accepted. A future Controller-reviewed, owner-approved
+      # PR must replace this gate with an authoritative receipt validator.
+      - name: Enforce mandatory P0 recovery HOLD
+        shell: bash
+        run: |
+          echo 'LARI_P0_RECOVERY_HOLD: OWNER_LOCAL_RESTORE_AND_SQL_GO_REQUIRED' >&2
+          exit 1
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:

@@ -117,7 +117,7 @@
     "qa:rls-policy-pack": "node scripts/verify-rls-policy-pack.mjs",
     "qa:iyzico-sandbox": "node scripts/verify-iyzico-sandbox-readiness.mjs",
     "qa:dns-subdomain": "node scripts/verify-dns-subdomain-readiness.mjs",
-    "qa:communication-provider-rehearsal": "node scripts/verify-communication-provider-rehearsal.mjs",
+    "qa:communication-provider-rehearsal": "npx tsx scripts/verify-communication-provider-rehearsal.mjs",
     "qa:background-jobs": "node scripts/verify-background-jobs-readiness.mjs",
     "qa:media-storage": "node scripts/verify-media-storage-readiness.mjs",
     "qa:observability-support": "node scripts/verify-observability-support-readiness.mjs",
@@ -130,7 +130,18 @@
     "qa:market-global": "node scripts/verify-market-global-readiness.mjs",
     "qa:data-mode-regression": "npx tsx scripts/test-data-mode-regression.mjs",
     "qa:slug-regression": "npx tsx scripts/test-slug-regression.mjs",
-    "qa:superadmin-availability-regression": "npx tsx scripts/test-superadmin-and-availability-regression.ts"
+    "qa:superadmin-availability-regression": "npx tsx scripts/test-superadmin-and-availability-regression.ts",
+    "qa:v1-truthful-client-contracts": "npx tsx scripts/verify-v1-truthful-client-contracts.mjs",
+    "qa:recovery-hard-gate": "node scripts/verify-lari-recovery-hard-gate.mjs",
+    "qa:phase-a-functional-acceptance": "npx tsx scripts/verify-phase-a-functional-acceptance.mjs",
+    "qa:phase-b-staging-source-readiness": "npx tsx scripts/verify-phase-b-staging-source-readiness.mjs",
+    "qa:payment-mode-safety": "npx tsx scripts/verify-payment-mode-safety.mjs",
+    "qa:iyzico-webhook-cryptography": "npx tsx scripts/verify-iyzico-webhook-cryptography.mjs",
+    "qa:subscription-lifecycle-integrity": "npx tsx scripts/verify-subscription-lifecycle-integrity.mjs",
+    "qa:phase-d-routing-rehearsal": "npx tsx scripts/verify-phase-d-routing-rehearsal.mjs",
+    "qa:communication-delivery-contracts": "npx tsx scripts/verify-communication-provider-rehearsal.mjs",
+    "qa:synthetic-salon-onboarding": "npx tsx scripts/verify-synthetic-salon-onboarding.mjs",
+    "qa:tailwind-local-build": "node scripts/test-v1-wq06-tailwind-local-build.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",
@@ -141,10 +152,14 @@
     "react-router-dom": "^7.13.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.15",
     "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "embedded-postgres": "17.11.0-beta.19",
     "playwright": "^1.60.0",
+    "postcss": "^8.5.10",
+    "tailwindcss": "^4.2.2",
     "tsx": "^4.19.2",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"

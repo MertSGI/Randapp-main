@@ -74,6 +74,7 @@ Operators must enforce the following checklist values before declaring productio
 ### Current Blockers:
 1. **Physical Database Validation**: A real physical Supabase project has not been provisioned. The command-line smoke runner correctly blocked execution because live env credentials (`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`) are missing.
 2. **Staging Execution result log**: The verification log `docs/SUPABASE_STAGING_EXECUTION_RESULT_LOG.md` remains incomplete.
+3. **Disaster Recovery & Remote Restore Qualification (GitHub Issue #10)**: PostgreSQL 17 remote physical restore qualification is strictly required before live production cutover. GitHub Issue #10 remains OPEN as a mandatory production release blocker.
 
 ### Required Actions:
 1. Provision a real staging database in the Supabase console.
@@ -83,6 +84,7 @@ Operators must enforce the following checklist values before declaring productio
 5. Run the SQL seeding script and the RLS smoke tests.
 6. Verify endpoints programmatically with the smoke commands.
 7. Fill out the result log with verified data.
+8. Resolve GitHub Issue #10 with independent remote PostgreSQL 17 disaster recovery proof prior to any production launch.
 
 ---
 
@@ -102,6 +104,8 @@ If a major bug, schema conflict, or RLS data leakage occurs after going live:
 1. **Immediate Redeployment**: Revert the hosting server to the previous stable release commit.
 2. **Database Schema Recovery**: Restore the database using the latest night snapshot, or run the cascade deletion to restore only the affected tenant namespace.
 3. **Emergency Read-Only Lock**: If an RLS violation is detected, immediately disable anonymous public insertions in the staging/production SQL editor by disabling the target policy.
+4. **Emergency Pilot Rollback Automation**: Execute `scripts/run-paymentless-real-pilot-rollback.mjs` with explicit operator confirmation (`LARI_P1C_ROLLBACK_CONFIRMATION="I_UNDERSTAND_THIS_ROLLS_BACK_THE_REAL_MELIS_PAYMENTLESS_PILOT"`) to restore global release phase to `pre_pilot`, immediately lock public booking, and revoke pilot tenant authorization.
+5. **Release Candidate Reference**: Refer to `docs/V1A_RELEASE_CANDIDATE_ACCEPTANCE.md` for full release baseline and rollback contract parameters.
 
 ---
 

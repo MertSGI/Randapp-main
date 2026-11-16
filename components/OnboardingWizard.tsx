@@ -73,6 +73,7 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   const [selectedPreviewStaff, setSelectedPreviewStaff] = useState<string | null>(null);
   const [selectedPreviewTime, setSelectedPreviewTime] = useState<string | null>(null);
   const [previewBookingStatus, setPreviewBookingStatus] = useState<'idle' | 'booked'>('idle');
+  const [stepError, setStepError] = useState<string | null>(null);
 
   // Synchronize dynamic updates with local state & recover half-entered data
   useEffect(() => {
@@ -91,6 +92,8 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
           if (!profileShortDesc) setProfileShortDesc(prof.short_description || '');
           if (!setupPhone) setSetupPhone(prof.phone || '');
         }
+      }).catch(err => {
+        console.error('Failed to load onboarding business profile:', err);
       });
 
       refreshReport();
@@ -127,10 +130,14 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
 
   const refreshReport = async () => {
     if (!tenant) return;
-    const rep = await onboardingChecklistService.getOnboardingReport(tenant.id);
-    setOnboardingReport(rep);
-    const read = await goLiveService.getGoLiveReadiness(tenant.id);
-    setReadiness(read);
+    try {
+      const rep = await onboardingChecklistService.getOnboardingReport(tenant.id);
+      setOnboardingReport(rep);
+      const read = await goLiveService.getGoLiveReadiness(tenant.id);
+      setReadiness(read);
+    } catch (err) {
+      console.error('Failed to refresh onboarding report:', err);
+    }
   };
 
   const steps = [
@@ -168,16 +175,23 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   const handleSaveBusinessProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tenant) return;
-    if (!setupSalonName) {
-      await showAlert("İşletme adı zorunludur.");
+    setStepError(null);
+    if (!setupSalonName.trim()) {
+      const msg = "İşletme adı zorunludur.";
+      setStepError(msg);
+      await showAlert(msg);
       return;
     }
-    if (!profileDistrict) {
-      await showAlert("Lütfen ilçe bilgisini doldurun.");
+    if (!profileDistrict.trim()) {
+      const msg = "Lütfen ilçe bilgisini doldurun.";
+      setStepError(msg);
+      await showAlert(msg);
       return;
     }
-    if (!setupSlug) {
-      await showAlert("Özel web adresi (URL Slug) boş bırakılamaz.");
+    if (!setupSlug.trim()) {
+      const msg = "Özel web adresi (URL Slug) boş bırakılamaz.";
+      setStepError(msg);
+      await showAlert(msg);
       return;
     }
 
@@ -185,30 +199,42 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
     try {
       const { siteProvisioningService } = await import('../services/siteProvisioningService');
       const val = await siteProvisioningService.validateTenantSlug(setupSlug, tenant.id);
-      if (!val.isValid) {
-        await showAlert(val.error || "Girdiğiniz web adresi başka bir işletme tarafından kullanılıyor veya geçersiz.");
+      if (!val.isValid && val.reason !== 'SLUG_TAKEN') {
+        const msg = val.error || "Girdiğiniz web adresi geçersiz.";
+        setStepError(msg);
+        await showAlert(msg);
         setSetupSaving(false);
         return;
       }
 
+      const canonicalSlug = val.normalizedSlug || setupSlug;
+      const reserved = await siteProvisioningService.reserveTenantSlug(tenant.id, canonicalSlug);
+      if (!reserved) {
+        const msg = val.error || "Girdiğiniz web adresi başka bir işletme tarafından kullanılıyor veya rezerve edilemedi.";
+        setStepError(msg);
+        await showAlert(msg);
+        setSetupSaving(false);
+        return;
+      }
+      setSetupSlug(canonicalSlug);
+
       const { tenantService } = await import('../services/tenantService');
       await tenantService.updateTenantBranding(tenant.id, {
-        businessName: setupSalonName,
-      });
-      await tenantService.updateTenant(tenant.id, {
-        slug: setupSlug
+        businessName: setupSalonName.trim(),
       });
       await businessProfileService.updateBusinessProfile(tenant.id, {
         business_category: profileCategory,
         city: profileCity,
-        district: profileDistrict,
+        district: profileDistrict.trim(),
       });
       await refreshTenant();
       await refreshReport();
       setActiveStep(2);
     } catch (err) {
       console.error(err);
-      await showAlert("Kaydedilirken bir hata oluştu.");
+      const msg = "İşletme bilgileri kaydedilirken bir hata oluştu.";
+      setStepError(msg);
+      await showAlert(msg);
     } finally {
       setSetupSaving(false);
     }
@@ -218,31 +244,38 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   const handleSaveContactLocation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tenant) return;
-    if (!setupWhatsapp) {
-      await showAlert("En azından bir WhatsApp iletişim numarası girilmesi zorunludur.");
+    setStepError(null);
+    if (!setupWhatsapp.trim()) {
+      const msg = "En azından bir WhatsApp iletişim numarası girilmesi zorunludur.";
+      setStepError(msg);
+      await showAlert(msg);
       return;
     }
-    if (!profileAddress) {
-      await showAlert("Müşterilerinizin işletmeyi bulabilmesi için adres girmelisiniz.");
+    if (!profileAddress.trim()) {
+      const msg = "Müşterilerinizin işletmeyi bulabilmesi için adres girmelisiniz.";
+      setStepError(msg);
+      await showAlert(msg);
       return;
     }
     setSetupSaving(true);
     try {
       const { tenantService } = await import('../services/tenantService');
       await tenantService.updateTenantBranding(tenant.id, {
-        whatsappNumber: setupWhatsapp,
-        address: profileAddress
+        whatsappNumber: setupWhatsapp.trim(),
+        address: profileAddress.trim()
       });
       await businessProfileService.updateBusinessProfile(tenant.id, {
-        phone: setupPhone,
-        address: profileAddress
+        phone: setupPhone.trim(),
+        address: profileAddress.trim()
       });
       await refreshTenant();
       await refreshReport();
       setActiveStep(3);
     } catch (err) {
       console.error(err);
-      await showAlert("Kaydedilirken bir hata oluştu.");
+      const msg = "İletişim ve adres bilgileri kaydedilirken bir hata oluştu.";
+      setStepError(msg);
+      await showAlert(msg);
     } finally {
       setSetupSaving(false);
     }
@@ -251,12 +284,30 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   // Step 3: Add Service
   const handleAddService = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant || !newServiceName) return;
+    if (!tenant || !newServiceName.trim()) {
+      const msg = 'Lütfen hizmet adını girin.';
+      setStepError(msg);
+      await showAlert(msg);
+      return;
+    }
+    if (Number(newServicePrice) < 0 || !Number.isFinite(Number(newServicePrice))) {
+      const msg = 'Hizmet ücreti geçerli bir sayı olmalıdır.';
+      setStepError(msg);
+      await showAlert(msg);
+      return;
+    }
+    if (Number(newServiceDuration) <= 0 || !Number.isFinite(Number(newServiceDuration))) {
+      const msg = 'Hizmet süresi 0 dakikadan büyük olmalıdır.';
+      setStepError(msg);
+      await showAlert(msg);
+      return;
+    }
+    setStepError(null);
     setIsAdding(true);
     try {
       await createService(tenant.id, {
-        name: newServiceName,
-        name_tr: newServiceName,
+        name: newServiceName.trim(),
+        name_tr: newServiceName.trim(),
         price: Number(newServicePrice),
         duration: Number(newServiceDuration),
         active: true,
@@ -268,7 +319,9 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
       await refreshReport();
     } catch (err) {
       console.error(err);
-      await showAlert('Hizmet eklenemedi.');
+      const msg = 'Hizmet eklenemedi.';
+      setStepError(msg);
+      await showAlert(msg);
     } finally {
       setIsAdding(false);
     }
@@ -277,12 +330,18 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   // Step 4: Add Staff
   const handleAddStaff = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenant || !newStaffName) return;
+    if (!tenant || !newStaffName.trim()) {
+      const msg = 'Lütfen personel/uzman adını girin.';
+      setStepError(msg);
+      await showAlert(msg);
+      return;
+    }
+    setStepError(null);
     setIsAdding(true);
     try {
       await createStaff(tenant.id, {
-        name: newStaffName,
-        title: newStaffTitle,
+        name: newStaffName.trim(),
+        title: newStaffTitle.trim() || 'Uzman',
         active: true,
         rating: 5,
         reviewCount: 0
@@ -292,7 +351,9 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
       await refreshReport();
     } catch (err) {
       console.error(err);
-      await showAlert('Çalışan eklenemedi.');
+      const msg = 'Çalışan eklenemedi.';
+      setStepError(msg);
+      await showAlert(msg);
     } finally {
       setIsAdding(false);
     }
@@ -301,6 +362,13 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   // Step 5: Save Hours
   const handleSaveAvailability = async () => {
     if (!tenant) return;
+    setStepError(null);
+    if (activeDays.length === 0) {
+      const msg = 'Lütfen en az bir çalışma günü seçin.';
+      setStepError(msg);
+      await showAlert(msg);
+      return;
+    }
     setSetupSaving(true);
     try {
       localStorage.setItem(`lari_availability_${tenant.id}_configured`, 'true');
@@ -312,6 +380,9 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
       await showAlert('Çalışma saatleri başarıyla yapılandırıldı.');
     } catch (err) {
       console.error(err);
+      const msg = 'Çalışma saatleri kaydedilirken bir hata oluştu.';
+      setStepError(msg);
+      await showAlert(msg);
     } finally {
       setSetupSaving(false);
     }
@@ -329,6 +400,7 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   const handleSaveBranding = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tenant) return;
+    setStepError(null);
     setSetupSaving(true);
     try {
       const { tenantService } = await import('../services/tenantService');
@@ -345,6 +417,9 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
       setActiveStep(7);
     } catch (err) {
       console.error(err);
+      const msg = 'Marka ve tasarım ayarları kaydedilirken bir hata oluştu.';
+      setStepError(msg);
+      await showAlert(msg);
     } finally {
       setSetupSaving(false);
     }
@@ -353,6 +428,7 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   // Step 7: Booking Rules Save
   const handleSaveBookingRules = async () => {
     if (!tenant) return;
+    setStepError(null);
     setSetupSaving(true);
     try {
       await businessProfileService.updateBusinessProfile(tenant.id, {
@@ -364,6 +440,9 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
       await showAlert('Randevu kuralları kaydedildi.');
     } catch (err) {
       console.error(err);
+      const msg = 'Randevu kuralları kaydedilirken bir hata oluştu.';
+      setStepError(msg);
+      await showAlert(msg);
     } finally {
       setSetupSaving(false);
     }
@@ -395,7 +474,7 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
       {/* Sidebar with step numbers and progress indicator */}
-      <div className="md:col-span-1 border-r border-slate-100 dark:border-slate-800 pr-2">
+      <nav aria-label="Kurulum Adımları" className="md:col-span-1 border-r border-slate-100 dark:border-slate-800 pr-2">
         <div className="mb-4">
           <h2 className="text-base font-bold text-gray-900 dark:text-white">Kurulum Adımları</h2>
           {onboardingReport && (
@@ -411,10 +490,12 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
             const isCurrent = activeStep === step.id;
             return (
               <button
+                type="button"
                 key={step.id}
                 disabled={!clickable}
-                onClick={() => setActiveStep(step.id)}
-                className={`w-full text-left p-3 rounded-xl transition-all flex items-center justify-between border ${
+                aria-current={isCurrent ? 'step' : undefined}
+                onClick={() => { setStepError(null); setActiveStep(step.id); }}
+                className={`w-full text-left p-3 rounded-xl transition-all flex items-center justify-between border focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   isCurrent 
                     ? 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 font-bold' 
                     : clickable 
@@ -436,17 +517,27 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                   </div>
                 </div>
                 {step.required && (
-                  <span className="text-[9px] text-red-500 dark:text-red-400 font-extrabold px-1.5 py-0.5 rounded bg-red-50 dark:bg-red-950/20">*</span>
+                  <span className="text-[9px] text-red-500 dark:text-red-400 font-extrabold px-1.5 py-0.5 rounded bg-red-50 dark:bg-red-950/20" aria-label="Zorunlu adım">*</span>
                 )}
               </button>
             );
           })}
         </div>
-      </div>
+      </nav>
 
       {/* Main step forms content */}
       <div className="md:col-span-3">
-        <div className="bg-white dark:bg-slate-800 border border-slate-150 dark:border-slate-700 rounded-2xl p-6 shadow-sm">
+        <div className="bg-white dark:bg-slate-800 border border-slate-150 dark:border-slate-700 rounded-2xl p-6 shadow-sm" aria-busy={setupSaving || isAdding}>
+          {stepError && (
+            <div
+              role="alert"
+              aria-live="assertive"
+              data-testid="onboarding-step-error"
+              className="mb-5 p-3.5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-xs font-semibold text-red-700 dark:text-red-300"
+            >
+              {stepError}
+            </div>
+          )}
           
           {/* STEP 1: BUSINESS PROFILE */}
           {activeStep === 1 && (
@@ -1083,13 +1174,16 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                           <div className="text-[9px] text-slate-500">{s.title || 'Uzman'}</div>
                         </button>
                       ))}
+                      {staffList.length === 0 && (
+                        <p className="text-[10px] text-slate-500 col-span-2">Eklenmiş uzman bulunmuyor.</p>
+                      )}
                     </div>
                   </div>
 
                   {/* Booking Trigger button */}
                   {previewBookingStatus === 'booked' ? (
-                    <div className="p-3 bg-green-950/20 text-green-400 rounded-lg border border-green-800 text-center text-xs">
-                      🎉 Test Randevusu Tamamlandı! Gerçek sitede anında bildirim alırsınız.
+                    <div role="status" aria-live="polite" className="p-3 bg-green-950/20 text-green-400 rounded-lg border border-green-800 text-center text-xs">
+                      🎉 Test Randevusu Tamamlandı! Canlı sitede oluşturulan randevular yönetim paneli takviminize ve iletişim kutunuza (Outbox) kaydedilir.
                     </div>
                   ) : (
                     <button 
@@ -1198,19 +1292,21 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
               </div>
 
               {tenant?.publicSiteStatus === 'pending_review' ? (
-                <div className="p-4 bg-blue-50 text-blue-800 rounded-xl text-center text-xs font-bold border border-blue-200">
-                  Siteniz incelemede. LARİ editörleri onayladığında anında SMS ve E-posta alacaksınız.
+                <div role="status" aria-live="polite" className="p-4 bg-blue-50 text-blue-800 rounded-xl text-center text-xs font-bold border border-blue-200">
+                  Siteniz incelemede. LARİ editörlerinin incelemesi tamamlandığında yayın durumu bu panelde güncellenir.
                 </div>
               ) : tenant?.publicSiteStatus === 'published' ? (
-                <div className="p-4 bg-green-50 text-green-800 rounded-xl text-center text-xs font-bold border border-green-200">
+                <div role="status" aria-live="polite" className="p-4 bg-green-50 text-green-800 rounded-xl text-center text-xs font-bold border border-green-200">
                   Yayında! Sitenizin kurulumu onaylandı ve müşterilerinize açıldı.
                 </div>
               ) : (
                 <div className="flex justify-center pt-2">
                   <button 
+                    type="button"
                     disabled={readiness && !readiness.canGoLive}
                     onClick={async () => {
                       if (!tenant) return;
+                      setStepError(null);
                       try {
                         const verifiedResult = businessVerificationService.submitForReview(tenant.id, {
                           officialBusinessName: setupSalonName,
@@ -1219,19 +1315,24 @@ const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                         });
                         
                         if (!verifiedResult.success) {
-                          await showAlert('Onay Başarısız: İşletme kategorisi veya adı Lari yayın politikalarına uygun bulunamadı.');
+                          const msg = 'Onay Başarısız: İşletme kategorisi veya adı Lari yayın politikalarına uygun bulunamadı.';
+                          setStepError(msg);
+                          await showAlert(msg);
                           await refreshReport();
                           return;
                         }
 
                         await goLiveService.markReadyForReview(tenant.id);
-                        await showAlert("Yayın incelemesine başarıyla gönderildi. Siteniz kısa sürede aktifleştirilecektir.");
+                        await showAlert("Yayın incelemesine başarıyla gönderildi. İnceleme tamamlandığında yayın durumu bu ekrandan takip edilebilir.");
                         await refreshReport();
                       } catch(err) {
-                        await showAlert("Hata oluştu.");
+                        console.error(err);
+                        const msg = "Yayın incelemesine gönderilirken bir hata oluştu.";
+                        setStepError(msg);
+                        await showAlert(msg);
                       }
                     }} 
-                    className="px-8 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-xl font-bold text-xs"
+                    className="px-8 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-xl font-bold text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     Yayın İncelemesine Gönder
                   </button>

@@ -3,6 +3,80 @@ import { dataProvider } from './dataProvider';
 import { supabase } from './supabaseClient';
 import { getDataSourceMode } from './dataSourceConfig';
 import { shouldUsePilotLocalBypass } from './pilotBypassPolicy';
+import { STORAGE_KEYS, DYNAMIC_STORAGE_KEYS } from './storageKeys';
+
+export interface TenantAccessValidationResult {
+  allowed: boolean;
+  status: number;
+  reason: 'same_tenant_authorized' | 'super_admin_authorized' | 'cross_tenant_access_forbidden' | 'unauthenticated_or_missing_tenant';
+  message: string;
+}
+
+export interface ApiBoundaryRequest {
+  method?: string;
+  url: string;
+  headers?: Record<string, string>;
+  body?: any;
+}
+
+export interface ApiBoundaryResponse {
+  status: number;
+  ok: boolean;
+  body: any;
+}
+
+export class CrossTenantAccessError extends Error {
+  readonly status: number;
+  readonly reason: string;
+  readonly callerTenantId?: string | null;
+  readonly targetTenantId?: string | null;
+
+  constructor(reason: string, status = 403, callerTenantId?: string | null, targetTenantId?: string | null) {
+    super(`[CrossTenantAccessError] 403 Forbidden: Caller tenant '${callerTenantId || 'none'}' attempted unauthorized cross-tenant access to target tenant '${targetTenantId || 'none'}' (${reason})`);
+    this.name = 'CrossTenantAccessError';
+    this.status = status;
+    this.reason = reason;
+    this.callerTenantId = callerTenantId;
+    this.targetTenantId = targetTenantId;
+  }
+}
+
+const RESERVED_ROUTE_SEGMENTS = new Set([
+  'book',
+  'booking',
+  's',
+  'discovery',
+  'admin',
+  'super-admin',
+  'login',
+  'features',
+  'pricing',
+  'mobile-app',
+  'register',
+  'contact',
+  'pilot',
+  'privacy',
+  'terms',
+  'support',
+  'demo',
+  'customer',
+  'appointment',
+  'ai-visualizer',
+  'admin-preview',
+]);
+
+/** Extracts the tenant slug from `/s/:slug`, `/booking/:slug`, or direct `/:slug` routes. */
+export function extractTenantSlugFromSegments(rawPath: string): string {
+  const parts = rawPath.split('/');
+  if (parts.length >= 3 && (parts[1] === 'booking' || parts[1] === 's')) {
+    return (parts[2] || '').split('?')[0];
+  }
+  const firstSegment = (parts[1] || '').split('?')[0];
+  if (parts.length >= 2 && firstSegment && !RESERVED_ROUTE_SEGMENTS.has(firstSegment)) {
+    return firstSegment;
+  }
+  return '';
+}
 
 const DEMO_TENANT: Tenant = {
   id: 'tenant_demo',
@@ -21,56 +95,187 @@ const DEMO_TENANT: Tenant = {
 };
 
 export const tenantService = {
+  /**
+   * Kiracılar arası (cross-tenant) erişim girişimini denetler.
+   * Farklı iki kiracı arasındaki erişim taleplerini HTTP 403 ile engeller.
+   */
+  validateCrossTenantAccess(
+    callerTenantId: string | null | undefined,
+    targetTenantId: string | null | undefined,
+    role?: string
+  ): TenantAccessValidationResult {
+    if (role === 'super_admin') {
+      return {
+        allowed: true,
+        status: 200,
+        reason: 'super_admin_authorized',
+        message: 'Super Admin platform çapında yetkilidir.',
+      };
+    }
+
+    if (!callerTenantId || !targetTenantId) {
+      return {
+        allowed: false,
+        status: 401,
+        reason: 'unauthenticated_or_missing_tenant',
+        message: 'Kimlik doğrulama bağlamı veya hedef kiracı kimliği eksik.',
+      };
+    }
+
+    if (callerTenantId !== targetTenantId) {
+      return {
+        allowed: false,
+        status: 403,
+        reason: 'cross_tenant_access_forbidden',
+        message: `Çapraz kiracı erişimi engellendi: '${callerTenantId}' kiracısı '${targetTenantId}' kiracısının verilerine erişemez.`,
+      };
+    }
+
+    return {
+      allowed: true,
+      status: 200,
+      reason: 'same_tenant_authorized',
+      message: 'Aynı kiracı bağlamı doğrulandı.',
+    };
+  },
+
+  /**
+   * Kiracılar arası yetkisiz erişimi doğrular; ihlal durumunda CrossTenantAccessError (HTTP 403) fırlatır.
+   */
+  assertTenantAccess(
+    callerTenantId: string | null | undefined,
+    targetTenantId: string | null | undefined,
+    role?: string
+  ): void {
+    const res = this.validateCrossTenantAccess(callerTenantId, targetTenantId, role);
+    if (!res.allowed) {
+      throw new CrossTenantAccessError(res.reason, res.status, callerTenantId, targetTenantId);
+    }
+  },
+
   async resolveTenantFromHost(hostname: string): Promise<Tenant | null> {
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
+    if (!hostname) return null;
+
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
+    const baseDomain = ((typeof process !== 'undefined' && process.env?.VITE_APP_BASE_DOMAIN) || (import.meta as any)?.env?.VITE_APP_BASE_DOMAIN || 'randevulari.com').trim().toLowerCase();
+    
+    // Port stripping and normalization (e.g., 'salon-a.randevulari.com:3000' -> 'salon-a.randevulari.com')
+    const cleanHost = hostname.split(':')[0].trim().toLowerCase();
+    if (!cleanHost) return null;
+
+    const isLoopback = cleanHost === 'localhost' || cleanHost.startsWith('127.') || cleanHost === '0.0.0.0';
+    const isRootDomain = cleanHost === baseDomain || cleanHost === `www.${baseDomain}`;
+
+    let isTenantSubdomain = false;
+    let querySlug = '';
+
+    // Only hosts strictly ending in .<baseDomain> are candidate subdomains (FINDING-ADIM018-005)
+    if (baseDomain && cleanHost.endsWith(`.${baseDomain}`)) {
+      const candidateSlug = cleanHost.slice(0, -(baseDomain.length + 1)).trim();
+      if (candidateSlug && candidateSlug !== 'www') {
+        isTenantSubdomain = true;
+        querySlug = candidateSlug;
+      }
+    }
+
+    // Other dotted hosts that are not loopback and not root domain are exact custom domains
+    const isCustomDomain = !isLoopback && !isRootDomain && !isTenantSubdomain && cleanHost.includes('.');
+
     if (mode.startsWith('supabase')) {
-      // In supabase mode (including staging), always resolve from DB regardless of hostname.
-      // Localhost is a valid dev environment for real supabase testing.
-      if (hostname === 'localhost' || hostname.startsWith('127.0.0.1')) {
-        console.info('Supabase staging mode on localhost — resolving tenant from authenticated user profile.');
-        // Fall through to DB resolution
+      if (isTenantSubdomain && querySlug) {
+        const { data: tenant } = await supabase
+          .from('tenants')
+          .select('*')
+          .eq('slug', querySlug)
+          .maybeSingle();
+
+        if (tenant) {
+          return {
+            id: tenant.id,
+            slug: tenant.slug,
+            name: tenant.name,
+            status: tenant.status,
+            createdAt: tenant.created_at || new Date().toISOString(),
+            updatedAt: tenant.updated_at || new Date().toISOString(),
+          } as Tenant;
+        }
+
+        console.warn('Supabase tenant resolution failed for subdomain:', cleanHost);
+        return null;
       }
 
-      const baseDomain = import.meta.env?.VITE_APP_BASE_DOMAIN;
-      let querySlug = '';
-      let isSubdomain = false;
-      
-      if (baseDomain && hostname.endsWith(`.${baseDomain}`)) {
-        querySlug = hostname.replace(`.${baseDomain}`, '');
-        isSubdomain = true;
+      if (isCustomDomain) {
+        const { data: tenant } = await supabase
+          .from('tenants')
+          .select('*')
+          .eq('custom_domain', cleanHost)
+          .maybeSingle();
+
+        if (tenant) {
+          return {
+            id: tenant.id,
+            slug: tenant.slug,
+            name: tenant.name,
+            status: tenant.status,
+            createdAt: tenant.created_at || new Date().toISOString(),
+            updatedAt: tenant.updated_at || new Date().toISOString(),
+          } as Tenant;
+        }
+
+        console.warn('Supabase tenant resolution failed for custom domain:', cleanHost);
+        return null;
       }
 
-      const queryParams = isSubdomain 
-        ? `slug.eq.${querySlug}` 
-        : `custom_domain.eq.${hostname},slug.eq.${hostname.split('.')[0]}`; // Fallback to splitting host if no base domain logic matched
-
-      const { data: tenant, error } = await supabase
-        .from('tenants')
-        .select('*')
-        .or(queryParams)
-        .single();
-        
-      if (tenant) {
-        return {
-          id: tenant.id,
-          slug: tenant.slug,
-          name: tenant.name,
-          status: tenant.status,
-          createdAt: tenant.created_at || new Date().toISOString(),
-          updatedAt: tenant.updated_at || new Date().toISOString(),
-        } as Tenant;
+      if (isLoopback || isRootDomain) {
+        return DEMO_TENANT;
       }
-      
-      console.warn('Supabase tenant resolution failed. Tenant not found for host:', hostname);
+
       return null;
     }
-    
-    // Fallback or mock behavior
-    return DEMO_TENANT;
+
+    // In mock or local mode:
+    if (isTenantSubdomain && querySlug) {
+      const resolved = await this.getTenantBySlug(querySlug);
+      if (resolved) return resolved;
+      return null; // Fail-closed for unknown subdomain
+    }
+
+    if (isCustomDomain) {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) : null;
+      if (raw) {
+        try {
+          const tenants = JSON.parse(raw);
+          const matched = tenants.find((t: any) => 
+            (t.customDomain && String(t.customDomain).trim().toLowerCase() === cleanHost) ||
+            (t.custom_domain && String(t.custom_domain).trim().toLowerCase() === cleanHost)
+          );
+          if (matched) {
+            return {
+              id: matched.id,
+              slug: matched.slug || matched.id,
+              name: matched.businessName || matched.name,
+              status: matched.status || 'active',
+              createdAt: matched.created_at || new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              verificationStatus: matched.verificationStatus || 'approved',
+              publicSiteStatus: matched.publicSiteStatus || 'published',
+              businessRiskStatus: matched.businessRiskStatus || 'normal',
+            } as Tenant;
+          }
+        } catch (e) {}
+      }
+      return null; // Fail-closed for unknown custom domain
+    }
+
+    if (isLoopback || isRootDomain) {
+      return DEMO_TENANT;
+    }
+
+    return null;
   },
 
   async getTenantById(tenantId: string): Promise<Tenant | null> {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem('lari_registered_tenants') : null;
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) : null;
     if (raw) {
       try {
         const tenants = JSON.parse(raw);
@@ -78,11 +283,26 @@ export const tenantService = {
         if (t) return t as Tenant;
       } catch (e) {}
     }
+    const isLocalMode = getDataSourceMode() === 'local';
+    if (tenantId === 'synthetic_salon_aura_001' && isLocalMode) {
+      const { SYNTHETIC_SALON_AURA } = await import('./syntheticSalonFixtureService');
+      return {
+        id: SYNTHETIC_SALON_AURA.tenantId,
+        slug: SYNTHETIC_SALON_AURA.slug,
+        name: SYNTHETIC_SALON_AURA.businessName,
+        status: 'active',
+        publicSiteStatus: 'published',
+        verificationStatus: 'approved',
+        businessRiskStatus: 'normal',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as Tenant;
+    }
     return null;
   },
 
   async getTenantBySlug(slug: string): Promise<Tenant | null> {
-    const mode = (import.meta as any).env.VITE_DATA_MODE || 'mock';
+    const mode = (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
       const { data, error } = await supabase
         .from('tenants')
@@ -103,7 +323,7 @@ export const tenantService = {
     }
     
     // local mock
-    const raw = localStorage.getItem('lari_registered_tenants');
+    const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS);
     if (raw) {
       try {
         const tenants = JSON.parse(raw);
@@ -111,10 +331,41 @@ export const tenantService = {
         if (tenant) return tenant;
       } catch(e) {}
     }
+    const isLocalMode = getDataSourceMode() === 'local';
+    if (slug === 'aura-nisantasi' && isLocalMode) {
+      const { SYNTHETIC_SALON_AURA } = await import('./syntheticSalonFixtureService');
+      return {
+        id: SYNTHETIC_SALON_AURA.tenantId,
+        slug: SYNTHETIC_SALON_AURA.slug,
+        name: SYNTHETIC_SALON_AURA.businessName,
+        status: 'active',
+        publicSiteStatus: 'published',
+        verificationStatus: 'approved',
+        businessRiskStatus: 'normal',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as Tenant;
+    }
+    if (slug === 'tenant_pilot_demo') {
+      return {
+        id: 'tenant_pilot_demo',
+        slug: 'tenant_pilot_demo',
+        name: 'Lumina Güzellik & Kuaför',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        verificationStatus: 'approved',
+        publicSiteStatus: 'published',
+        businessRiskStatus: 'normal',
+      } as Tenant;
+    }
     return null;
   },
 
   async getCurrentTenant(): Promise<Tenant | null> {
+    if (typeof window === 'undefined') {
+      return null;
+    }
     const hash = window.location.hash || '';
     const path = window.location.pathname || '';
 
@@ -124,29 +375,10 @@ export const tenantService = {
 
     const hostname = window.location.hostname;
     
-    // Check if slug is present in URL hash or path (e.g. /booking/:slug or /:slug)
-    let urlSlug = '';
-    
-    // Parse Hash Routing e.g. #/booking/melis-guzellik or #/melis-guzellik
-    if (hash) {
-      const parts = hash.split('/');
-      // hash usually starts with #/
-      // e.g. #, booking, melis-guzellik
-      if (parts.length >= 3 && parts[1] === 'booking') {
-        urlSlug = parts[2].split('?')[0];
-      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment') {
-        urlSlug = parts[1].split('?')[0];
-      }
-    }
-    
-    // Parse Path routing if not found in hash
+    // Check if slug is present in URL hash or path (e.g. /s/:slug, /booking/:slug, or /:slug)
+    let urlSlug = hash ? extractTenantSlugFromSegments(hash) : '';
     if (!urlSlug && path && path !== '/') {
-      const parts = path.split('/');
-      if (parts.length >= 3 && parts[1] === 'booking') {
-        urlSlug = parts[2];
-      } else if (parts.length >= 2 && parts[1] && parts[1] !== 'book' && parts[1] !== 'admin' && parts[1] !== 'super-admin' && parts[1] !== 'login' && parts[1] !== 'features' && parts[1] !== 'pricing' && parts[1] !== 'mobile-app' && parts[1] !== 'register' && parts[1] !== 'contact' && parts[1] !== 'pilot' && parts[1] !== 'privacy' && parts[1] !== 'terms' && parts[1] !== 'support' && parts[1] !== 'demo' && parts[1] !== 'customer' && parts[1] !== 'appointment') {
-        urlSlug = parts[1];
-      }
+      urlSlug = extractTenantSlugFromSegments(path);
     }
     
     if (urlSlug) {
@@ -157,11 +389,12 @@ export const tenantService = {
         }
         return resolved;
       }
+      return null;
     }
 
     // In all modes, if we are specifically previewing pilot demo, return it.
     // This allows /pilot -> /#/tenant_pilot_demo flow to work even in production/supabase mode without breaking the publish gate.
-    const activeTenantId = localStorage.getItem('lari_active_tenant_id');
+    const activeTenantId = localStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT_ID);
     const isPilotDemoRoute = window.location.hash.includes('#/tenant_pilot_demo') || 
                              window.location.pathname.includes('/tenant_pilot_demo') ||
                              window.location.hash.includes('/pilot/customer') ||
@@ -196,12 +429,26 @@ export const tenantService = {
         } as Tenant;
     }
 
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
-    if (mode === 'mock') {
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
+    if (mode === 'mock' || mode === 'local') {
        if (activeTenantId && activeTenantId !== 'tenant_pilot_demo') {
-          const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || localStorage.getItem('lari_registered_tenants') || '[]');
+          const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
           const tenantRecord = registeredArr.find((t: any) => t.id === activeTenantId);
           if (tenantRecord) {
+             const isAdminRoute = hash.includes('/admin') || path.includes('/admin');
+             if (hostname && hostname !== 'localhost' && !hostname.startsWith('127.')) {
+               const hostTenant = await this.resolveTenantFromHost(hostname);
+               if (isAdminRoute) {
+                 // In admin route, require every non-local host to resolve successfully AND equal authenticated tenant (FINDING-ADIM018-004)
+                 if (!hostTenant || hostTenant.id !== tenantRecord.id) {
+                   console.warn(`[SECURITY] Cross-tenant or unresolved admin access blocked: User belongs to ${tenantRecord.id} but host resolved to ${hostTenant?.id || 'null'}`);
+                   return null;
+                 }
+               } else if (hostTenant && hostTenant.id !== tenantRecord.id) {
+                 return hostTenant;
+               }
+             }
+
              return {
                 id: tenantRecord.id,
                 slug: tenantRecord.slug || tenantRecord.id,
@@ -240,6 +487,20 @@ export const tenantService = {
             
             console.log('getCurrentTenant: tenants result:', { tenantRow, tenantError });
             if (tenantRow) {
+              const isAdminRoute = hash.includes('/admin') || path.includes('/admin');
+              if (hostname && hostname !== 'localhost' && !hostname.startsWith('127.')) {
+                const hostTenant = await this.resolveTenantFromHost(hostname);
+                if (isAdminRoute) {
+                  // In admin route, require every non-local host to resolve successfully AND equal authenticated tenant (FINDING-ADIM018-004)
+                  if (!hostTenant || hostTenant.id !== tenantRow.id) {
+                    console.warn(`[SECURITY] Cross-tenant or unresolved admin access blocked: User belongs to ${tenantRow.id} but host resolved to ${hostTenant?.id || 'null'}`);
+                    return null;
+                  }
+                } else if (hostTenant && hostTenant.id !== tenantRow.id) {
+                  return hostTenant;
+                }
+              }
+
               return {
                 id: tenantRow.id,
                 slug: tenantRow.slug,
@@ -275,8 +536,19 @@ export const tenantService = {
         primaryColor: '#8b5cf6',
       } as TenantBranding;
     }
+
+    const isLocalMode = getDataSourceMode() === 'local';
+    if (tenantId === 'synthetic_salon_aura_001' && isLocalMode) {
+      return {
+        tenantId: 'synthetic_salon_aura_001',
+        businessName: 'Aura Kuaför & Güzellik',
+        tagline: 'Aura Kuaför ve Güzellik',
+        footerText: 'Aura Kuaför & Güzellik. Tüm hakları saklıdır.',
+        primaryColor: '#3b82f6',
+      } as TenantBranding;
+    }
     
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
       const { data: branding, error } = await supabase
         .from('tenant_branding')
@@ -315,12 +587,12 @@ export const tenantService = {
       } as TenantBranding;
     }
     
-    const key = `lari:${tenantId}:branding`;
+    const key = DYNAMIC_STORAGE_KEYS.tenantBrandingColon(tenantId);
     return dataProvider.get<TenantBranding>(key);
   },
 
   async updateTenant(tenantId: string, updates: Partial<Tenant>): Promise<void> {
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
     if (mode.startsWith('supabase')) {
       const { error } = await supabase
         .from('tenants')
@@ -341,7 +613,7 @@ export const tenantService = {
       return;
     }
 
-    let raw = localStorage.getItem('lari_registered_tenants') || localStorage.getItem('lari_registered_tenants');
+    let raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS);
     if (!raw) {
       raw = '[]';
     }
@@ -369,13 +641,12 @@ export const tenantService = {
         };
         tenants.push(item);
       }
-      localStorage.setItem('lari_registered_tenants', JSON.stringify(tenants));
-      localStorage.setItem('lari_registered_tenants', JSON.stringify(tenants));
+      localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(tenants));
     } catch (e) {}
   },
 
   async updateTenantBranding(tenantId: string, updates: Partial<TenantBranding>): Promise<TenantBranding | null> {
-    const mode = import.meta.env?.VITE_DATA_MODE || 'mock';
+    const mode = (typeof process !== 'undefined' && process.env?.VITE_DATA_MODE) || (import.meta as any)?.env?.VITE_DATA_MODE || 'mock';
     
     // Get existing to merge
     const current = await this.getTenantBranding(tenantId) || { tenantId } as TenantBranding;
@@ -404,7 +675,7 @@ export const tenantService = {
       return next;
     }
 
-    const key = `lari:${tenantId}:branding`;
+    const key = DYNAMIC_STORAGE_KEYS.tenantBrandingColon(tenantId);
     await dataProvider.set(key, next);
     return next;
   }

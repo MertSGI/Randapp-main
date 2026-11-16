@@ -4,11 +4,13 @@ on:
   pull_request:
     branches:
       - staging/supabase-staging-consistency
+      - 'review/lari-*'
   push:
     branches:
       - 'review/lari-backup-pristine-restore-*'
       - 'review/lari-b13-*'
       - 'review/lari-b15-*'
+      - 'review/lari-*'
 
 permissions:
   contents: read
@@ -79,3 +81,45 @@ jobs:
 
       - name: 7. Zero-cost quarantine capture static & security QA
         run: npm run qa:zero-cost-quarantine-capture
+
+      - name: 8. V1 truthful client behavioral acceptance
+        run: npm run qa:v1-truthful-client-contracts
+
+      - name: 9. Mandatory P0 recovery hard gate
+        run: npm run qa:recovery-hard-gate
+
+      - name: 10. V1 product, auth and secrets regressions
+        run: |
+          npm run qa:notifications
+          npm run qa:all-communication-notifications
+          npm run qa:payment-run-modes
+          npm run qa:booking-self-service
+          npm run qa:auth-isolation
+          npm run check:secrets
+
+      - name: 11. Phase A functional acceptance QA
+        run: npm run qa:phase-a-functional-acceptance
+
+      - name: 12. Phase B staging source readiness QA
+        run: npm run qa:phase-b-staging-source-readiness
+
+      - name: 13. Phase C payment mode safety & cryptography QA
+        run: |
+          npm run qa:payment-mode-safety
+          npm run qa:payment-security
+          npm run qa:iyzico-webhook-cryptography
+          npm run qa:subscription-lifecycle-integrity
+
+      - name: 14. Phase D routing & subdomain rehearsal QA
+        run: npm run qa:phase-d-routing-rehearsal
+
+      - name: 15. Phase E communication delivery contracts & provider rehearsal QA
+        run: |
+          npm run qa:communication-delivery-contracts
+          npm run qa:communication-provider-rehearsal
+
+      - name: 16. Phase F synthetic first-salon onboarding rehearsal QA
+        run: npm run qa:synthetic-salon-onboarding
+
+      - name: 17. V1 build
+        run: npm run build

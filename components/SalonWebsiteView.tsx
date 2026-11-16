@@ -86,23 +86,26 @@ const SalonWebsiteView: React.FC<SalonWebsiteViewProps> = ({
     return () => clearInterval(interval);
   }, [coverImages.length, isPaused, lightboxImage, handleNextCover]);
 
-  // Lightbox keyboard navigation
+  // Lightbox & AI Modal keyboard navigation
   useEffect(() => {
-     if (!lightboxImage) return;
+     if (!lightboxImage && !isAIOpen) return;
      const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') setLightboxImage(null);
-        if (e.key === 'ArrowRight') {
+        if (e.key === 'Escape') {
+           if (lightboxImage) setLightboxImage(null);
+           if (isAIOpen) setIsAIOpen(false);
+        }
+        if (lightboxImage && e.key === 'ArrowRight') {
            const idx = coverImages.indexOf(lightboxImage);
            if (idx > -1) setLightboxImage(coverImages[(idx + 1) % coverImages.length]);
         }
-        if (e.key === 'ArrowLeft') {
+        if (lightboxImage && e.key === 'ArrowLeft') {
            const idx = coverImages.indexOf(lightboxImage);
            if (idx > -1) setLightboxImage(coverImages[idx === 0 ? coverImages.length - 1 : idx - 1]);
         }
      };
      window.addEventListener('keydown', handleKeyDown);
      return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [lightboxImage, coverImages]);
+  }, [lightboxImage, isAIOpen, coverImages]);
 
   const directionsUrl = businessProfile?.address 
     ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${businessProfile.address} ${businessProfile.district || ''} ${businessProfile.city || ''}`)}` 
@@ -287,12 +290,12 @@ const SalonWebsiteView: React.FC<SalonWebsiteViewProps> = ({
           {/* 3 & 4. Services + AI Combined Section */}
           <div className="flex flex-col xl:flex-row gap-8 items-start">
              {/* Left: Services */}
-             {servicesList.length > 0 && (
-                <section className="flex-1 w-full scroll-mt-24" id="services">
-                   <div className="flex items-center justify-between mb-8">
-                      <h2 className="text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white">{language === 'tr' ? 'Popüler Hizmetler' : 'Popular Services'}</h2>
-                      <span className="bg-blue-50 dark:bg-slate-800 text-accent px-3 py-1 text-sm font-bold rounded-full">{servicesList.length}</span>
-                   </div>
+             <section className="flex-1 w-full scroll-mt-24" id="services">
+                <div className="flex items-center justify-between mb-8">
+                   <h2 className="text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white">{language === 'tr' ? 'Popüler Hizmetler' : 'Popular Services'}</h2>
+                   <span className="bg-blue-50 dark:bg-slate-800 text-accent px-3 py-1 text-sm font-bold rounded-full">{servicesList.length}</span>
+                </div>
+                {servicesList.length > 0 ? (
                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 2xl:grid-cols-3 gap-6">
                       {servicesList.map(service => (
                           <div key={service.id} className="group flex flex-col bg-white dark:bg-slate-800 rounded-3xl border border-gray-200 dark:border-slate-700 hover:shadow-xl hover:border-accent/40 transition-all overflow-hidden h-full">
@@ -327,50 +330,65 @@ const SalonWebsiteView: React.FC<SalonWebsiteViewProps> = ({
                           </div>
                       ))}
                    </div>
+                ) : (
+                   <div
+                      role="status"
+                      data-testid="website-services-empty"
+                      className="p-8 bg-white dark:bg-slate-800 rounded-3xl border border-dashed border-gray-200 dark:border-slate-700 text-center"
+                   >
+                      <p className="text-base font-bold text-gray-700 dark:text-gray-200 mb-1">
+                         {language === 'tr' ? 'Aktif hizmet listesi henüz yayınlanmadı.' : 'Active service catalog is not published yet.'}
+                      </p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                         {language === 'tr' ? 'Detaylı bilgi için işletme iletişim kanallarından bize ulaşabilirsiniz.' : 'Please contact the salon directly for service inquiries.'}
+                      </p>
+                   </div>
+                )}
+             </section>
+
+             {/* Right: AI Card (vertical layout, only when AI plan is enabled) */}
+             {isAiEnabled && (
+                <section className="w-full xl:w-[350px] 2xl:w-[400px] shrink-0 sticky top-24 scroll-mt-24" id="ai-assistant">
+                    <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-violet-900 via-indigo-900 to-fuchsia-900 p-8 text-white shadow-2xl border border-violet-700/30 w-full flex flex-col items-center text-center">
+                        <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center text-3xl mb-6 shadow-inner border border-white/20">🪄</div>
+                        <h2 className="text-2xl font-bold mb-3 tracking-tight">{language === 'tr' ? 'Ne yaptıracağınıza karar veremediniz mi?' : 'Not sure what to book?'}</h2>
+                        <p className="text-violet-200 mb-8 font-medium text-sm leading-relaxed">
+                             {language === 'tr' 
+                                ? 'Saç, sakal veya tırnak fotoğrafınızla stil önerisi alın; size uygun hizmeti seçip randevuya devam edin.' 
+                                : 'Upload your photo and let the AI Style Assistant recommend the best service for you.'}
+                        </p>
+                        
+                        <div className="flex flex-col w-full gap-3">
+                            <button 
+                               onClick={() => setIsAIOpen(true)}
+                               className="w-full py-4 bg-white text-violet-900 font-bold rounded-xl shadow-xl hover:shadow-2xl hover:-translate-y-0.5 transition-all text-sm"
+                            >
+                               {language === 'tr' ? 'AI ile Fikir Al' : 'Get AI Advice'}
+                            </button>
+                            <button 
+                               onClick={onStartBooking}
+                               className="w-full py-3 bg-violet-800/50 hover:bg-violet-700 text-white border border-violet-400/30 font-bold rounded-xl transition-colors text-sm"
+                            >
+                               {language === 'tr' ? 'Öneriye Göre Randevu Al' : 'Book Based on Advice'}
+                            </button>
+                        </div>
+                        
+                        <p className="text-[10px] text-violet-300/60 mt-8 mb-1 leading-tight">
+                             {language === 'tr' 
+                                ? 'Fotoğrafınız yalnızca stil önerisi amacıyla kullanılır. Kimlik tanıma veya sağlık teşhisi yapılmaz.' 
+                                : 'Photos are processed for styling recommendations only. No biometric data is stored.'}
+                        </p>
+                    </div>
                 </section>
              )}
-
-             {/* Right: AI Card (vertical layout) */}
-             <section className="w-full xl:w-[350px] 2xl:w-[400px] shrink-0 sticky top-24 scroll-mt-24" id="ai-assistant">
-                 <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-violet-900 via-indigo-900 to-fuchsia-900 p-8 text-white shadow-2xl border border-violet-700/30 w-full flex flex-col items-center text-center">
-                     <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center text-3xl mb-6 shadow-inner border border-white/20">🪄</div>
-                     <h2 className="text-2xl font-bold mb-3 tracking-tight">{language === 'tr' ? 'Ne yaptıracağınıza karar veremediniz mi?' : 'Not sure what to book?'}</h2>
-                     <p className="text-violet-200 mb-8 font-medium text-sm leading-relaxed">
-                          {language === 'tr' 
-                             ? 'Saç, sakal veya tırnak fotoğrafınızla stil önerisi alın; size uygun hizmeti seçip randevuya devam edin.' 
-                             : 'Upload your photo and let the AI Style Assistant recommend the best service for you.'}
-                     </p>
-                     
-                     <div className="flex flex-col w-full gap-3">
-                         <button 
-                            onClick={() => setIsAIOpen(true)}
-                            className="w-full py-4 bg-white text-violet-900 font-bold rounded-xl shadow-xl hover:shadow-2xl hover:-translate-y-0.5 transition-all text-sm"
-                         >
-                            {language === 'tr' ? 'AI ile Fikir Al' : 'Get AI Advice'}
-                         </button>
-                         <button 
-                            onClick={onStartBooking}
-                            className="w-full py-3 bg-violet-800/50 hover:bg-violet-700 text-white border border-violet-400/30 font-bold rounded-xl transition-colors text-sm"
-                         >
-                            {language === 'tr' ? 'Öneriye Göre Randevu Al' : 'Book Based on Advice'}
-                         </button>
-                     </div>
-                     
-                     <p className="text-[10px] text-violet-300/60 mt-8 mb-1 leading-tight">
-                          {language === 'tr' 
-                             ? 'Fotoğrafınız yalnızca stil önerisi amacıyla kullanılır. Kimlik tanıma veya sağlık teşhisi yapılmaz.' 
-                             : 'Photos are processed for styling recommendations only. No biometric data is stored.'}
-                     </p>
-                 </div>
-             </section>
           </div>
 
           {/* 5. Staff Section */}
-          {staffList.length > 0 && (
-            <section id="staff" className="scroll-mt-24">
-              <div className="flex items-center justify-between mb-8">
-                 <h2 className="text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white">{language === 'tr' ? 'Uzmanlarımız' : 'Our Team'}</h2>
-              </div>
+          <section id="staff" className="scroll-mt-24">
+            <div className="flex items-center justify-between mb-8">
+               <h2 className="text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white">{language === 'tr' ? 'Uzmanlarımız' : 'Our Team'}</h2>
+            </div>
+            {staffList.length > 0 ? (
               <div className="flex flex-wrap justify-center items-stretch gap-6">
                  
                  {/* No Preference Card */}
@@ -417,8 +435,21 @@ const SalonWebsiteView: React.FC<SalonWebsiteViewProps> = ({
                     </div>
                  ))}
               </div>
-            </section>
-          )}
+            ) : (
+              <div
+                role="status"
+                data-testid="website-staff-empty"
+                className="p-8 bg-white dark:bg-slate-800 rounded-3xl border border-dashed border-gray-200 dark:border-slate-700 text-center"
+              >
+                <p className="text-base font-bold text-gray-700 dark:text-gray-200 mb-1">
+                  {language === 'tr' ? 'Aktif uzman listesi henüz yayınlanmadı.' : 'Active staff list is not published yet.'}
+                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {language === 'tr' ? 'Uygunluk durumu için doğrudan randevu adımlarını veya iletişim hattımızı kullanabilirsiniz.' : 'Please contact the salon directly for specialist availability.'}
+                </p>
+              </div>
+            )}
+          </section>
 
           {/* 6. Gallery / Instagram Showcase */}
           <section id="gallery" className="scroll-mt-24">
@@ -561,7 +592,9 @@ const SalonWebsiteView: React.FC<SalonWebsiteViewProps> = ({
                   <ul className="space-y-3 font-medium text-slate-400">
                      <li><button onClick={() => { document.getElementById('services')?.scrollIntoView({ behavior: 'smooth' }); }} className="hover:text-accent transition-colors">{language === 'tr' ? 'Hizmetler' : 'Services'}</button></li>
                      <li><button onClick={() => { document.getElementById('staff')?.scrollIntoView({ behavior: 'smooth' }); }} className="hover:text-accent transition-colors">{language === 'tr' ? 'Uzmanlar' : 'Staff'}</button></li>
-                     <li><button onClick={() => setIsAIOpen(true)} className="hover:text-violet-400 transition-colors flex items-center gap-1.5"><span className="text-lg">🪄</span> {language === 'tr' ? 'AI Stil Asistanı' : 'AI Style'}</button></li>
+                     {isAiEnabled && (
+                        <li><button onClick={() => setIsAIOpen(true)} className="hover:text-violet-400 transition-colors flex items-center gap-1.5"><span className="text-lg">🪄</span> {language === 'tr' ? 'AI Stil Asistanı' : 'AI Style'}</button></li>
+                     )}
                      <li><button onClick={() => { document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' }); }} className="hover:text-accent transition-colors">{language === 'tr' ? 'Konum' : 'Location'}</button></li>
                   </ul>
                </div>
@@ -608,15 +641,23 @@ const SalonWebsiteView: React.FC<SalonWebsiteViewProps> = ({
 
       {/* Lightbox */}
       {lightboxImage && (
-         <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in duration-200" onClick={() => setLightboxImage(null)}>
+         <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={language === 'tr' ? 'Görsel Önizleme' : 'Image Preview'}
+            className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in duration-200"
+            onClick={() => setLightboxImage(null)}
+         >
             <div className="relative w-full max-w-5xl h-full flex items-center justify-center group/lightbox">
-               <button className="absolute top-4 right-4 text-white hover:text-gray-300 z-50 bg-black/40 hover:bg-black/80 rounded-full w-10 h-10 flex items-center justify-center transition-colors border border-white/10" onClick={() => setLightboxImage(null)} title="Kapat">
+               <button type="button" aria-label={language === 'tr' ? 'Kapat' : 'Close'} className="absolute top-4 right-4 text-white hover:text-gray-300 z-50 bg-black/40 hover:bg-black/80 rounded-full w-10 h-10 flex items-center justify-center transition-colors border border-white/10" onClick={() => setLightboxImage(null)} title="Kapat">
                   <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
                </button>
                
                {coverImages.length > 1 && (
                   <>
                      <button 
+                         type="button"
+                         aria-label={language === 'tr' ? 'Önceki' : 'Previous'}
                          onClick={(e) => {
                              e.stopPropagation();
                              const idx = coverImages.indexOf(lightboxImage);
@@ -628,6 +669,8 @@ const SalonWebsiteView: React.FC<SalonWebsiteViewProps> = ({
                         <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7"/></svg>
                      </button>
                      <button 
+                         type="button"
+                         aria-label={language === 'tr' ? 'Sonraki' : 'Next'}
                          onClick={(e) => {
                              e.stopPropagation();
                              const idx = coverImages.indexOf(lightboxImage);
@@ -648,15 +691,23 @@ const SalonWebsiteView: React.FC<SalonWebsiteViewProps> = ({
 
       {/* AI Assistant Modal */}
       {isAIOpen && (
-         <div className="fixed inset-0 z-[110] bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center transition-all">
+         <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ai-modal-title"
+            className="fixed inset-0 z-[110] bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center transition-all"
+         >
              <div className="bg-white dark:bg-slate-900 w-full sm:w-auto sm:min-w-[500px] max-w-lg rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col p-6 sm:p-8 animate-in slide-in-from-bottom-5 sm:slide-in-from-bottom-0 sm:fade-in-0 duration-300 relative border border-gray-100 dark:border-slate-800 h-[85vh] sm:h-auto overflow-y-auto">
-                 <button onClick={() => setIsAIOpen(false)} className="absolute top-4 right-4 w-10 h-10 bg-gray-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors">
+                 <button type="button" aria-label={language === 'tr' ? 'Kapat' : 'Close'} onClick={() => setIsAIOpen(false)} className="absolute top-4 right-4 w-10 h-10 bg-gray-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors">
                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
                  </button>
                  
                  <div className="text-center mb-6 pt-4">
-                     <div className="w-16 h-16 bg-violet-100 dark:bg-violet-900/40 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4 border border-violet-200 dark:border-violet-700">🪄</div>
-                     <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">{language === 'tr' ? 'Randevu öncesi AI Stil Asistanı' : 'AI Style Assistant'}</h3>
+                     <div className="w-16 h-16 bg-violet-100 dark:bg-violet-900/40 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-3 border border-violet-200 dark:border-violet-700">🪄</div>
+                     <span data-testid="ai-simulation-badge" className="inline-block mb-2 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                         {language === 'tr' ? 'Önizleme Simülasyonu (Demo)' : 'Preview Simulation (Demo)'}
+                     </span>
+                     <h3 id="ai-modal-title" className="text-2xl font-bold text-gray-900 dark:text-white mb-2">{language === 'tr' ? 'Randevu öncesi AI Stil Asistanı' : 'AI Style Assistant'}</h3>
                      <p className="text-sm text-gray-500 dark:text-gray-400">
                          {language === 'tr' 
                             ? 'Saç, sakal veya tırnak fikrinizi görselleştirin; hangi hizmete randevu almanız gerektiğini daha kolay seçin.'

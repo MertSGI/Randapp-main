@@ -1,6 +1,7 @@
-import { AvailabilityRule, CatalogRepository } from './types';
-import { Service, Staff, SERVICES as DEMO_SERVICES } from '../../types';
+import { AvailabilityRule, CatalogRepository } from './types.ts';
+import { Service, Staff, SERVICES as DEMO_SERVICES } from '../../types.ts';
 import { dataProvider } from '../dataProvider';
+import { DYNAMIC_STORAGE_KEYS } from '../storageKeys';
 
 const DEMO_STAFF: Staff[] = [
   {
@@ -26,125 +27,217 @@ const DEMO_STAFF: Staff[] = [
   }
 ];
 
+export function requireTenantId(tenantId?: string, operation: string = 'operation'): string {
+  if (!tenantId || typeof tenantId !== 'string' || !tenantId.trim()) {
+    throw new Error(`[localCatalogRepository] Security error: non-empty tenantId is required for ${operation}`);
+  }
+  return tenantId.trim();
+}
+
 export class LocalCatalogRepository implements CatalogRepository {
-  private getServicesKey(tenantId: string) { return `lari:${tenantId}:services`; }
-  private getStaffKey(tenantId: string) { return `lari:${tenantId}:staff`; }
+  private getServicesKey(tenantId: string) { return DYNAMIC_STORAGE_KEYS.tenantServices(tenantId); }
+  private getStaffKey(tenantId: string) { return DYNAMIC_STORAGE_KEYS.tenantStaff(tenantId); }
   // We'll store simple mappings as "staffId_serviceId" -> bool
-  private getStaffServiceMappingKey(tenantId: string) { return `lari:${tenantId}:staff_services`; }
+  private getStaffServiceMappingKey(tenantId: string) { return DYNAMIC_STORAGE_KEYS.tenantStaffServices(tenantId); }
 
   async listServices(tenantId: string, options?: { activeOnly?: boolean }): Promise<Service[]> {
-    const key = this.getServicesKey(tenantId);
+    const cleanTenantId = requireTenantId(tenantId, 'listServices');
+    const key = this.getServicesKey(cleanTenantId);
     const existing = await dataProvider.getList<Service>(key);
     
     if (!existing || existing.length === 0) {
-      const isSeeded = localStorage.getItem(`lari:${tenantId}:is_seeded_services`) === 'true';
+      const isSeeded = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantIsSeededServices(cleanTenantId)) === 'true';
       if (isSeeded) return [];
       
-      const seededServices = DEMO_SERVICES.map(s => ({ ...s, tenantId }));
+      const seededServices = DEMO_SERVICES.map(s => ({ ...s, tenantId: cleanTenantId }));
       await dataProvider.set(key, seededServices);
-      localStorage.setItem(`lari:${tenantId}:is_seeded_services`, 'true');
+      localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantIsSeededServices(cleanTenantId), 'true');
       return options?.activeOnly ? seededServices.filter(s => s.active !== false) : seededServices;
     }
     return options?.activeOnly ? existing.filter(s => s.active !== false) : existing;
   }
 
-  async getServiceById(serviceId: string): Promise<Service | null> {
-    // In local mode, we have to scan keys or assume we can find it.
-    // Better yet: we just iterate all services across tenant if we don't have tenantId...
-    // But usually we do. If we don't, we can search.
-    for (let i = 0; i < localStorage.length; i++) {
-       const key = localStorage.key(i);
-       if (key && key.includes(':services')) {
-          const list = JSON.parse(localStorage.getItem(key) || '[]');
-          const match = list.find((s: Service) => s.id === serviceId);
-          if (match) return match;
-       }
+  async getServiceById(serviceId: string, tenantId?: string): Promise<Service | null> {
+    const cleanTenantId = requireTenantId(tenantId, 'getServiceById');
+    const key = this.getServicesKey(cleanTenantId);
+    let list = await dataProvider.getList<Service>(key) || [];
+    if (list.length === 0) {
+      const isSeeded = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantIsSeededServices(cleanTenantId)) === 'true';
+      if (!isSeeded) {
+        list = await this.listServices(cleanTenantId);
+      }
     }
-    return null;
+    const match = list.find((s: Service) => s.id === serviceId);
+    return match || null;
   }
 
   async createService(tenantId: string, input: Omit<Service, 'id' | 'tenantId'>): Promise<Service> {
-    const key = this.getServicesKey(tenantId);
+    const cleanTenantId = requireTenantId(tenantId, 'createService');
+    const key = this.getServicesKey(cleanTenantId);
     const existing = await dataProvider.getList<Service>(key);
-    const newService: Service = { ...input, id: `srv_${Date.now()}`, tenantId };
+    const newService: Service = { ...input, id: `srv_${Date.now()}`, tenantId: cleanTenantId };
     await dataProvider.set(key, [...(existing || []), newService]);
     return newService;
   }
 
-  async updateService(serviceId: string, patch: Partial<Service>): Promise<Service | null> {
-    const service = await this.getServiceById(serviceId);
-    if (!service) return null;
-    const key = this.getServicesKey(service.tenantId!);
-    const existing = await dataProvider.getList<Service>(key);
-    const updated = existing?.map(s => s.id === serviceId ? { ...s, ...patch } : s) || [];
+  async updateService(serviceId: string, patch: Partial<Service>, tenantId?: string): Promise<Service | null> {
+    const cleanTenantId = requireTenantId(tenantId, 'updateService');
+    if (patch.tenantId !== undefined && patch.tenantId.trim() !== cleanTenantId) {
+      throw new Error('[localCatalogRepository] Tenant isolation violation: cannot alter service tenant_id');
+    }
+    const existingInTenant = await this.getServiceById(serviceId, cleanTenantId);
+    if (!existingInTenant) {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.includes(':services') && key !== this.getServicesKey(cleanTenantId)) {
+          const raw = localStorage.getItem(key);
+          try {
+            const list = raw ? JSON.parse(raw) : [];
+            if (Array.isArray(list) && list.some((s: any) => s && s.id === serviceId)) {
+              throw new Error('[localCatalogRepository] Tenant isolation violation: cannot update service of another tenant');
+            }
+          } catch (e: any) {
+            if (e.message && e.message.includes('Tenant isolation violation')) throw e;
+          }
+        }
+      }
+      return null;
+    }
+    const { tenantId: _t, id: _id, createdAt: _c, ...safePatch } = patch as any;
+    const key = this.getServicesKey(cleanTenantId);
+    const existing = await dataProvider.getList<Service>(key) || [];
+    const updated = existing.map(s => s.id === serviceId ? { ...s, ...safePatch } : s);
     await dataProvider.set(key, updated);
-    return { ...service, ...patch };
+    return { ...existingInTenant, ...safePatch };
   }
 
-  async deleteOrDeactivateService(serviceId: string): Promise<boolean> {
-    const service = await this.getServiceById(serviceId);
-    if (!service) return false;
-    await this.updateService(serviceId, { active: false });
-    return true;
+  async deleteOrDeactivateService(serviceId: string, tenantId?: string): Promise<boolean> {
+    const cleanTenantId = requireTenantId(tenantId, 'deleteOrDeactivateService');
+    const updated = await this.updateService(serviceId, { active: false }, cleanTenantId);
+    return updated !== null;
   }
 
   async listStaff(tenantId: string, options?: { activeOnly?: boolean }): Promise<Staff[]> {
-    const key = this.getStaffKey(tenantId);
+    const cleanTenantId = requireTenantId(tenantId, 'listStaff');
+    const key = this.getStaffKey(cleanTenantId);
     const existing = await dataProvider.getList<Staff>(key);
     
     if (!existing || existing.length === 0) {
-      const isSeeded = localStorage.getItem(`lari:${tenantId}:is_seeded_staff`) === 'true';
+      const isSeeded = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantIsSeededStaff(cleanTenantId)) === 'true';
       if (isSeeded) return [];
       
-      const seededStaff = DEMO_STAFF.map(s => ({ ...s, tenantId }));
+      const seededStaff = DEMO_STAFF.map(s => ({ ...s, tenantId: cleanTenantId }));
       await dataProvider.set(key, seededStaff);
-      localStorage.setItem(`lari:${tenantId}:is_seeded_staff`, 'true');
+      localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantIsSeededStaff(cleanTenantId), 'true');
+
+      const mappingKey = this.getStaffServiceMappingKey(cleanTenantId);
+      if (localStorage.getItem(mappingKey) === null) {
+        const demoMappings: Record<string, string[]> = {
+          staff_1: ['srv_1', 'srv_2', 'srv_3', 'srv_4', 'srv_5'],
+          staff_2: ['srv_1', 'srv_2', 'srv_3', 'srv_4', 'srv_5'],
+          staff_3: ['srv_1', 'srv_2', 'srv_3', 'srv_4', 'srv_5'],
+        };
+        localStorage.setItem(mappingKey, JSON.stringify(demoMappings));
+      }
       return options?.activeOnly ? seededStaff.filter(s => s.active !== false) : seededStaff;
     }
     return options?.activeOnly ? existing.filter(s => s.active !== false) : existing;
   }
 
-  async getStaffById(staffId: string): Promise<Staff | null> {
-    for (let i = 0; i < localStorage.length; i++) {
-       const key = localStorage.key(i);
-       if (key && key.includes(':staff') && !key.includes('staff_services')) {
-          const list = JSON.parse(localStorage.getItem(key) || '[]');
-          const match = list.find((s: Staff) => s.id === staffId);
-          if (match) return match;
-       }
+  async getStaffById(staffId: string, tenantId?: string): Promise<Staff | null> {
+    const cleanTenantId = requireTenantId(tenantId, 'getStaffById');
+    const key = this.getStaffKey(cleanTenantId);
+    let list = await dataProvider.getList<Staff>(key) || [];
+    if (list.length === 0) {
+      const isSeeded = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantIsSeededStaff(cleanTenantId)) === 'true';
+      if (!isSeeded) {
+        list = await this.listStaff(cleanTenantId);
+      }
     }
-    return null;
+    const match = list.find((s: Staff) => s.id === staffId);
+    return match || null;
   }
 
   async createStaff(tenantId: string, input: Omit<Staff, 'id' | 'tenantId'>): Promise<Staff> {
-    const key = this.getStaffKey(tenantId);
+    const cleanTenantId = requireTenantId(tenantId, 'createStaff');
+    const key = this.getStaffKey(cleanTenantId);
     const existing = await dataProvider.getList<Staff>(key);
-    const newStaff: Staff = { ...input, id: `staff_${Date.now()}`, tenantId };
+    const newStaff: Staff = { ...input, id: `staff_${Date.now()}`, tenantId: cleanTenantId };
     await dataProvider.set(key, [...(existing || []), newStaff]);
+
+    // If caller explicitly provides initial service mappings, record them
+    if (Array.isArray((input as any).serviceIds) && (input as any).serviceIds.length > 0) {
+      const mappingKey = this.getStaffServiceMappingKey(cleanTenantId);
+      const mappings = JSON.parse(localStorage.getItem(mappingKey) || '{}');
+      mappings[newStaff.id] = (input as any).serviceIds;
+      localStorage.setItem(mappingKey, JSON.stringify(mappings));
+    }
+
     return newStaff;
   }
 
-  async updateStaff(staffId: string, patch: Partial<Staff>): Promise<Staff | null> {
-    const staff = await this.getStaffById(staffId);
-    if (!staff) return null;
-    const key = this.getStaffKey(staff.tenantId!);
-    const existing = await dataProvider.getList<Staff>(key);
-    const updated = existing?.map(s => s.id === staffId ? { ...s, ...patch } : s) || [];
+  async updateStaff(staffId: string, patch: Partial<Staff>, tenantId?: string): Promise<Staff | null> {
+    const cleanTenantId = requireTenantId(tenantId, 'updateStaff');
+    if (patch.tenantId !== undefined && patch.tenantId.trim() !== cleanTenantId) {
+      throw new Error('[localCatalogRepository] Tenant isolation violation: cannot alter staff tenant_id');
+    }
+    const existingInTenant = await this.getStaffById(staffId, cleanTenantId);
+    if (!existingInTenant) {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.includes(':staff') && !key.includes('staff_services') && key !== this.getStaffKey(cleanTenantId)) {
+          const raw = localStorage.getItem(key);
+          try {
+            const list = raw ? JSON.parse(raw) : [];
+            if (Array.isArray(list) && list.some((s: any) => s && s.id === staffId)) {
+              throw new Error('[localCatalogRepository] Tenant isolation violation: cannot update staff of another tenant');
+            }
+          } catch (e: any) {
+            if (e.message && e.message.includes('Tenant isolation violation')) throw e;
+          }
+        }
+      }
+      return null;
+    }
+    const { tenantId: _t, id: _id, createdAt: _c, ...safePatch } = patch as any;
+    const key = this.getStaffKey(cleanTenantId);
+    const existing = await dataProvider.getList<Staff>(key) || [];
+    const updated = existing.map(s => s.id === staffId ? { ...s, ...safePatch } : s);
     await dataProvider.set(key, updated);
-    return { ...staff, ...patch };
+    return { ...existingInTenant, ...safePatch };
   }
 
-  async deleteOrDeactivateStaff(staffId: string): Promise<boolean> {
-    const staff = await this.getStaffById(staffId);
-    if (!staff) return false;
-    await this.updateStaff(staffId, { active: false });
-    return true;
+  async deleteOrDeactivateStaff(staffId: string, tenantId?: string): Promise<boolean> {
+    const cleanTenantId = requireTenantId(tenantId, 'deleteOrDeactivateStaff');
+    const updated = await this.updateStaff(staffId, { active: false }, cleanTenantId);
+    return updated !== null;
   }
 
-  async assignServiceToStaff(staffId: string, serviceId: string): Promise<void> {
-    const staff = await this.getStaffById(staffId);
-    if (!staff?.tenantId) return;
-    const key = this.getStaffServiceMappingKey(staff.tenantId);
+  async assignServiceToStaff(staffId: string, serviceId: string, tenantId?: string): Promise<void> {
+    const cleanTenantId = requireTenantId(tenantId, 'assignServiceToStaff');
+    const staff = await this.getStaffById(staffId, cleanTenantId);
+    if (!staff) {
+      throw new Error('[localCatalogRepository] Staff not found for tenant');
+    }
+    const service = await this.getServiceById(serviceId, cleanTenantId);
+    if (!service) {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.includes(':services') && k !== this.getServicesKey(cleanTenantId)) {
+          const raw = localStorage.getItem(k);
+          try {
+            const list = raw ? JSON.parse(raw) : [];
+            if (Array.isArray(list) && list.some((s: any) => s && s.id === serviceId)) {
+              throw new Error('[localCatalogRepository] Tenant isolation violation: cannot assign service to staff across tenants');
+            }
+          } catch (e: any) {
+            if (e.message && e.message.includes('Tenant isolation violation')) throw e;
+          }
+        }
+      }
+      throw new Error('[localCatalogRepository] Service not found for tenant');
+    }
+    const key = this.getStaffServiceMappingKey(cleanTenantId);
     const mappings = JSON.parse(localStorage.getItem(key) || '{}');
     if (!mappings[staffId]) mappings[staffId] = [];
     if (!mappings[staffId].includes(serviceId)) {
@@ -153,10 +246,13 @@ export class LocalCatalogRepository implements CatalogRepository {
     }
   }
 
-  async removeServiceFromStaff(staffId: string, serviceId: string): Promise<void> {
-    const staff = await this.getStaffById(staffId);
-    if (!staff?.tenantId) return;
-    const key = this.getStaffServiceMappingKey(staff.tenantId);
+  async removeServiceFromStaff(staffId: string, serviceId: string, tenantId?: string): Promise<void> {
+    const cleanTenantId = requireTenantId(tenantId, 'removeServiceFromStaff');
+    const staff = await this.getStaffById(staffId, cleanTenantId);
+    if (!staff) {
+      throw new Error('[localCatalogRepository] Tenant isolation violation: staff does not belong to requested tenant');
+    }
+    const key = this.getStaffServiceMappingKey(cleanTenantId);
     const mappings = JSON.parse(localStorage.getItem(key) || '{}');
     if (mappings[staffId]) {
       mappings[staffId] = mappings[staffId].filter((id: string) => id !== serviceId);
@@ -165,29 +261,47 @@ export class LocalCatalogRepository implements CatalogRepository {
   }
 
   async listStaffForService(tenantId: string, serviceId: string): Promise<Staff[]> {
-    const staffList = await this.listStaff(tenantId, { activeOnly: true });
-    // In local mode, if we haven't mapped anything, we assume all staff can do all seeded services for simplicity
-    // unless they specifically have a mapping array.
-    const key = this.getStaffServiceMappingKey(tenantId);
-    const mappings = JSON.parse(localStorage.getItem(key) || 'null');
-    
-    if (!mappings) {
-       return staffList; // No explicit mappings, everyone can do everything
+    const cleanTenantId = requireTenantId(tenantId, 'listStaffForService');
+    const service = await this.getServiceById(serviceId, cleanTenantId);
+    if (!service) return [];
+
+    const staffList = await this.listStaff(cleanTenantId, { activeOnly: true });
+    if (!staffList || staffList.length === 0) return [];
+
+    const key = this.getStaffServiceMappingKey(cleanTenantId);
+    const rawMappings = localStorage.getItem(key);
+    if (rawMappings === null) {
+      return staffList.filter(s => {
+        if (Array.isArray((s as any).serviceIds) && (s as any).serviceIds.length > 0) {
+          return (s as any).serviceIds.includes(serviceId);
+        }
+        return false;
+      });
     }
-    
+
+    const mappings = JSON.parse(rawMappings || '{}');
     return staffList.filter(s => {
-       const theirServices = mappings[s.id];
-       if (!theirServices || theirServices.length === 0) return true; // If they have no mappings explicitly set, fallback to true, or false depending on rigidness. Let's say true for demo.
-       return theirServices.includes(serviceId);
+      const theirServices = mappings[s.id] || (Array.isArray((s as any).serviceIds) ? (s as any).serviceIds : undefined);
+      if (theirServices && Array.isArray(theirServices) && theirServices.length > 0) {
+        return theirServices.includes(serviceId);
+      }
+      return false;
     });
   }
 
-  async listServicesForStaff(staffId: string): Promise<string[]> {
-    const staff = await this.getStaffById(staffId);
-    if (!staff?.tenantId) return [];
-    const key = this.getStaffServiceMappingKey(staff.tenantId);
+  async listServicesForStaff(staffId: string, tenantId?: string): Promise<string[]> {
+    const cleanTenantId = requireTenantId(tenantId, 'listServicesForStaff');
+    const staff = await this.getStaffById(staffId, cleanTenantId);
+    if (!staff) return [];
+    const key = this.getStaffServiceMappingKey(cleanTenantId);
     const mappings = JSON.parse(localStorage.getItem(key) || '{}');
-    return Array.isArray(mappings[staffId]) ? mappings[staffId] : [];
+    const rawIds: string[] = Array.isArray(mappings[staffId]) ? mappings[staffId] : [];
+    if (rawIds.length === 0) return [];
+
+    // Intersect mapped service IDs with tenant-owned services to prevent corrupted/cross-tenant leaks (FINDING-ADIM023-014)
+    const tenantServices = await this.listServices(cleanTenantId);
+    const allowedIds = new Set(tenantServices.map(s => s.id));
+    return rawIds.filter(id => allowedIds.has(id));
   }
 
   private normalizeAvailabilityRule(tenantId: string, rule: any): AvailabilityRule {
@@ -216,8 +330,9 @@ export class LocalCatalogRepository implements CatalogRepository {
   }
 
   async listAvailabilityRules(tenantId: string, staffId?: string): Promise<AvailabilityRule[]> {
-    const localData = localStorage.getItem(`lari:${tenantId}:availability_rules`);
-    let rules = (localData ? JSON.parse(localData) : []).map((rule: any) => this.normalizeAvailabilityRule(tenantId, rule));
+    const cleanTenantId = requireTenantId(tenantId, 'listAvailabilityRules');
+    const localData = localStorage.getItem(DYNAMIC_STORAGE_KEYS.tenantAvailabilityRules(cleanTenantId));
+    let rules = (localData ? JSON.parse(localData) : []).map((rule: any) => this.normalizeAvailabilityRule(cleanTenantId, rule));
     if (rules.length === 0) {
       const seeded: AvailabilityRule[] = [];
       const staffIds = ['staff_1', 'staff_2', 'staff_3'];
@@ -225,7 +340,7 @@ export class LocalCatalogRepository implements CatalogRepository {
         for (let d = 1; d <= 7; d++) {
           seeded.push({
             id: `rule_seeded_${sid}_${d}`,
-            tenantId,
+            tenantId: cleanTenantId,
             staffId: sid,
             weekday: d,
             is_active: true,
@@ -235,7 +350,7 @@ export class LocalCatalogRepository implements CatalogRepository {
         }
       }
       rules = seeded;
-      localStorage.setItem(`lari:${tenantId}:availability_rules`, JSON.stringify(rules));
+      localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantAvailabilityRules(cleanTenantId), JSON.stringify(rules));
     }
     if (staffId) {
       return rules.filter((r: AvailabilityRule) => r.staffId === staffId || r.staffId == null);
@@ -243,38 +358,49 @@ export class LocalCatalogRepository implements CatalogRepository {
     return rules;
   }
 
-  async updateAvailabilityRule(ruleId: string, patch: Partial<AvailabilityRule>): Promise<void> {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key || !key.endsWith(':availability_rules')) continue;
-      const tenantId = key.split(':')[1];
-      const rules = JSON.parse(localStorage.getItem(key) || '[]').map((rule: any) => this.normalizeAvailabilityRule(tenantId, rule));
-      const index = rules.findIndex((rule: AvailabilityRule) => rule.id === ruleId);
-      if (index < 0) continue;
-
-      const updated = { ...rules[index], ...patch };
+  async updateAvailabilityRule(ruleId: string, patch: Partial<AvailabilityRule>, tenantId?: string): Promise<void> {
+    const cleanTenantId = requireTenantId(tenantId, 'updateAvailabilityRule');
+    if (patch.tenantId !== undefined && patch.tenantId.trim() !== cleanTenantId) {
+      throw new Error('[localCatalogRepository] Tenant isolation violation: cannot alter availability rule tenantId');
+    }
+    const key = DYNAMIC_STORAGE_KEYS.tenantAvailabilityRules(cleanTenantId);
+    const rules = JSON.parse(localStorage.getItem(key) || '[]').map((rule: any) => this.normalizeAvailabilityRule(cleanTenantId, rule));
+    const index = rules.findIndex((rule: AvailabilityRule) => rule.id === ruleId);
+    if (index >= 0) {
+      const { tenantId: _t, id: _id, ...safePatch } = patch as any;
+      const updated = { ...rules[index], ...safePatch };
       this.assertValidAvailabilityRule(updated);
       rules[index] = updated;
       localStorage.setItem(key, JSON.stringify(rules));
       return;
     }
-    throw new Error(`Availability rule not found: ${ruleId}`);
+    for (let i = 0; i < localStorage.length; i++) {
+      const otherKey = localStorage.key(i);
+      if (otherKey && otherKey.endsWith(':availability_rules') && otherKey !== key) {
+        const otherRules = JSON.parse(localStorage.getItem(otherKey) || '[]');
+        if (Array.isArray(otherRules) && otherRules.some((r: any) => r && r.id === ruleId)) {
+          throw new Error('[localCatalogRepository] Tenant isolation violation: cannot update availability rule of another tenant');
+        }
+      }
+    }
+    throw new Error(`Availability rule not found for tenant: ${ruleId}`);
   }
 
   async createAvailabilityRule(tenantId: string, input: Omit<AvailabilityRule, 'id' | 'tenantId'>): Promise<AvailabilityRule> {
-    const rules = await this.listAvailabilityRules(tenantId);
-    const normalizedInput = this.normalizeAvailabilityRule(tenantId, { ...input, tenantId });
+    const cleanTenantId = requireTenantId(tenantId, 'createAvailabilityRule');
+    const rules = await this.listAvailabilityRules(cleanTenantId);
+    const normalizedInput = this.normalizeAvailabilityRule(cleanTenantId, { ...input, tenantId: cleanTenantId });
     this.assertValidAvailabilityRule(normalizedInput);
 
     const duplicateIndex = rules.findIndex((rule: AvailabilityRule) =>
-      rule.tenantId === tenantId &&
+      rule.tenantId === cleanTenantId &&
       (rule.staffId || null) === (normalizedInput.staffId || null) &&
       rule.weekday === normalizedInput.weekday
     );
 
     const nextRule: AvailabilityRule = {
       ...normalizedInput,
-      id: rules[duplicateIndex]?.id || `rule_${tenantId}_${normalizedInput.staffId || 'tenant'}_${normalizedInput.weekday}`
+      id: rules[duplicateIndex]?.id || `rule_${cleanTenantId}_${normalizedInput.staffId || 'tenant'}_${normalizedInput.weekday}`
     };
 
     if (duplicateIndex >= 0) {
@@ -283,13 +409,14 @@ export class LocalCatalogRepository implements CatalogRepository {
       rules.push(nextRule);
     }
 
-    localStorage.setItem(`lari:${tenantId}:availability_rules`, JSON.stringify(rules));
+    localStorage.setItem(DYNAMIC_STORAGE_KEYS.tenantAvailabilityRules(cleanTenantId), JSON.stringify(rules));
     return nextRule;
   }
 
   async archiveService(tenantId: string, serviceId: string): Promise<boolean> {
-    await this.updateService(serviceId, { active: false });
-    return true;
+    const cleanTenantId = requireTenantId(tenantId, 'archiveService');
+    const updated = await this.updateService(serviceId, { active: false }, cleanTenantId);
+    return updated !== null;
   }
 
   async listPublicActiveServicesByTenantSlug(slug: string): Promise<Service[]> {
@@ -298,8 +425,9 @@ export class LocalCatalogRepository implements CatalogRepository {
   }
 
   async archiveStaff(tenantId: string, staffId: string): Promise<boolean> {
-    await this.updateStaff(staffId, { active: false });
-    return true;
+    const cleanTenantId = requireTenantId(tenantId, 'archiveStaff');
+    const updated = await this.updateStaff(staffId, { active: false }, cleanTenantId);
+    return updated !== null;
   }
 
   async listPublicActiveStaffByTenantSlug(slug: string): Promise<Staff[]> {
@@ -308,20 +436,26 @@ export class LocalCatalogRepository implements CatalogRepository {
   }
 
   async getAvailability(tenantId: string): Promise<any> {
-    return this.listAvailabilityRules(tenantId);
+    const cleanTenantId = requireTenantId(tenantId, 'getAvailability');
+    return this.listAvailabilityRules(cleanTenantId);
   }
 
   async updateAvailability(tenantId: string, input: any): Promise<any> {
-    const rules = await this.listAvailabilityRules(tenantId);
+    const cleanTenantId = requireTenantId(tenantId, 'updateAvailability');
+    if (input && typeof input === 'object') {
+      if (input.tenantId !== undefined && String(input.tenantId).trim() !== cleanTenantId) {
+        throw new Error('[localCatalogRepository] Tenant isolation violation: cannot alter availability rule tenantId');
+      }
+    }
+    const rules = await this.listAvailabilityRules(cleanTenantId);
     if (rules.length > 0) {
       const firstRule = rules[0];
-      const updated = { ...firstRule, ...input };
-      const index = rules.findIndex((r: any) => r.id === firstRule.id);
-      rules[index] = updated;
-      localStorage.setItem(`lari:${tenantId}:availability_rules`, JSON.stringify(rules));
-      return updated;
+      await this.updateAvailabilityRule(firstRule.id, input, cleanTenantId);
+      const refreshed = (await this.listAvailabilityRules(cleanTenantId)).find(r => r.id === firstRule.id);
+      return refreshed || firstRule;
     } else {
-      return this.createAvailabilityRule(tenantId, input);
+      const { tenantId: _t, id: _id, ...safeInput } = (input || {}) as any;
+      return this.createAvailabilityRule(cleanTenantId, safeInput);
     }
   }
 

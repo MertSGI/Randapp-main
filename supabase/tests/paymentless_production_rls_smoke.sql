@@ -60,14 +60,17 @@ BEGIN
       (appt_a, tenant_a, 'Jane A', 'jane@a.com', '+905555555551', '2026-08-01', '10:00:00', 'pending'),
       (appt_b, tenant_b, 'Bob B', 'bob@b.com', '+905555555552', '2026-08-01', '11:00:00', 'pending');
 
-    -- 6. Self-service Access Token
-    INSERT INTO public.appointment_access_tokens (id, tenant_id, appointment_id, token, expires_at)
+    -- 6. Self-service Access Token (canonical token_hash column)
+    INSERT INTO public.appointment_access_tokens (id, tenant_id, appointment_id, token_hash, expires_at)
     VALUES
-      (token_a, tenant_a, appt_a, 'secure-hash-token-a', now() + interval '24 hours');
+      (token_a, tenant_a::text, appt_a, encode(sha256('secure-raw-token-a'::bytea), 'hex'), now() + interval '24 hours');
 
-    -- 7. Policy Acceptances and Consent Rows
-    INSERT INTO public.policy_acceptances (tenant_id, user_id, ip_address, policy_version)
-    VALUES (tenant_a, owner_a_id, '127.0.0.1', 'kvkk_v1');
+    -- 7. Policy Acceptances and Consent Ledger Rows
+    INSERT INTO public.consent_ledger (tenant_id, customer_id, consent_type, is_granted, ip_address)
+    VALUES (tenant_a::text, owner_a_id::text, 'kvkk', true, '127.0.0.1');
+
+    INSERT INTO public.policy_acceptances (tenant_id, user_id, policy_type, version, ip_address, user_agent)
+    VALUES (tenant_a::text, owner_a_id::text, 'kvkk_consent', '1.0', '127.0.0.1', 'rls-smoke-test');
 
     -- 8. Audit Event Row
     INSERT INTO public.audit_events (tenant_id, event_type, actor_id, details)
@@ -116,8 +119,44 @@ SELECT 'TEST_4B' as test, COUNT(*) as result_count FROM public.customers;
 -- EXPECTED: 0 rows (blocked by SELECT policy)
 
 
--- Test 5: Policy/consent rows are isolated and tenant-scoped
--- TODO: Verify KVKK consent ledger behaves exactly like standard multi-tenant scoping.
+-- Test 5: Policy/consent and token rows are isolated and tenant-scoped
+-- 5A: Owner A can read own tenant's consent_ledger, policy_acceptances, and appointment_access_tokens rows
+SET LOCAL request.jwt.claim.sub = '1a1a1a1a-a1a1-a1a1-a1a1-111111111111';
+SET LOCAL role = 'authenticated';
+
+SELECT 'TEST_5A_CONSENT_OWN' as test, COUNT(*) as result_count
+FROM public.consent_ledger
+WHERE tenant_id = 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa';
+-- EXPECTED: >= 1 row (Owner A reads own tenant consent rows)
+
+SELECT 'TEST_5A_POLICY_OWN' as test, COUNT(*) as result_count
+FROM public.policy_acceptances
+WHERE tenant_id = 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa';
+-- EXPECTED: >= 1 row (Owner A reads own tenant policy acceptance rows)
+
+SELECT 'TEST_5A_TOKENS_OWN' as test, COUNT(*) as result_count
+FROM public.appointment_access_tokens
+WHERE tenant_id = 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa';
+-- EXPECTED: >= 1 row (Owner A reads own tenant access token rows)
+
+-- 5B: Owner B cannot read Tenant A's consent_ledger, policy_acceptances, or appointment_access_tokens rows
+SET LOCAL request.jwt.claim.sub = '2b2b2b2b-b2b2-b2b2-b2b2-222222222222';
+SET LOCAL role = 'authenticated';
+
+SELECT 'TEST_5B_CONSENT_CROSS_TENANT' as test, COUNT(*) as result_count
+FROM public.consent_ledger
+WHERE tenant_id = 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa';
+-- EXPECTED: 0 rows (Owner B blocked from reading Tenant A consent rows)
+
+SELECT 'TEST_5B_POLICY_CROSS_TENANT' as test, COUNT(*) as result_count
+FROM public.policy_acceptances
+WHERE tenant_id = 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa';
+-- EXPECTED: 0 rows (Owner B blocked from reading Tenant A policy acceptance rows)
+
+SELECT 'TEST_5B_TOKENS_CROSS_TENANT' as test, COUNT(*) as result_count
+FROM public.appointment_access_tokens
+WHERE tenant_id = 'aaaa1111-a1a1-a1a1-a1a1-aaaaaaaaaaaa';
+-- EXPECTED: 0 rows (Owner B blocked from reading Tenant A access tokens)
 
 
 -- Test 6: Audit/support tickets rows are tenant-scoped or Super Admin-only

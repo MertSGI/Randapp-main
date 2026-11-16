@@ -49,6 +49,12 @@ export const TenantProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   useEffect(() => {
     loadTenant();
+    window.addEventListener('hashchange', loadTenant);
+    window.addEventListener('popstate', loadTenant);
+    return () => {
+      window.removeEventListener('hashchange', loadTenant);
+      window.removeEventListener('popstate', loadTenant);
+    };
   }, []);
 
   const value = {

@@ -258,6 +258,30 @@ export function parseBillingTransactionsResponse(data: any, params?: { limit?: n
   };
 }
 
+function normalizeMutationResult(data: unknown): MutationResult {
+  if (!data || typeof data !== 'object') {
+    return { success: false, reason_code: 'empty_response' };
+  }
+  const candidate = data as MutationResult;
+  if (candidate.success !== true) {
+    return {
+      ...candidate,
+      success: false,
+      reason_code: candidate.reason_code || 'mutation_rejected'
+    };
+  }
+  return candidate;
+}
+
+function validateMutationRequiredFields(checks: Array<[string, string | null | undefined]>): MutationResult | null {
+  for (const [reasonCode, value] of checks) {
+    if (typeof value !== 'string' || !value.trim()) {
+      return { success: false, reason_code: reasonCode };
+    }
+  }
+  return null;
+}
+
 export const superAdminCommercialAdapter = {
   /**
    * Get public commercial plan catalog (H1A read contract)
@@ -265,18 +289,40 @@ export const superAdminCommercialAdapter = {
   async getPublicPlanCatalog(): Promise<CommercialPlanCatalogItem[]> {
     const { data, error } = await supabase.rpc('get_public_commercial_plan_catalog');
     if (error) throw new Error(error.message);
-    return data || [];
+    return Array.isArray(data) ? data : [];
   },
 
   /**
    * Get tenant commercial enforcement snapshot (H1C Super Admin diagnostic contract)
    */
   async getTenantSnapshot(tenantId: string): Promise<TenantCommercialEnforcementSnapshot> {
+    const normalizedTenantId = typeof tenantId === 'string' ? tenantId.trim() : '';
+    if (!normalizedTenantId) {
+      return { success: false, reason_code: 'invalid_tenant_id' };
+    }
+
     const { data, error } = await supabase.rpc('super_admin_get_tenant_commercial_enforcement_snapshot', {
-      p_tenant_id: tenantId
+      p_tenant_id: normalizedTenantId
     });
     if (error) throw new Error(error.message);
-    return data || { success: false, reason_code: 'unknown_error' };
+    if (!data || typeof data !== 'object') {
+      return { success: false, reason_code: 'empty_response' };
+    }
+    const snapshot = data as TenantCommercialEnforcementSnapshot;
+    if (snapshot.success === true) {
+      if (snapshot.tenant_id !== normalizedTenantId) {
+        return { success: false, reason_code: 'tenant_mismatch' };
+      }
+      return snapshot;
+    }
+    if (snapshot.tenant_id && snapshot.tenant_id !== normalizedTenantId) {
+      return { success: false, reason_code: 'tenant_mismatch' };
+    }
+    return {
+      ...snapshot,
+      success: false,
+      reason_code: snapshot.reason_code || 'snapshot_rejected'
+    };
   },
 
   /**
@@ -321,10 +367,17 @@ export const superAdminCommercialAdapter = {
     startsAt?: string | null;
     expiresAt?: string | null;
   }): Promise<MutationResult> {
+    const invalid = validateMutationRequiredFields([
+      ['missing_idempotency_key', params.idempotencyKey],
+      ['missing_feature_key', params.featureKey],
+      ['missing_operator_reason', params.reason]
+    ]);
+    if (invalid) return invalid;
+
     const rpcArgs = buildCreateRestrictionRpcArgs(params);
     const { data, error } = await supabase.rpc('super_admin_create_platform_restriction', rpcArgs);
     if (error) throw new Error(error.message);
-    return data;
+    return normalizeMutationResult(data);
   },
 
   /**
@@ -335,10 +388,17 @@ export const superAdminCommercialAdapter = {
     restrictionId: string;
     reason: string;
   }): Promise<MutationResult> {
+    const invalid = validateMutationRequiredFields([
+      ['missing_idempotency_key', params.idempotencyKey],
+      ['missing_restriction_id', params.restrictionId],
+      ['missing_operator_reason', params.reason]
+    ]);
+    if (invalid) return invalid;
+
     const rpcArgs = buildEndRestrictionRpcArgs(params);
     const { data, error } = await supabase.rpc('super_admin_end_platform_restriction', rpcArgs);
     if (error) throw new Error(error.message);
-    return data;
+    return normalizeMutationResult(data);
   },
 
   /**
@@ -368,10 +428,17 @@ export const superAdminCommercialAdapter = {
     customDomainApproved?: boolean;
     internalNote?: string;
   }): Promise<MutationResult> {
+    const invalid = validateMutationRequiredFields([
+      ['missing_idempotency_key', params.idempotencyKey],
+      ['invalid_tenant_id', params.tenantId],
+      ['missing_plan_code', params.planCode]
+    ]);
+    if (invalid) return invalid;
+
     const { data, error } = await supabase.rpc('super_admin_assign_commercial_plan', {
-      p_idempotency_key: params.idempotencyKey,
-      p_tenant_id: params.tenantId,
-      p_plan_code: params.planCode,
+      p_idempotency_key: params.idempotencyKey.trim(),
+      p_tenant_id: params.tenantId.trim(),
+      p_plan_code: params.planCode.trim(),
       p_version_number: params.versionNumber ?? 1,
       p_billing_mode: params.billingMode ?? 'manual',
       p_agreed_amount: params.agreedAmount ?? null,
@@ -379,7 +446,7 @@ export const superAdminCommercialAdapter = {
       p_internal_note: params.internalNote ?? null
     });
     if (error) throw new Error(error.message);
-    return data;
+    return normalizeMutationResult(data);
   },
 
   /**
@@ -391,14 +458,22 @@ export const superAdminCommercialAdapter = {
     targetStatus: string;
     operatorReason: string;
   }): Promise<MutationResult> {
+    const invalid = validateMutationRequiredFields([
+      ['missing_idempotency_key', params.idempotencyKey],
+      ['invalid_tenant_id', params.tenantId],
+      ['missing_target_status', params.targetStatus],
+      ['missing_operator_reason', params.operatorReason]
+    ]);
+    if (invalid) return invalid;
+
     const { data, error } = await supabase.rpc('super_admin_change_subscription_status', {
-      p_idempotency_key: params.idempotencyKey,
-      p_tenant_id: params.tenantId,
-      p_target_status: params.targetStatus,
-      p_operator_reason: params.operatorReason
+      p_idempotency_key: params.idempotencyKey.trim(),
+      p_tenant_id: params.tenantId.trim(),
+      p_target_status: params.targetStatus.trim(),
+      p_operator_reason: params.operatorReason.trim()
     });
     if (error) throw new Error(error.message);
-    return data;
+    return normalizeMutationResult(data);
   },
 
   /**
@@ -411,15 +486,24 @@ export const superAdminCommercialAdapter = {
     effectiveAt: string;
     operatorReason: string;
   }): Promise<MutationResult> {
+    const invalid = validateMutationRequiredFields([
+      ['missing_idempotency_key', params.idempotencyKey],
+      ['invalid_tenant_id', params.tenantId],
+      ['missing_plan_code', params.targetPlanCode],
+      ['missing_effective_at', params.effectiveAt],
+      ['missing_operator_reason', params.operatorReason]
+    ]);
+    if (invalid) return invalid;
+
     const { data, error } = await supabase.rpc('super_admin_schedule_plan_change', {
-      p_idempotency_key: params.idempotencyKey,
-      p_tenant_id: params.tenantId,
-      p_target_plan_code: params.targetPlanCode,
+      p_idempotency_key: params.idempotencyKey.trim(),
+      p_tenant_id: params.tenantId.trim(),
+      p_target_plan_code: params.targetPlanCode.trim(),
       p_effective_at: params.effectiveAt,
-      p_operator_reason: params.operatorReason
+      p_operator_reason: params.operatorReason.trim()
     });
     if (error) throw new Error(error.message);
-    return data;
+    return normalizeMutationResult(data);
   },
 
   /**
@@ -430,13 +514,20 @@ export const superAdminCommercialAdapter = {
     tenantId: string;
     operatorReason: string;
   }): Promise<MutationResult> {
+    const invalid = validateMutationRequiredFields([
+      ['missing_idempotency_key', params.idempotencyKey],
+      ['invalid_tenant_id', params.tenantId],
+      ['missing_operator_reason', params.operatorReason]
+    ]);
+    if (invalid) return invalid;
+
     const { data, error } = await supabase.rpc('super_admin_cancel_scheduled_plan_change', {
-      p_idempotency_key: params.idempotencyKey,
-      p_tenant_id: params.tenantId,
-      p_operator_reason: params.operatorReason
+      p_idempotency_key: params.idempotencyKey.trim(),
+      p_tenant_id: params.tenantId.trim(),
+      p_operator_reason: params.operatorReason.trim()
     });
     if (error) throw new Error(error.message);
-    return data;
+    return normalizeMutationResult(data);
   },
 
   /**
@@ -446,12 +537,18 @@ export const superAdminCommercialAdapter = {
     idempotencyKey: string;
     tenantId: string;
   }): Promise<MutationResult> {
+    const invalid = validateMutationRequiredFields([
+      ['missing_idempotency_key', params.idempotencyKey],
+      ['invalid_tenant_id', params.tenantId]
+    ]);
+    if (invalid) return invalid;
+
     const { data, error } = await supabase.rpc('super_admin_apply_due_scheduled_plan_change', {
-      p_idempotency_key: params.idempotencyKey,
-      p_tenant_id: params.tenantId
+      p_idempotency_key: params.idempotencyKey.trim(),
+      p_tenant_id: params.tenantId.trim()
     });
     if (error) throw new Error(error.message);
-    return data;
+    return normalizeMutationResult(data);
   },
 
   /**
@@ -468,19 +565,31 @@ export const superAdminCommercialAdapter = {
     externalReference?: string;
     operatorReason: string;
   }): Promise<MutationResult> {
+    const invalid = validateMutationRequiredFields([
+      ['missing_idempotency_key', params.idempotencyKey],
+      ['invalid_tenant_id', params.tenantId],
+      ['missing_transaction_type', params.transactionType],
+      ['missing_operator_reason', params.operatorReason]
+    ]);
+    if (invalid) return invalid;
+
+    if (typeof params.amount !== 'number' || !Number.isFinite(params.amount) || params.amount < 0) {
+      return { success: false, reason_code: 'invalid_amount' };
+    }
+
     const { data, error } = await supabase.rpc('super_admin_record_billing_transaction', {
-      p_idempotency_key: params.idempotencyKey,
-      p_tenant_id: params.tenantId,
+      p_idempotency_key: params.idempotencyKey.trim(),
+      p_tenant_id: params.tenantId.trim(),
       p_amount: params.amount,
       p_currency: params.currency ?? 'TRY',
-      p_transaction_type: params.transactionType,
+      p_transaction_type: params.transactionType.trim(),
       p_transaction_status: params.transactionStatus ?? 'settled',
       p_billing_mode: params.billingMode ?? 'manual',
       p_external_reference: params.externalReference ?? null,
-      p_operator_reason: params.operatorReason
+      p_operator_reason: params.operatorReason.trim()
     });
     if (error) throw new Error(error.message);
-    return data;
+    return normalizeMutationResult(data);
   },
 
   /**
@@ -500,16 +609,24 @@ export const superAdminCommercialAdapter = {
     endsAt?: string;
     operatorReason: string;
   }): Promise<MutationResult> {
+    const invalid = validateMutationRequiredFields([
+      ['missing_idempotency_key', params.idempotencyKey],
+      ['invalid_tenant_id', params.tenantId],
+      ['missing_feature_key', params.featureKey],
+      ['missing_operator_reason', params.operatorReason]
+    ]);
+    if (invalid) return invalid;
+
     const { data, error } = await supabase.rpc('super_admin_manage_tenant_entitlement_override', {
-      p_idempotency_key: params.idempotencyKey,
-      p_tenant_id: params.tenantId,
-      p_feature_key: params.featureKey,
+      p_idempotency_key: params.idempotencyKey.trim(),
+      p_tenant_id: params.tenantId.trim(),
+      p_feature_key: params.featureKey.trim(),
       p_action: params.action,
       p_override_value: params.overrideValue ? JSON.stringify(params.overrideValue) : null,
       p_ends_at: params.endsAt ?? null,
-      p_operator_reason: params.operatorReason
+      p_operator_reason: params.operatorReason.trim()
     });
     if (error) throw new Error(error.message);
-    return data;
+    return normalizeMutationResult(data);
   }
 };

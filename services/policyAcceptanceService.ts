@@ -6,8 +6,9 @@ import {
 } from '../types';
 import { legalDocumentService } from './legalDocumentService';
 import { auditLogService } from './auditLogService';
+import { STORAGE_KEYS } from './storageKeys';
 
-const ACCEPTANCE_STORAGE_KEY = 'lari_policy_acceptances_v1';
+const ACCEPTANCE_STORAGE_KEY = STORAGE_KEYS.POLICY_ACCEPTANCES;
 
 export interface RecordPolicyAcceptanceInput {
   tenantId?: string;

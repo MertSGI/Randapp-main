@@ -1,61 +1,74 @@
 import { tenantService } from './tenantService';
 import { entitlementService } from './entitlementService';
-import { Tenant } from '../types';
+import type { Tenant } from '../types';
+import {
+  RESERVED_SLUGS_LIST,
+  SLUG_VALIDATION_REASONS,
+  type SlugValidationResult,
+  generateSlugFromName,
+  isReservedSlugWord,
+  normalizeCanonicalSlug,
+  validateSlugFormat,
+} from '../utils/slugUtils';
 
-export const RESERVED_SLUGS = [
-  'admin', 'login', 'register', 'pricing', 'demo', 'pilot', 'book', 'api',
-  'super-admin', 'settings', 'checkout', 'payment', 'help', 'support',
-  'randevu', 'lari', 'app', 'www', 'mail', 'ftp'
-];
+export const RESERVED_SLUGS: string[] = [...RESERVED_SLUGS_LIST];
 
 export const publicLinkService = {
   normalizeSlug(input: string): string {
-    const trMap: { [key: string]: string } = {
-      'ç': 'c', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u',
-      'Ç': 'c', 'Ğ': 'g', 'İ': 'i', 'Ö': 'o', 'Ş': 's', 'Ü': 'u'
-    };
-    let slug = input.replace(/[çğıöşüÇĞİÖŞÜ]/g, match => trMap[match] || match);
-    slug = slug.toLowerCase();
-    slug = slug.replace(/[^a-z0-9-]/g, '-');
-    slug = slug.replace(/-+/g, '-');
-    slug = slug.replace(/^-|-$/g, '');
-    return slug;
+    return normalizeCanonicalSlug(input);
   },
 
   isReservedSlug(slug: string): boolean {
-    return RESERVED_SLUGS.includes(slug.toLowerCase());
+    return isReservedSlugWord(slug);
   },
 
-  async validateSlug(slug: string, currentTenantId?: string): Promise<{ isValid: boolean; error?: string }> {
-    const normalized = this.normalizeSlug(slug);
-    
-    if (!normalized || normalized.length < 3) {
-      return { isValid: false, error: 'Link en az 3 karakter olmalıdır.' };
+  async validateSlug(slug: string, currentTenantId?: string): Promise<SlugValidationResult> {
+    const formatCheck = validateSlugFormat(slug);
+    if (!formatCheck.isValid) {
+      return formatCheck;
     }
-    
-    if (this.isReservedSlug(normalized)) {
-      return { isValid: false, error: 'Bu bağlantı adı sistem tarafından rezerve edilmiştir.' };
+
+    const normalized = formatCheck.normalizedSlug;
+
+    try {
+      const tenantBySlug = await tenantService.getTenantBySlug(normalized);
+      if (tenantBySlug && tenantBySlug.id !== currentTenantId) {
+        return {
+          isValid: false,
+          reason: SLUG_VALIDATION_REASONS.SLUG_TAKEN,
+          normalizedSlug: normalized,
+          error: 'Bu bağlantı adı başka bir işletme tarafından kullanılıyor.',
+        };
+      }
+    } catch {
+      return {
+        isValid: false,
+        reason: SLUG_VALIDATION_REASONS.UNKNOWN_ERROR,
+        normalizedSlug: normalized,
+        error: 'Bağlantı adı doğrulanırken beklenmeyen bir hata oluştu.',
+      };
     }
-    
-    // Check uniqueness
-    const tenantBySlug = await tenantService.getTenantBySlug(normalized);
-    if (tenantBySlug && tenantBySlug.id !== currentTenantId) {
-      return { isValid: false, error: 'Bu bağlantı adı başka bir işletme tarafından kullanılıyor.' };
-    }
-    
-    return { isValid: true };
+
+    return {
+      isValid: true,
+      reason: SLUG_VALIDATION_REASONS.VALID,
+      normalizedSlug: normalized,
+    };
   },
 
   generateTenantSlug(inputName: string): string {
-    const baseSlug = this.normalizeSlug(inputName) || 'randevu';
-    if (this.isReservedSlug(baseSlug)) {
-       return `${baseSlug}-${Math.floor(Math.random() * 1000)}`;
+    const baseSlug = generateSlugFromName(inputName);
+    if (baseSlug) {
+      return baseSlug;
     }
-    return baseSlug;
+    return 'isletme-randevu';
   },
 
   getTenantPublicUrl(tenant: Tenant): string {
-    const baseUrl = window.location.origin;
+    const baseUrl =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'https://randevulari.com';
     if (tenant.customDomain) {
       return tenant.customDomain.startsWith('http') ? tenant.customDomain : `https://${tenant.customDomain}`;
     }
@@ -72,7 +85,10 @@ export const publicLinkService = {
   },
 
   getAdminPreviewUrl(tenant: Tenant): string {
-    const baseUrl = window.location.origin;
+    const baseUrl =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'https://randevulari.com';
     return `${baseUrl}/#/book?tenant=${tenant.id}&preview=true`;
   },
 
@@ -103,5 +119,118 @@ export const publicLinkService = {
       return 'active';
     }
     return 'not_requested';
-  }
+  },
+
+  /**
+   * Builds a V1 direct storefront URL (`/#/s/:slug`, `/#/booking/:slug`, `/#/book?tenant=:slug`,
+   * `/#/:slug`, or subdomain) independent of Discovery Marketplace activation.
+   */
+  getDirectStorefrontUrl(
+    tenant: Pick<Tenant, 'id' | 'slug' | 'customDomain'>,
+    options?: {
+      origin?: string;
+      baseDomain?: string;
+      preferSubdomain?: boolean;
+      style?: 'legacy_s' | 'booking' | 'query' | 'root';
+      branchSlugOrId?: string;
+      uiV2?: boolean;
+    }
+  ): string {
+    const cleanCustomDomain = tenant.customDomain?.trim();
+    if (cleanCustomDomain) {
+      const base = cleanCustomDomain.startsWith('http') ? cleanCustomDomain : `https://${cleanCustomDomain}`;
+      const params = new URLSearchParams();
+      if (options?.branchSlugOrId) params.set('branch', options.branchSlugOrId);
+      if (options?.uiV2) params.set('ui', 'v2');
+      const qs = params.toString();
+      return qs ? `${base}/#/book?${qs}` : base;
+    }
+
+    const slug = normalizeCanonicalSlug(tenant.slug || tenant.id) || tenant.id;
+    if (options?.preferSubdomain) {
+      const subdomainUrl = this.getTenantSubdomainUrl({ ...tenant, slug }, options.baseDomain);
+      const params = new URLSearchParams();
+      if (options.branchSlugOrId) params.set('branch', options.branchSlugOrId);
+      if (options.uiV2) params.set('ui', 'v2');
+      const qs = params.toString();
+      return qs ? `${subdomainUrl}/#/?${qs}` : subdomainUrl;
+    }
+
+    const origin =
+      options?.origin ??
+      (typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'https://randevulari.com');
+    const style = options?.style ?? 'legacy_s';
+    const params = new URLSearchParams();
+    if (style === 'query') {
+      params.set('tenant', slug);
+    }
+    if (options?.branchSlugOrId) params.set('branch', options.branchSlugOrId);
+    if (options?.uiV2) params.set('ui', 'v2');
+    const qs = params.toString();
+    const suffix = qs ? `?${qs}` : '';
+
+    switch (style) {
+      case 'booking':
+        return `${origin}/#/booking/${encodeURIComponent(slug)}${suffix}`;
+      case 'query':
+        return `${origin}/#/book${suffix}`;
+      case 'root':
+        return `${origin}/#/${encodeURIComponent(slug)}${suffix}`;
+      case 'legacy_s':
+      default:
+        return `${origin}/#/s/${encodeURIComponent(slug)}${suffix}`;
+    }
+  },
+
+  getTenantSubdomainUrl(
+    tenant: Pick<Tenant, 'id' | 'slug' | 'customDomain'>,
+    baseDomain = 'randevulari.com'
+  ): string {
+    if (tenant.customDomain?.trim()) {
+      const d = tenant.customDomain.trim();
+      return d.startsWith('http') ? d : `https://${d}`;
+    }
+    const slug = normalizeCanonicalSlug(tenant.slug || tenant.id) || tenant.id;
+    const cleanBase = baseDomain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    return `https://${slug}.${cleanBase}`;
+  },
+
+  getDiscoveryMarketplaceUrl(slug?: string, origin?: string): string {
+    const resolvedOrigin =
+      origin ??
+      (typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'https://randevulari.com');
+    const cleanSlug = slug ? normalizeCanonicalSlug(slug) : '';
+    return cleanSlug
+      ? `${resolvedOrigin}/#/discovery/${encodeURIComponent(cleanSlug)}`
+      : `${resolvedOrigin}/#/discovery`;
+  },
+
+  /**
+   * Resolves direct V1 storefront URLs and guarantees that disabling Discovery Marketplace
+   * never blocks direct V1 storefront access (`/#/s/:slug`, `/#/book?tenant=:slug`, or subdomain).
+   */
+  resolveDirectStorefrontIndependence(
+    tenant: Pick<Tenant, 'id' | 'slug' | 'customDomain'>,
+    options?: { marketplaceEnabled?: boolean; origin?: string; baseDomain?: string }
+  ): {
+    marketplaceEnabled: boolean;
+    marketplaceRequired: false;
+    storefrontAccessibleWhenMarketplaceDisabled: true;
+    legacySUrl: string;
+    directBookingUrl: string;
+    subdomainUrl: string;
+    discoveryUrl: string | null;
+  } {
+    const marketplaceEnabled = Boolean(options?.marketplaceEnabled);
+    const slug = normalizeCanonicalSlug(tenant.slug || tenant.id) || tenant.id;
+    return {
+      marketplaceEnabled,
+      marketplaceRequired: false,
+      storefrontAccessibleWhenMarketplaceDisabled: true,
+      legacySUrl: this.getDirectStorefrontUrl(tenant, { origin: options?.origin, style: 'legacy_s' }),
+      directBookingUrl: this.getDirectStorefrontUrl(tenant, { origin: options?.origin, style: 'query' }),
+      subdomainUrl: this.getTenantSubdomainUrl(tenant, options?.baseDomain),
+      discoveryUrl: marketplaceEnabled ? this.getDiscoveryMarketplaceUrl(slug, options?.origin) : null,
+    };
+  },
 };

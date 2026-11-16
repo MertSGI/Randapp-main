@@ -1,6 +1,7 @@
 ﻿import { CustomerProfile } from '../types';
+import { DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
-const getLocalStorageKey = (tenantId: string) => `lari_customer_profile_${tenantId}`;
+const getLocalStorageKey = (tenantId: string) => DYNAMIC_STORAGE_KEYS.tenantCustomerProfile(tenantId);
 
 export const customerService = {
   getSavedCustomerProfile(tenantId: string): CustomerProfile | null {

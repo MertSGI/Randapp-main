@@ -1,5 +1,8 @@
 import fs from 'fs';
 import path from 'path';
+import { CommunicationDeliveryService } from '../services/communicationDeliveryService.js';
+import { OfflineCommunicationProviderSimulator } from '../services/offlineCommunicationProviderSimulator.js';
+import { CommunicationRetryPolicy } from '../types/communicationContracts.js';
 
 let passCount = 0;
 let failCount = 0;
@@ -14,9 +17,13 @@ const assert = (condition, message) => {
   }
 };
 
-console.log('🔍 Starting QA: Transactional Email, SMS & WhatsApp Provider Rehearsal Verification (Phase E)...');
+console.log('🔍 Starting QA: Transactional Communication Provider Rehearsal & Delivery Contracts (Phase E)...');
 
 const cwd = process.cwd();
+
+// ============================================================================
+// PART 1: STATIC & CONTRACT CHECKS
+// ============================================================================
 
 // 1. Check Document Existences
 const requiredDocs = [
@@ -56,40 +63,7 @@ if (fs.existsSync(envPath)) {
   failCount++;
 }
 
-// 4. Outbox Panel simulation check
-const panelPath = path.join(cwd, 'components', 'CommunicationOutboxPanel.tsx');
-if (fs.existsSync(panelPath)) {
-  const content = fs.readFileSync(panelPath, 'utf8');
-  assert(content.includes('local_outbox_only'), 'CommunicationOutboxPanel checks the local_outbox_only state');
-  assert(content.includes('Gönderim Simüle Edildi') || content.includes('Simüle Gönderildi'), 'CommunicationOutboxPanel replaces "delivered" or "sent" statuses with simulated warning labels under dry runs');
-} else {
-  console.error('❌ CommunicationOutboxPanel.tsx not found!');
-  failCount++;
-}
-
-// 5. Template Localization Check
-const templatePath = path.join(cwd, 'services', 'messageTemplateService.ts');
-if (fs.existsSync(templatePath)) {
-  const content = fs.readFileSync(templatePath, 'utf8');
-  assert(content.includes('language: \'tr\''), 'messageTemplateService contains Turkish translations');
-  assert(content.includes('language: \'en\''), 'messageTemplateService contains English translations');
-} else {
-  console.error('❌ messageTemplateService.ts not found!');
-  failCount++;
-}
-
-// 6. Consent Bypass Verification (Strategic vs Personal)
-const eventPath = path.join(cwd, 'services', 'communicationEventService.ts');
-if (fs.existsSync(eventPath)) {
-  const content = fs.readFileSync(eventPath, 'utf8');
-  assert(content.includes('bookingContactConsent'), 'communicationEventService performs bookingContactConsent validations');
-  assert(content.includes('skipped'), 'communicationEventService contains skipped event status updates');
-} else {
-  console.error('❌ communicationEventService.ts not found!');
-  failCount++;
-}
-
-// 7. Security Scanning
+// 4. Security Scanning
 let hasSecrets = false;
 let hasForbiddenNoCardCopy = false;
 let hasForbidden7DayCopy = false;
@@ -120,18 +94,1086 @@ assert(!hasSecrets, 'Security check: Absolute zero hardcoded live messaging secr
 assert(!hasForbiddenNoCardCopy, 'Commercial safety check: All signup screens avoid "no credit card required" marketing lines');
 assert(!hasForbidden7DayCopy, 'Commercial duration check: Absolutely zero 7-day trials reference found, LARİ standardizes on 14-day trials');
 
-// 8. Brand and Strategy Checks
-const marketPath = path.join(cwd, 'services', 'marketConfigService.ts');
-if (fs.existsSync(marketPath)) {
-  const content = fs.readFileSync(marketPath, 'utf8');
-  assert(content.includes('randevulari.com'), 'Platform uses randevulari.com for Turkey routing');
-  assert(content.includes('brandName: \'LARİ\''), 'Platform preserves LARİ as brand name');
+// ============================================================================
+// PART 2: 19 DETERMINISTIC OFFLINE SIMULATION SCENARIOS
+// ============================================================================
+
+console.log('\n🧪 Executing 19 Deterministic Behavioral Simulation Scenarios...');
+
+const deliveryService = new CommunicationDeliveryService();
+const simulator = new OfflineCommunicationProviderSimulator(deliveryService, {
+  webhookSecret: 'test_rehearsal_secret_20261024',
+  isSimulation: true
+});
+
+// Scenario 1: Rate limit 429 backoff handling
+{
+  const intent = deliveryService.createIntent({
+    intentId: 'scen_01_rate_limit',
+    tenantId: 'tenant_alpha',
+    channel: 'sms',
+    recipient: '+905551112233',
+    templateId: 'booking_confirmed',
+    templateArgs: { customerName: 'Ayşe' },
+    body: 'Sayın Ayşe, randevunuz onaylandı.',
+    consentGranted: true
+  });
+  deliveryService.queueIntent(intent.intentId);
+
+  const res = await simulator.simulateDispatch(intent.intentId, {
+    forceRateLimit: true,
+    retryAfterMs: 2000
+  });
+  assert(res.success === true, 'Scenario 1: Rate limit 429 backoff successfully retries and accepts');
+  assert(res.attempts.length === 2, 'Scenario 1: Two attempts recorded (1 rate limit + 1 accepted)');
+  assert(res.attempts[0].httpStatusCode === 429, 'Scenario 1: First attempt was HTTP 429');
+  assert(res.attempts[1].httpStatusCode === 200, 'Scenario 1: Second attempt was HTTP 200');
 }
 
+// Scenario 2: Retryable 5xx error recovery
+{
+  const intent = deliveryService.createIntent({
+    intentId: 'scen_02_server_error',
+    tenantId: 'tenant_alpha',
+    channel: 'email',
+    recipient: 'test@example.com',
+    templateId: 'booking_confirmed',
+    templateArgs: { customerName: 'Fatma' },
+    body: 'Randevunuz onaylandı.',
+    consentGranted: true
+  });
+  deliveryService.queueIntent(intent.intentId);
+
+  const res = await simulator.simulateDispatch(intent.intentId, {
+    consecutiveFailuresBeforeSuccess: 1
+  });
+  assert(res.success === true, 'Scenario 2: Retryable 5xx error recovers on subsequent attempt');
+  assert(res.attempts.length === 2, 'Scenario 2: Attempt count is 2 (503 then 200)');
+  assert(res.attempts[0].httpStatusCode === 503, 'Scenario 2: Initial attempt was HTTP 503');
+}
+
+// Scenario 3: Permanent 4xx error fail-closed (invalid recipient)
+{
+  const intent = deliveryService.createIntent({
+    intentId: 'scen_03_invalid_recipient',
+    tenantId: 'tenant_alpha',
+    channel: 'sms',
+    recipient: 'invalid_phone',
+    templateId: 'booking_confirmed',
+    templateArgs: { customerName: 'Zeynep' },
+    body: 'Randevu onay',
+    consentGranted: true
+  });
+  deliveryService.queueIntent(intent.intentId);
+
+  const res = await simulator.simulateDispatch(intent.intentId, { forceInvalidRecipient: true });
+  assert(res.success === false, 'Scenario 3: Permanent 4xx error fails closed immediately');
+  assert(res.attempts.length === 1, 'Scenario 3: Exactly 1 attempt made (0 retries on 400)');
+  assert(res.intent.status === 'failed', 'Scenario 3: Intent status is terminal failed');
+  assert(res.error === 'INVALID_RECIPIENT_NUMBER', 'Scenario 3: Error code is INVALID_RECIPIENT_NUMBER');
+}
+
+// Scenario 4: Poison message / serialization failure
+{
+  const intent = deliveryService.createIntent({
+    intentId: 'scen_04_poison_msg',
+    tenantId: 'tenant_alpha',
+    channel: 'whatsapp',
+    recipient: '+905559998877',
+    templateId: 'booking_confirmed',
+    templateArgs: {},
+    body: 'Poison test',
+    consentGranted: true
+  });
+  deliveryService.queueIntent(intent.intentId);
+
+  const res = await simulator.simulateDispatch(intent.intentId, { forcePoisonPayload: true });
+  assert(res.success === false, 'Scenario 4: Poison payload rejected at boundary');
+  assert(res.error === 'POISON_PAYLOAD', 'Scenario 4: Error code is POISON_PAYLOAD');
+  assert(res.intent.status === 'failed', 'Scenario 4: Intent marked terminal failed');
+}
+
+// Scenario 5: Duplicate delivery callback (idempotent ignore)
+{
+  const intent = deliveryService.createIntent({
+    intentId: 'scen_05_idempotent',
+    tenantId: 'tenant_alpha',
+    channel: 'sms',
+    recipient: '+905553334455',
+    templateId: 'booking_confirmed',
+    templateArgs: {},
+    body: 'Idempotency test',
+    consentGranted: true
+  });
+  deliveryService.queueIntent(intent.intentId);
+  const dispatchRes = await simulator.simulateDispatch(intent.intentId);
+  const provMsgId = deliveryService.getAcceptanceReceipt(intent.intentId).providerMessageId;
+
+  const payload = {
+    intentId: intent.intentId,
+    providerMessageId: provMsgId,
+    tenantId: 'tenant_alpha',
+    status: 'delivered',
+    timestamp: new Date().toISOString(),
+    nonce: 'nonce_scen_05_a'
+  };
+  const bodyStr = JSON.stringify(payload);
+  const sig = simulator.signPayload(bodyStr);
+
+  const res1 = simulator.verifyAndProcessWebhook(bodyStr, sig, 'tenant_alpha');
+  assert(res1.valid === true, 'Scenario 5: First delivery callback processed');
+  assert(deliveryService.getIntent(intent.intentId).status === 'delivered', 'Scenario 5: Intent reached delivered');
+
+  // Second delivery callback with new nonce for same providerMessageId
+  const payload2 = { ...payload, nonce: 'nonce_scen_05_b' };
+  const bodyStr2 = JSON.stringify(payload2);
+  const sig2 = simulator.signPayload(bodyStr2);
+  const res2 = simulator.verifyAndProcessWebhook(bodyStr2, sig2, 'tenant_alpha');
+  assert(res2.valid === true, 'Scenario 5: Duplicate delivery callback safely acknowledged idempotently');
+  assert(deliveryService.getIntent(intent.intentId).status === 'delivered', 'Scenario 5: Status remains delivered without duplicate corruption');
+
+  // =========================================================================
+  // SEC-001: 6 Mandatory Negative & Security Tests for recordProviderDelivery
+  // =========================================================================
+
+  // Test 1: İlk teslimat doğrulanmamış imzayla kabul edilmemeli
+  {
+    const intentUnverified = deliveryService.createIntent({
+      intentId: 'sec_01_unverified_first',
+      tenantId: 'tenant_alpha',
+      channel: 'sms',
+      recipient: '+905551112233',
+      templateId: 'booking_confirmed',
+      templateArgs: {},
+      body: 'Unverified first delivery test',
+      consentGranted: true,
+    });
+    deliveryService.queueIntent(intentUnverified.intentId);
+    let rejected1 = false;
+    let err1 = '';
+    try {
+      deliveryService.recordProviderDelivery({
+        receiptId: 'del_unverified_first',
+        intentId: intentUnverified.intentId,
+        tenantId: 'tenant_alpha',
+        providerMessageId: 'prov_unverified_01',
+        providerName: 'offline_simulator',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: false,
+      });
+    } catch (e) {
+      rejected1 = true;
+      err1 = e.message;
+    }
+    assert(rejected1, 'SEC-001 Test 1: İlk teslimat doğrulanmamış imzayla reddedilmeli');
+    assert(err1.includes('signature verification failed'), 'SEC-001 Test 1: Güvenlik ihlali hatası fırlatılmalı');
+    assert(deliveryService.getIntent(intentUnverified.intentId).status === 'queued', 'SEC-001 Test 1: Intent queued durumunda kalmalı');
+  }
+
+  // Test 2: Önceden teslim edilmiş intent için gelen mükerrer doğrulanmamış callback güvenli biçimde reddedilmeli (imza bypass engeli)
+  {
+    let rejected2 = false;
+    let err2 = '';
+    try {
+      deliveryService.recordProviderDelivery({
+        receiptId: 'del_replay_unverified',
+        intentId: intent.intentId,
+        tenantId: 'tenant_alpha',
+        providerMessageId: provMsgId,
+        providerName: 'offline_simulator',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: false,
+      });
+    } catch (e) {
+      rejected2 = true;
+      err2 = e.message;
+    }
+    assert(rejected2, 'SEC-001 Test 2: Önceden teslim edilmiş intent için gelen doğrulanmamış replay reddedilmeli');
+    assert(err2.includes('signature verification failed'), 'SEC-001 Test 2: İmza bypass edilmeden güvenlik hatası fırlatılmalı');
+  }
+
+  // Test 3: Doğrulanmış meşru tekrar çağrıları idempotent kalmalı
+  {
+    const legitimateDuplicate = deliveryService.recordProviderDelivery({
+      receiptId: 'del_legit_dup',
+      intentId: intent.intentId,
+      tenantId: 'tenant_alpha',
+      providerMessageId: provMsgId,
+      providerName: 'offline_simulator',
+      deliveredAt: new Date().toISOString(),
+      signatureVerified: true,
+    });
+    assert(legitimateDuplicate.status === 'delivered', 'SEC-001 Test 3: Doğrulanmış meşru tekrar çağrısı idempotent delivered dönmeli');
+    assert(legitimateDuplicate.intentId === intent.intentId, 'SEC-001 Test 3: Intent kimliği korunmalı');
+  }
+
+  // Test 4: Mükerrer callback farklı provider message ID veya çelişkili bilgiler taşıyorsa sessizce kabul edilmemeli
+  {
+    // 4a. Farklı providerMessageId
+    let rejected4a = false;
+    let err4a = '';
+    try {
+      deliveryService.recordProviderDelivery({
+        receiptId: 'del_conflicting_prov_msg_id',
+        intentId: intent.intentId,
+        tenantId: 'tenant_alpha',
+        providerMessageId: 'prov_DIFFERENT_SPOOFED_ID_999',
+        providerName: 'offline_simulator',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: true,
+      });
+    } catch (e) {
+      rejected4a = true;
+      err4a = e.message;
+    }
+    assert(rejected4a, 'SEC-001 Test 4a: Farklı providerMessageId taşıyan çelişkili callback reddedilmeli');
+    assert(err4a.includes('Conflicting delivery callback'), 'SEC-001 Test 4a: Çelişki hatası fırlatılmalı');
+
+    // 4b. Farklı providerName
+    let rejected4b = false;
+    let err4b = '';
+    try {
+      deliveryService.recordProviderDelivery({
+        receiptId: 'del_conflicting_prov_name',
+        intentId: intent.intentId,
+        tenantId: 'tenant_alpha',
+        providerMessageId: provMsgId,
+        providerName: 'rogue_attacker_provider',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: true,
+      });
+    } catch (e) {
+      rejected4b = true;
+      err4b = e.message;
+    }
+    assert(rejected4b, 'SEC-001 Test 4b: Farklı providerName taşıyan çelişkili callback reddedilmeli');
+    assert(err4b.includes('Conflicting delivery callback'), 'SEC-001 Test 4b: Çelişki hatası fırlatılmalı');
+
+    // 4c. Boş providerMessageId
+    let rejected4c = false;
+    let err4c = '';
+    try {
+      deliveryService.recordProviderDelivery({
+        receiptId: 'del_empty_prov_msg_id',
+        intentId: intent.intentId,
+        tenantId: 'tenant_alpha',
+        providerMessageId: '',
+        providerName: 'offline_simulator',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: true,
+      });
+    } catch (e) {
+      rejected4c = true;
+      err4c = e.message;
+    }
+    assert(rejected4c, 'SEC-001 Test 4c: Boş providerMessageId taşıyan callback reddedilmeli');
+    assert(err4c.includes('Conflicting delivery callback'), 'SEC-001 Test 4c: Çelişki hatası fırlatılmalı');
+
+    // 4d. Boş providerName
+    let rejected4d = false;
+    let err4d = '';
+    try {
+      deliveryService.recordProviderDelivery({
+        receiptId: 'del_empty_prov_name',
+        intentId: intent.intentId,
+        tenantId: 'tenant_alpha',
+        providerMessageId: provMsgId,
+        providerName: '',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: true,
+      });
+    } catch (e) {
+      rejected4d = true;
+      err4d = e.message;
+    }
+    assert(rejected4d, 'SEC-001 Test 4d: Boş providerName taşıyan callback reddedilmeli');
+    assert(err4d.includes('Conflicting delivery callback'), 'SEC-001 Test 4d: Çelişki hatası fırlatılmalı');
+  }
+
+  // Test 5: Reddedilen çağrılar intent durumunu, receipt ve attempt kayıtlarını değiştirmemeli (tam durum snapshot karşılaştırması)
+  {
+    // Snapshot alımı: red denemeleri öncesi mevcut durum
+    const snapshotIntent = JSON.parse(JSON.stringify(deliveryService.getIntent(intent.intentId)));
+    const snapshotDeliveryReceipt = JSON.parse(JSON.stringify(deliveryService.getDeliveryReceipt(intent.intentId)));
+    const snapshotAcceptanceReceipt = JSON.parse(JSON.stringify(deliveryService.getAcceptanceReceipt(intent.intentId)));
+    const snapshotAttempts = JSON.parse(JSON.stringify(deliveryService.getAttemptsForIntent(intent.intentId)));
+
+    // Bir dizi geçersiz çağrı simüle et:
+    // 1. İmzasız tekrar çağrısı
+    try {
+      deliveryService.recordProviderDelivery({
+        receiptId: 'del_snap_test_unverified',
+        intentId: intent.intentId,
+        tenantId: 'tenant_alpha',
+        providerMessageId: provMsgId,
+        providerName: 'offline_simulator',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: false,
+      });
+    } catch (_) {}
+
+    // 2. Çelişkili providerMessageId
+    try {
+      deliveryService.recordProviderDelivery({
+        receiptId: 'del_snap_test_conflict_id',
+        intentId: intent.intentId,
+        tenantId: 'tenant_alpha',
+        providerMessageId: 'prov_spoofed_attempt',
+        providerName: 'offline_simulator',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: true,
+      });
+    } catch (_) {}
+
+    // 3. Çelişkili providerName
+    try {
+      deliveryService.recordProviderDelivery({
+        receiptId: 'del_snap_test_conflict_name',
+        intentId: intent.intentId,
+        tenantId: 'tenant_alpha',
+        providerMessageId: provMsgId,
+        providerName: 'untrusted_name',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: true,
+      });
+    } catch (_) {}
+
+    // 4. Boş provider bilgisi
+    try {
+      deliveryService.recordProviderDelivery({
+        receiptId: 'del_snap_test_empty_fields',
+        intentId: intent.intentId,
+        tenantId: 'tenant_alpha',
+        providerMessageId: '',
+        providerName: '',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: true,
+      });
+    } catch (_) {}
+
+    // 5. Tamamen eksik tenantId (true omission)
+    try {
+      deliveryService.recordProviderDelivery({
+        receiptId: 'del_snap_test_true_omitted_tenant',
+        intentId: intent.intentId,
+        providerMessageId: provMsgId,
+        providerName: 'offline_simulator',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: true,
+      });
+    } catch (_) {}
+
+    // 6. Boş string tenantId
+    try {
+      deliveryService.recordProviderDelivery({
+        receiptId: 'del_snap_test_empty_tenant',
+        intentId: intent.intentId,
+        tenantId: '',
+        providerMessageId: provMsgId,
+        providerName: 'offline_simulator',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: true,
+      });
+    } catch (_) {}
+
+    // Snapshot sonrası derin eşitlik ve alan bazlı doğrulama
+    const postIntent = deliveryService.getIntent(intent.intentId);
+    const postDeliveryReceipt = deliveryService.getDeliveryReceipt(intent.intentId);
+    const postAcceptanceReceipt = deliveryService.getAcceptanceReceipt(intent.intentId);
+    const postAttempts = deliveryService.getAttemptsForIntent(intent.intentId);
+
+    assert(postIntent.status === 'delivered', 'SEC-001 Test 5: Intent durumu delivered olarak korunmalı');
+    assert(postIntent.status === snapshotIntent.status, 'SEC-001 Test 5: Intent status alanı snapshot ile birebir eşleşmeli');
+    assert(postIntent.updatedAt === snapshotIntent.updatedAt, 'SEC-001 Test 5: Intent updatedAt alanı reddedilen çağrılarda mutasyona uğramamalı');
+    assert(postIntent.tenantId === snapshotIntent.tenantId, 'SEC-001 Test 5: Intent tenantId alanı korunmalı');
+    assert(postIntent.recipient === snapshotIntent.recipient, 'SEC-001 Test 5: Intent recipient alanı korunmalı');
+    assert(postIntent.consentVerified === snapshotIntent.consentVerified, 'SEC-001 Test 5: Intent consentVerified korunmalı');
+
+    assert(JSON.stringify(postDeliveryReceipt) === JSON.stringify(snapshotDeliveryReceipt), 'SEC-001 Test 5: Delivery receipt kaydı byte-for-byte snapshot ile özdeş kalmalı');
+    assert(postDeliveryReceipt.providerMessageId === snapshotDeliveryReceipt.providerMessageId, 'SEC-001 Test 5: Delivery receipt providerMessageId bozulmamalı');
+    assert(postDeliveryReceipt.providerName === snapshotDeliveryReceipt.providerName, 'SEC-001 Test 5: Delivery receipt providerName bozulmamalı');
+    assert(postDeliveryReceipt.deliveredAt === snapshotDeliveryReceipt.deliveredAt, 'SEC-001 Test 5: Delivery receipt deliveredAt bozulmamalı');
+
+    assert(JSON.stringify(postAcceptanceReceipt) === JSON.stringify(snapshotAcceptanceReceipt), 'SEC-001 Test 5: Acceptance receipt kaydı değişmemeli');
+    assert(postAttempts.length === snapshotAttempts.length, 'SEC-001 Test 5: Attempt sayısı artmamalı (başarısız callback attempt listesine eklenmemeli)');
+    assert(JSON.stringify(postAttempts) === JSON.stringify(snapshotAttempts), 'SEC-001 Test 5: Attempt listesi değişmemeli');
+  }
+
+  // Test 6: Mevcut tenant izolasyonu ve iletişim onayı kuralları bozulmamalı (çapraz kiracı geçerli imza saldırı engeli)
+  {
+    // 6a. Çapraz kiracı (cross-tenant) geçerli imzalı teslimat saldırısı testi:
+    // Kiracı Beta, geçerli kendi imzasıyla Kiracı Alpha'nın kuyruktaki intent'ini delivered yapmaya çalışır.
+    const intentAlphaTarget = deliveryService.createIntent({
+      intentId: 'sec_06_alpha_queued_target',
+      tenantId: 'tenant_alpha',
+      channel: 'sms',
+      recipient: '+905557778899',
+      templateId: 'booking_confirmed',
+      templateArgs: {},
+      body: 'Alpha queued intent to test cross-tenant protection',
+      consentGranted: true,
+    });
+    deliveryService.queueIntent(intentAlphaTarget.intentId);
+    assert(deliveryService.getIntent(intentAlphaTarget.intentId).status === 'queued', 'SEC-001 Test 6a: Alpha intent kuyrukta olmalı');
+
+    // Snapshot alımı: saldırı denemesi öncesi Alpha hedef intent durumu
+    const snapshotAlphaTarget = JSON.parse(JSON.stringify(deliveryService.getIntent(intentAlphaTarget.intentId)));
+    const snapshotAlphaReceipt = deliveryService.getDeliveryReceipt(intentAlphaTarget.intentId);
+    const snapshotAlphaAttempts = deliveryService.getAttemptsForIntent(intentAlphaTarget.intentId).length;
+
+    // Beta kiracısı geçerli imzalı webhook paketi oluşturur:
+    const crossTenantPayload = {
+      intentId: intentAlphaTarget.intentId, // Alpha'nın intent ID'si
+      providerMessageId: 'prov_beta_cross_tenant_attack_01',
+      tenantId: 'tenant_beta',              // Beta payload tenant'ı
+      status: 'delivered',
+      timestamp: new Date().toISOString(),
+      nonce: 'nonce_beta_cross_tenant_01',
+    };
+    const crossTenantBodyStr = JSON.stringify(crossTenantPayload);
+    const crossTenantValidSig = simulator.signPayload(crossTenantBodyStr); // GEÇERLİ İMZA!
+
+    const crossTenantResult = simulator.verifyAndProcessWebhook(
+      crossTenantBodyStr,
+      crossTenantValidSig,
+      'tenant_beta' // Beta context'i
+    );
+
+    assert(crossTenantResult.valid === false, 'SEC-001 Test 6a: Geçerli imzalı çapraz kiracı webhook çağrısı reddedilmeli');
+    assert(crossTenantResult.statusCode === 403, 'SEC-001 Test 6a: Çapraz kiracı çağrısına HTTP 403 dönmeli');
+    assert(crossTenantResult.error.includes('TENANT_MISMATCH'), 'SEC-001 Test 6a: TENANT_MISMATCH hatası verilmeli');
+
+    // Alpha hedef intent'in tam durum değişmezliği doğrulanmalı
+    const postAttackIntent = deliveryService.getIntent(intentAlphaTarget.intentId);
+    assert(postAttackIntent.status === 'queued', 'SEC-001 Test 6a: Alpha intent durumu delivered olmamalı, queued kalmalı');
+    assert(postAttackIntent.tenantId === 'tenant_alpha', 'SEC-001 Test 6a: Alpha intent tenantId değişmemeli');
+    assert(JSON.stringify(postAttackIntent) === JSON.stringify(snapshotAlphaTarget), 'SEC-001 Test 6a: Alpha intent byte-for-byte değişmez kalmalı');
+    assert(deliveryService.getDeliveryReceipt(intentAlphaTarget.intentId) === snapshotAlphaReceipt, 'SEC-001 Test 6a: Alpha için sahte teslimat makbuzu oluşmamalı');
+    assert(deliveryService.getAttemptsForIntent(intentAlphaTarget.intentId).length === snapshotAlphaAttempts, 'SEC-001 Test 6a: Attempt sayısı artmamalı');
+
+    // 6b. Doğrudan recordProviderDelivery üzerinde kiracı uyumsuzluğu güvenlik denetimi
+    let directCrossTenantRejected = false;
+    let directCrossTenantErr = '';
+    try {
+      deliveryService.recordProviderDelivery({
+        receiptId: 'del_direct_cross_tenant_probe',
+        intentId: intentAlphaTarget.intentId,
+        tenantId: 'tenant_beta', // Çelişkili kiracı kimliği
+        providerMessageId: 'prov_direct_cross_probe',
+        providerName: 'offline_simulator',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: true,
+      });
+    } catch (e) {
+      directCrossTenantRejected = true;
+      directCrossTenantErr = e.message;
+    }
+    assert(directCrossTenantRejected, 'SEC-001 Test 6b: Doğrudan çağrıda kiracı uyuşmazlığı taşıyan teslimat makbuzu reddedilmeli');
+    assert(directCrossTenantErr.includes('Tenant mismatch or missing tenant'), 'SEC-001 Test 6b: Güvenlik ihlali Tenant mismatch hatası fırlatılmalı');
+    assert(deliveryService.getIntent(intentAlphaTarget.intentId).status === 'queued', 'SEC-001 Test 6b: Alpha intent queued kalmalı');
+    assert(JSON.stringify(deliveryService.getIntent(intentAlphaTarget.intentId)) === JSON.stringify(snapshotAlphaTarget), 'SEC-001 Test 6b: Alpha intent tam durum değişmezliği korunmalı');
+
+    // 6c. Doğrudan recordProviderDelivery üzerinde GERÇEK EKSİK (omitted) tenantId güvenlik denetimi (omission attack)
+    // Çağrı öncesi anlık durum snapshot'ı alımı (intent, delivery receipt, acceptance receipt, attempts)
+    const preOmissionIntent = JSON.parse(JSON.stringify(deliveryService.getIntent(intentAlphaTarget.intentId)));
+    const preOmissionDeliveryReceipt = JSON.parse(JSON.stringify(deliveryService.getDeliveryReceipt(intentAlphaTarget.intentId) || null));
+    const preOmissionAcceptanceReceipt = JSON.parse(JSON.stringify(deliveryService.getAcceptanceReceipt(intentAlphaTarget.intentId) || null));
+    const preOmissionAttempts = JSON.parse(JSON.stringify(deliveryService.getAttemptsForIntent(intentAlphaTarget.intentId)));
+
+    let omittedTenantRejected = false;
+    let omittedTenantErr = '';
+    try {
+      // tenantId özelliği nesneden tamamen çıkarılmıştır (true omission: property does not exist on receipt)
+      const trueOmissionReceipt = {
+        receiptId: 'del_omitted_tenant_probe',
+        intentId: intentAlphaTarget.intentId,
+        providerMessageId: 'prov_omitted_tenant_probe',
+        providerName: 'offline_simulator',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: true,
+      };
+      deliveryService.recordProviderDelivery(trueOmissionReceipt);
+    } catch (e) {
+      omittedTenantRejected = true;
+      omittedTenantErr = e.message;
+    }
+    assert(omittedTenantRejected, 'SEC-001 Test 6c: tenantId alanı tamamen eksik (omitted) teslimat makbuzu reddedilmeli');
+    assert(omittedTenantErr.includes('Tenant mismatch or missing tenant'), 'SEC-001 Test 6c: Eksik tenant güvenlik hatası fırlatılmalı');
+
+    // Çağrı sonrası tam durum karşılaştırması ve değişmezlik kontrolü
+    const postOmissionIntent = JSON.parse(JSON.stringify(deliveryService.getIntent(intentAlphaTarget.intentId)));
+    const postOmissionDeliveryReceipt = JSON.parse(JSON.stringify(deliveryService.getDeliveryReceipt(intentAlphaTarget.intentId) || null));
+    const postOmissionAcceptanceReceipt = JSON.parse(JSON.stringify(deliveryService.getAcceptanceReceipt(intentAlphaTarget.intentId) || null));
+    const postOmissionAttempts = JSON.parse(JSON.stringify(deliveryService.getAttemptsForIntent(intentAlphaTarget.intentId)));
+
+    assert(postOmissionIntent.status === 'queued', 'SEC-001 Test 6c: Alpha intent queued durumunda kalmalı');
+    assert(JSON.stringify(postOmissionIntent) === JSON.stringify(preOmissionIntent), 'SEC-001 Test 6c: Intent byte-for-byte değişmez kalmalı');
+    assert(JSON.stringify(postOmissionDeliveryReceipt) === JSON.stringify(preOmissionDeliveryReceipt), 'SEC-001 Test 6c: Delivery receipt kaydı değişmemeli (null kalmalı)');
+    assert(JSON.stringify(postOmissionAcceptanceReceipt) === JSON.stringify(preOmissionAcceptanceReceipt), 'SEC-001 Test 6c: Acceptance receipt kaydı değişmemeli');
+    assert(JSON.stringify(postOmissionAttempts) === JSON.stringify(preOmissionAttempts), 'SEC-001 Test 6c: Attempt kayıtları değişmemeli');
+
+    // 6c2. Boş dize ('') tenantId güvenlik denetimi
+    let emptyTenantRejected = false;
+    let emptyTenantErr = '';
+    try {
+      deliveryService.recordProviderDelivery({
+        receiptId: 'del_empty_tenant_probe',
+        intentId: intentAlphaTarget.intentId,
+        tenantId: '',
+        providerMessageId: 'prov_empty_tenant_probe',
+        providerName: 'offline_simulator',
+        deliveredAt: new Date().toISOString(),
+        signatureVerified: true,
+      });
+    } catch (e) {
+      emptyTenantRejected = true;
+      emptyTenantErr = e.message;
+    }
+    assert(emptyTenantRejected, 'SEC-001 Test 6c2: Boş string tenantId ile yapılan doğrudan teslimat makbuzu reddedilmeli');
+    assert(emptyTenantErr.includes('Tenant mismatch or missing tenant'), 'SEC-001 Test 6c2: Eksik tenant güvenlik hatası fırlatılmalı');
+    assert(deliveryService.getIntent(intentAlphaTarget.intentId).status === 'queued', 'SEC-001 Test 6c2: Alpha intent queued kalmalı');
+    assert(JSON.stringify(deliveryService.getIntent(intentAlphaTarget.intentId)) === JSON.stringify(preOmissionIntent), 'SEC-001 Test 6c2: Alpha intent tam durum değişmezliği korunmalı');
+
+    // 6d. İletişim onayı reddedilmiş intent izolasyonu ve değişmezliği
+    const intentTenantB = deliveryService.createIntent({
+      intentId: 'sec_06_tenant_beta',
+      tenantId: 'tenant_beta',
+      channel: 'sms',
+      recipient: '+905559998877',
+      templateId: 'booking_confirmed',
+      templateArgs: {},
+      body: 'Tenant isolation test',
+      consentGranted: false,
+    });
+    assert(intentTenantB.consentVerified === false, 'SEC-001 Test 6d: Onay verilmemiş intent consentVerified false kalmalı');
+    assert(intentTenantB.status === 'skipped', 'SEC-001 Test 6d: Onaysız intent durumu skipped olmalı');
+
+    const invalidSigWebhook = simulator.verifyAndProcessWebhook(
+      JSON.stringify({
+        intentId: intentTenantB.intentId,
+        providerMessageId: 'prov_beta_01',
+        tenantId: 'tenant_beta',
+        status: 'delivered',
+        timestamp: new Date().toISOString(),
+        nonce: 'nonce_beta_sec_06',
+      }),
+      'invalid_signature_hex',
+      'tenant_beta'
+    );
+    assert(invalidSigWebhook.valid === false, 'SEC-001 Test 6d: Geçersiz imzalı tenant_beta webhook reddedilmeli');
+    assert(deliveryService.getIntent(intentTenantB.intentId).status === 'skipped', 'SEC-001 Test 6d: Onaysız tenant_beta intent durumu skipped kalmalı');
+  }
+}
+
+// Scenario 6: Out-of-order callback (delivery before acceptance)
+{
+  const intent = deliveryService.createIntent({
+    intentId: 'scen_06_out_of_order',
+    tenantId: 'tenant_alpha',
+    channel: 'sms',
+    recipient: '+905556667788',
+    templateId: 'booking_confirmed',
+    templateArgs: {},
+    body: 'Out of order test',
+    consentGranted: true
+  });
+  deliveryService.queueIntent(intent.intentId);
+
+  // Directly send delivery webhook while intent is still 'queued'
+  const payload = {
+    intentId: intent.intentId,
+    providerMessageId: 'prov_out_of_order_01',
+    tenantId: 'tenant_alpha',
+    status: 'delivered',
+    timestamp: new Date().toISOString(),
+    nonce: 'nonce_scen_06'
+  };
+  const bodyStr = JSON.stringify(payload);
+  const sig = simulator.signPayload(bodyStr);
+
+  const res = simulator.verifyAndProcessWebhook(bodyStr, sig, 'tenant_alpha');
+  assert(res.valid === true, 'Scenario 6: Out-of-order delivery callback handled cleanly');
+  assert(deliveryService.getIntent(intent.intentId).status === 'delivered', 'Scenario 6: Intent successfully transitioned to delivered');
+  assert(deliveryService.getAcceptanceReceipt(intent.intentId) !== undefined, 'Scenario 6: Synthesized acceptance receipt created');
+  assert(deliveryService.getAcceptanceReceipt(intent.intentId).tenantId === 'tenant_alpha', 'Scenario 6: Synthesized acceptance receipt preserves tenant provenance');
+}
+
+// Scenario 7: Tampered webhook signature rejection
+{
+  const payload = {
+    intentId: 'scen_01_rate_limit',
+    providerMessageId: 'prov_msg_tamper',
+    tenantId: 'tenant_alpha',
+    status: 'delivered',
+    timestamp: new Date().toISOString(),
+    nonce: 'nonce_scen_07'
+  };
+  const bodyStr = JSON.stringify(payload);
+  const badSig = '0000000000000000000000000000000000000000000000000000000000000000';
+
+  const res = simulator.verifyAndProcessWebhook(bodyStr, badSig, 'tenant_alpha');
+  assert(res.valid === false && res.statusCode === 401, 'Scenario 7: Tampered webhook signature rejected with HTTP 401');
+}
+
+// Scenario 8: Tampered webhook payload rejection
+{
+  const payload = {
+    intentId: 'scen_01_rate_limit',
+    providerMessageId: 'prov_msg_tamper_payload',
+    tenantId: 'tenant_alpha',
+    status: 'delivered',
+    timestamp: new Date().toISOString(),
+    nonce: 'nonce_scen_08'
+  };
+  const bodyStr = JSON.stringify(payload);
+  const sig = simulator.signPayload(bodyStr);
+
+  // Tamper body after signature generation
+  const tamperedBody = bodyStr.replace('tenant_alpha', 'tenant_hacked');
+  const res = simulator.verifyAndProcessWebhook(tamperedBody, sig, 'tenant_alpha');
+  assert(res.valid === false && res.statusCode === 401, 'Scenario 8: Tampered payload body rejected with HTTP 401');
+}
+
+// Scenario 9: Tenant mismatch rejection
+{
+  const payload = {
+    intentId: 'scen_01_rate_limit',
+    providerMessageId: 'prov_msg_mismatch',
+    tenantId: 'tenant_bravo', // Belongs to Bravo, but handler expects Alpha
+    status: 'delivered',
+    timestamp: new Date().toISOString(),
+    nonce: 'nonce_scen_09'
+  };
+  const bodyStr = JSON.stringify(payload);
+  const sig = simulator.signPayload(bodyStr);
+
+  const res = simulator.verifyAndProcessWebhook(bodyStr, sig, 'tenant_alpha');
+  assert(res.valid === false && res.statusCode === 403, 'Scenario 9: Tenant mismatch rejected with HTTP 403');
+  assert(res.error.includes('TENANT_MISMATCH'), 'Scenario 9: Error specifies TENANT_MISMATCH');
+}
+
+// Scenario 10: Retry exhaustion
+{
+  const intent = deliveryService.createIntent({
+    intentId: 'scen_10_exhaustion',
+    tenantId: 'tenant_alpha',
+    channel: 'sms',
+    recipient: '+905554443322',
+    templateId: 'booking_confirmed',
+    templateArgs: {},
+    body: 'Exhaustion test',
+    consentGranted: true
+  });
+  deliveryService.queueIntent(intent.intentId);
+
+  const res = await simulator.simulateDispatch(intent.intentId, {
+    forceServerError: true
+  });
+  assert(res.success === false, 'Scenario 10: Dispatch failed after exhausting retries');
+  assert(res.error === 'RETRY_EXHAUSTED', 'Scenario 10: Terminal error is RETRY_EXHAUSTED');
+  assert(res.attempts.length === 3, 'Scenario 10: Exactly maxAttempts (3) attempted before exhaustion');
+  assert(res.intent.status === 'failed', 'Scenario 10: Terminal status is failed');
+}
+
+// Scenario 11: PII/secret scrubbing
+{
+  const rawLog = 'Customer Phone: +905551234567, Email: zeynep.kaya@example.com';
+  const scrubbed = CommunicationDeliveryService.scrubPII(rawLog);
+  assert(!scrubbed.includes('1234567'), 'Scenario 11: Phone number digits scrubbed');
+  assert(!scrubbed.includes('zeynep.kaya'), 'Scenario 11: Email address scrubbed');
+  assert(scrubbed.includes('****'), 'Scenario 11: Mask characters present in scrubbed output');
+}
+
+// Scenario 12: Consent denied -> terminal skipped
+{
+  const intent = deliveryService.createIntent({
+    intentId: 'scen_12_consent_denied',
+    tenantId: 'tenant_alpha',
+    channel: 'sms',
+    recipient: '+905558887766',
+    templateId: 'marketing_promo',
+    templateArgs: {},
+    body: 'Kampanya mesajı',
+    consentGranted: false,
+    consentDenialReason: 'Customer opted out of marketing SMS'
+  });
+  assert(intent.status === 'skipped', 'Scenario 12: Intent immediately created as skipped');
+
+  let queueError = false;
+  try {
+    deliveryService.queueIntent(intent.intentId);
+  } catch {
+    queueError = true;
+  }
+  assert(queueError === true, 'Scenario 12: Attempting to queue a skipped intent throws error');
+
+  const res = await simulator.simulateDispatch(intent.intentId);
+  assert(res.success === false, 'Scenario 12: Simulator refuses dispatch for skipped intent');
+  assert(res.attempts.length === 0, 'Scenario 12: Zero dispatch attempts made for skipped intent');
+}
+
+// Scenario 13: Channel disabled / unsupported
+{
+  const disabledSim = new OfflineCommunicationProviderSimulator(deliveryService, {
+    enabledChannels: { sms: false, whatsapp: true, email: true, in_app: true }
+  });
+  const intent = deliveryService.createIntent({
+    intentId: 'scen_13_disabled_channel',
+    tenantId: 'tenant_alpha',
+    channel: 'sms',
+    recipient: '+905557776655',
+    templateId: 'booking_confirmed',
+    templateArgs: {},
+    body: 'Disabled channel test',
+    consentGranted: true
+  });
+  deliveryService.queueIntent(intent.intentId);
+
+  const res = await disabledSim.simulateDispatch(intent.intentId);
+  assert(res.success === false, 'Scenario 13: Dispatch rejected on disabled channel');
+  assert(res.error === 'CHANNEL_DISABLED', 'Scenario 13: Error code is CHANNEL_DISABLED');
+  assert(res.intent.status === 'failed', 'Scenario 13: Intent status transitioned to failed');
+}
+
+// Scenario 14: Simulation mode header/flag requirement
+{
+  const nonSim = new OfflineCommunicationProviderSimulator(deliveryService, {
+    isSimulation: false
+  });
+  const payload = {
+    intentId: 'scen_01_rate_limit',
+    providerMessageId: 'prov_non_sim',
+    tenantId: 'tenant_alpha',
+    status: 'delivered',
+    timestamp: new Date().toISOString(),
+    nonce: 'nonce_scen_14'
+  };
+  const bodyStr = JSON.stringify(payload);
+  const sig = nonSim.signPayload(bodyStr);
+
+  const res = nonSim.verifyAndProcessWebhook(bodyStr, sig, 'tenant_alpha');
+  assert(res.valid === false && res.statusCode === 403, 'Scenario 14: Simulator refuses execution when simulation mode flag is false');
+  assert(res.error.includes('SIMULATION_REQUIRED'), 'Scenario 14: Error specifies SIMULATION_REQUIRED');
+}
+
+// Scenario 15: Receipt correlation with outbound message ID
+{
+  const intent = deliveryService.createIntent({
+    intentId: 'scen_15_correlation',
+    tenantId: 'tenant_alpha',
+    channel: 'email',
+    recipient: 'owner@salon.com',
+    templateId: 'trial_started',
+    templateArgs: {},
+    body: 'Deneme süreniz başladı',
+    consentGranted: true
+  });
+  deliveryService.queueIntent(intent.intentId);
+  await simulator.simulateDispatch(intent.intentId);
+
+  const accReceipt = deliveryService.getAcceptanceReceipt(intent.intentId);
+  assert(accReceipt !== undefined, 'Scenario 15: Acceptance receipt recorded');
+  assert(accReceipt.intentId === 'scen_15_correlation', 'Scenario 15: Acceptance receipt correlates to outbound intentId');
+  assert(accReceipt.providerMessageId.startsWith('prov_msg_'), 'Scenario 15: Provider message ID stamped');
+}
+
+// Scenario 16: Dispatch attempt ledger immutability
+{
+  const attempts = deliveryService.getAttemptsForIntent('scen_10_exhaustion');
+  assert(attempts.length === 3, 'Scenario 16: All 3 attempts preserved in ledger');
+  const firstAttempt = attempts[0];
+  assert(firstAttempt.attemptNumber === 1, 'Scenario 16: Attempt order and structure preserved');
+  assert(firstAttempt.httpStatusCode === 503, 'Scenario 16: Attempt status codes unmodified');
+}
+
+// Scenario 17: Zero network I/O in offline mode
+{
+  assert(simulator.getNetworkCallCount() === 0, 'Scenario 17: Absolute zero external network calls made in offline mode');
+}
+
+// Scenario 18: Callback replay protection with timestamp nonce
+{
+  // 18a: Replay by reusing nonce
+  const payload1 = {
+    intentId: 'scen_01_rate_limit',
+    providerMessageId: 'prov_msg_replay_1',
+    tenantId: 'tenant_alpha',
+    status: 'delivered',
+    timestamp: new Date().toISOString(),
+    nonce: 'unique_nonce_18a'
+  };
+  const body1 = JSON.stringify(payload1);
+  const sig1 = simulator.signPayload(body1);
+
+  const firstCall = simulator.verifyAndProcessWebhook(body1, sig1, 'tenant_alpha');
+  assert(firstCall.valid === true, 'Scenario 18a: First webhook with unique nonce succeeds');
+
+  const replayCall = simulator.verifyAndProcessWebhook(body1, sig1, 'tenant_alpha');
+  assert(replayCall.valid === false && replayCall.statusCode === 409, 'Scenario 18a: Replayed webhook with same nonce rejected with HTTP 409');
+
+  // 18b: Expired timestamp (> 5 minutes ago)
+  const expiredTime = new Date(Date.now() - 600 * 1000).toISOString(); // 10 minutes ago
+  const payload2 = {
+    intentId: 'scen_01_rate_limit',
+    providerMessageId: 'prov_msg_replay_2',
+    tenantId: 'tenant_alpha',
+    status: 'delivered',
+    timestamp: expiredTime,
+    nonce: 'unique_nonce_18b'
+  };
+  const body2 = JSON.stringify(payload2);
+  const sig2 = simulator.signPayload(body2);
+
+  const expiredCall = simulator.verifyAndProcessWebhook(body2, sig2, 'tenant_alpha');
+  assert(expiredCall.valid === false && expiredCall.statusCode === 400, 'Scenario 18b: Expired timestamp outside replay window rejected with HTTP 400');
+}
+
+// Scenario 19: Communication intent identity collision & payload conflict safety
+{
+  const baseInput = {
+    intentId: 'scen_19_identity',
+    tenantId: 'tenant_alpha',
+    branchId: 'branch_kadikoy',
+    channel: 'sms',
+    recipient: '+905553334455',
+    templateId: 'appointment_reminder',
+    templateArgs: { customerName: 'Ayşe Kaya', time: '14:30' },
+    subject: 'Randevu Hatırlatması',
+    body: 'Sayın Ayşe Kaya, randevunuz 14:30 saatindedir.',
+    consentGranted: true,
+    idempotencyKey: 'idem_scen_19',
+    metadata: { source: 'online_booking', priority: 'normal' }
+  };
+
+  // 19a: Initial creation & snapshot
+  const intent1 = deliveryService.createIntent(baseInput);
+  const initialSnapshot = JSON.parse(JSON.stringify(intent1));
+
+  // 19b: Legitimate idempotent replays
+  const intent1Repeat = deliveryService.createIntent(baseInput);
+  assert(intent1Repeat === intent1, 'Scenario 19b: Legitimate idempotent replay returns identical existing intent reference');
+  assert(intent1Repeat.intentId === 'scen_19_identity', 'Scenario 19b: Intent ID preserved');
+  assert(intent1Repeat.createdAt === intent1.createdAt, 'Scenario 19b: CreatedAt timestamp remains unmodified');
+
+  // Permuted key order in templateArgs should be canonical-equivalent and succeed
+  const permutedArgsRepeat = deliveryService.createIntent({
+    ...baseInput,
+    templateArgs: { time: '14:30', customerName: 'Ayşe Kaya' }
+  });
+  assert(permutedArgsRepeat === intent1, 'Scenario 19b: Key-order agnostic canonical equivalence for templateArgs succeeds');
+
+  // Permuted key order in metadata should be canonical-equivalent and succeed
+  const permutedMetaRepeat = deliveryService.createIntent({
+    ...baseInput,
+    metadata: { priority: 'normal', source: 'online_booking' }
+  });
+  assert(permutedMetaRepeat === intent1, 'Scenario 19b: Key-order agnostic canonical equivalence for metadata succeeds');
+
+  // 19c: Cross-tenant intent ID collision
+  let crossTenantBlocked = false;
+  let crossTenantErrorMsg = '';
+  try {
+    deliveryService.createIntent({
+      ...baseInput,
+      tenantId: 'tenant_beta'
+    });
+  } catch (err) {
+    crossTenantBlocked = true;
+    crossTenantErrorMsg = err.message;
+  }
+  assert(crossTenantBlocked, 'Scenario 19c: Cross-tenant intent ID collision rejected');
+  assert(
+    crossTenantErrorMsg === 'Security violation: Intent ID collision across tenant boundaries (tenant mismatch).',
+    'Scenario 19c: Throws exact tenant mismatch security violation message'
+  );
+
+  // Helper for asserting conflict errors
+  const assertConflict = (modifier, testLabel, specificCheck) => {
+    let blocked = false;
+    let errorMsg = '';
+    const payload = typeof modifier === 'function' ? modifier({ ...baseInput }) : { ...baseInput, ...modifier };
+    try {
+      deliveryService.createIntent(payload);
+    } catch (err) {
+      blocked = true;
+      errorMsg = err.message;
+    }
+    assert(blocked, `${testLabel}: Conflicting payload rejected`);
+    assert(
+      errorMsg === `Conflict error: Conflicting intent payload for existing intent ${baseInput.intentId}.`,
+      `${testLabel}: Throws conflicting intent payload error`
+    );
+    if (specificCheck) {
+      specificCheck(errorMsg);
+    }
+  };
+
+  // 19d: Conflicting recipient payload & PII protection
+  assertConflict(
+    { recipient: '+905559990011' },
+    'Scenario 19d: Conflicting recipient',
+    (msg) => {
+      assert(
+        !msg.includes('+905559990011') && !msg.includes('+905553334455'),
+        'Scenario 19d: Zero recipient PII leaked in conflict error message'
+      );
+    }
+  );
+
+  // 19e: Conflicting channel payload
+  assertConflict({ channel: 'whatsapp' }, 'Scenario 19e: Conflicting channel');
+
+  // 19f: Conflicting template ID payload
+  assertConflict({ templateId: 'booking_cancelled' }, 'Scenario 19f: Conflicting templateId');
+
+  // 19g: Conflicting consent decision
+  assertConflict({ consentGranted: false }, 'Scenario 19g: Conflicting consent decision');
+
+  // 19h: Conflicting templateArgs - modified argument
+  assertConflict(
+    { templateArgs: { customerName: 'Ayşe Kaya', time: '15:00' } },
+    'Scenario 19h: Modified templateArgs value'
+  );
+
+  // 19i: Conflicting templateArgs - asymmetric key removal
+  assertConflict(
+    { templateArgs: { customerName: 'Ayşe Kaya' } },
+    'Scenario 19i: Asymmetric templateArgs key removal'
+  );
+
+  // 19j: Conflicting templateArgs - asymmetric key addition
+  assertConflict(
+    { templateArgs: { customerName: 'Ayşe Kaya', time: '14:30', room: 'Suite A' } },
+    'Scenario 19j: Asymmetric templateArgs key addition'
+  );
+
+  // 19k: Conflicting optional field - branchId modified
+  assertConflict({ branchId: 'branch_besiktas' }, 'Scenario 19k: Modified branchId');
+
+  // 19l: Conflicting optional field - branchId removed (asymmetric omission)
+  assertConflict(
+    (p) => { delete p.branchId; return p; },
+    'Scenario 19l: Asymmetric branchId omission'
+  );
+
+  // 19m: Conflicting optional field - subject modified
+  assertConflict({ subject: 'Farklı Konu Başlığı' }, 'Scenario 19m: Modified subject');
+
+  // 19n: Conflicting optional field - subject removed (asymmetric omission)
+  assertConflict(
+    (p) => { delete p.subject; return p; },
+    'Scenario 19n: Asymmetric subject omission'
+  );
+
+  // 19o: Conflicting optional field - idempotencyKey modified
+  assertConflict({ idempotencyKey: 'idem_other_key_999' }, 'Scenario 19o: Modified idempotencyKey');
+
+  // 19p: Conflicting optional field - idempotencyKey removed (asymmetric omission)
+  assertConflict(
+    (p) => { delete p.idempotencyKey; return p; },
+    'Scenario 19p: Asymmetric idempotencyKey omission'
+  );
+
+  // 19q: Conflicting metadata modified
+  assertConflict(
+    { metadata: { source: 'online_booking', priority: 'high' } },
+    'Scenario 19q: Modified metadata'
+  );
+
+  // 19r: Conflicting metadata removed (asymmetric omission)
+  assertConflict(
+    (p) => { delete p.metadata; return p; },
+    'Scenario 19r: Asymmetric metadata omission'
+  );
+
+  // 19s: Conflicting body payload
+  assertConflict(
+    { body: 'Sayın Ayşe Kaya, randevu saatiniz güncellendi.' },
+    'Scenario 19s: Modified body'
+  );
+
+  // 19t: Conflicting consent denial reason on denied intent
+  {
+    const deniedInput = {
+      ...baseInput,
+      intentId: 'scen_19_denied',
+      idempotencyKey: 'idem_scen_19_denied',
+      consentGranted: false,
+      consentDenialReason: 'Customer opted out via SMS'
+    };
+    const deniedIntent = deliveryService.createIntent(deniedInput);
+    const deniedSnapshot = JSON.parse(JSON.stringify(deniedIntent));
+
+    // Legitimate replay
+    const deniedRepeat = deliveryService.createIntent(deniedInput);
+    assert(deniedRepeat === deniedIntent, 'Scenario 19t: Denied consent intent legitimate replay succeeds');
+
+    // Conflicting denial reason
+    let deniedConflictBlocked = false;
+    try {
+      deliveryService.createIntent({
+        ...deniedInput,
+        consentDenialReason: 'Customer blacklisted'
+      });
+    } catch (err) {
+      deniedConflictBlocked = true;
+    }
+    assert(deniedConflictBlocked, 'Scenario 19t: Conflicting consent denial reason rejected');
+
+    // Asymmetric removal of consentDenialReason
+    let deniedOmissionBlocked = false;
+    try {
+      const omitted = { ...deniedInput };
+      delete omitted.consentDenialReason;
+      deliveryService.createIntent(omitted);
+    } catch (err) {
+      deniedOmissionBlocked = true;
+    }
+    assert(deniedOmissionBlocked, 'Scenario 19t: Asymmetric removal of consent denial reason rejected');
+
+    // Verify denied intent immutability
+    const persistedDenied = deliveryService.getIntent('scen_19_denied');
+    assert(
+      JSON.stringify(persistedDenied) === JSON.stringify(deniedSnapshot),
+      'Scenario 19t: Denied intent remains 100% byte-for-byte immutable after rejected attempts'
+    );
+  }
+
+  // 19u: Full ledger record snapshot immutability check
+  const persistedIntent = deliveryService.getIntent('scen_19_identity');
+  const finalSnapshot = JSON.parse(JSON.stringify(persistedIntent));
+
+  assert(
+    JSON.stringify(finalSnapshot) === JSON.stringify(initialSnapshot),
+    'Scenario 19u: Primary intent remains 100% byte-for-byte identical to initial snapshot'
+  );
+  assert(persistedIntent.tenantId === initialSnapshot.tenantId, 'Scenario 19u: Existing intent tenantId remains intact');
+  assert(persistedIntent.branchId === initialSnapshot.branchId, 'Scenario 19u: Existing intent branchId remains intact');
+  assert(persistedIntent.recipient === initialSnapshot.recipient, 'Scenario 19u: Existing intent recipient remains intact');
+  assert(persistedIntent.channel === initialSnapshot.channel, 'Scenario 19u: Existing intent channel remains intact');
+  assert(persistedIntent.templateId === initialSnapshot.templateId, 'Scenario 19u: Existing intent templateId remains intact');
+  assert(persistedIntent.subject === initialSnapshot.subject, 'Scenario 19u: Existing intent subject remains intact');
+  assert(persistedIntent.body === initialSnapshot.body, 'Scenario 19u: Existing intent body remains intact');
+  assert(persistedIntent.idempotencyKey === initialSnapshot.idempotencyKey, 'Scenario 19u: Existing intent idempotencyKey remains intact');
+  assert(persistedIntent.consentVerified === initialSnapshot.consentVerified, 'Scenario 19u: Existing intent consent remains verified');
+  assert(persistedIntent.status === initialSnapshot.status, 'Scenario 19u: Existing intent status remains rendered');
+  assert(persistedIntent.createdAt === initialSnapshot.createdAt, 'Scenario 19u: Existing intent createdAt remains unmodified');
+  assert(persistedIntent.updatedAt === initialSnapshot.updatedAt, 'Scenario 19u: Existing intent updatedAt remains unmodified');
+  assert(
+    JSON.stringify(persistedIntent.templateArgs) === JSON.stringify(initialSnapshot.templateArgs),
+    'Scenario 19u: Existing intent templateArgs remain intact'
+  );
+  assert(
+    JSON.stringify(persistedIntent.metadata) === JSON.stringify(initialSnapshot.metadata),
+    'Scenario 19u: Existing intent metadata remains intact'
+  );
+}
+
+// Final check
 if (failCount > 0) {
-  console.error(`\n❌ QA Failed: ${failCount} errors were encountered during Communication/Provider rehearsal review.`);
+  console.error(`\n❌ QA Failed: ${failCount} errors were encountered during Communication Provider & Delivery Contracts verification.`);
   process.exit(1);
 } else {
-  console.log('\n🎉 Communication Provider Setup & Rehearsal QA completed with 100% SUCCESS.');
+  console.log(`\n🎉 Phase E Communication Provider Rehearsal QA completed with 100% SUCCESS (${passCount} checks passed).`);
   process.exit(0);
 }

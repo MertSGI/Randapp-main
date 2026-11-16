@@ -95,15 +95,85 @@ const CANONICAL_MIGRATIONS = [
   '20260831_p1c_public_branch_read_contract_runtime_fix.sql'
 ];
 
+const CANDIDATE_MIGRATIONS = [
+  '20260901_payment_webhook_idempotency_and_replay_security.sql',
+  '20260902_subscription_sync_transaction.sql',
+  '20260903_public_booking_ratelimit_spam_and_otp_contract.sql',
+  '20260904_self_service_token_security_and_ratelimit.sql'
+];
+
+const V2_MIGRATIONS = [
+  '20260905_p2a_atomic_tenant_provisioning_rpc.sql',
+  '20260906_p2a_publish_commercial_contract_alignment.sql',
+  '20260907_p2a_owner_onboarding_contracts.sql',
+  '20260908_authenticated_owner_branch_mutations_rpc.sql',
+  '20260909_phase2_staff_scheduling_foundation.sql',
+  '20260910_phase3_waitlist_foundation.sql',
+  '20260911_phase3_background_job_calendar_foundation.sql',
+  '20260912_phase3_resource_capacity_foundation.sql',
+  '20260913_phase3_reporting_analytics_foundation.sql',
+  '20260914_phase3_custom_domain_verification_foundation.sql',
+  '20260915_phase5_scheduling_buffer_parity_hardening.sql',
+  '20260916_phase6_product_inventory_foundation.sql',
+  '20260917_phase6_node2_suppliers_po_receiving.sql',
+  '20260918_phase6_node3_pos_mixed_cart_checkout.sql',
+  '20260919_phase6_node4_staff_commissions_tips.sql',
+  '20260920_phase3_communications_foundation.sql',
+  '20260921_phase3_provider_neutral_payment_foundation.sql',
+  '20260922_phase3_customer360_segmentation_foundation.sql',
+  '20260923_phase4_deposit_noshow_policy_foundation.sql',
+  '20260924_phase4_loyalty_reactivation_foundation.sql',
+  '20260925_phase4_packages_memberships_foundation.sql',
+  '20260926_phase4_giftcards_wallet_foundation.sql',
+  '20260927_commercial_lifecycle_eligibility_alignment.sql',
+  '20260928_lari_clinic_domain_server_authority.sql',
+  '20260929_lari_clinic_operational_integration.sql',
+  '20260930_lari_clinic_workspace_authority_hardening.sql',
+  '20261001_lari_health_tourism_foundation.sql',
+  '20261002_lari_health_tourism_lead_ops_ai_assist.sql',
+  '20261003_lari_health_tourism_clinic_acceptance.sql',
+  '20261004_lari_health_tourism_clinic_acceptance_workspace.sql',
+  '20261005_phase5_vertical_skus_commercial_packaging.sql',
+  '20261006_phase5_clinic_practitioners_workspace_hardening.sql',
+  '20261007_phase5_ht_treatment_journey_quote_itinerary.sql',
+  '20261008_phase7_node1_verified_reviews_foundation.sql',
+  '20261009_phase7_node2_discovery_marketplace_projection.sql',
+  '20261010_phase7_node3_favorites_fast_rebooking.sql',
+  '20261011_program_v2_security_surface_hardening.sql',
+  '20261012_appointment_access_tokens_table_access_hardening.sql'
+];
+
+const ALL_EXPECTED_MIGRATIONS = [...CANONICAL_MIGRATIONS, ...CANDIDATE_MIGRATIONS, ...V2_MIGRATIONS].sort();
+
 // Check actual migration files on disk
 const migrationsDir = join(ROOT, 'supabase', 'migrations');
 if (existsSync(migrationsDir)) {
   const diskFiles = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
+  const diskSet = new Set(diskFiles);
   check(
-    `Migration files on disk match canonical list (${CANONICAL_MIGRATIONS.length} files)`,
-    diskFiles.length === CANONICAL_MIGRATIONS.length &&
-    diskFiles.every((f, i) => f === CANONICAL_MIGRATIONS[i]),
-    `Found: [${diskFiles.join(', ')}]`
+    `All ${CANONICAL_MIGRATIONS.length} canonical staging migrations exist on disk`,
+    CANONICAL_MIGRATIONS.every(m => diskSet.has(m)),
+    'Missing canonical: ' + CANONICAL_MIGRATIONS.filter(m => !diskSet.has(m)).join(', ')
+  );
+  check(
+    `All ${CANDIDATE_MIGRATIONS.length} candidate Pilot 3/4/5 migrations exist and carry CANDIDATE ONLY guard`,
+    CANDIDATE_MIGRATIONS.every(m => {
+      if (!diskSet.has(m)) return false;
+      const sql = readSafe(join('supabase', 'migrations', m)) || '';
+      return sql.includes('CANDIDATE ONLY');
+    }),
+    'Missing or unguarded candidate: ' + CANDIDATE_MIGRATIONS.filter(m => !diskSet.has(m)).join(', ')
+  );
+  check(
+    `All ${V2_MIGRATIONS.length} V2 ported migrations exist on disk`,
+    V2_MIGRATIONS.every(m => diskSet.has(m)),
+    'Missing V2: ' + V2_MIGRATIONS.filter(m => !diskSet.has(m)).join(', ')
+  );
+  check(
+    `Migration files on disk match ${CANONICAL_MIGRATIONS.length} canonical + ${CANDIDATE_MIGRATIONS.length} candidate + ${V2_MIGRATIONS.length} V2 (${ALL_EXPECTED_MIGRATIONS.length} total)`,
+    diskFiles.length === ALL_EXPECTED_MIGRATIONS.length &&
+    diskFiles.every((f, i) => f === ALL_EXPECTED_MIGRATIONS[i]),
+    `Unexpected/missing diff on disk (${diskFiles.length} files): [${diskFiles.join(', ')}]`
   );
 } else {
   check('supabase/migrations directory exists', false, 'Directory not found');
@@ -113,9 +183,9 @@ if (existsSync(migrationsDir)) {
 const manifest = readSafe('supabase/MIGRATION_APPLY_MANIFEST.md');
 if (manifest) {
   check(
-    `MIGRATION_APPLY_MANIFEST.md lists all ${CANONICAL_MIGRATIONS.length} migrations`,
-    CANONICAL_MIGRATIONS.every(m => manifest.includes(m)),
-    'Missing: ' + CANONICAL_MIGRATIONS.filter(m => !manifest.includes(m)).join(', ')
+    `MIGRATION_APPLY_MANIFEST.md lists all ${CANONICAL_MIGRATIONS.length} canonical + ${CANDIDATE_MIGRATIONS.length} candidate + ${V2_MIGRATIONS.length} V2 migrations`,
+    ALL_EXPECTED_MIGRATIONS.every(m => manifest.includes(m)),
+    'Missing: ' + ALL_EXPECTED_MIGRATIONS.filter(m => !manifest.includes(m)).join(', ')
   );
 } else {
   check('MIGRATION_APPLY_MANIFEST.md exists', false);

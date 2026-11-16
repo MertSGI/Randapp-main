@@ -1,6 +1,7 @@
 import { AuditEvent, AuditActorType, AuditEventCategory, AuditEventSeverity, AuditEventStatus } from '../types';
+import { STORAGE_KEYS } from './storageKeys';
 
-const AUDIT_STORAGE_KEY = 'lari_audit_events_v1';
+const AUDIT_STORAGE_KEY = STORAGE_KEYS.AUDIT_EVENTS;
 
 export const auditLogService = {
   /**

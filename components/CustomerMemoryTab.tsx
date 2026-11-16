@@ -6,6 +6,12 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useTenant } from '../contexts/TenantContext';
 import { useDialog } from '../contexts/DialogContext';
 import { entitlementService } from '../services/entitlementService';
+import { getDataSourceMode } from '../services/dataSourceConfig';
+import { customer360Service, Customer360View } from '../services/customer360Service';
+import {
+  loyaltyReactivationService,
+  CustomerLoyaltyProfile,
+} from '../services/loyaltyReactivationService';
 
 interface CustomerMemoryTabProps {
   appointments: Appointment[];
@@ -13,9 +19,10 @@ interface CustomerMemoryTabProps {
   servicesList: Service[];
   targetAppointmentId?: string | null;
   onClearTarget?: () => void;
+  modeOverride?: 'supabase' | 'local';
 }
 
-const CustomerMemoryTab: React.FC<CustomerMemoryTabProps> = ({ appointments, staffList, servicesList, targetAppointmentId, onClearTarget }) => {
+const CustomerMemoryTab: React.FC<CustomerMemoryTabProps> = ({ appointments, staffList, servicesList, targetAppointmentId, onClearTarget, modeOverride }) => {
   const { t, language } = useLanguage();
   const { tenant } = useTenant();
   const { confirm: showConfirm, alert: showAlert } = useDialog();
@@ -26,6 +33,8 @@ const CustomerMemoryTab: React.FC<CustomerMemoryTabProps> = ({ appointments, sta
     invitedOthers: any[];
     wasInvitedBy: any | null;
   }>({ invitedOthers: [], wasInvitedBy: null });
+  const [customer360View, setCustomer360View] = useState<Customer360View | null>(null);
+  const [loyaltyProfile, setLoyaltyProfile] = useState<CustomerLoyaltyProfile | null>(null);
 
   // Note form
   const [newNote, setNewNote] = useState('');
@@ -40,8 +49,50 @@ const CustomerMemoryTab: React.FC<CustomerMemoryTabProps> = ({ appointments, sta
     careNotes: ''
   });
 
+  const activeDataMode = modeOverride ?? getDataSourceMode();
+  const loyaltyBoundaryReport = loyaltyReactivationService.getCapabilityBoundaryReport(activeDataMode);
   const planId = tenant?.planId || 'baslangic';
-  const hasAccess = entitlementService.canUseFeature(planId, 'customer_memory_lite') || entitlementService.canUseFeature(planId, 'customer_memory_full');
+  const syncHasAccess = entitlementService.canUseFeature(planId, 'customer_memory_lite') || entitlementService.canUseFeature(planId, 'customer_memory_full');
+  const syncHasFullAccess = entitlementService.canUseFeature(planId, 'customer_memory_full');
+  const [hasAccess, setHasAccess] = useState<boolean>(activeDataMode === 'local' ? syncHasAccess : false);
+  const [hasFullAccess, setHasFullAccess] = useState<boolean>(activeDataMode === 'local' ? syncHasFullAccess : false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function checkEntitlements() {
+      if (!tenant) {
+        if (!cancelled) {
+          setHasAccess(false);
+          setHasFullAccess(false);
+        }
+        return;
+      }
+      if (activeDataMode === 'local') {
+        if (!cancelled) {
+          setHasAccess(syncHasAccess);
+          setHasFullAccess(syncHasFullAccess);
+        }
+        return;
+      }
+      try {
+        const lite = await entitlementService.canTenantUseFeature(tenant.id, 'customer_memory_lite', planId);
+        const full = await entitlementService.canTenantUseFeature(tenant.id, 'customer_memory_full', planId);
+        if (!cancelled) {
+          setHasAccess(lite || full);
+          setHasFullAccess(full);
+        }
+      } catch {
+        if (!cancelled) {
+          setHasAccess(false);
+          setHasFullAccess(false);
+        }
+      }
+    }
+    checkEntitlements();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenant, planId, activeDataMode, syncHasAccess, syncHasFullAccess]);
 
   useEffect(() => {
     if (!hasAccess) return;
@@ -82,10 +133,24 @@ const CustomerMemoryTab: React.FC<CustomerMemoryTabProps> = ({ appointments, sta
           setCustomerRewards([]);
         });
       });
+
+      if (activeDataMode === 'supabase') {
+        customer360Service.getCustomer360ViewSafe(tenant.id, selectedCustomer.id, { mode: 'supabase' })
+          .then((res) => setCustomer360View(res.success && res.data ? res.data : null))
+          .catch(() => setCustomer360View(null));
+        loyaltyReactivationService.getLoyaltyProfile(tenant.id, selectedCustomer.id, { mode: 'supabase' })
+          .then((res) => setLoyaltyProfile(res.success && res.data ? res.data : null))
+          .catch(() => setLoyaltyProfile(null));
+      } else {
+        setCustomer360View(null);
+        setLoyaltyProfile(null);
+      }
     } else {
       setCustomerRewards([]);
+      setCustomer360View(null);
+      setLoyaltyProfile(null);
     }
-  }, [tenant, selectedCustomer]);
+  }, [tenant, selectedCustomer, activeDataMode]);
 
   const handleSelectCustomer = (customer: CustomerProfile) => {
     setSelectedCustomer(customer);
@@ -142,7 +207,7 @@ const CustomerMemoryTab: React.FC<CustomerMemoryTabProps> = ({ appointments, sta
     const file = e.target.files?.[0];
     if (!file || !tenant || !selectedCustomer) return;
     
-    if (!entitlementService.canUseFeature(planId, 'customer_memory_full')) {
+    if (!hasFullAccess) {
        alert(language === 'tr' ? 'Fotoğraf yükleme özelliği Full CRM paketlerinde mevcuttur.' : 'Photo upload is available in Full CRM plans.');
        return;
     }
@@ -212,9 +277,28 @@ const CustomerMemoryTab: React.FC<CustomerMemoryTabProps> = ({ appointments, sta
     return (
       <div className="space-y-6">
         <div className="bg-white dark:bg-slate-800 shadow-sm rounded-lg border border-gray-200 dark:border-slate-700 overflow-hidden">
-          <div className="px-4 py-5 sm:px-6 bg-gray-50 dark:bg-slate-800/80 border-b border-gray-200 dark:border-slate-700">
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white">{t.admin.customers_title}</h3>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t.admin.customers_subtitle}</p>
+          <div className="px-4 py-5 sm:px-6 bg-gray-50 dark:bg-slate-800/80 border-b border-gray-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white">{t.admin.customers_title}</h3>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t.admin.customers_subtitle}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                data-testid="customer360-authority-badge"
+                className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${
+                  loyaltyBoundaryReport.activeAuthority === 'DB_AUTHORITATIVE'
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800'
+                    : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800'
+                }`}
+              >
+                {loyaltyBoundaryReport.activeAuthority === 'DB_AUTHORITATIVE'
+                  ? 'DB Yetkili (Supabase RPC)'
+                  : 'Yerel Simülasyon / Demo'}
+              </span>
+              <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:border-slate-600">
+                EXTERNAL_HOLD (Canlı Tahsilat &amp; Gönderim Kapalı)
+              </span>
+            </div>
           </div>
           <ul className="divide-y divide-gray-200 dark:divide-slate-700 max-h-[600px] overflow-y-auto">
             {customers.length === 0 ? (
@@ -601,6 +685,78 @@ const CustomerMemoryTab: React.FC<CustomerMemoryTabProps> = ({ appointments, sta
                   )
                 })
               )}
+            </div>
+          </div>
+        </div>
+
+        {/* Customer 360 & Loyalty / Wallet Server Authority Card */}
+        <div className="mt-6 pt-6 border-t border-gray-100 dark:border-slate-700" data-testid="customer360-loyalty-panel">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+              {language === 'tr' ? 'Müşteri 360, Sadakat & Cüzdan Yetki Özeti' : 'Customer 360, Loyalty & Wallet Authority'}
+            </h3>
+            <div className="flex items-center gap-2">
+              <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                loyaltyBoundaryReport.activeAuthority === 'DB_AUTHORITATIVE'
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : 'bg-amber-50 text-amber-700 border border-amber-200'
+              }`}>
+                {loyaltyBoundaryReport.activeAuthority === 'DB_AUTHORITATIVE'
+                  ? 'DB Yetkili (Supabase RPC)'
+                  : 'Yerel Simülasyon — Bakiye Yazımı Kapalı'}
+              </span>
+              <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                EXTERNAL_HOLD (Canlı Kapalı)
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div className="bg-slate-50 dark:bg-slate-700/40 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
+              <p className="text-slate-500 uppercase text-[10px] font-semibold">
+                {language === 'tr' ? 'Sadakat Puanı (Sunucu Defteri)' : 'Loyalty Points (Server Ledger)'}
+              </p>
+              <p className="text-base font-bold text-slate-900 dark:text-white mt-1">
+                {loyaltyProfile ? `${loyaltyProfile.currentBalance} puan` : activeDataMode === 'supabase' ? '0 puan' : 'Yerel Mod (RPC Yok)'}
+              </p>
+              {loyaltyProfile && (
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {language === 'tr'
+                    ? `Kazanılan: ${loyaltyProfile.lifetimeEarned} • Harcanan: ${loyaltyProfile.lifetimeRedeemed}`
+                    : `Earned: ${loyaltyProfile.lifetimeEarned} • Redeemed: ${loyaltyProfile.lifetimeRedeemed}`}
+                </p>
+              )}
+            </div>
+
+            <div className="bg-slate-50 dark:bg-slate-700/40 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
+              <p className="text-slate-500 uppercase text-[10px] font-semibold">
+                {language === 'tr' ? 'Müşteri 360 Segmentleri' : 'Customer 360 Segments'}
+              </p>
+              <p className="text-sm font-medium text-slate-900 dark:text-white mt-1">
+                {customer360View && customer360View.segments.length > 0
+                  ? customer360View.segments.map((s) => s.name).join(', ')
+                  : language === 'tr'
+                    ? 'Atanmış segment yok'
+                    : 'No assigned segments'}
+              </p>
+              {customer360View && (
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {language === 'tr'
+                    ? `Tamamlanan: ${customer360View.metrics.completedAppointments} • Gelmedi: ${customer360View.metrics.noShowAppointments}`
+                    : `Completed: ${customer360View.metrics.completedAppointments} • No-Show: ${customer360View.metrics.noShowAppointments}`}
+                </p>
+              )}
+            </div>
+
+            <div className="bg-slate-50 dark:bg-slate-700/40 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
+              <p className="text-slate-500 uppercase text-[10px] font-semibold">
+                {language === 'tr' ? 'Paket / Cüzdan / Depozito Mutasyonları' : 'Package / Wallet / Deposit Authority'}
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
+                {language === 'tr'
+                  ? 'Tüm bakiye, puan, paket kredisi ve depozito mutasyonları yalnız sunucu yetkili PostgreSQL RPC sözleşmeleriyle yürütülür; istemcide bakiye yazımı yasaktır.'
+                  : 'All balance, loyalty, package, and deposit mutations are server-authoritative via PostgreSQL RPCs only.'}
+              </p>
             </div>
           </div>
         </div>

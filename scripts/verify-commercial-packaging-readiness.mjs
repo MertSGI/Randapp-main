@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { spawnSync } from 'child_process';
 
 function verify() {
   console.log("=== LARİ Commercial Packaging & Entitlement Audits ===");
@@ -143,6 +144,65 @@ function verify() {
       }
     }
   });
+
+  // 8. 14-day Trial & V1-B SOURCE_READY / EXTERNAL_HOLD Governance Checks
+  const trialConfigContent = checkFileExists('services/trialConfigService.ts');
+  if (trialConfigContent) {
+    if (
+      !trialConfigContent.includes('trialDayCount: 14') ||
+      !trialConfigContent.includes('requiresPaymentMethod: true')
+    ) {
+      console.error('❌ trialConfigService.ts must enforce 14-day card-backed trial contract.');
+      passed = false;
+    } else {
+      console.log('  • trialConfigService.ts enforces 14-day card-backed trial contract.');
+    }
+  }
+
+  const v1bReportContent = checkFileExists('docs/V1B_SOURCE_READY_REPORT.md');
+  if (v1bReportContent) {
+    const requiredTokens = ['SOURCE_READY', 'EXTERNAL_HOLD', 'PRODUCTION = NO_GO', 'PAID_FALLBACK = DISABLED', 'Issue #10'];
+    requiredTokens.forEach(token => {
+      if (!v1bReportContent.includes(token)) {
+        console.error(`❌ docs/V1B_SOURCE_READY_REPORT.md is missing required governance token: "${token}"`);
+        passed = false;
+      }
+    });
+    if (requiredTokens.every(token => v1bReportContent.includes(token))) {
+      console.log('  • docs/V1B_SOURCE_READY_REPORT.md documents SOURCE_READY and EXTERNAL_HOLD governance.');
+    }
+  }
+
+  // 9. V1-B Payment Env Negative Unit Tests & iyzico Sandbox Readiness Sub-Gates
+  const subGates = [
+    'scripts/test-check-payment-env.mjs',
+    'scripts/verify-iyzico-sandbox-readiness.mjs'
+  ];
+
+  for (const relScript of subGates) {
+    const fullScriptPath = path.join(process.cwd(), relScript);
+    console.log(`\n--- Executing V1-B sub-gate: node ${relScript} ---`);
+    if (!fs.existsSync(fullScriptPath)) {
+      console.error(`❌ Missing V1-B sub-gate script: ${relScript}`);
+      passed = false;
+      continue;
+    }
+    const res = spawnSync(process.execPath, [fullScriptPath], {
+      cwd: process.cwd(),
+      encoding: 'utf-8'
+    });
+    if (res.stdout) process.stdout.write(res.stdout);
+    if (res.stderr) process.stderr.write(res.stderr);
+    if (res.error) {
+      console.error(`❌ Failed to spawn ${relScript}: ${res.error.message}`);
+      passed = false;
+    } else if (res.status !== 0) {
+      console.error(`❌ Sub-gate failed: node ${relScript} (exit code ${res.status ?? 'null'})`);
+      passed = false;
+    } else {
+      console.log(`✅ Sub-gate passed: node ${relScript} (exit code 0)`);
+    }
+  }
 
   if (passed) {
     console.log("\n🎉 ALL COMMERCIAL PACKAGING AND ENTITLEMENT CHECKS PASSED SUCCESSFULLY!");

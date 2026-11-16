@@ -3,6 +3,7 @@ import { supabase } from './supabaseClient';
 import { createClient } from '@supabase/supabase-js';
 import { mapSupabaseProfileToUser, SUPABASE_AUTH_PROFILE_ERROR } from './authProfileMapper';
 import { resolveDataSourceMode } from './dataSourceModeResolver';
+import { STORAGE_KEYS } from './storageKeys';
 
 // Helper mock user for development
 const MOCK_ADMIN_USER: User = {
@@ -79,10 +80,10 @@ export const authService = {
     return new Promise(resolve => {
       setTimeout(() => {
         if (email === 'superadmin@randevulari.com' && passwordHash === 'superadmin123') {
-          localStorage.setItem('lari_active_owner_session', JSON.stringify(MOCK_SUPER_ADMIN_USER));
+          localStorage.setItem(STORAGE_KEYS.ACTIVE_OWNER_SESSION, JSON.stringify(MOCK_SUPER_ADMIN_USER));
           resolve(MOCK_SUPER_ADMIN_USER);
         } else if (passwordHash === 'admin123') {
-          localStorage.setItem('lari_active_owner_session', JSON.stringify(MOCK_ADMIN_USER));
+          localStorage.setItem(STORAGE_KEYS.ACTIVE_OWNER_SESSION, JSON.stringify(MOCK_ADMIN_USER));
           resolve(MOCK_ADMIN_USER);
         } else {
           resolve(null);
@@ -100,8 +101,8 @@ export const authService = {
     }
     
     localStorage.removeItem('nexus_admin_auth');
-    localStorage.removeItem('lari_mock_user');
-    localStorage.removeItem('lari_active_owner_session');
+    localStorage.removeItem(STORAGE_KEYS.MOCK_USER);
+    localStorage.removeItem(STORAGE_KEYS.ACTIVE_OWNER_SESSION);
   },
 
   async getCurrentUser(): Promise<User | null> {
@@ -129,7 +130,7 @@ export const authService = {
       }
     }
     
-    const mockUserStr = localStorage.getItem('lari_active_owner_session') || localStorage.getItem('lari_mock_user');
+    const mockUserStr = localStorage.getItem(STORAGE_KEYS.ACTIVE_OWNER_SESSION) || localStorage.getItem(STORAGE_KEYS.MOCK_USER);
     if (mockUserStr) {
       try {
         return JSON.parse(mockUserStr) as User;

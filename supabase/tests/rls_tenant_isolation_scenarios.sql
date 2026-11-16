@@ -258,11 +258,18 @@ WHERE tenant_id = 'aaaaaaaa-1111-2222-3333-aaaaaaaaaaaa';
 
 
 -- -------------------------------------------------------------------------
--- SCENARIO 14 & 15: Custom Domain Requests & Branch records (Multi-Tenancy checks)
+-- SCENARIO 14 & 15: Custom Domain Requests, Branch records, Direct-Update & Token/Consent Hardening
 -- -------------------------------------------------------------------------
--- Detailed documentation: Both of these tables are scoped strictly by:
--- `tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid())`
--- This automatically guarantees 100% tenant-level isolation during active client transactions.
+-- Detailed documentation:
+-- 1. Custom domain requests and branch records are scoped strictly by:
+--    `tenant_id IN (SELECT tenant_id FROM public.users_profile WHERE id = auth.uid())`
+-- 2. Direct table UPDATE on `public.appointments` is revoked from `PUBLIC`, `anon`, and `authenticated`
+--    (`20260804_appointments_direct_update_hardening.sql`); all appointment status mutations route
+--    exclusively through `public.admin_update_appointment_status` and
+--    `public.cancel_public_appointment_by_manage_token`.
+-- 3. Direct table access on `public.appointment_access_tokens` for `PUBLIC`/`anon` is revoked and
+--    `public.consent_ledger` / `public.policy_acceptances` enforce tenant-scoped SELECT and
+--    revoked direct client INSERT/UPDATE/DELETE (`20261011_proposed_appointment_access_tokens_and_consent_rls_hardening.sql`).
 
 
 -- Rollback transaction block to keep test sandbox pure

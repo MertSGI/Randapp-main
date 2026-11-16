@@ -1,8 +1,10 @@
-import { LegalDocumentType } from '../types';
+import type { LegalDocumentType } from '../types.ts';
 import { auditLogService } from './auditLogService';
 import { legalDocumentService } from './legalDocumentService';
+import { STORAGE_KEYS } from './storageKeys';
 
-const LEDGER_STORAGE_KEY = 'lari_consent_ledger_v1';
+const LEDGER_STORAGE_KEY = STORAGE_KEYS.CONSENT_LEDGER;
+const CONSENT_STATUS_VALUES: ConsentStatusType[] = ['granted', 'denied', 'withdrawn', 'expired'];
 
 export type ConsentStatusType = 'granted' | 'denied' | 'withdrawn' | 'expired';
 
@@ -38,6 +40,22 @@ export const consentLedgerService = {
     legalDocumentType?: LegalDocumentType;
     metadata?: any;
   }): ConsentLedgerRecord {
+    const isBlank = (value?: string) => !value || value.trim().length === 0;
+    const normalizedConsentType = input.consentType?.trim();
+    const normalizedSource = input.source?.trim();
+    const normalizedTenantId = input.tenantId?.trim();
+    const normalizedActorId = input.actorId?.trim();
+
+    if (!CONSENT_STATUS_VALUES.includes(input.status)) {
+      throw new Error(`Invalid consent status: ${String(input.status)}`);
+    }
+
+    if (input.actorType === 'customer') {
+      if (isBlank(normalizedTenantId) || isBlank(normalizedActorId) || isBlank(normalizedConsentType) || isBlank(normalizedSource)) {
+        throw new Error('Customer consent requires tenantId, actorId, consentType, and source.');
+      }
+    }
+
     const ledger = this._getLedgerFromStore();
     const id = `cld_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
@@ -57,13 +75,13 @@ export const consentLedgerService = {
 
     const record: ConsentLedgerRecord = {
       id,
-      tenantId: input.tenantId,
+      tenantId: normalizedTenantId,
       actorType: input.actorType,
-      actorId: input.actorId || 'anonymous',
+      actorId: normalizedActorId || 'anonymous',
       contact: safeContact,
-      consentType: input.consentType,
+      consentType: normalizedConsentType || input.consentType,
       status: input.status,
-      source: input.source,
+      source: normalizedSource || input.source,
       capturedAt: new Date().toISOString(),
       legalDocumentType: input.legalDocumentType,
       legalDocumentVersion: version,
@@ -129,33 +147,74 @@ export const consentLedgerService = {
 
   /**
    * Withdraws (revokes) a consent by updating its status and logging the withdrawal timestamp.
+   * Requires non-empty tenantId for customer consent decisions to fail closed on omitted or ambiguous tenant context.
    */
-  withdrawConsent(actorId: string, consentType: string, reason: string = 'Kullanıcı talebi'): boolean {
+  withdrawConsent(actorId: string, consentType: string, reason: string = 'Kullanıcı talebi', tenantId?: string): boolean {
+    if (!actorId?.trim() || !consentType?.trim()) return false;
+    const cleanTenantId = tenantId?.trim();
+    if (!cleanTenantId) {
+      console.warn('Consent withdrawal failed: tenantId is required for customer consent decisions.');
+      return false;
+    }
     const ledger = this._getLedgerFromStore();
-    // Find latest active 'granted' consent for this actor and type
-    const activeIndex = ledger.findIndex(r => r.actorId === actorId && r.consentType === consentType && r.status === 'granted');
-    
-    if (activeIndex !== -1) {
-      const activeRecord = ledger[activeIndex];
-      activeRecord.status = 'withdrawn';
-      activeRecord.withdrawnAt = new Date().toISOString();
-      if (!activeRecord.metadata) activeRecord.metadata = {};
-      activeRecord.metadata.withdrawalReason = reason;
+    const normalizedActorId = actorId.trim();
+    const normalizedConsentType = consentType.trim();
+    const recordsForActorType = ledger.filter(r =>
+      r.actorId === normalizedActorId &&
+      r.consentType === normalizedConsentType &&
+      r.tenantId === cleanTenantId
+    );
 
+    const latestRecord = recordsForActorType[0];
+    if (!latestRecord) return false;
+    if (latestRecord.status === 'withdrawn') return false;
+
+    if (latestRecord.status === 'granted') {
+      const timestamp = new Date().toISOString();
+      const withdrawalIdBase = `cld_withdrawn_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${latestRecord.id}`;
+      let withdrawalId = withdrawalIdBase;
+      let suffix = 0;
+      while (ledger.some(record => record.id === withdrawalId)) {
+        suffix += 1;
+        withdrawalId = `${withdrawalIdBase}_${suffix}`;
+      }
+      const withdrawalRecord: ConsentLedgerRecord = {
+        id: withdrawalId,
+        tenantId: cleanTenantId,
+        actorType: latestRecord.actorType,
+        actorId: latestRecord.actorId,
+        contact: latestRecord.contact,
+        consentType: latestRecord.consentType,
+        status: 'withdrawn',
+        source: latestRecord.source,
+        capturedAt: timestamp,
+        withdrawnAt: timestamp,
+        legalDocumentType: latestRecord.legalDocumentType,
+        legalDocumentVersion: latestRecord.legalDocumentVersion,
+        consentTextSnapshot: latestRecord.consentTextSnapshot,
+        metadata: {
+          ...(latestRecord.metadata || {}),
+          withdrawalReason: reason,
+          supersedesRecordId: latestRecord.id
+        }
+      };
+
+      ledger.unshift(withdrawalRecord);
       this._saveLedgerToStore(ledger);
 
       // Audit trail record
       auditLogService.logAuditEvent({
-        tenantId: activeRecord.tenantId,
-        actorType: activeRecord.actorType === 'tenant_owner' ? 'tenant_owner' : 'customer',
-        actorId: activeRecord.actorId,
+        tenantId: cleanTenantId,
+        actorType: latestRecord.actorType === 'tenant_owner' ? 'tenant_owner' : 'customer',
+        actorId: latestRecord.actorId,
         category: 'security',
         severity: 'warning',
         action: 'consent_withdrawn',
-        summary: `Rıza geri çekildi: ${consentType}`,
+        summary: `Rıza geri çekildi: ${normalizedConsentType}`,
         safeDetails: {
-          recordId: activeRecord.id,
-          consentType,
+          recordId: withdrawalRecord.id,
+          supersedesRecordId: latestRecord.id,
+          consentType: normalizedConsentType,
           reason
         }
       });
@@ -167,20 +226,38 @@ export const consentLedgerService = {
 
   /**
    * Checks if a user has currently granted a specific consent.
+   * Requires non-empty tenantId and fails closed when tenant context is omitted or ambiguous.
    */
-  hasConsent(actorId: string, consentType: string): boolean {
+  hasConsent(actorId: string, consentType: string, tenantId?: string): boolean {
+    const cleanTenantId = tenantId?.trim();
+    if (!cleanTenantId) {
+      return false;
+    }
     const ledger = this._getLedgerFromStore();
-    // Find latest record for actor and consent type
-    const match = ledger.find(r => r.actorId === actorId && r.consentType === consentType);
+    // Find latest record for actor and consent type scoped to tenantId
+    const match = ledger.find(r =>
+      r.actorId === actorId &&
+      r.consentType === consentType &&
+      r.tenantId === cleanTenantId
+    );
     return match ? match.status === 'granted' : false;
   },
 
   /**
    * Alias method for checking active consent state (for QA contract compliance).
+   * Requires non-empty tenantId and fails closed (null) when tenant context is omitted.
    */
-  getConsentState(actorId: string, consentType: string): ConsentStatusType | null {
+  getConsentState(actorId: string, consentType: string, tenantId?: string): ConsentStatusType | null {
+    const cleanTenantId = tenantId?.trim();
+    if (!cleanTenantId) {
+      return null;
+    }
     const ledger = this._getLedgerFromStore();
-    const match = ledger.find(r => r.actorId === actorId && r.consentType === consentType);
+    const match = ledger.find(r =>
+      r.actorId === actorId &&
+      r.consentType === consentType &&
+      r.tenantId === cleanTenantId
+    );
     return match ? match.status : null;
   },
 
@@ -219,7 +296,9 @@ export const consentLedgerService = {
     try {
       if (typeof window === 'undefined') return [];
       const data = localStorage.getItem(LEDGER_STORAGE_KEY);
-      return data ? JSON.parse(data) : [];
+      if (!data) return [];
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }
@@ -232,6 +311,7 @@ export const consentLedgerService = {
       }
     } catch (e) {
       console.error('Failed to write consent ledger to storage', e);
+      throw new Error('Failed to persist consent ledger.');
     }
   }
 };

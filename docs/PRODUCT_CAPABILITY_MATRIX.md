@@ -55,3 +55,49 @@ When a user requests `booking.myhairsalon.com`, they must point a CNAME to `cust
 * **Main corporate/general booking page**: `https://{tenant-slug}.randevulari.com` (maps to the tenant's primary hub).
 * **Specific branch booking page**: `https://{tenant-slug}.randevulari.com/{branch-slug}` (or with dynamic route query parameter fallbacks). This routes the user specifically to the selected location, pre-filtering services and staff calendar availability.
 
+
+## Phase A Acceptance Matrix (Controller Directive 20261024)
+
+Authoritative qualification status across core Phase A booking, availability, anti-abuse, and operational contracts:
+
+| Scope Item | Subsystem / Function | Status | Evidence / Verification |
+| :--- | :--- | :--- | :--- |
+| **1. Available Slot Booking** | `availabilityService.getAvailableSlotsForStaff` & `createAppointment` | `VERIFIED` | Verified by `qa:phase-a-functional-acceptance` (Scenario 1). Slots generated and booked accurately. |
+| **2. Conflicting Slot Rejection** | `LocalBookingRepository.createAppointment` | `DEFECT_FOUND_AND_FIXED` | Demonstrated defect: Local repo lacked overlap checks. Fixed: checks duration overlap against active appointments and throws `Slot conflict`. Verified in Scenario 2. |
+| **3. Staff Time-Off & Hours Overrides** | `availabilityService.getAvailableSlotsForStaff` | `DEFECT_FOUND_AND_FIXED` | Demonstrated defect: Rule resolution bypassed staff overrides when salon rule existed. Fixed: prioritizes staff-specific rule over tenant-wide fallback. Verified in Scenario 3. |
+| **4. Staff Eligibility & Service Durations** | `LocalCatalogRepository`, `availabilityService`, `LocalBookingRepository` | `DEFECT_FOUND_AND_FIXED` | Demonstrated defect: Missing staff-service eligibility checks allowed unassigned bookings; `getServiceById` lacked demo fallback. Fixed & verified in Scenario 4. |
+| **5. Cancellation Without Ghost Slots** | `updateAppointmentStatus` & `availabilityService` | `VERIFIED` | Verified by `qa:phase-a-functional-acceptance` (Scenario 5). Cancelled appointments immediately release reserved time window. |
+| **6. Self-Service Token Security** | `appointmentSelfServiceService` | `VERIFIED` | Verified by `qa:phase-a-functional-acceptance` (Scenario 6). Expired/invalid tokens reject change and cancel requests. |
+| **7. Cross-Tenant Booking Isolation** | `LocalBookingRepository` & partition keys | `VERIFIED` | Verified by `qa:phase-a-functional-acceptance` (Scenario 7). Tenant A data completely isolated from Tenant B. |
+| **8. Anti-Abuse Scoping & No-Show Protection** | `bookingAbuseProtectionService` | `VERIFIED` | Verified by `qa:phase-a-functional-acceptance` (Scenario 8). Repeat no-show phone blocking is tenant-scoped without blocking innocent clients. |
+| **9. Decoupled Truthful Notifications** | `communicationEventService` & `notificationService` | `VERIFIED` | Verified by `qa:phase-a-functional-acceptance` (Scenario 9). Booking success is strictly decoupled from delivery; no false sent status. |
+| **10. Pilot Demo State Restoration** | `pilotDemoService` & `PilotDemoEntryPage` | `DEFECT_FOUND_AND_FIXED` | Demonstrated defect: Demo entry did not save previous real tenant/session. Fixed: `enterDemoContext` preserves and `exitDemoContext` restores them. Verified in Scenario 10. |
+| **11. Wildcard DNS & SSL Routing** | Infrastructure / CDN | `EXTERNAL_DEPENDENCY_PENDING` | Requires production CDN/DNS mapping for `*.randevulari.com` and `*.lari.app`. |
+| **12. Real External Notification Dispatch** | Live WhatsApp / SMS Providers (Netgsm, Twilio) | `EXTERNAL_DEPENDENCY_PENDING` | Pre-live safely defaults to outbox rendering; external gateway credentials required for live dispatch. |
+| **13. Real Online Card Processing** | Iyzico / Payment Gateway | `EXTERNAL_DEPENDENCY_PENDING` | Client-side simulation active; server-side tokenization and merchant keys required for real collection. |
+| **14. Supabase Staging Database Cutover** | Remote PostgreSQL 17 Staging | `EXTERNAL_DEPENDENCY_PENDING` | Tracked in Issue #10. Production cutover strictly blocked pending recovery resolution. |
+
+
+## Phase C & Phase D Product Acceptance Matrix (Controller Directive 20261024)
+
+Authoritative qualification status for Phase C (Payments, Webhooks, Subscriptions) and Phase D (Domain, Subdomain & Branch Routing):
+
+| Capability / Flow | Implementation Status | Qualification Category | Verified In Suite | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **Payment Run Mode Safety** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:payment-mode-safety` | LocalStorage cannot force `production_live`. Fails closed if backend credentials/release authorization missing. |
+| **Client Payment Adapters** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:payment-mode-safety` | Return typed `PAYMENT_PROVIDER_NOT_CONFIGURED` without manufacturing fake checkout URLs or session tokens. |
+| **Cryptographic Webhook Signature Verification** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:payment-security`, `qa:iyzico-webhook-cryptography` | Timing-safe HMAC-SHA256 calculation. Permanent deletion of `sandbox_bypass` backdoor. Missing, malformed, tampered signatures rejected. |
+| **Strict Event Classification & Failsafe** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:iyzico-webhook-cryptography` | Only explicitly classified event types accepted. Unrecognized events fail closed without state mutation. |
+| **Sanitized Webhook Logging** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:iyzico-webhook-cryptography` | Zero raw secrets, signature strings, or customer PII enter logs or audit trails. |
+| **Webhook Idempotency Protection** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` | Unique `providerEventId` checked in audit store; duplicate webhooks are ignored idempotently. |
+| **Tenant / Customer Mismatch Rejection** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` | Webhooks referencing customer ID differing from subscription record are rejected with 403 Forbidden. |
+| **Non-Existent Subscription Rejection** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` | Webhooks referencing unknown `subscriptionReferenceCode` are rejected with 404 without synthesising records. |
+| **Out-of-Order Lifecycle Protection** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` | Terminal states (`cancelled`, `expired`) cannot be resurrected to `active` via delayed or out-of-order webhooks. |
+| **Diagnostic Endpoint Authorization** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` | Public unauthenticated `diagnostic: true` probes rejected with 401 `UNAUTHENTICATED_DIAGNOSTIC_REQUEST`. |
+| **Frontend Redirect Immunity** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:subscription-lifecycle-integrity` | URL params (`?checkout=success`) do not mutate persistent subscription state; state only transitions on verified backend events. |
+| **Domain & Subdomain Resolution** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:phase-d-routing-rehearsal` | Normalizes hostnames, parses tenant slugs, rejects malicious Host headers and path traversal strings. |
+| **Branch Routing Rehearsal** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:phase-d-routing-rehearsal` | Maps branch paths and query parameters to specific branch contexts with tenant containment. |
+| **Router Mode Fallback** | Implemented | `SOURCE_READY` / `MOCK_TESTED` | `qa:phase-d-routing-rehearsal` | Hash routing fallback for static preview environments and browser routing for top-level domains verified. |
+| **Real External iyzico Sandbox Interoperability** | Pending Owner Action | `PROVIDER_INTEGRATION_PENDING` | Pending live test credentials | Requires merchant subscription contract approval from iyzico. |
+| **Wildcard DNS & TLS Public Routing** | Pending Hosting Setup | `PROVIDER_INTEGRATION_PENDING` | Pending DNS CNAME mapping | Requires `*.randevulari.com` CNAME and wildcard TLS cert on CDN ingress. |
+| **Production Live Financial Processing** | Deferred Release Blocker | `NOT_TESTED` | Blocked by Issue #10 | Real credit card processing strictly deferred until PostgreSQL recovery qualification is complete. |

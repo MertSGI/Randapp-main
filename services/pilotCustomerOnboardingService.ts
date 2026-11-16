@@ -1,3 +1,5 @@
+import { STORAGE_KEYS } from './storageKeys';
+
 export type PilotStage =
   | 'lead_identified'
   | 'demo_scheduled'
@@ -61,7 +63,7 @@ export const pilotCustomerOnboardingService = {
 
   getAllPilots(): PilotCustomer[] {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('lari_pilot_customer_tracker_by_tenant');
+      const stored = localStorage.getItem(STORAGE_KEYS.PILOT_CUSTOMER_TRACKER);
       if (stored) {
         try {
           return JSON.parse(stored);
@@ -136,7 +138,7 @@ export const pilotCustomerOnboardingService = {
 
   savePilots(pilots: PilotCustomer[]) {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('lari_pilot_customer_tracker_by_tenant', JSON.stringify(pilots));
+      localStorage.setItem(STORAGE_KEYS.PILOT_CUSTOMER_TRACKER, JSON.stringify(pilots));
     }
   },
 

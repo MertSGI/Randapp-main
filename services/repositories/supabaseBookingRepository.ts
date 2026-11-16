@@ -207,21 +207,25 @@ export class SupabaseBookingRepository implements BookingRepository {
     marketingConsent?: boolean;
     reminderConsent?: boolean;
     idempotencyKey?: string;
+    otpVerificationToken?: string;
+    clientFingerprint?: string;
   }): Promise<PublicBookingResult> {
     const body = {
-      p_slug:              params.slug,
-      p_branch_id:         params.branchId ?? null,
-      p_service_id:        params.serviceId,
-      p_staff_id:          params.staffId,
-      p_appointment_date:  params.appointmentDate,
-      p_appointment_time:  params.appointmentTime,
-      p_customer_name:     params.customerName,
-      p_customer_email:    params.customerEmail || '',
-      p_customer_phone:    params.customerPhone || '',
-      p_required_consent:  params.requiredConsent,
-      p_marketing_consent: params.marketingConsent ?? false,
-      p_reminder_consent:  params.reminderConsent ?? false,
-      p_idempotency_key:   params.idempotencyKey ?? null,
+      p_slug:                   params.slug,
+      p_branch_id:              params.branchId ?? null,
+      p_service_id:             params.serviceId,
+      p_staff_id:               params.staffId,
+      p_appointment_date:       params.appointmentDate,
+      p_appointment_time:       params.appointmentTime,
+      p_customer_name:          params.customerName,
+      p_customer_email:         params.customerEmail || '',
+      p_customer_phone:         params.customerPhone || '',
+      p_required_consent:       params.requiredConsent,
+      p_marketing_consent:      params.marketingConsent ?? false,
+      p_reminder_consent:       params.reminderConsent ?? false,
+      p_idempotency_key:        params.idempotencyKey ?? null,
+      p_otp_verification_token: params.otpVerificationToken ?? null,
+      p_client_fingerprint:     params.clientFingerprint ?? null,
     };
 
     const res = await fetchSupabase('/rest/v1/rpc/create_public_booking', {
@@ -246,7 +250,7 @@ export class SupabaseBookingRepository implements BookingRepository {
       appointmentId: result?.appointment_id,
       manageToken:   result?.manage_token,
       branchId:      result?.branch_id,
-      reasonCode:    result?.reason_code || 'temporary_failure',
+      reasonCode:    result?.reason_code || (result?.success ? 'ok' : 'temporary_failure'),
     };
   }
 

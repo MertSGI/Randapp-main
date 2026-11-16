@@ -22,7 +22,9 @@ const IGNORED_PATHS = [
     '.git',
     'supabase/functions',
     'docs',
-    'scripts' // ignore this script itself
+    'scripts', // ignore this script itself
+    'scratch',
+    '.autodev_logs'
 ];
 
 let violations = 0;

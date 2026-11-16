@@ -22,10 +22,13 @@ import CustomerMemoryTab from '../components/CustomerMemoryTab';
 import ReferralTab from '../components/ReferralTab';
 import AdminSettingsTab from '../components/AdminSettingsTab';
 import { RescheduleRequestsTab } from '../components/RescheduleRequestsTab';
+import PosInventoryWorkspacePanel from '../components/PosInventoryWorkspacePanel';
 import { ImageUpload } from '../components/ImageUpload';
 import { onboardingChecklistService, OnboardingReport } from '../services/onboardingChecklistService';
 import { AdminFeatureAvailability } from '../services/adminFeatureAvailabilityService';
 import { appointmentSelfServiceService } from '../services/appointmentSelfServiceService';
+import AppointmentCard from '../components/AppointmentCard';
+import { bookingAbuseProtectionService, NoShowRiskBadge } from '../services/bookingAbuseProtectionService';
 
 // Local initials avatar —  generates an SVG data-URI (no external network request, no personal data leaves the app)
 const getInitialsAvatar = (name: string): string => {
@@ -41,6 +44,24 @@ const getInitialsAvatar = (name: string): string => {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 };
 
+/**
+ * V1A-FUNC-02 / FINDING-ADIM014-001 & FINDING-ADIM014-003:
+ * Evaluates the status mutation result and records a customer no-show anti-abuse signal
+ * strictly when the mutation succeeded AND produced an actual state change.
+ * Returns true if a signal was recorded, false otherwise.
+ */
+export function handlePostMutationNoShowSignal(
+  mutationResult: { success?: boolean; changed?: boolean } | null | undefined,
+  phone: string | null | undefined,
+  tenantId: string | null | undefined
+): boolean {
+  if (mutationResult && mutationResult.success && mutationResult.changed && phone && tenantId) {
+    bookingAbuseProtectionService.recordNoShowSignal(tenantId, phone);
+    return true;
+  }
+  return false;
+}
+
 const AdminPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -51,12 +72,12 @@ const AdminPage: React.FC = () => {
   const getInitialTab = () => {
     const pathSegments = location.pathname.split('/');
     const lastSegment = pathSegments[pathSegments.length - 1];
-    const validTabs = ['dashboard', 'setup', 'appointments', 'reschedule-requests', 'staff', 'services', 'reports', 'billing', 'profile', 'settings', 'customers', 'referrals'];
+    const validTabs = ['dashboard', 'setup', 'appointments', 'reschedule-requests', 'pos', 'staff', 'services', 'reports', 'billing', 'profile', 'settings', 'customers', 'referrals'];
     if (validTabs.includes(lastSegment)) return lastSegment;
     return 'dashboard';
   };
 
-  const [activeTab, setActiveTabState] = useState<'dashboard' | 'setup' | 'appointments' | 'reschedule-requests' | 'staff' | 'services' | 'reports' | 'billing' | 'profile' | 'settings' | 'customers' | 'referrals'>(getInitialTab() as any);
+  const [activeTab, setActiveTabState] = useState<'dashboard' | 'setup' | 'appointments' | 'reschedule-requests' | 'pos' | 'staff' | 'services' | 'reports' | 'billing' | 'profile' | 'settings' | 'customers' | 'referrals'>(getInitialTab() as any);
 
   const setActiveTab = (tab: any) => {
     setActiveTabState(tab);
@@ -249,9 +270,9 @@ const AdminPage: React.FC = () => {
     appointmentId: string,
     targetStatus: 'confirmed' | 'completed' | 'no_show' | 'cancelled',
     reason?: string | null
-  ) => {
+  ): Promise<{ success: boolean; changed: boolean }> => {
     // Double-click guard: if this appointment is already mutating, abort
-    if (mutatingAppointments.has(appointmentId)) return;
+    if (mutatingAppointments.has(appointmentId)) return { success: false, changed: false };
 
     // Generate or reuse idempotency key
     const retryMapKey = `${appointmentId}:${targetStatus}`;
@@ -289,11 +310,14 @@ const AdminPage: React.FC = () => {
           setAppointmentRetryNonce(n => n + 1);
           // Invalidate bootstrap dashboard data
           bootstrap.invalidateAfterMutation();
+          return { success: true, changed: true };
         } else if (result.reason_code === 'no_change') {
           // Same status — safe no-op, just sync UI silently
           aptLoadedKeyRef.current = '';
           setAppointmentRetryNonce(n => n + 1);
+          return { success: true, changed: false };
         }
+        return { success: true, changed: false };
       } else {
         // Failure — show safe Turkish error
         const errorMsg = getAdminStatusReasonMessage(result.reason_code);
@@ -316,6 +340,7 @@ const AdminPage: React.FC = () => {
           // Other failures (forbidden, unauthenticated, etc.): clear key
           pendingRetryKeys.current.delete(retryMapKey);
         }
+        return { success: false, changed: false };
       }
     } catch (err) {
       // Unexpected error — retain key for retry
@@ -324,6 +349,7 @@ const AdminPage: React.FC = () => {
           ? 'İşlem şu anda tamamlanamadı. Lütfen tekrar deneyin.'
           : 'Operation could not be completed. Please try again.'
       );
+      return { success: false, changed: false };
     } finally {
       setMutatingAppointments(prev => {
         const next = new Set(prev);
@@ -348,7 +374,24 @@ const AdminPage: React.FC = () => {
 
   const handleNoShow = async (id: string) => {
     if (!isOwner || mutatingAppointments.has(id)) return;
-    await executeStatusMutation(id, 'no_show');
+    const targetApt = appointments.find(a => a.id === id);
+    const mutationResult = await executeStatusMutation(id, 'no_show');
+    handlePostMutationNoShowSignal(mutationResult, targetApt?.phone, tenantId);
+  };
+
+  const handleCallConfirm = async (apt: Appointment, badge: NoShowRiskBadge) => {
+    if (!apt.phone) return;
+    const confirmed = await showConfirm({
+      title: language === 'tr' ? 'No-Show Teyit Araması' : 'No-Show Confirmation Call',
+      message: language === 'tr'
+        ? `${apt.user_name} adlı müşterinin geçmişte ${badge.count} adet no-show kaydı bulunmaktadır.\n\nRandevuya katılıp katılmayacağını teyit etmek için ${apt.phone} numarasını aramak istiyor musunuz?`
+        : `Customer ${apt.user_name} has ${badge.count} past no-show record(s).\n\nWould you like to call ${apt.phone} to confirm attendance?`,
+      confirmText: language === 'tr' ? 'Aramayı Başlat' : 'Call Now',
+      cancelText: language === 'tr' ? 'Vazgeç' : 'Cancel',
+    });
+    if (confirmed && typeof window !== 'undefined') {
+      window.location.href = `tel:${apt.phone}`;
+    }
   };
 
   const runAnalysis = async () => {
@@ -713,6 +756,12 @@ const AdminPage: React.FC = () => {
             </button>
           )}
           <button
+            onClick={() => setActiveTab('pos')}
+            className={`${activeTab === 'pos' ? 'border-accent text-accent dark:border-blue-400 dark:text-blue-400 border-b-2' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-slate-500 border-b-2'} whitespace-nowrap py-2 px-1 font-medium text-sm transition-colors duration-300`}
+          >
+            POS &amp; Envanter
+          </button>
+          <button
             onClick={() => setActiveTab('services')}
             className={`${activeTab === 'services' ? 'border-accent text-accent dark:border-blue-400 dark:text-blue-400 border-b-2' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-slate-500 border-b-2'} whitespace-nowrap py-2 px-1 font-medium text-sm transition-colors duration-300`}
           >
@@ -954,6 +1003,18 @@ const AdminPage: React.FC = () => {
         />
       )}
 
+      {activeTab === 'pos' && (
+        tabAvailability['pos']?.isAccessible === false
+          ? renderLockedFeature(tabAvailability['pos']!.lockReason!, tabAvailability['pos']!.recommendedAction)
+          : <PosInventoryWorkspacePanel
+              branchName={
+                (selectedBranchFilter !== 'all'
+                  ? branches.find(b => b.id === selectedBranchFilter)?.name
+                  : branches.find(b => b.isPrimary)?.name) || branches[0]?.name || 'Merkez Şube'
+              }
+            />
+      )}
+
       {activeTab === 'appointments' && (
         tabAvailability['appointments']?.isAccessible === false 
           ? renderLockedFeature(tabAvailability['appointments']!.lockReason!, tabAvailability['appointments']!.recommendedAction) 
@@ -998,82 +1059,28 @@ const AdminPage: React.FC = () => {
                   const branchName = branches.find(b => b.id === apt.branchId)?.name;
                   const serviceName = language === 'tr' ? (assignedService?.name_tr || assignedService?.name) : assignedService?.name;
                   return (
-                    <li key={apt.id} className="p-4 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors duration-300">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-0">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-accent dark:text-blue-400 truncate transition-colors duration-300">
-                            {apt.user_name}
-                          </p>
-                          <p className="text-sm text-gray-500 dark:text-gray-400 transition-colors duration-300 mt-0.5">
-                            {apt.date} at {apt.time} • {serviceName || t.admin.unknown_service} {assignedStaff && `(${t.admin.with} ${assignedStaff.name})`} {branchName && `• [${branchName}]`}
-                          </p>
-                          <div className="mt-1 flex flex-wrap items-center text-xs text-gray-400 dark:text-gray-500 gap-x-2 gap-y-1 transition-colors duration-300">
-                              <span>{apt.user_email}</span>
-                              <span className="hidden sm:inline">⬢</span>
-                              <span>{apt.phone || t.admin.no_phone}</span>
-                          </div>
-                        </div>
-                        <div className="flex-shrink-0 flex items-center gap-3 sm:gap-4 justify-between sm:justify-end w-full sm:w-auto mt-2 sm:mt-0">
-                          <button 
-                            onClick={() => {
-                              setTargetAppointmentId(apt.id);
-                              setActiveTab('customers');
-                            }}
-                            className="text-accent hover:text-blue-700 text-sm font-medium"
-                          >
-                            {t.admin.view_profile || 'View Profile'}
-                          </button>
-                          <div className="flex flex-col items-end gap-1">
-                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                              apt.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 
-                              apt.status === 'completed' ? 'bg-green-100 text-green-800' : 
-                              apt.status.includes('cancel') ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
-                            }`}>
-                              {t.customer_portal?.[`status_${apt.status}`] || apt.status}
-                            </span>
-                            {apt.status.includes('cancel') && apt.cancelReason && (
-                              <span className="text-[10px] text-red-500 max-w-[150px] truncate block text-right" title={apt.cancelReason}>
-                                {apt.cancelReason}
-                              </span>
-                            )}
-                          </div>
-                          {isOwner && apt.status === 'confirmed' && !isTerminalStatus(apt.status) && (
-                            <div className="flex flex-col sm:flex-row items-center gap-2">
-                              {mutatingAppointments.has(apt.id) ? (
-                                <span className="text-xs text-gray-500 dark:text-gray-400 animate-pulse">
-                                  {language === 'tr' ? 'İşleniyor...' : 'Processing...'}
-                                </span>
-                              ) : (
-                                <>
-                                  <button
-                                    onClick={() => handleComplete(apt.id)}
-                                    disabled={mutatingAppointments.has(apt.id)}
-                                    className="text-green-600 hover:text-green-900 text-xs font-semibold px-2 py-1 bg-green-50 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                                  >
-                                    {language === 'tr' ? 'Tamamlandı' : 'Complete'}
-                                  </button>
-                                  <button
-                                    onClick={() => handleNoShow(apt.id)}
-                                    disabled={mutatingAppointments.has(apt.id)}
-                                    className="text-orange-600 hover:text-orange-900 text-xs font-semibold px-2 py-1 bg-orange-50 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                                  >
-                                    {language === 'tr' ? 'Gelmedi' : 'No Show'}
-                                  </button>
-                                  <button
-                                    onClick={() => handleCancel(apt.id)}
-                                    disabled={mutatingAppointments.has(apt.id)}
-                                    className="text-red-600 hover:text-red-900 text-xs font-semibold px-2 py-1 bg-red-50 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                                  >
-                                    {t.admin.cancel}
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </li>
-                  )
+                    <AppointmentCard
+                      key={apt.id}
+                      appointment={apt}
+                      tenantId={tenantId}
+                      assignedStaff={assignedStaff}
+                      assignedService={assignedService}
+                      branchName={branchName}
+                      serviceName={serviceName}
+                      isOwner={isOwner}
+                      isMutating={mutatingAppointments.has(apt.id)}
+                      onViewProfile={(id) => {
+                        setTargetAppointmentId(id);
+                        setActiveTab('customers');
+                      }}
+                      onComplete={handleComplete}
+                      onNoShow={handleNoShow}
+                      onCancel={handleCancel}
+                      onCallConfirm={handleCallConfirm}
+                      allAppointments={appointments}
+                      language={language}
+                    />
+                  );
                 })
               )}
             </ul>
@@ -1568,7 +1575,7 @@ const AdminPage: React.FC = () => {
                <span className="text-[10px] font-medium leading-none truncate w-full text-center px-1 text-ellipsis overflow-hidden">{t.admin.tab_services}</span>
             </button>
             <div className="relative flex-1 h-full flex justify-center dropdown-container">
-                <button className={`flex flex-col items-center justify-center w-full h-full ${(['staff', 'reports', 'billing', 'profile', 'referrals', 'settings'].includes(activeTab)) ? 'text-accent dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`} onClick={() => setIsMobileMoreMenuOpen(!isMobileMoreMenuOpen)}>
+                <button className={`flex flex-col items-center justify-center w-full h-full ${(['pos', 'staff', 'reports', 'billing', 'profile', 'referrals', 'settings'].includes(activeTab)) ? 'text-accent dark:text-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`} onClick={() => setIsMobileMoreMenuOpen(!isMobileMoreMenuOpen)}>
                    <svg className="w-6 h-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16"/></svg>
                    <span className="text-[10px] font-medium leading-none truncate w-full text-center px-1 text-ellipsis overflow-hidden">Di�xer</span>
                 </button>
@@ -1582,6 +1589,9 @@ const AdminPage: React.FC = () => {
         {isMobileMoreMenuOpen && (
           <div className="absolute bottom-16 right-2 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-gray-100 dark:border-slate-700 overflow-hidden transform transition-all z-50">
               <div className="py-1 flex flex-col items-start w-full" onClick={() => setIsMobileMoreMenuOpen(false)}>
+                  <button onClick={() => setActiveTab('pos')} className={`w-full text-left px-4 py-3 text-sm flex items-center gap-2 ${activeTab === 'pos' ? 'bg-blue-50 dark:bg-slate-700 text-accent font-semibold' : 'text-gray-700 dark:text-gray-300'}`}>
+                     POS &amp; Envanter
+                  </button>
                   <button onClick={() => setActiveTab('staff')} className={`w-full text-left px-4 py-3 text-sm flex items-center gap-2 ${activeTab === 'staff' ? 'bg-blue-50 dark:bg-slate-700 text-accent font-semibold' : 'text-gray-700 dark:text-gray-300'}`}>
                      {t.admin.tab_staff}
                   </button>

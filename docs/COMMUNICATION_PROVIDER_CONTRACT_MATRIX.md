@@ -1,5 +1,11 @@
 # Communication Provider Contract Matrix
 
+> [!IMPORTANT]
+> **Implementation Qualification Status**: `MOCK_TESTED` & `SOURCE_READY`
+> **Live Carrier Gateway Status**: `PROVIDER_INTEGRATION_PENDING` (Zero live SMS, WhatsApp, or Email outbound dispatches)
+> **Live Network Outbound**: `NOT_TESTED` (Strictly offline simulation harness with zero network I/O)
+
+
 This matrix defines the distribution expectations, consent boundaries, delivery channels, and server vs. client runtime obligations for all LARİ system communications.
 
 | Flow | Local outbox behavior | Email provider expectation | SMS provider expectation | WhatsApp provider expectation | frontend allowed? | edge/server required? | consent required? | delivery status source | notes |

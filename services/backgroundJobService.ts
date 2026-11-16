@@ -1,4 +1,4 @@
-import {
+﻿import {
   BackgroundJobType,
   BackgroundJobStatus,
   BackgroundJobRun
@@ -7,8 +7,9 @@ import { tenantService } from './tenantService';
 import { subscriptionService } from './subscriptionService';
 import { communicationEventService } from './communicationEventService';
 import { siteProvisioningService } from './siteProvisioningService';
+import { STORAGE_KEYS } from './storageKeys';
 
-const RUNS_STORAGE_KEY = 'lari_background_job_runs';
+const RUNS_STORAGE_KEY = STORAGE_KEYS.BACKGROUND_JOB_RUNS;
 
 export interface BackgroundJobDefinition {
   jobType: BackgroundJobType;
@@ -41,9 +42,9 @@ const DEFAULT_JOBS: BackgroundJobDefinition[] = [
   },
   {
     jobType: 'subscription_past_due_sweep',
-    nameTr: '�deme Gecikmesi Taramas�',
+    nameTr: '�deme Gecikmesi Taramas�',
     nameEn: 'Past Due Subscription Sweep',
-    descriptionTr: 'Tahsilat� ba�ar�s�z olan faturaland�r�lm�� abonelikleri dunning kurallar�na g�re ask�ya al�r.',
+    descriptionTr: 'Tahsilat� ba�ar�s�z olan faturaland�r�lm�� abonelikleri dunning kurallar�na g�re ask�ya al�r.',
     descriptionEn: 'Identifies past due subscriptions and manages dunning or suspension rules.',
     schedule: '0 2 * * * (Her gün 02:00)',
     enabled: true
@@ -144,7 +145,7 @@ export const backgroundJobService = {
   // Local storage lists of job definitions (allows toggling enabled/disabled in UI)
   getRegisteredJobs(): BackgroundJobDefinition[] {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('lari_registered_jobs');
+      const stored = localStorage.getItem(STORAGE_KEYS.REGISTERED_JOBS);
       if (stored) {
         try {
           return JSON.parse(stored);
@@ -165,7 +166,7 @@ export const backgroundJobService = {
       jobs.push(job);
     }
     if (typeof window !== 'undefined') {
-      localStorage.setItem('lari_registered_jobs', JSON.stringify(jobs));
+      localStorage.setItem(STORAGE_KEYS.REGISTERED_JOBS, JSON.stringify(jobs));
     }
   },
 
@@ -558,7 +559,7 @@ export const backgroundJobService = {
 
   async handleCustomDomainVerificationPoll() {
     // Collect simulated domain requests from local review state
-    const requestedDomainsRaw = localStorage.getItem('lari_custom_domain_requests') || '[]';
+    const requestedDomainsRaw = localStorage.getItem(STORAGE_KEYS.CUSTOM_DOMAIN_REQUESTS) || '[]';
     let requests: any[] = [];
     try {
       requests = JSON.parse(requestedDomainsRaw);
@@ -584,12 +585,18 @@ export const backgroundJobService = {
       }
     }
 
-    localStorage.setItem('lari_custom_domain_requests', JSON.stringify(requests));
+    localStorage.setItem(STORAGE_KEYS.CUSTOM_DOMAIN_REQUESTS, JSON.stringify(requests));
 
     return {
       affectedTenantIds,
       affectedRecordCount,
-      summary: `Doğrulama bekleyen ${affectedRecordCount} adet özel alan adının CNAME / SSL yapısı kontrol edildi.`
+      summary: `Doğrulama bekleyen ${affectedRecordCount} adet özel alan adının CNAME / SSL yapısı simülasyon modunda kontrol edildi (Canlı DNS doğrulaması EXTERNAL_HOLD).`,
+      metadata: {
+        verificationMode: 'local_simulation',
+        externalHoldClassification: 'EXTERNAL_HOLD',
+        liveDnsVerificationAllowed: false,
+        providerStatus: 'DOMAIN_PROVIDER_READY_NOT_CONNECTED'
+      }
     };
   },
 
@@ -655,13 +662,37 @@ export const backgroundJobService = {
       enabled: false,
       isCronTriggered: false,
       readyForLiveOps: false,
+      externalHoldCapabilities: [
+        {
+          capabilityId: 'external_calendar_oauth_sync',
+          classification: 'EXTERNAL_HOLD' as const,
+          liveExecutionAllowed: false,
+          reasonCode: 'EXTERNAL_CALENDAR_CREDENTIALS_REQUIRED',
+          description: 'Canlı Google Calendar OAuth / Apple CalDAV çift yönlü senkronizasyon harici kimlik bilgisi ve onay gerektirir.'
+        },
+        {
+          capabilityId: 'live_custom_domain_dns_ssl_verification',
+          classification: 'EXTERNAL_HOLD' as const,
+          liveExecutionAllowed: false,
+          reasonCode: 'DOMAIN_PROVIDER_READY_NOT_CONNECTED',
+          description: 'Canlı DNS TXT/CNAME ve SSL sertifika doğrulaması harici DNS/hosting sağlayıcısı bağlantısı gerektirir.'
+        },
+        {
+          capabilityId: 'live_edge_cron_scheduler',
+          classification: 'EXTERNAL_HOLD' as const,
+          liveExecutionAllowed: false,
+          reasonCode: 'EXTERNAL_CRON_INFRASTRUCTURE_REQUIRED',
+          description: 'Otonom zamanlanmış iş çalıştırma için canlı Edge/Cron tetikleyicisi gereklidir.'
+        }
+      ],
       checklist: [
         { label: 'Background Model ve Servis Altyapısı', completed: true },
         { label: 'Abonelik Deneme Süresi Sonu & İptal Sweepleri', completed: true },
         { label: 'Outbox Yeniden Gönderim ve Hata Retraing Mekanizması', completed: true },
-        { label: 'Super Admin Y�netim Konsolu Paneli', completed: true },
-        { label: 'Supabase Edge Functions / Scheduled Cron Entegrasyonu', completed: false, comment: 'Sürekli çalışan bir server cron veya Supabase Scheduled Function tetikleyicisi kurulmalıdır.' },
-        { label: 'Canlı E-Posta / SMS / WhatsApp Sağlayıcı API Key Bağlantısı', completed: false, comment: 'Resend API key, Netgsm şifreleri ve Meta Token bağlantıları girilmelidir.' }
+        { label: 'Super Admin Y�netim Konsolu Paneli', completed: true },
+        { label: 'Supabase Edge Functions / Scheduled Cron Entegrasyonu', completed: false, comment: 'Sürekli çalışan bir server cron veya Supabase Scheduled Function tetikleyicisi kurulmalıdır (EXTERNAL_HOLD).' },
+        { label: 'Canlı E-Posta / SMS / WhatsApp Sağlayıcı API Key Bağlantısı', completed: false, comment: 'Resend API key, Netgsm şifreleri ve Meta Token bağlantıları girilmelidir (EXTERNAL_HOLD).' },
+        { label: 'Harici Takvim OAuth & Canlı Custom Domain DNS/SSL Doğrulaması', completed: false, comment: 'Canlı Google/Apple takvim senkronizasyonu ve DNS/SSL sağlayıcı doğrulaması EXTERNAL_HOLD kapsamındadır.' }
       ]
     };
   }
@@ -676,7 +707,7 @@ function newEventRunPlaceholder(run: BackgroundJobRun): BackgroundJobRun {
 async function getMockAndRegisteredTenantIds(): Promise<string[]> {
   const list: string[] = ['tenant_demo', 'tenant_pilot_demo', 'tenant_active_demo'];
   try {
-    const raw = localStorage.getItem('lari_registered_tenants') || localStorage.getItem('lari_registered_tenants');
+    const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS);
     if (raw) {
       const parsed = JSON.parse(raw);
       for (const p of parsed) {

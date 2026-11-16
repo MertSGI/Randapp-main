@@ -2,6 +2,7 @@ import { getCampaignRepository } from './repositories';
 import { entitlementService } from './entitlementService';
 import { BusinessCustomerCampaign, BusinessCustomerReferral, CustomerCampaignReward } from '../types';
 import { notifyReferralBooked, notifyReferralCompleted, notifyReferralRewarded, notifyCustomerRewardAvailable, notifyCustomerRewardUsed, notifyCustomerRewardExpiring } from './notificationService';
+import { STORAGE_KEYS } from './storageKeys';
 
 // Helper to resolve tenant's plan from localStorage
 function getTenantPlan(tenantId: string): string {
@@ -9,7 +10,7 @@ function getTenantPlan(tenantId: string): string {
     return 'premium'; // Pilot has premium features
   }
   try {
-    const raw = localStorage.getItem('lari_registered_tenants');
+    const raw = localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS);
     if (raw) {
       const tenants = JSON.parse(raw);
       const tenant = tenants.find((t: any) => t.id === tenantId);
@@ -21,19 +22,19 @@ function getTenantPlan(tenantId: string): string {
     // Fallback
   }
   // Check active tenant fallback in localStorage
-  const activeTenantId = localStorage.getItem('lari_active_tenant_id');
+  const activeTenantId = localStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT_ID);
   if (activeTenantId === tenantId) {
-    const currentPlan = localStorage.getItem('lari_active_plan_id');
+    const currentPlan = localStorage.getItem(STORAGE_KEYS.ACTIVE_PLAN_ID);
     if (currentPlan) return currentPlan;
   }
   return 'baslangic';
 }
 
-function verifyEntitlement(tenantId: string): void {
+async function verifyEntitlement(tenantId: string): Promise<void> {
   const plan = getTenantPlan(tenantId);
-  const hasAccess = entitlementService.canUseFeature(plan, 'campaigns_referrals');
+  const hasAccess = await entitlementService.canTenantUseFeature(tenantId, 'campaigns_referrals', plan);
   if (!hasAccess) {
-    throw new Error('Bu özellik mevcut paketinizde yer almıyor. Mü�xteri referans kampanyalarını kullanmak için Profesyonel pakete geçebilirsiniz.');
+    throw new Error('Bu özellik mevcut paketinizde yer almıyor. Müşteri referans kampanyalarını kullanmak için Profesyonel pakete geçebilirsiniz.');
   }
 }
 
@@ -48,16 +49,16 @@ export const customerCampaignService = {
   },
 
   async createCampaign(tenantId: string, input: Partial<BusinessCustomerCampaign>): Promise<BusinessCustomerCampaign> {
-    verifyEntitlement(tenantId);
+    await verifyEntitlement(tenantId);
     const repo = getCampaignRepository();
     
     const newCampaign: BusinessCustomerCampaign = {
       id: input.id || `camp_${Date.now()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
       tenantId,
-      name: input.name || 'Arkada�xını Getir',
+      name: input.name || 'Arkadaşını Getir',
       type: input.type || 'refer_friend',
       isActive: input.isActive !== undefined ? input.isActive : true,
-      rewardDescription: input.rewardDescription || '�dül, referansla gelen mü�xterinin randevusunu tamamlaması sonrası geçerlidir.',
+      rewardDescription: input.rewardDescription || 'Ödül, referansla gelen müşterinin randevusunu tamamlaması sonrası geçerlidir.',
       customerReward: input.customerReward || 'Bir sonraki randevuda %15 indirim',
       referredCustomerReward: input.referredCustomerReward || 'İlk randevuda %10 indirim',
       startDate: input.startDate || new Date().toISOString(),
@@ -73,26 +74,20 @@ export const customerCampaignService = {
 
   async updateCampaign(campaignId: string, patch: Partial<BusinessCustomerCampaign>): Promise<BusinessCustomerCampaign | null> {
     const repo = getCampaignRepository();
-    // Locate campaign across all tenants first to find owner tenantId
-    let foundCampaign: BusinessCustomerCampaign | null = null;
-    
-    // We can list from the active tenant id
-    const activeTenantId = localStorage.getItem('lari_active_tenant_id') || 'global';
-    const activePlan = getTenantPlan(activeTenantId);
+    const activeTenantId = localStorage.getItem(STORAGE_KEYS.ACTIVE_TENANT_ID) || 'global';
     const campaigns = await repo.listCampaigns(activeTenantId);
     let matched = campaigns.find(c => c.id === campaignId);
     
     if (!matched) {
-      // Look globally in storage as backup
       try {
-        const raw = localStorage.getItem('lari_customer_campaigns_by_tenant');
+        const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_CAMPAIGNS_BY_TENANT);
         const list = raw ? JSON.parse(raw) : [];
         matched = list.find((c: any) => c.id === campaignId);
       } catch (e) {}
     }
     
     if (matched) {
-      verifyEntitlement(matched.tenantId);
+      await verifyEntitlement(matched.tenantId);
       const updated = {
         ...matched,
         ...patch,
@@ -122,20 +117,13 @@ export const customerCampaignService = {
   },
 
   async createCustomerReferral(tenantId: string, input: Partial<BusinessCustomerReferral>): Promise<BusinessCustomerReferral> {
-    // Let's bypass strict edit check on register so we can capture booking referrals even if lower plan is booking 
-    // but block manual entries if not entitled
-    if (input.referrerCustomerId) {
-      // If manually entered, check entitlements
-      // But we always allow save for client bookings to preserve customer intents.
-    }
-    
     const repo = getCampaignRepository();
     const newReferral: BusinessCustomerReferral = {
       id: input.id || `cref_${Date.now()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
       tenantId,
       campaignId: input.campaignId || 'default',
       referrerCustomerId: input.referrerCustomerId || 'unknown',
-      referredCustomerName: input.referredCustomerName || 'Tavsiye Edilen Mü�xteri',
+      referredCustomerName: input.referredCustomerName || 'Tavsiye Edilen Müşteri',
       referredCustomerPhone: input.referredCustomerPhone,
       status: input.status || 'pending',
       appointmentId: input.appointmentId,
@@ -145,7 +133,6 @@ export const customerCampaignService = {
     
     const saved = await repo.saveCustomerReferral(tenantId, newReferral);
     
-    // Trigger notification
     if (newReferral.status === 'booked' || newReferral.status === 'pending') {
       notifyReferralBooked(newReferral.referrerCustomerId, newReferral.referredCustomerName, newReferral.campaignId);
     }
@@ -154,20 +141,16 @@ export const customerCampaignService = {
   },
 
   async attachReferralToAppointment(referralId: string, appointmentId: string): Promise<BusinessCustomerReferral | null> {
-    const repo = getCampaignRepository();
-    // Find globally or in local
     try {
-      const raw = localStorage.getItem('lari_customer_referrals_by_tenant');
+      const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT);
       const referrals: BusinessCustomerReferral[] = raw ? JSON.parse(raw) : [];
       const index = referrals.findIndex(r => r.id === referralId);
       if (index > -1) {
         referrals[index].appointmentId = appointmentId;
         referrals[index].status = 'booked';
         referrals[index].updatedAt = new Date().toISOString();
-        localStorage.setItem('lari_customer_referrals_by_tenant', JSON.stringify(referrals));
-        
-        // Also sync lari key
-        localStorage.setItem('lari_business_referrals', JSON.stringify(referrals));
+        localStorage.setItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT, JSON.stringify(referrals));
+        localStorage.setItem(STORAGE_KEYS.BUSINESS_REFERRALS, JSON.stringify(referrals));
         return referrals[index];
       }
     } catch {}
@@ -179,70 +162,54 @@ export const customerCampaignService = {
   },
 
   async markReferralCompleted(referralId: string): Promise<BusinessCustomerReferral | null> {
-    try {
-      const raw = localStorage.getItem('lari_customer_referrals_by_tenant');
-      const referrals: BusinessCustomerReferral[] = raw ? JSON.parse(raw) : [];
-      const index = referrals.findIndex(r => r.id === referralId);
-      if (index > -1) {
-        verifyEntitlement(referrals[index].tenantId);
-        referrals[index].status = 'completed';
-        referrals[index].updatedAt = new Date().toISOString();
-        localStorage.setItem('lari_customer_referrals_by_tenant', JSON.stringify(referrals));
-        localStorage.setItem('lari_business_referrals', JSON.stringify(referrals));
-        
-        notifyReferralCompleted(referrals[index].referrerCustomerId, referrals[index].referredCustomerName, 'İndirim Kuponu');
-        
-        // Auto-generate rewards in our brand new ledger!
-        await this.createRewardFromReferral(referralId);
+    const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT);
+    const referrals: BusinessCustomerReferral[] = raw ? JSON.parse(raw) : [];
+    const index = referrals.findIndex(r => r.id === referralId);
+    if (index > -1) {
+      await verifyEntitlement(referrals[index].tenantId);
+      referrals[index].status = 'completed';
+      referrals[index].updatedAt = new Date().toISOString();
+      localStorage.setItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT, JSON.stringify(referrals));
+      localStorage.setItem(STORAGE_KEYS.BUSINESS_REFERRALS, JSON.stringify(referrals));
+      
+      notifyReferralCompleted(referrals[index].referrerCustomerId, referrals[index].referredCustomerName, 'İndirim Kuponu');
+      await this.createRewardFromReferral(referralId);
 
-        return referrals[index];
-      }
-    } catch (e: any) {
-      throw e;
+      return referrals[index];
     }
     return null;
   },
 
   async markReferralRewarded(referralId: string): Promise<BusinessCustomerReferral | null> {
-    try {
-      const raw = localStorage.getItem('lari_customer_referrals_by_tenant');
-      const referrals: BusinessCustomerReferral[] = raw ? JSON.parse(raw) : [];
-      const index = referrals.findIndex(r => r.id === referralId);
-      if (index > -1) {
-        verifyEntitlement(referrals[index].tenantId);
-        referrals[index].status = 'rewarded';
-        referrals[index].updatedAt = new Date().toISOString();
-        localStorage.setItem('lari_customer_referrals_by_tenant', JSON.stringify(referrals));
-        localStorage.setItem('lari_business_referrals', JSON.stringify(referrals));
-        
-        notifyReferralRewarded(referrals[index].referrerCustomerId, 'Bir sonraki randevuda %15 indirim');
-        
-        // Generate or ensure available rewards
-        await this.createRewardFromReferral(referralId);
+    const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT);
+    const referrals: BusinessCustomerReferral[] = raw ? JSON.parse(raw) : [];
+    const index = referrals.findIndex(r => r.id === referralId);
+    if (index > -1) {
+      await verifyEntitlement(referrals[index].tenantId);
+      referrals[index].status = 'rewarded';
+      referrals[index].updatedAt = new Date().toISOString();
+      localStorage.setItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT, JSON.stringify(referrals));
+      localStorage.setItem(STORAGE_KEYS.BUSINESS_REFERRALS, JSON.stringify(referrals));
+      
+      notifyReferralRewarded(referrals[index].referrerCustomerId, 'Bir sonraki randevuda %15 indirim');
+      await this.createRewardFromReferral(referralId);
 
-        return referrals[index];
-      }
-    } catch (e: any) {
-      throw e;
+      return referrals[index];
     }
     return null;
   },
 
   async rejectReferral(referralId: string, reason?: string): Promise<BusinessCustomerReferral | null> {
-    try {
-      const raw = localStorage.getItem('lari_customer_referrals_by_tenant');
-      const referrals: BusinessCustomerReferral[] = raw ? JSON.parse(raw) : [];
-      const index = referrals.findIndex(r => r.id === referralId);
-      if (index > -1) {
-        verifyEntitlement(referrals[index].tenantId);
-        referrals[index].status = 'rejected';
-        referrals[index].updatedAt = new Date().toISOString();
-        localStorage.setItem('lari_customer_referrals_by_tenant', JSON.stringify(referrals));
-        localStorage.setItem('lari_business_referrals', JSON.stringify(referrals));
-        return referrals[index];
-      }
-    } catch (e: any) {
-      throw e;
+    const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT);
+    const referrals: BusinessCustomerReferral[] = raw ? JSON.parse(raw) : [];
+    const index = referrals.findIndex(r => r.id === referralId);
+    if (index > -1) {
+      await verifyEntitlement(referrals[index].tenantId);
+      referrals[index].status = 'rejected';
+      referrals[index].updatedAt = new Date().toISOString();
+      localStorage.setItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT, JSON.stringify(referrals));
+      localStorage.setItem(STORAGE_KEYS.BUSINESS_REFERRALS, JSON.stringify(referrals));
+      return referrals[index];
     }
     return null;
   },
@@ -267,29 +234,26 @@ export const customerCampaignService = {
 
   async createRewardFromReferral(referralId: string): Promise<CustomerCampaignReward[]> {
     const repo = getCampaignRepository();
-    const rawRefs = localStorage.getItem('lari_customer_referrals_by_tenant');
+    const rawRefs = localStorage.getItem(STORAGE_KEYS.CUSTOMER_REFERRALS_BY_TENANT);
     const referrals: BusinessCustomerReferral[] = rawRefs ? JSON.parse(rawRefs) : [];
     const referral = referrals.find(r => r.id === referralId);
     if (!referral) return [];
 
-    // Safeguard 1: Rejected referral cannot generate reward
     if (referral.status === 'rejected') {
       console.warn("Rejected referral cannot generate reward");
       return [];
     }
 
-    // Safeguard 2: Prevent duplicate reward creation for the same referral
     const existingRewards = await repo.listCustomerRewards(referral.tenantId);
     const duplicates = existingRewards.filter(rew => rew.customerReferralId === referralId);
     if (duplicates.length > 0) {
       return duplicates;
     }
 
-    // Safeguard 3: Respect Max Uses
     const campaigns = await repo.listCampaigns(referral.tenantId);
     const campaign = campaigns.find(c => c.id === referral.campaignId) || {
       id: referral.campaignId,
-      name: 'Arkada�xını Getir',
+      name: 'Arkadaşını Getir',
       customerReward: 'Bir sonraki randevuda %15 indirim',
       referredCustomerReward: 'İlk randevuda %10 indirim',
       maxUses: 500,
@@ -307,7 +271,6 @@ export const customerCampaignService = {
 
     const createdRewards: CustomerCampaignReward[] = [];
 
-    // Referrer reward
     if (referral.referrerCustomerId && referral.referrerCustomerId !== 'unknown') {
       const referrerReward: CustomerCampaignReward = {
         id: `crew_${Date.now()}_REF_${Math.random().toString(36).substring(2,6).toUpperCase()}`,
@@ -329,7 +292,6 @@ export const customerCampaignService = {
       notifyCustomerRewardAvailable(referrerReward.customerId, referrerReward.rewardDescription);
     }
 
-    // Referred customer reward
     const refereeId = referral.referredCustomerPhone || referral.referredCustomerName;
     if (refereeId) {
       const friendReward: CustomerCampaignReward = {
@@ -357,112 +319,101 @@ export const customerCampaignService = {
 
   async markRewardAvailable(rewardId: string): Promise<CustomerCampaignReward | null> {
     const repo = getCampaignRepository();
-    try {
-      const raw = localStorage.getItem('lari_customer_campaign_rewards_by_tenant');
-      const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
-      const index = rewards.findIndex(r => r.id === rewardId);
-      if (index > -1) {
-        const reward = rewards[index];
-        verifyEntitlement(reward.tenantId);
-        reward.status = 'available';
-        reward.updatedAt = new Date().toISOString();
-        await repo.saveCustomerReward(reward.tenantId, reward);
-        return reward;
-      }
-    } catch {}
+    const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT);
+    const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
+    const index = rewards.findIndex(r => r.id === rewardId);
+    if (index > -1) {
+      const reward = rewards[index];
+      await verifyEntitlement(reward.tenantId);
+      reward.status = 'available';
+      reward.updatedAt = new Date().toISOString();
+      await repo.saveCustomerReward(reward.tenantId, reward);
+      return reward;
+    }
     return null;
   },
 
   async reserveRewardForAppointment(rewardId: string, appointmentId: string): Promise<CustomerCampaignReward | null> {
     const repo = getCampaignRepository();
-    try {
-      const raw = localStorage.getItem('lari_customer_campaign_rewards_by_tenant');
-      const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
-      const index = rewards.findIndex(r => r.id === rewardId);
-      if (index > -1) {
-        const reward = rewards[index];
-        verifyEntitlement(reward.tenantId);
-        if (reward.status === 'cancelled' || reward.status === 'expired') {
-          throw new Error("Süresi dolmu�x veya iptal edilmi�x bir ödül rezerve edilemez.");
-        }
-        reward.status = 'reserved';
-        reward.appointmentId = appointmentId;
-        reward.updatedAt = new Date().toISOString();
-        await repo.saveCustomerReward(reward.tenantId, reward);
-        return reward;
+    const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT);
+    const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
+    const index = rewards.findIndex(r => r.id === rewardId);
+    if (index > -1) {
+      const reward = rewards[index];
+      await verifyEntitlement(reward.tenantId);
+      if (reward.status === 'cancelled' || reward.status === 'expired') {
+        throw new Error("Süresi dolmuş veya iptal edilmiş bir ödül rezerve edilemez.");
       }
-    } catch {}
+      reward.status = 'reserved';
+      reward.appointmentId = appointmentId;
+      reward.updatedAt = new Date().toISOString();
+      await repo.saveCustomerReward(reward.tenantId, reward);
+      return reward;
+    }
     return null;
   },
 
   async markRewardUsed(rewardId: string, appointmentId?: string): Promise<CustomerCampaignReward | null> {
     const repo = getCampaignRepository();
-    try {
-      const raw = localStorage.getItem('lari_customer_campaign_rewards_by_tenant');
-      const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
-      const index = rewards.findIndex(r => r.id === rewardId);
-      if (index > -1) {
-        const reward = rewards[index];
-        verifyEntitlement(reward.tenantId);
-        
-        // Safeguard: Used reward cannot be used twice
-        if (reward.status === 'used') {
-          throw new Error("Bu ödül zaten kullanılmı�x.");
-        }
-        if (reward.status === 'cancelled' || reward.status === 'expired') {
-          throw new Error("Süresi dolmu�x veya iptal edilmi�x bir ödül kullanılamaz.");
-        }
-
-        reward.status = 'used';
-        reward.usedAt = new Date().toISOString();
-        if (appointmentId) {
-          reward.usedAppointmentId = appointmentId;
-        }
-        reward.updatedAt = new Date().toISOString();
-        await repo.saveCustomerReward(reward.tenantId, reward);
-        
-        notifyCustomerRewardUsed(reward.customerId, reward.rewardDescription);
-        return reward;
+    const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT);
+    const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
+    const index = rewards.findIndex(r => r.id === rewardId);
+    if (index > -1) {
+      const reward = rewards[index];
+      await verifyEntitlement(reward.tenantId);
+      
+      if (reward.status === 'used') {
+        throw new Error("Bu ödül zaten kullanılmış.");
       }
-    } catch {}
+      if (reward.status === 'cancelled' || reward.status === 'expired') {
+        throw new Error("Süresi dolmuş veya iptal edilmiş bir ödül kullanılamaz.");
+      }
+
+      reward.status = 'used';
+      reward.usedAt = new Date().toISOString();
+      if (appointmentId) {
+        reward.usedAppointmentId = appointmentId;
+      }
+      reward.updatedAt = new Date().toISOString();
+      await repo.saveCustomerReward(reward.tenantId, reward);
+      
+      notifyCustomerRewardUsed(reward.customerId, reward.rewardDescription);
+      return reward;
+    }
     return null;
   },
 
   async cancelReward(rewardId: string, reason?: string): Promise<CustomerCampaignReward | null> {
     const repo = getCampaignRepository();
-    try {
-      const raw = localStorage.getItem('lari_customer_campaign_rewards_by_tenant');
-      const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
-      const index = rewards.findIndex(r => r.id === rewardId);
-      if (index > -1) {
-        const reward = rewards[index];
-        verifyEntitlement(reward.tenantId);
-        reward.status = 'cancelled';
-        reward.notes = reason ? `${reward.notes || ''} [İptal Sebebi: ${reason}]` : reward.notes;
-        reward.updatedAt = new Date().toISOString();
-        await repo.saveCustomerReward(reward.tenantId, reward);
-        return reward;
-      }
-    } catch {}
+    const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT);
+    const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
+    const index = rewards.findIndex(r => r.id === rewardId);
+    if (index > -1) {
+      const reward = rewards[index];
+      await verifyEntitlement(reward.tenantId);
+      reward.status = 'cancelled';
+      reward.notes = reason ? `${reward.notes || ''} [İptal Sebebi: ${reason}]` : reward.notes;
+      reward.updatedAt = new Date().toISOString();
+      await repo.saveCustomerReward(reward.tenantId, reward);
+      return reward;
+    }
     return null;
   },
 
   async expireReward(rewardId: string): Promise<CustomerCampaignReward | null> {
     const repo = getCampaignRepository();
-    try {
-      const raw = localStorage.getItem('lari_customer_campaign_rewards_by_tenant');
-      const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
-      const index = rewards.findIndex(r => r.id === rewardId);
-      if (index > -1) {
-        const reward = rewards[index];
-        verifyEntitlement(reward.tenantId);
-        reward.status = 'expired';
-        reward.updatedAt = new Date().toISOString();
-        await repo.saveCustomerReward(reward.tenantId, reward);
-        notifyCustomerRewardExpiring(reward.customerId, reward.rewardDescription);
-        return reward;
-      }
-    } catch {}
+    const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_CAMPAIGN_REWARDS_BY_TENANT);
+    const rewards: CustomerCampaignReward[] = raw ? JSON.parse(raw) : [];
+    const index = rewards.findIndex(r => r.id === rewardId);
+    if (index > -1) {
+      const reward = rewards[index];
+      await verifyEntitlement(reward.tenantId);
+      reward.status = 'expired';
+      reward.updatedAt = new Date().toISOString();
+      await repo.saveCustomerReward(reward.tenantId, reward);
+      notifyCustomerRewardExpiring(reward.customerId, reward.rewardDescription);
+      return reward;
+    }
     return null;
   },
 
@@ -480,7 +431,6 @@ export const customerCampaignService = {
     const list = await this.listCustomerReferrals(tenantId);
     const matched = list.filter(r => r.campaignId === campaignId);
     
-    // Also loaded rewards
     const rewards = await this.listCustomerRewards(tenantId);
     const campaignRewards = rewards.filter(rw => rw.campaignId === campaignId);
 
@@ -499,4 +449,3 @@ export const customerCampaignService = {
     };
   }
 };
-

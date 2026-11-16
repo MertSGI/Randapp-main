@@ -1,5 +1,10 @@
 import { launchModeService } from '../services/launchModeService';
-import React, { useState, useEffect } from 'react';
+import { paymentRunModeService, RunModeStatus } from '../services/paymentRunModeService';
+import { paymentProviderConfigService } from '../services/paymentProviderConfigService';
+import { businessProfileService } from '../services/businessProfileService';
+import { commercialCatalogService } from '../services/commercialCatalogService';
+import { getDataSourceMode } from '../services/dataSourceConfig';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { translations } from '../utils/translations';
 import { useTenant } from '../contexts/TenantContext';
@@ -8,7 +13,156 @@ import { planService, PricingPlan } from '../services/planService';
 import { resolvePaymentCta } from '../utils/paymentCtaResolver';
 import { CheckoutPreviewModal } from './CheckoutPreviewModal';
 
-const BillingTab: React.FC = () => {
+export interface CheckoutReturnEvaluation {
+  outcome:
+    | 'none'
+    | 'cancelled'
+    | 'verification_pending'
+    | 'simulation_rehearsal'
+    | 'simulation_rejected';
+  checkoutError: string | null;
+  checkoutMessage: string | null;
+  checkoutPendingNotice: string | null;
+  shouldStripQueryParams: boolean;
+  requiresServerVerification: boolean;
+}
+
+/**
+ * Evaluates checkout return query parameters fail-closed.
+ * URL parameters cannot authorize subscriptions or trigger referral mutations.
+ */
+export function evaluateCheckoutReturnParams(params: {
+  hash: string;
+  language?: string;
+  runModeStatus?: RunModeStatus;
+}): CheckoutReturnEvaluation {
+  const queryPart = params.hash.includes('?') ? params.hash.split('?')[1] : '';
+  const urlParams = new URLSearchParams(queryPart || '');
+  const lang = params.language === 'en' ? 'en' : 'tr';
+  const trLang = translations[lang]?.billing as any;
+
+  if (urlParams.get('checkout') === 'cancelled') {
+    return {
+      outcome: 'cancelled',
+      checkoutError: trLang?.checkout_cancelled_msg || 'Güvenli ödeme işlemi iptal edildi.',
+      checkoutMessage: null,
+      checkoutPendingNotice: null,
+      shouldStripQueryParams: true,
+      requiresServerVerification: false,
+    };
+  }
+
+  if (urlParams.get('checkout') === 'success') {
+    return {
+      outcome: 'verification_pending',
+      checkoutError: null,
+      checkoutMessage: null,
+      checkoutPendingNotice:
+        lang === 'tr'
+          ? 'Ödeme dönüşü alındı; sunucu doğrulaması bekleniyor. Abonelik ve deneme aktivasyonu yalnızca sunucu tarafından doğrulanmış abonelik kaydı ile onaylanır.'
+          : 'Checkout return received; server verification is pending. Subscription and trial activation are only confirmed via a server-verified subscription record.',
+      shouldStripQueryParams: true,
+      requiresServerVerification: true,
+    };
+  }
+
+  if (urlParams.get('checkout_simulate') === 'true') {
+    const latestRunMode = params.runModeStatus ?? paymentRunModeService.getStatus();
+    if (
+      latestRunMode.isPersistentDatabaseMode ||
+      !latestRunMode.isMockSimulation ||
+      latestRunMode.mode !== 'local_dry_run'
+    ) {
+      return {
+        outcome: 'simulation_rejected',
+        checkoutError:
+          lang === 'tr'
+            ? 'Güvenlik kuralı: Yerel simülasyon parametresi kalıcı veri veya canlı ödeme modunda reddedildi.'
+            : 'Security policy: Local checkout simulation parameter is rejected in persistent or live payment mode.',
+        checkoutMessage: null,
+        checkoutPendingNotice: null,
+        shouldStripQueryParams: true,
+        requiresServerVerification: false,
+      };
+    }
+
+    return {
+      outcome: 'simulation_rehearsal',
+      checkoutError: null,
+      checkoutMessage:
+        lang === 'tr'
+          ? `Yerel simülasyon provası tamamlandı (${latestRunMode.label}). Gerçek kart doğrulaması veya tahsilat yapılmamıştır.`
+          : `Local simulation rehearsal completed (${latestRunMode.label}). No real card verification or charge occurred.`,
+      checkoutPendingNotice: null,
+      shouldStripQueryParams: true,
+      requiresServerVerification: false,
+    };
+  }
+
+  return {
+    outcome: 'none',
+    checkoutError: null,
+    checkoutMessage: null,
+    checkoutPendingNotice: null,
+    shouldStripQueryParams: false,
+    requiresServerVerification: false,
+  };
+}
+
+/**
+ * Evaluates checkout return against the server commercial subscription snapshot.
+ * Fails closed: generic subscription snapshots never verify a checkout return or emit
+ * payment-verified copy until an explicitly checkout-correlated server attestation exists.
+ */
+export async function verifyCheckoutWithServerSnapshot(params: {
+  tenantId: string;
+  language?: string;
+}): Promise<{
+  verified: boolean;
+  checkoutMessage: string | null;
+  checkoutPendingNotice: string | null;
+}> {
+  const lang = params.language === 'en' ? 'en' : 'tr';
+  const normalizedTenantId = typeof params.tenantId === 'string' ? params.tenantId.trim() : '';
+
+  let dataSourceMode: 'local' | 'supabase' = 'local';
+  try {
+    dataSourceMode = getDataSourceMode();
+  } catch {
+    dataSourceMode = 'local';
+  }
+
+  if (!normalizedTenantId || dataSourceMode !== 'supabase') {
+    return {
+      verified: false,
+      checkoutMessage: null,
+      checkoutPendingNotice:
+        lang === 'tr'
+          ? 'Ödeme dönüşü alındı; sunucu doğrulaması bekleniyor. Abonelik aktivasyonu yalnızca sunucu tarafından doğrulanmış abonelik kaydı ile onaylanır.'
+          : 'Checkout return received; server verification is pending. Subscription activation is only confirmed via a server-verified subscription record.',
+    };
+  }
+
+  try {
+    // Query the authoritative snapshot so server state is refreshed, while keeping checkout
+    // return pending/neutral: an eligible generic subscription snapshot without an explicitly
+    // checkout-correlated server attestation must never set verified=true.
+    await commercialCatalogService.getMyCommercialSubscriptionSnapshot(normalizedTenantId);
+  } catch {
+    // Fail closed when server snapshot verification throws.
+  }
+
+  return {
+    verified: false,
+    checkoutMessage: null,
+    checkoutPendingNotice:
+      lang === 'tr'
+        ? 'Ödeme dönüşü alındı; sunucu doğrulaması bekleniyor. Sunucu webhook onayı tamamlanana kadar abonelik güncellenmiş sayılmaz.'
+        : 'Checkout return received; server verification is pending. Subscription is not considered updated until server webhook confirmation completes.',
+  };
+}
+
+export const BillingTab: React.FC = () => {
   const { language } = useLanguage();
   const t = translations[language];
   const { tenant } = useTenant();
@@ -19,77 +173,134 @@ const BillingTab: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
+  const [checkoutPendingNotice, setCheckoutPendingNotice] = useState<string | null>(null);
+  const pendingCheckoutVerificationRef = useRef(false);
   
   const [previewPlan, setPreviewPlan] = useState<PricingPlan | null>(null);
   const [platformLedgers, setPlatformLedgers] = useState<any[]>([]);
 
   useEffect(() => {
-    // Check for callback parameters from payment provider
-    const urlParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
-    if (urlParams.get('checkout') === 'cancelled') {
-        const trLang = translations[language || 'tr']?.billing as any;
-        setCheckoutError(trLang?.checkout_cancelled_msg || 'Güvenli ödeme işlemi iptal edildi.');
-        window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/admin?tab=abonelik');
+    // Check for callback parameters from payment provider fail-closed.
+    const latestRunMode = paymentRunModeService.getStatus();
+    const evaluation = evaluateCheckoutReturnParams({
+      hash: window.location.hash || '',
+      language,
+      runModeStatus: latestRunMode,
+    });
+
+    if (evaluation.shouldStripQueryParams) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/admin?tab=abonelik');
     }
-    if (urlParams.get('checkout') === 'success') {
-        const trLang = translations[language || 'tr']?.billing as any;
-        setCheckoutMessage(trLang?.checkout_success_msg || 'Ödeme başarıyla tamamlandı. Aboneliğiniz güncellendi.');
-        window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/admin?tab=abonelik');
-        
-        // Handle referral mapping on checkout success
-        if (tenant?.id) {
-          import('../services/referralProgramService').then(({ referralProgramService }) => {
-            referralProgramService.markReferralTrialStarted(tenant.id);
-          });
-        }
-    }
-    if (urlParams.get('checkout_simulate') === 'true') {
-        setCheckoutMessage('Ödeme başarıyla doğrulandı.');
-        window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/admin?tab=abonelik');
-        
-        // Handle referral mapping on checkout success
-        if (tenant?.id) {
-          import('../services/referralProgramService').then(({ referralProgramService }) => {
-            referralProgramService.markReferralTrialStarted(tenant.id);
-          });
-        }
+
+    if (evaluation.outcome === 'cancelled') {
+      setCheckoutError(evaluation.checkoutError);
+      setCheckoutMessage(null);
+      setCheckoutPendingNotice(null);
+      pendingCheckoutVerificationRef.current = false;
+    } else if (evaluation.outcome === 'verification_pending') {
+      setCheckoutError(null);
+      setCheckoutMessage(null);
+      setCheckoutPendingNotice(evaluation.checkoutPendingNotice);
+      pendingCheckoutVerificationRef.current = true;
+    } else if (evaluation.outcome === 'simulation_rejected') {
+      setCheckoutError(evaluation.checkoutError);
+      setCheckoutMessage(null);
+      setCheckoutPendingNotice(null);
+      pendingCheckoutVerificationRef.current = false;
+    } else if (evaluation.outcome === 'simulation_rehearsal') {
+      setCheckoutError(null);
+      setCheckoutMessage(evaluation.checkoutMessage);
+      setCheckoutPendingNotice(null);
+      pendingCheckoutVerificationRef.current = false;
     }
     
     if (tenant) {
-      loadBillingData();
+      void loadBillingData(pendingCheckoutVerificationRef.current);
       import('../services/referralProgramService').then(({ referralProgramService }) => {
         setPlatformLedgers(referralProgramService.listReferralRewards(tenant.id));
       });
     }
   }, [tenant]);
 
-  const loadBillingData = async () => {
+  const loadBillingData = async (verifyCheckoutReturn = false) => {
     if (!tenant) return;
     setLoading(true);
-    
-    const sub = await subscriptionService.getCurrentSubscription(tenant.id);
-    setSubscription(sub);
-    
-    const plan = await subscriptionService.getPlanForTenant(tenant.id);
-    setCurrentPlan(plan);
-    
-    const currentUsage = await subscriptionService.getTenantUsage(tenant.id);
-    setUsage(currentUsage);
-    
-    setPlans(planService.getActivePlans());
-    
-    setLoading(false);
+    try {
+      const sub = await subscriptionService.getCurrentSubscription(tenant.id);
+      setSubscription(sub);
+
+      const plan = await subscriptionService.getPlanForTenant(tenant.id);
+      setCurrentPlan(plan);
+
+      const currentUsage = await subscriptionService.getTenantUsage(tenant.id);
+      setUsage(currentUsage);
+
+      setPlans(planService.getActivePlans());
+
+      if (verifyCheckoutReturn) {
+        const verification = await verifyCheckoutWithServerSnapshot({
+          tenantId: tenant.id,
+          language,
+        });
+        pendingCheckoutVerificationRef.current = false;
+        if (verification.verified) {
+          setCheckoutPendingNotice(null);
+          setCheckoutMessage(verification.checkoutMessage);
+        } else {
+          setCheckoutMessage(null);
+          setCheckoutPendingNotice(verification.checkoutPendingNotice);
+        }
+      }
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const runModeStatus = paymentRunModeService.getStatus();
+  const providerContract = paymentProviderConfigService.getProviderOperationalContract(runModeStatus);
+  const taxProfile = tenant ? businessProfileService.getCommercialTaxProfile(tenant.id) : null;
+  const invoiceAdapterStatus = businessProfileService.getInvoiceAdapterStatus(taxProfile);
 
   const handleCheckout = async (planId: string) => {
     if (!tenant) return;
     setCheckoutError(null);
 
-    const paymentProvider = (import.meta as any).env.VITE_PAYMENT_PROVIDER;
-    const isMock = !paymentProvider || paymentProvider === 'mock' || paymentProvider === 'disabled' || paymentProvider === 'none';
+    if (runModeStatus.mode === 'production_live' && !runModeStatus.isPaymentCollectionAuthorized) {
+        setCheckoutError(
+            language === 'tr'
+              ? `Canlı ödeme tahsilatı kilitli: ${runModeStatus.missingBlockers[0] || 'Sunucu doğrulaması gereklidir.'}`
+              : `Live payment collection is locked: ${runModeStatus.missingBlockers[0] || 'Server verification required.'}`
+        );
+        return;
+    }
 
-    // Presentation mode block
+    if (runModeStatus.mode === 'sandbox_live' && !runModeStatus.canRunCheckout) {
+        setCheckoutError(
+            language === 'tr'
+              ? `Sandbox ödeme akışı hazır değil: ${runModeStatus.missingBlockers[0] || 'Doğrulanmış sunucu yapılandırması gereklidir.'}`
+              : `Sandbox checkout is not ready: ${runModeStatus.missingBlockers[0] || 'Verified backend configuration required.'}`
+        );
+        return;
+    }
+
+    const paymentProvider = (import.meta as any).env.VITE_PAYMENT_PROVIDER;
+    const isMock =
+      runModeStatus.isMockSimulation ||
+      !launchModeService.isOnlinePaymentEnabled() ||
+      !paymentProvider ||
+      paymentProvider === 'mock' ||
+      paymentProvider === 'disabled' ||
+      paymentProvider === 'none';
+
     if (isMock) {
+        if (runModeStatus.isPersistentDatabaseMode || !runModeStatus.isMockSimulation) {
+            setCheckoutError(
+                language === 'tr'
+                  ? 'Kalıcı veri modunda çevrimiçi kart tahsilatı veya istemci tarafı paket onayı kapalıdır. Paket talebiniz için destek / Süper Admin ile iletişime geçin.'
+                  : 'Online card checkout and client-side plan activation are disabled in persistent mode. Contact support for plan changes.'
+            );
+            return;
+        }
         const selected = plans.find(p => p.id === planId);
         if (selected) setPreviewPlan(selected);
         return;
@@ -119,14 +330,30 @@ const BillingTab: React.FC = () => {
 
   const handleConfirmMockCheckout = async () => {
     if (!tenant || !previewPlan) return;
+    const latestRunMode = paymentRunModeService.getStatus();
+    if (
+      !latestRunMode.isMockSimulation ||
+      latestRunMode.isPersistentDatabaseMode ||
+      latestRunMode.mode !== 'local_dry_run'
+    ) {
+      setCheckoutError(
+        language === 'tr'
+          ? 'Güvenlik kuralı: Simülasyon onayı kalıcı veri veya canlı ödeme modunda çalışmaz; sunucu webhook doğrulaması gereklidir.'
+          : 'Security policy: Simulation confirmation cannot approve subscriptions in persistent or live mode; server webhook verification is required.'
+      );
+      setPreviewPlan(null);
+      return;
+    }
+
     try {
       await subscriptionService.startTrialAfterCheckout(tenant.id);
       const updated = await subscriptionService.upgradePlanNow(tenant.id, previewPlan.id);
       setSubscription(updated);
       setCurrentPlan(previewPlan);
-      setCheckoutMessage(language === 'tr' 
-        ? `Kart doğrulama adımı başarıyla tamamlandı. ${previewPlan.name} planı için 14 günlük deneme süreniz aktiftir.` 
-        : `Verification successful. Your 14-day trial of ${previewPlan.name} is now active.`);
+      setCheckoutPendingNotice(null);
+      setCheckoutMessage(language === 'tr'
+        ? `Yerel simülasyon provası tamamlandı (${latestRunMode.label}). Gerçek kart çekimi yapılmamıştır; ${previewPlan.name} önizleme durumu güncellendi.`
+        : `Local rehearsal completed (${latestRunMode.label}). No real card charge occurred; ${previewPlan.name} preview state updated.`);
       setPreviewPlan(null);
     } catch (e: any) {
       setCheckoutError(e.message);
@@ -186,6 +413,19 @@ const BillingTab: React.FC = () => {
     }
   };
 
+  const handleWithdrawCancellation = async () => {
+    if (!tenant) return;
+    try {
+      const updated = await subscriptionService.withdrawScheduledCancellation(tenant.id);
+      setSubscription(updated);
+      setCheckoutMessage(language === 'tr'
+        ? "Dönem sonu iptal talebiniz geri çekildi. Aboneliğiniz kesintisiz devam edecektir."
+        : "Cancellation request withdrawn. Your subscription will renew normally.");
+    } catch (e: any) {
+      setCheckoutError(e.message);
+    }
+  };
+
   if (loading) {
     return <div className="p-8 text-center text-gray-500">{translations[language || 'tr']?.billing?.loading || 'Yükleniyor...'}</div>;
   }
@@ -210,6 +450,34 @@ const BillingTab: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Payment Run Mode & Tax/Invoice Adapter Fail-Closed Security Notice */}
+      <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 p-4 rounded-xl text-xs md:text-sm space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="font-semibold text-amber-900 dark:text-amber-200">
+            {language === 'tr'
+              ? `Ödeme Çalışma Modu: ${runModeStatus.label} (${providerContract.providerName})`
+              : `Payment Run Mode: ${runModeStatus.label} (${providerContract.providerName})`}
+          </span>
+          <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 font-medium">
+            {language === 'tr'
+              ? `Tahsilat Yetkisi: ${providerContract.canCollectRealPayments ? 'Aktif' : 'Sunucu Doğrulaması Bekleniyor'}`
+              : `Collection Authority: ${providerContract.canCollectRealPayments ? 'Active' : 'Server Verification Required'}`}
+          </span>
+        </div>
+        <p className="text-amber-800 dark:text-amber-300">
+          {language === 'tr'
+            ? `${runModeStatus.description} Fatura adaptörü: ${invoiceAdapterStatus.blockers[0] || 'Sunucu e-Fatura doğrulaması gereklidir.'}`
+            : `${runModeStatus.description} Invoice adapter: Server-side e-Invoice integration required; client cannot issue official tax invoices.`}
+        </p>
+        {runModeStatus.missingBlockers.length > 0 && (
+          <ul className="list-disc pl-5 text-amber-900 dark:text-amber-200 space-y-0.5">
+            {runModeStatus.missingBlockers.map((blocker, idx) => (
+              <li key={idx}>{blocker}</li>
+            ))}
+          </ul>
+        )}
+      </div>
       {/* Current Status */}
       <div className="bg-white dark:bg-slate-800 shadow-sm rounded-lg border border-gray-200 dark:border-slate-700 p-6">
         <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6">{t.billing.current_subscription_status}</h2>
@@ -218,6 +486,15 @@ const BillingTab: React.FC = () => {
           <div className="mb-6 bg-red-50 border border-red-500 p-4 rounded-md">
             <h3 className="text-red-900 font-bold">{t.billing.checkout_failed}</h3>
             <p className="text-red-800 text-sm mt-1">{checkoutError}</p>
+          </div>
+        )}
+
+        {checkoutPendingNotice && (
+          <div className="mb-6 bg-amber-50 border border-amber-500 p-4 rounded-md">
+            <h3 className="text-amber-900 font-bold">
+              {language === 'tr' ? 'Sunucu Doğrulaması Bekleniyor' : 'Server Verification Pending'}
+            </h3>
+            <p className="text-amber-800 text-sm mt-1">{checkoutPendingNotice}</p>
           </div>
         )}
 
@@ -534,7 +811,7 @@ const BillingTab: React.FC = () => {
 
                   {subscription.cancelAtPeriodEnd && (
                     <button
-                      onClick={handleResume}
+                      onClick={handleWithdrawCancellation}
                       className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer"
                     >
                       {language === 'tr' ? '🔄 İptali Geri Çek' : '🔄 Recede Cancellation'}

@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { getDataSourceMode } from './dataSourceConfig';
+import { STORAGE_KEYS, DYNAMIC_STORAGE_KEYS } from './storageKeys';
 
 export interface TenantInfo {
   id: string;
@@ -46,8 +47,8 @@ export const superAdminService = {
 
     if (mode !== 'supabase') {
       const { dataProvider } = await import('./dataProvider');
-      const provStatus1 = await dataProvider.get<string>(`lari:mock_tenant_1:provisioning_status`) || 'live';
-      const provStatus2 = await dataProvider.get<string>(`lari:tenant_demo:provisioning_status`) || 'setup_in_progress';
+      const provStatus1 = await dataProvider.get<string>(DYNAMIC_STORAGE_KEYS.tenantProvisioningStatus('mock_tenant_1')) || 'live';
+      const provStatus2 = await dataProvider.get<string>(DYNAMIC_STORAGE_KEYS.tenantProvisioningStatus('tenant_demo')) || 'setup_in_progress';
       
       const tenants = [
           {
@@ -90,7 +91,7 @@ export const superAdminService = {
           }
       ];
 
-      const registeredRaw = localStorage.getItem('lari_registered_tenants');
+      const registeredRaw = localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS);
       const dynamicTenants: TenantFullData[] = !registeredRaw ? [] : JSON.parse(registeredRaw).map((t: any) => ({
         tenant: {
           id: t.id,
@@ -197,21 +198,51 @@ export const superAdminService = {
     };
   },
 
-  async approveGoLive(tenantId: string): Promise<boolean> {
+  async approveGoLive(tenantId: string, options?: { isRehearsal?: boolean; demoOnly?: boolean }): Promise<boolean> {
+    const isSyntheticOrRehearsal =
+      options?.isRehearsal ||
+      options?.demoOnly ||
+      tenantId.startsWith('synthetic_') ||
+      tenantId.startsWith('demo_') ||
+      tenantId.startsWith('rehearsal_') ||
+      tenantId === 'mock_tenant_1' ||
+      tenantId === 'tenant_demo';
+
+    if (isSyntheticOrRehearsal) {
+      // Phase F Rehearsal Guard: Strictly avoid live Supabase publication RPC
+      const { dataProvider } = await import('./dataProvider');
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantGoLiveStatus(tenantId), 'DEMO_REHEARSAL_APPROVED');
+      await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantProvisioningStatus(tenantId), 'live');
+
+      if (typeof localStorage !== 'undefined') {
+        const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
+        const index = registeredArr.findIndex((t: any) => t.id === tenantId);
+        if (index !== -1) {
+          registeredArr[index].publicSiteStatus = 'published';
+          registeredArr[index].verificationStatus = 'approved';
+          registeredArr[index].rehearsalApproved = true;
+          localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(registeredArr));
+        }
+      }
+      return true;
+    }
+
     const mode = getDataSourceMode();
     if (mode !== 'supabase') {
        const { dataProvider } = await import('./dataProvider');
-       await dataProvider.set(`lari:${tenantId}:go_live_status`, 'live');
-       await dataProvider.set(`lari:${tenantId}:provisioning_status`, 'live');
+       await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantGoLiveStatus(tenantId), 'live');
+       await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantProvisioningStatus(tenantId), 'live');
        
-       const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
-       const index = registeredArr.findIndex((t: any) => t.id === tenantId);
-       if (index !== -1) {
-          registeredArr[index].publicSiteStatus = 'published';
-          registeredArr[index].verificationStatus = 'approved';
-          localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+       if (typeof localStorage !== 'undefined') {
+         const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
+         const index = registeredArr.findIndex((t: any) => t.id === tenantId);
+         if (index !== -1) {
+            registeredArr[index].publicSiteStatus = 'published';
+            registeredArr[index].verificationStatus = 'approved';
+            localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(registeredArr));
+         }
        }
-       return new Promise(resolve => setTimeout(() => resolve(true), 500));
+       return new Promise(resolve => setTimeout(() => resolve(true), 100));
     }
 
     const { data, error } = await supabase.rpc('approve_and_publish_tenant', {
@@ -244,15 +275,15 @@ export const superAdminService = {
      const mode = getDataSourceMode();
      if (mode !== 'supabase') {
        const { dataProvider } = await import('./dataProvider');
-       await dataProvider.set(`lari:${tenantId}:go_live_status`, 'needs_changes');
-       await dataProvider.set(`lari:${tenantId}:provisioning_status`, 'setup_in_progress');
+       await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantGoLiveStatus(tenantId), 'needs_changes');
+       await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantProvisioningStatus(tenantId), 'setup_in_progress');
        
-       const registeredArr = JSON.parse(localStorage.getItem('lari_registered_tenants') || '[]');
+       const registeredArr = JSON.parse(localStorage.getItem(STORAGE_KEYS.REGISTERED_TENANTS) || '[]');
        const index = registeredArr.findIndex((t: any) => t.id === tenantId);
        if (index !== -1) {
           registeredArr[index].publicSiteStatus = 'preview_ready';
           registeredArr[index].verificationStatus = 'rejected';
-          localStorage.setItem('lari_registered_tenants', JSON.stringify(registeredArr));
+          localStorage.setItem(STORAGE_KEYS.REGISTERED_TENANTS, JSON.stringify(registeredArr));
        }
        return new Promise(resolve => setTimeout(() => resolve(true), 500));
      }
@@ -270,7 +301,7 @@ export const superAdminService = {
      const mode = getDataSourceMode();
      if (mode !== 'supabase') {
        const { dataProvider } = await import('./dataProvider');
-       await dataProvider.set(`lari:${tenantId}:go_live_status`, 'paused');
+       await dataProvider.set(DYNAMIC_STORAGE_KEYS.tenantGoLiveStatus(tenantId), 'paused');
        return new Promise(resolve => setTimeout(() => resolve(true), 500));
      }
      const { error } = await supabase.from('tenants').update({ 
