@@ -1,13 +1,13 @@
 # LARİ Nihai V1 -> V1-B -> V2 Kaynak Kabul Paketi (Final Acceptance Package)
 
 **Belge Kimliği:** `LARI-DOC-FINAL-V1-V2-ACCEPTANCE-20261116`  
-**Referans Adım:** `ADIM-039` (`Faz H1: Nihai Bütünleştirme, Program V2 Güvenlik Yüzeyi & Kabul Paketi`)  
-**Aktif Çalışma Dalı:** `ci/lari-independent-acceptance-gate`  
-**Kanonik Base Commit SHA (`ADIM-038` Kabulü):** `d7f1f5fdfeb942b699ba937bdc3b769804c73d09`  
-**Aday Durum (Candidate SHA):** Çalışma ağacındaki `ADIM-039` bütünleştirmesi tamamlandıktan sonra `loop.py` `TESTING` + bağımsız `Codex` `PASS` onayı ile mühürlenir.  
+**Referans Adımlar:** `ADIM-039` (`Faz H1`) & `ADIM-040` (`Faz I1: Kanonik Branch & Staging PR Uzlaştırması`)  
+**Kaynak Aday Dalı & Kabul SHA (`ADIM-039`):** `ci/lari-independent-acceptance-gate` @ `66371ce230b0136c5e86f3f9f33aeefe6ea49bb8` *(Base: `d7f1f5fdfeb942b699ba937bdc3b769804c73d09`)*  
+**Kanonik Staging Dalı & PR #34 Merge SHA (`ADIM-040`):** `staging/supabase-staging-consistency` @ `29c75164313114f306f49fcf05682aeb83eb1532` *(Önceki hedef: `2c6a99b0b92ecea4f324c7195b3222f92688f294`; [`PR #34`](https://github.com/MertSGI/Randapp-main/pull/34) insan onayıyla `2026-11-16T14:06:22Z` tarihinde manuel birleştirildi)*  
+**Kanonik Uzlaştırma Kaydı:** [`docs/LARI_CANONICAL_BRANCH_RELEASE_RECORD.md`](LARI_CANONICAL_BRANCH_RELEASE_RECORD.md) *(Salt-dokümantasyon PR #2 mühürlemesi; döngüsel SHA referansı içermez)*  
 **Nihai Kaynak Durumu:** **`SOURCE_CANDIDATE_COMPLETE`** *(Kesinlikle `PRODUCTION_READY` değildir)*  
 **Resmi Canlı Kesim Kararı:** **`PRODUCTION = NO_GO`**  
-**Açık Üretim Blokeri:** **GitHub Issue #10 (`OPEN_PRODUCTION_BLOCKER`)**  
+**Açık Üretim Blokeri:** **GitHub Issue #10 (`OPEN / RED / BLOCKED` — `OPEN_PRODUCTION_BLOCKER`)**  
 **Tarih:** 16 Kasım 2026
 
 ---
@@ -25,7 +25,7 @@ Bu belge, **LARİ (`randevulari.com`)** platformunun **V1-A (Ödemesiz Çekirdek
 | **`PAID_FALLBACK`** | `DISABLED` | Ödemesiz/yerel modlarda veya istemci durumunda otomatik ücretli abonelik, AI sağlayıcı fallback'i veya tahsilat açılamaz. |
 | **`AUTO_MERGE`** | `DISABLED` | `main` veya `staging` dallarına otomatik birleştirme yapılmaz (`ADIM-040` insan onaylı PR uzlaştırması gerekir). |
 | **`NO_REMOTE_DB_WRITE`** | `TRUE` | Tüm PostgreSQL doğrulamaları sıfır uzak ağ çıkışı ile izole yerel PG17 (`EmbeddedPostgres 17.11`) üzerinde çalıştırılmıştır. |
-| **GitHub Issue #10** | `OPEN_PRODUCTION_BLOCKER` | Uzak PostgreSQL 17 bağımsız felaket kurtarma ve geri yükleme (DR Restore) kanıtı tamamlanana kadar açık üretim blokeri olarak korunur. |
+| **GitHub Issue #10** | `OPEN / RED / BLOCKED` (`OPEN_PRODUCTION_BLOCKER`) | Uzak PostgreSQL 17 bağımsız felaket kurtarma ve geri yükleme (DR Restore) kanıtı tamamlanana kadar açık üretim blokeri olarak korunur. |
 | **Bütçe & Harcama Sınırı** | `0 TL` | Canlı iyzico tahsilatı, canlı SMS/WhatsApp/e-posta gönderimi ve ücretli LLM/Gemini API çağrısı yapılmamıştır. |
 | **Marka & Alan Adı** | `LARİ` / `randevulari.com` | Görünür marka **LARİ** ve Türkiye alan adı stratejisi **`randevulari.com`** korunmuştur. |
 
@@ -48,7 +48,8 @@ Bu belge, **LARİ (`randevulari.com`)** platformunun **V1-A (Ödemesiz Çekirdek
 | **Faz E1 (`ADIM-036`)** | Dikey Çekirdek, Klinik & Sağlık Turizmi | `PASS` | `6824aa81` | `20260927..20261007`, `verticalCommercialService`, `clinicService`, `healthTourismService`, PHI koruması, `ht_leads` pasaport izolasyonu, KVKK/sağlık mevzuatı `EXTERNAL_HOLD`. |
 | **Faz F1 (`ADIM-037`)** | Keşif Pazar Yeri, Doğrulanmış Yorumlar & Favoriler | `PASS` | `46c8562f` | `20261008..20261010`, `discoveryMarketplaceService`, V1 `/#/s/:slug` vitrin bağımsızlığı, tamamlanmış-randevu/token doğrulamalı yorum yazımı. |
 | **Faz G1 (`ADIM-038`)** | Küreselleşme, Fail-Closed AI & 3-Kademeli Durum | `PASS` | `d7f1f5fd` | `marketConfigService`, `currencyService` (desteklenmeyen kur fallback'i), `adminFeatureAvailabilityService` (3 kademe), `clinic-ai-*` ve `ht-ai-chat` sunucu `LIVE_ENABLED` kapıları (`DISABLED_EXTERNAL_HOLD`). |
-| **Faz H1 (`ADIM-039`)** | Program V2 Güvenlik Yüzeyi & Nihai Kabul Paketi | `CANDIDATE` | *(Base: `d7f1f5fd`)* | `20261011_program_v2_security_surface_hardening.sql` & `20261012_appointment_access_tokens_table_access_hardening.sql` (`72911e4:20261007/20261011` eşdeğeri), 98-migrasyon PG17 replay & pristine restore doğrulaması ve bu kabul paketi. |
+| **Faz H1 (`ADIM-039`)** | Program V2 Güvenlik Yüzeyi & Nihai Kabul Paketi | `PASS` | `66371ce2` | `20261011_program_v2_security_surface_hardening.sql` & `20261012_appointment_access_tokens_table_access_hardening.sql` (`72911e4:20261007/20261011` eşdeğeri), 98-migrasyon PG17 replay & pristine restore doğrulaması (`10/10 PASS`) ve bu kabul paketi. |
+| **Faz I1 (`ADIM-040`)** | Kanonik Branch & Staging PR Uzlaştırması | `PR #1 MERGED` *(PR #2 doc-only mühürleme)* | `29c75164` *(PR #34 merge)* | `ci/lari-independent-acceptance-gate@66371ce2` → `staging/supabase-staging-consistency@2c6a99b0` [`PR #34`](https://github.com/MertSGI/Randapp-main/pull/34) insan incelemesi ve `AUTO_MERGE = DISABLED` ile birleştirildi (`2026-11-16T14:06:22Z`); CI run'lar `43870002466`, `43872084503`, `43872084917` doğrulandı ve `docs/LARI_CANONICAL_BRANCH_RELEASE_RECORD.md` mühürlendi. |
 
 ---
 
@@ -129,7 +130,7 @@ Tam liste ve tablo sahiplik haritası `supabase/MIGRATION_APPLY_MANIFEST.md` dos
 
 ## 6. Doğrulama Sınırı ve Test Kanıtları
 
-Bu raporda **önceki kabul edilmiş Faz A–G adımlarının tarihsel kanıtları**, **`ADIM-039` oturumu içinde çalışma ağacında doğrudan gözlenen PG17/statik doğrulama çıktıları** ve **teslim sonrası `loop.py` `TESTING` evresinde senkron koşulacak 10 kanonik kapı komutu** birbirinden dürüstçe ayrılmıştır.
+Bu raporda **önceki kabul edilmiş Faz A–G adımlarının tarihsel kanıtları**, **`ADIM-039` (`66371ce2`) 10/10 kabul kapısı ile `ADIM-040` PR #34 CI kanıtları** ve **teslim sonrası `loop.py` `TESTING` evresinde senkron koşulacak salt-dokümantasyon doğrulama kapısı** birbirinden dürüstçe ayrılmıştır.
 
 ### 6.1. Önceki Kabul Edilmiş Adımların Kanıt Özeti (`ADIM-001..038` — Tarihsel Kabul)
 
@@ -148,22 +149,24 @@ Bu raporda **önceki kabul edilmiş Faz A–G adımlarının tarihsel kanıtlar�
 4. **`node scripts/verify-supabase-staging-consistency.test.mjs` (`Exit Code: 0`):** Tüm 98 migrasyon gerçek `PG17(170011)` üzerinde yeniden oynatıldı; Faz D1/D2/D3/E1/F1 matrisleri, **ADIM-039 Program V2 Security Surface & Token Hardening PG17 Matrisi** (`ht_rate_limit_buckets` erişim reddi, `get_user_role`/`get_user_tenant_id`/`is_super_admin`/trigger `search_path=pg_catalog, public` & `PUBLIC/anon` `EXECUTE` reddi, pasif `super_admin` reddi, `appointment_access_tokens` doğrudan `anon` erişim reddi + `SECURITY DEFINER` RPC sürekliliği), 6 adet ADIM-036 davranış testi ve 3 adet ADIM-037 davranış testi PASS.
 5. **`node scripts/test-v1a-data-mode-switching-regression.mjs` (`Exit Code: 0`):** Çift yönlü `local <-> supabase_staging` depo geçişi, sıfır veri kaybı ve sözleşme paritesi (`31/31`) PASS.
 
-### 6.3. `ADIM-039` Nihai Kabul Kapısı (`loop.py` `TESTING` Evresi Komutları)
+### 6.3. `ADIM-039` Nihai Kabul Kapısı (`66371ce2` — `10/10 PASS`) ve `ADIM-040` Uzlaştırma Kanıtları
 
-Bu belge teslim edildikten hemen sonra `loop.py` aşağıdaki **10 senkron doğrulama komutunu** nihai dosya ağacı üzerinde baştan sona çalıştırır ve tam çıktıları bağımsız Denetçi (`Codex`) değerlendirmesine sunar:
-
-1. `npx tsc --noEmit`
-2. `npm run build`
-3. `node scripts/scan-frontend-secrets.mjs`
-4. `node scripts/verify-supabase-migration-integrity.mjs`
-5. `node scripts/test-v1a-data-mode-switching-regression.mjs`
-6. `node scripts/verify-disposable-pg17-pristine-restore.mjs`
-7. `node scripts/verify-supabase-staging-consistency.mjs`
-8. `node scripts/verify-supabase-staging-consistency.test.mjs`
-9. `node scripts/test-ui-v2-booking-e2e.mjs`
-10. `node scripts/test-phase-f-browser-regression.mjs`
-
-*(Kayıt Disiplini: Yukarıdaki 10 komutun nihai `ADIM-039` çalıştırma çıktıları `loop.py` tarafından `hafiza/adimlar/ADIM-039.md` ve Denetçi oturumuna eklenir; teslim öncesinde henüz koşturulmamış komutlar için yapay çıktı yazılmamıştır.)*
+* **`ADIM-039` (`66371ce230b0136c5e86f3f9f33aeefe6ea49bb8`) Yerel Kabul Çıktıları (`10/10 PASS` + `Codex PASS`):**
+  1. `npx tsc --noEmit` → `PASS (28.4s)`
+  2. `npm run build` → `PASS (10.1s)`
+  3. `node scripts/scan-frontend-secrets.mjs` → `PASS (0.6s)`
+  4. `node scripts/verify-supabase-migration-integrity.mjs` → `PASS (0.6s)`
+  5. `node scripts/test-v1a-data-mode-switching-regression.mjs` → `PASS (1.4s)`
+  6. `node scripts/verify-disposable-pg17-pristine-restore.mjs` → `PASS (12.2s)`
+  7. `node scripts/verify-supabase-staging-consistency.mjs` → `PASS (0.7s)`
+  8. `node scripts/verify-supabase-staging-consistency.test.mjs` → `PASS (14.7s)`
+  9. `node scripts/test-ui-v2-booking-e2e.mjs` → `PASS (19.5s)`
+  10. `node scripts/test-phase-f-browser-regression.mjs` → `PASS (21.6s)`
+* **`ADIM-040` GitHub CI & PR #34 Birleştirme Kanıtları:**
+  * **Push CI (`ADIM-039` @ `66371ce2`):** Run [`43870002466`](https://github.com/MertSGI/Randapp-main/actions/runs/43870002466) → `SUCCESS`.
+  * **PR #1 (`MertSGI/Randapp-main#34`):** [`https://github.com/MertSGI/Randapp-main/pull/34`](https://github.com/MertSGI/Randapp-main/pull/34) (`ci/lari-independent-acceptance-gate@66371ce2` → `staging/supabase-staging-consistency@2c6a99b0`) — `LARI Independent Acceptance CI` Run [`43872084503`](https://github.com/MertSGI/Randapp-main/actions/runs/43872084503) (`4/4 SUCCESS`) ve `LARI PG17 Role Restore Qualification` Run [`43872084917`](https://github.com/MertSGI/Randapp-main/actions/runs/43872084917) (`gh run rerun 43872084917 --failed` sonrası `SUCCESS`) yeşil olduktan sonra insan incelemesiyle `2026-11-16T14:06:22Z` tarihinde manuel birleştirildi (`mergeCommit`: `29c75164313114f306f49fcf05682aeb83eb1532`, `AUTO_MERGE = DISABLED`).
+* **`ADIM-040` Salt-Dokümantasyon Mühürleme Kapısı (`loop.py` `TESTING` Evresi):**
+  Bu salt-dokümantasyon güncellemesi (`docs/LARI_CANONICAL_BRANCH_RELEASE_RECORD.md` + `docs/LARI_FINAL_V1_V2_ACCEPTANCE_PACKAGE.md`) teslim edildikten sonra `npx tsc --noEmit`, `npm run build`, `node scripts/scan-frontend-secrets.mjs` ve `node scripts/verify-supabase-migration-integrity.mjs` komutları `loop.py` tarafından senkron koşulur; mühürleme PR #2 commit SHA'sı döngüsel referans yasağı gereği bu dosyaya önceden yazılmamıştır.
 
 ---
 
@@ -171,7 +174,7 @@ Bu belge teslim edildikten hemen sonra `loop.py` aşağıdaki **10 senkron doğr
 
 `SOURCE_CANDIDATE_COMPLETE` mühründen sonra canlı `PRODUCTION = GO` kararına ulaşmak için insan yetkisiyle sırayla tamamlanması gereken Faz I adımları:
 
-1. **`ADIM-040` (Faz I1 — Branch & Staging PR Uzlaştırması):** `ci/lari-independent-acceptance-gate` -> `staging` kanonik PR açılışı, CI yeşil kapı doğrulaması ve insan onaylı birleştirme (`AUTO_MERGE = DISABLED` korunarak).
+1. **`ADIM-040` (Faz I1 — Branch & Staging PR Uzlaştırması):** `PR #1` ([`PR #34`](https://github.com/MertSGI/Randapp-main/pull/34)) `2026-11-16T14:06:22Z` tarihinde insan incelemesiyle `staging/supabase-staging-consistency` dalına birleştirildi (`mergeCommit`: `29c75164313114f306f49fcf05682aeb83eb1532`, `AUTO_MERGE = DISABLED`); `PR #2` salt-dokümantasyon mühürlemesi [`docs/LARI_CANONICAL_BRANCH_RELEASE_RECORD.md`](LARI_CANONICAL_BRANCH_RELEASE_RECORD.md) ve bu belge ile tamamlanmaktadır (`PRODUCTION = NO_GO`, **GitHub Issue #10 `OPEN / RED / BLOCKED`**).
 2. **`ADIM-041` (Faz I2 — Gerçek Supabase `lari-staging` Aktivasyonu):** Fiziksel bulut Supabase `lari-staging` projesine `001..20261012` (98 migrasyon) uygulanması, Auth/seed eşlemesi ve `docs/SUPABASE_STAGING_EXECUTION_RESULT_LOG.md` belgesinin gerçek `PASS` kanıtlarıyla doldurulması.
 3. **`ADIM-042` (Faz I3 — GitHub Issue #10 Bağımsız DR Restore Kanıtı):** Uzak staging yedeğinin temiz bir PG17 örneğine geri yüklenip P0 + RLS postcondition'larının kanıtlanması ve **GitHub Issue #10** blokerinin kapatılması.
 4. **`ADIM-043` (Faz I4 — Teknik & Altyapı Açılışı):** `randevulari.com` / `*.randevulari.com` DNS & TLS sertifikalarının bağlanması, Vercel staging/prod ortam değişkenlerinin atanması ve `paymentless` güvenlik kilidinin canlı altyapıda doğrulanması.
@@ -180,4 +183,4 @@ Bu belge teslim edildikten hemen sonra `loop.py` aşağıdaki **10 senkron doğr
 
 ---
 
-**Nihai Program Kararı:** `SOURCE_CANDIDATE_COMPLETE` | `PRODUCTION = NO_GO` | `ISSUE #10 = OPEN_PRODUCTION_BLOCKER` | `NO_REMOTE_DB_WRITE = TRUE` | `PAID_FALLBACK = DISABLED` | `AUTO_MERGE = DISABLED`
+**Nihai Program Kararı:** `SOURCE_CANDIDATE_COMPLETE` | `PRODUCTION = NO_GO` | `ISSUE #10 = OPEN / RED / BLOCKED (OPEN_PRODUCTION_BLOCKER)` | `NO_REMOTE_DB_WRITE = TRUE` | `PAID_FALLBACK = DISABLED` | `AUTO_MERGE = DISABLED` | `CANONICAL_STAGING_MERGE_SHA = 29c75164313114f306f49fcf05682aeb83eb1532`
