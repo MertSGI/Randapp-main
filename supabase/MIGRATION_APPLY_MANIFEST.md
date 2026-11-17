@@ -106,6 +106,7 @@ All migrations in `supabase/migrations/` must be applied in the exact alphabetic
 96. **`20261010_phase7_node3_favorites_fast_rebooking.sql`** — V2 Faz F1 (from `72911e4:20261006`): `customer_favorites` relationship table with direct DML revoked, `set_customer_favorite`, `get_customer_favorites`, and `get_fast_rebooking_seed_by_manage_token` (binding rebooking strictly to `evaluate_booking_slot` and `create_public_booking`).
 97. **`20261011_program_v2_security_surface_hardening.sql`** — V2 Faz H1 (from `72911e4:20261007`): Program V2 security surface hardening — locks down `ht_rate_limit_buckets` privileges/RLS, enforces `SET search_path = pg_catalog, public` and revokes `PUBLIC`/`anon` EXECUTE on `get_user_role`, `get_user_tenant_id`, and `is_super_admin` (with `active = true`), and sets `SET search_path = pg_catalog, public` on `update_updated_at_column` and `update_tenant_business_profiles_updated_at_column`.
 98. **`20261012_appointment_access_tokens_table_access_hardening.sql`** — V2 Faz H1 (from `72911e4:20261011155623`): Forward-only hardening on `public.appointment_access_tokens` — verifies table identity and drops permissive `"Allow public select by token hash"` (`USING (true)`) policy while revoking `PUBLIC`/`anon` table privileges, preserving `SECURITY DEFINER` token RPC boundaries and authenticated owner/admin RLS.
+99. **`20261117033457_adim041c_forward_reconciliation_and_p0_hardening.sql`** — ADIM-041C Forward-Only Idempotent Reconciliation & P0 Security Hardening (`BEGIN; SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '120s';`): reconciles `lari-staging` (`79` remote incl. `4` remote-only `20261008063020..41` + `19` version collisions) with canonical schema parity (`001..20261012`), preserves `clinic_check_and_consume_ai_allowance()` and `idx_subscriptions_unique_tenant_id`, drops legacy un-OTP'd/un-ratelimited RPC overloads, and closes P0 `appointment_access_tokens`, `consent_ledger`, and `policy_acceptances` direct write / PG17 `MAINTAIN` privileges.
 
 ---
 
@@ -378,5 +379,14 @@ After the migrations have successfully been applied:
   * Trigger functions `public.update_updated_at_column()` and `public.update_tenant_business_profiles_updated_at_column()` pinned to `SET search_path = pg_catalog, public`.
   * `public.appointment_access_tokens`: drops legacy `"Allow public select by token hash"` (`USING (true)`) policy and revokes `PUBLIC`/`anon` direct table privileges while keeping `SECURITY DEFINER` token RPCs intact.
 * **Program Seal**: Source state sealed at `SOURCE_CANDIDATE_COMPLETE` with `PRODUCTION = NO_GO`, `PAID_FALLBACK = DISABLED`, `AUTO_MERGE = DISABLED`, `NO_REMOTE_DB_WRITE = TRUE`, and GitHub **Issue #10** open pending Phase I (`ADIM-040..045`) Release Closure.
+
+---
+
+## 15. ADIM-041C — Forward-Only Staging Reconciliation & P0 Hardening (`20261117033457`)
+
+* **CLI Migration Record (`supabase migration new`)**: `20261117033457_adim041c_forward_reconciliation_and_p0_hardening.sql` (append-only after `20261012`, leaving `001..20261012` and remote `20261008063020..41` history untouched; no `db push --include-all` or `migration repair`).
+* **Transaction & Timeout Safety**: Executes inside `BEGIN; SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '120s'; ... COMMIT;` with automatic atomic rollback on any failure.
+* **P0 Closure**: Extends `appointment_access_tokens` hardening to drop legacy permissive `WITH CHECK (true)` anon policies on `consent_ledger` and `policy_acceptances`, revokes `PUBLIC`, `anon`, and `authenticated` write + PostgreSQL 17 `MAINTAIN` privileges (retaining tenant-scoped `authenticated SELECT` and `SECURITY DEFINER` RPC boundaries), drops insecure legacy `create_public_booking(13-arg)` and `get_public_appointment_by_manage_token(1-arg)` overloads, and preserves live `clinic_check_and_consume_ai_allowance()` + `idx_subscriptions_unique_tenant_id`.
+
 
 

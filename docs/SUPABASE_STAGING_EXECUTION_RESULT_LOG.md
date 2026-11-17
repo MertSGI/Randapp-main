@@ -89,3 +89,23 @@ This log documents the official results of executing the real, physical Supabase
 
 **Reasoning & Core Fixes Required:**
 [Provide detailed reasoning and actions taken to resolve any bugs]
+
+---
+
+## 6. Recorded ADIM-041C Live Staging Forward Reconciliation & Read-Only Smoke Receipt (2026-11-17)
+
+| Field | Recorded Value |
+| :--- | :--- |
+| **Supabase Project Name** | `lari-staging` |
+| **Project Ref** | `rwedeejhjazwjthdjzrt` |
+| **Execution Date (UTC)** | `2026-11-17` |
+| **Source Base Branch / SHA** | `ci/lari-independent-acceptance-gate` @ `cd6d708e2f82f923235b58b362b1fe00af131593` |
+| **Applied Forward Migration** | `20261117033457_adim041c_forward_reconciliation_and_p0_hardening.sql` (`SHA-256: 7ced58f32a3cdf759bd35292f00cc0bc745d64778e59e1e30813275b647f313e`) |
+| **Canonical Repo Migration Count** | `99` (`001..005`, `20260601..20261012`, `20261117033457`; `22` legacy superseded files archived under `supabase/archive/`) |
+| **Live `schema_migrations` Count** | `80` (`79` pre-existing including 4 preserved `20261008*` remote-only entries + `20261117033457`) |
+| **Catalog Counts (`public`)** | `120` tables, `236` application functions, `provider_token=true`, `payments.amount=numeric`, `idx_subscriptions_unique_tenant=true` |
+| **P0 Direct Anon PostgREST Probes** | `GET appointment_access_tokens` -> `401`, `POST consent_ledger` -> `401`, `POST policy_acceptances` -> `401` |
+| **Safe Anon RPC Probes** | `get_public_commercial_plan_catalog` -> `200`, `can_accept_public_booking` -> `200`, manage-token short probe -> `200 (invalid_token)`, bad-slug probe -> `200 (allowed: false)` |
+| **Smoke Command (`--read-only`)** | `node scripts/smoke-supabase-paymentless-staging.mjs --read-only` -> `PASS (exit=0)` |
+| **Secrets / PII Disclosed** | `0` (strictly sanitized receipt) |
+| **Production Cutover Decision** | `NO (PRODUCTION = NO_GO; GitHub Issue #10 remains OPEN / RED / BLOCKED; NO_REMOTE_DB_WRITE re-locked after one-time ADIM-041C authorization)` |

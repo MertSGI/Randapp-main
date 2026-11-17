@@ -75,7 +75,7 @@ async function runPgTests() {
     await client.query(bootstrapSql);
 
     const migrationFiles = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
-    assert.equal(migrationFiles.length, 98, `Expected 98 total migrations, got ${migrationFiles.length}`);
+    assert.equal(migrationFiles.length, 99, `Expected 99 total migrations, got ${migrationFiles.length}`);
 
     const bridgeSql = fs.readFileSync(
       path.join(testsDir, 'fixtures', 'p2a_historical_replay_bridge_before_migration_38.sql'),

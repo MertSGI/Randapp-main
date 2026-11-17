@@ -335,7 +335,7 @@ function loadCanonicalPre20260804Fixtures(tmpDir) {
     .readdirSync(migrationsDir)
     .filter((f) => f.endsWith('.sql'))
     .sort();
-  assert.equal(allMigrations.length, 98, `Expected 98 migrations in supabase/migrations, got ${allMigrations.length}`);
+  assert.equal(allMigrations.length, 99, `Expected 99 migrations in supabase/migrations, got ${allMigrations.length}`);
 
   const preMigrations = allMigrations.filter((f) => f < '20260804_');
   const forwardMigrationFiles = allMigrations.filter((f) => f >= '20260804_');
@@ -700,7 +700,9 @@ async function run() {
 
     // 1.5 Missing 20261012 token table hardening & 20261011 proposal (pre-hardening open policy remains) -> FAIL in POSTCONDITION_FAILED
     const preTokenHardeningForward = fixtures.forwardMigrations.filter(
-      (m) => m.name !== '20261012_appointment_access_tokens_table_access_hardening.sql'
+      (m) =>
+        m.name !== '20261012_appointment_access_tokens_table_access_hardening.sql' &&
+        m.name !== '20261117033457_adim041c_forward_reconciliation_and_p0_hardening.sql'
     );
     await assert.rejects(
       () =>

@@ -140,7 +140,8 @@ const V2_MIGRATIONS = [
   '20261009_phase7_node2_discovery_marketplace_projection.sql',
   '20261010_phase7_node3_favorites_fast_rebooking.sql',
   '20261011_program_v2_security_surface_hardening.sql',
-  '20261012_appointment_access_tokens_table_access_hardening.sql'
+  '20261012_appointment_access_tokens_table_access_hardening.sql',
+  '20261117033457_adim041c_forward_reconciliation_and_p0_hardening.sql'
 ];
 
 const ALL_EXPECTED_MIGRATIONS = [...CANONICAL_MIGRATIONS, ...CANDIDATE_MIGRATIONS, ...V2_MIGRATIONS].sort();
