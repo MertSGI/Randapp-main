@@ -22,7 +22,23 @@ WITH schemas_rows AS (
             a.is_grantable
         )
         FROM pg_catalog.aclexplode(n.nspacl) AS a
-      ), '')
+        WHERE NOT (
+          n.nspname IN ('graphql', 'graphql_public')
+          AND a.is_grantable = false
+          AND pg_catalog.pg_get_userbyid(a.grantor) IN ('postgres', 'supabase_admin')
+          AND a.grantee <> 0::oid
+          AND (
+            (
+              pg_catalog.pg_get_userbyid(a.grantee) IN ('postgres', 'supabase_admin')
+              AND a.privilege_type IN ('USAGE', 'CREATE')
+            )
+            OR (
+              pg_catalog.pg_get_userbyid(a.grantee) IN ('supabase_read_only_user', 'dashboard_user', 'cli_login_postgres')
+              AND a.privilege_type = 'USAGE'
+            )
+          )
+        )
+      ), '<default>')
     END AS acl_norm
   FROM pg_catalog.pg_namespace AS n
   WHERE n.nspname <> 'information_schema'
@@ -61,7 +77,28 @@ WITH schemas_rows AS (
             a.is_grantable
         )
         FROM pg_catalog.aclexplode(c.relacl) AS a
-      ), '')
+        WHERE NOT (
+          n.nspname = 'realtime' AND c.relname = 'schema_migrations'
+          AND a.is_grantable = false
+          AND pg_catalog.pg_get_userbyid(a.grantor) IN ('postgres', 'supabase_admin', 'supabase_realtime_admin')
+          AND a.grantee <> 0::oid
+          AND (
+            (
+              a.grantor = c.relowner
+              AND a.grantee = c.relowner
+              AND pg_catalog.pg_get_userbyid(a.grantee) IN ('postgres', 'supabase_admin', 'supabase_realtime_admin')
+            )
+            OR (
+              pg_catalog.pg_get_userbyid(a.grantee) IN ('postgres', 'supabase_admin', 'supabase_realtime_admin')
+              AND a.privilege_type IN ('SELECT', 'INSERT', 'UPDATE')
+            )
+            OR (
+              pg_catalog.pg_get_userbyid(a.grantee) IN ('supabase_read_only_user', 'dashboard_user', 'cli_login_postgres')
+              AND a.privilege_type = 'SELECT'
+            )
+          )
+        )
+      ), '<default>')
     END AS acl_norm
   FROM pg_catalog.pg_class AS c
   JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
@@ -96,8 +133,56 @@ WITH schemas_rows AS (
       ) AS policy_role
       ORDER BY policy_role.role_name COLLATE "C"
     )::text AS roles_norm,
-    coalesce(pg_catalog.pg_get_expr(p.polqual, p.polrelid), '') AS qual_expr,
-    coalesce(pg_catalog.pg_get_expr(p.polwithcheck, p.polrelid), '') AS withcheck_expr
+    coalesce((
+      SELECT pg_catalog.string_agg(
+        CASE
+          WHEN m.tok[1] ~ '^=\s*ANY\s*\(' THEN
+            pg_catalog.regexp_replace(
+              pg_catalog.regexp_replace(
+                m.tok[1],
+                '\(ARRAY\[((?:''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)(?:,\s*''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name))*))\]\)::text\[\]',
+                'ARRAY[\1]',
+                'g'
+              ),
+              '\((''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name))\)::text',
+              '\1',
+              'g'
+            )
+          ELSE m.tok[1]
+        END,
+        '' ORDER BY m.ord
+      )
+      FROM pg_catalog.regexp_matches(
+        coalesce(pg_catalog.pg_get_expr(p.polqual, p.polrelid), ''),
+        '(=\s*ANY\s*\(\(ARRAY\[(?:''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)(?:,\s*''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name))*)\]\)::text\[\]\)|=\s*ANY\s*\(ARRAY\[\(''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)\)::text(?:,\s*\(''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)\)::text)*\]\)|''(?:[^'']|'''')*''|"(?:[^"]|"")*"|[^''"=]+|=|''|")',
+        'g'
+      ) WITH ORDINALITY AS m(tok, ord)
+    ), '') AS qual_expr,
+    coalesce((
+      SELECT pg_catalog.string_agg(
+        CASE
+          WHEN m.tok[1] ~ '^=\s*ANY\s*\(' THEN
+            pg_catalog.regexp_replace(
+              pg_catalog.regexp_replace(
+                m.tok[1],
+                '\(ARRAY\[((?:''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)(?:,\s*''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name))*))\]\)::text\[\]',
+                'ARRAY[\1]',
+                'g'
+              ),
+              '\((''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name))\)::text',
+              '\1',
+              'g'
+            )
+          ELSE m.tok[1]
+        END,
+        '' ORDER BY m.ord
+      )
+      FROM pg_catalog.regexp_matches(
+        coalesce(pg_catalog.pg_get_expr(p.polwithcheck, p.polrelid), ''),
+        '(=\s*ANY\s*\(\(ARRAY\[(?:''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)(?:,\s*''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name))*)\]\)::text\[\]\)|=\s*ANY\s*\(ARRAY\[\(''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)\)::text(?:,\s*\(''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)\)::text)*\]\)|''(?:[^'']|'''')*''|"(?:[^"]|"")*"|[^''"=]+|=|''|")',
+        'g'
+      ) WITH ORDINALITY AS m(tok, ord)
+    ), '') AS withcheck_expr
   FROM pg_catalog.pg_policy AS p
   JOIN pg_catalog.pg_class AS c ON c.oid = p.polrelid
   JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
@@ -121,40 +206,83 @@ WITH schemas_rows AS (
       E'\n' ORDER BY schema_name COLLATE "C", rel_name COLLATE "C", pol_name COLLATE "C"
     ), '')) AS fingerprint
   FROM policies_rows
-), routines_rows AS (
+), routines_base AS (
   SELECT
+    p.oid AS proc_oid,
     pg_catalog.format('%I.%I(%s)', n.nspname, p.proname, pg_catalog.pg_get_function_identity_arguments(p.oid)) AS obj_key,
     n.nspname AS schema_name,
     p.proname AS proc_name,
     pg_catalog.pg_get_function_identity_arguments(p.oid) AS proc_args,
     p.prosecdef AS proc_secdef,
-    pg_catalog.pg_get_userbyid(p.proowner) AS owner_name,
-    CASE
-      WHEN p.proacl IS NULL THEN '<default>'
-      ELSE coalesce((
-        SELECT pg_catalog.string_agg(
-          pg_catalog.format(
-            '%s|%s|%s|%s',
-            pg_catalog.pg_get_userbyid(a.grantor),
-            CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(a.grantee) END,
-            a.privilege_type,
-            a.is_grantable
-          ),
-          ',' ORDER BY
-            pg_catalog.pg_get_userbyid(a.grantor) COLLATE "C",
-            (CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(a.grantee) END) COLLATE "C",
-            a.privilege_type COLLATE "C",
-            a.is_grantable
-        )
-        FROM pg_catalog.aclexplode(p.proacl) AS a
-      ), '')
-    END AS acl_norm,
+    p.proowner AS proc_owner_oid,
+    p.proacl AS proc_acl,
+    (
+      NOT p.prosecdef
+      AND n.nspname = 'extensions'
+      AND EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_depend AS d
+        JOIN pg_catalog.pg_extension AS e
+          ON e.oid = d.refobjid
+         AND d.refclassid = 'pg_catalog.pg_extension'::regclass
+        WHERE d.classid = 'pg_catalog.pg_proc'::regclass
+          AND d.objid = p.oid
+          AND d.deptype = 'e'
+          AND e.extname IN ('pgcrypto', 'pg_stat_statements')
+      )
+    ) AS is_normalized_ext_routine,
     coalesce(pg_catalog.pg_get_functiondef(p.oid), '') AS func_def
   FROM pg_catalog.pg_proc AS p
   JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace
   WHERE p.prokind IN ('f', 'p')
     AND n.nspname <> 'information_schema'
     AND n.nspname !~ '^pg_'
+), routines_rows AS (
+  SELECT
+    rb.obj_key,
+    rb.schema_name,
+    rb.proc_name,
+    rb.proc_args,
+    rb.proc_secdef,
+    CASE
+      WHEN rb.is_normalized_ext_routine AND pg_catalog.pg_get_userbyid(rb.proc_owner_oid) IN ('postgres', 'supabase_admin')
+        THEN '<extension_installer>'
+      ELSE pg_catalog.pg_get_userbyid(rb.proc_owner_oid)
+    END AS owner_name,
+    CASE
+      WHEN rb.proc_acl IS NULL THEN '<default>'
+      ELSE coalesce((
+        SELECT pg_catalog.string_agg(
+          pg_catalog.format(
+            '%s|%s|%s|%s',
+            CASE
+              WHEN rb.is_normalized_ext_routine
+               AND a.is_grantable = false
+               AND pg_catalog.pg_get_userbyid(a.grantor) IN ('postgres', 'supabase_admin')
+                THEN '<extension_installer>'
+              ELSE pg_catalog.pg_get_userbyid(a.grantor)
+            END,
+            CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(a.grantee) END,
+            a.privilege_type,
+            a.is_grantable
+          ),
+          ',' ORDER BY
+            (CASE
+              WHEN rb.is_normalized_ext_routine
+               AND a.is_grantable = false
+               AND pg_catalog.pg_get_userbyid(a.grantor) IN ('postgres', 'supabase_admin')
+                THEN '<extension_installer>'
+              ELSE pg_catalog.pg_get_userbyid(a.grantor)
+            END) COLLATE "C",
+            (CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(a.grantee) END) COLLATE "C",
+            a.privilege_type COLLATE "C",
+            a.is_grantable
+        )
+        FROM pg_catalog.aclexplode(rb.proc_acl) AS a
+      ), '')
+    END AS acl_norm,
+    rb.func_def
+  FROM routines_base AS rb
 ), routines AS (
   SELECT
     count(*) AS object_count,
