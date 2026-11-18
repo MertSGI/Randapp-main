@@ -27,9 +27,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  compareSevenCategoryCatalogParity,
   evaluateP0RecoveryGate,
+  evaluateProductionReleaseEnforcement,
   queryCloneCatalog,
   queryP0CatalogPostconditions,
+  querySevenCategoryCatalogFingerprint,
   reconcileCatalogWithMatrix,
 } from './verify-lari-recovery-hard-gate.mjs';
 
@@ -398,7 +401,7 @@ function loadCanonicalPre20260804Fixtures(tmpDir) {
  */
 export async function executeRestoreIntoPristineClone(
   engine,
-  { dbName, schemaChunks, dataSql, forwardMigrations, proposalSql }
+  { dbName, schemaChunks, dataSql, forwardMigrations, proposalSql, expectedSevenCategoryCatalog = null }
 ) {
   if (!Array.isArray(schemaChunks) || schemaChunks.length === 0 || schemaChunks.every((c) => !c.sql.trim())) {
     throw new RestoreStageError('SCHEMA_DUMP_EMPTY', new Error('Schema dump is empty; refusing silent skip'));
@@ -486,6 +489,18 @@ export async function executeRestoreIntoPristineClone(
       throw new RestoreStageError('CATALOG_MISMATCH', new Error(`Expected 0 tables with RLS disabled, found ${rlsDisabledCount}`));
     }
 
+    const sevenCategoryCatalog = await querySevenCategoryCatalogFingerprint(targetDb);
+    let sevenCategoryParity = null;
+    if (expectedSevenCategoryCatalog) {
+      sevenCategoryParity = compareSevenCategoryCatalogParity(expectedSevenCategoryCatalog, sevenCategoryCatalog);
+      if (!sevenCategoryParity.parity_verified) {
+        throw new RestoreStageError(
+          'CATALOG_PARITY_MISMATCH',
+          new Error(JSON.stringify(sevenCategoryParity.mismatched_categories))
+        );
+      }
+    }
+
     const reconciliation = reconcileCatalogWithMatrix(catalog, '', ROOT);
     if (reconciliation.staging_restore_status !== 'STAGING_RESTORE_NOT_ATTESTED') {
       throw new RestoreStageError('RECONCILIATION_MISMATCH', new Error(reconciliation.staging_restore_status));
@@ -536,6 +551,8 @@ export async function executeRestoreIntoPristineClone(
     return {
       p0Postconditions,
       catalog,
+      sevenCategoryCatalog,
+      sevenCategoryParity,
       reconciliation,
       gateEval,
       rlsDisabledCount,
@@ -719,39 +736,89 @@ async function run() {
     console.log('  [PASS] Negative 1.5: Missing P0 20261011 hardening -> POSTCONDITION_FAILED (P0_NOT_APPLIED)');
 
     // -------------------------------------------------------------------------
-    // Step 2: Positive End-to-End Restore Verification (Same Dumps + Migrations + P0 Proposal)
+    // Step 2: Source 7-Category Baseline + Positive & Drift-Negative Parity
     // -------------------------------------------------------------------------
-    console.log('\n--- Step 2: End-to-End Restore (Pre-20260804 Dumps -> Forward 20260804..20261012 -> 20261011 Proposal) ---');
-    const positive = await executeRestoreIntoPristineClone(engine, {
-      dbName: 'lari_restore_pristine_pg17',
+    console.log('\n--- Step 2: End-to-End Restore (Pre-20260804 Dumps -> Forward 20260804..20261117 -> 20261011 Proposal + 7-Category Parity) ---');
+    const sourceReference = await executeRestoreIntoPristineClone(engine, {
+      dbName: 'lari_restore_source_ref',
       schemaChunks: fixtures.schemaChunks,
       dataSql: fixtures.dataSql,
       forwardMigrations: fixtures.forwardMigrations,
       proposalSql: fixtures.proposalSql,
     });
 
+    // 1.6 7-category catalog drift (extra table + policy) must fail closed with CATALOG_PARITY_MISMATCH
+    await assert.rejects(
+      () =>
+        executeRestoreIntoPristineClone(engine, {
+          dbName: 'lari_restore_neg_catalog_drift',
+          schemaChunks: fixtures.schemaChunks,
+          dataSql: fixtures.dataSql,
+          forwardMigrations: fixtures.forwardMigrations,
+          proposalSql: `${fixtures.proposalSql}\nCREATE TABLE public.unexpected_drift_tbl (id uuid PRIMARY KEY DEFAULT gen_random_uuid());\nALTER TABLE public.unexpected_drift_tbl ENABLE ROW LEVEL SECURITY;`,
+          expectedSevenCategoryCatalog: sourceReference.sevenCategoryCatalog,
+        }),
+      (err) => err instanceof RestoreStageError && err.stage === 'CATALOG_PARITY_MISMATCH'
+    );
+    assert.equal(engine.kind, engineKindBeforeRestore, 'Catalog parity drift must never switch engines mid-restore');
+    console.log('  [PASS] Negative 1.6: 7-category catalog drift -> CATALOG_PARITY_MISMATCH (fail-closed)');
+
+    const positive = await executeRestoreIntoPristineClone(engine, {
+      dbName: 'lari_restore_pristine_pg17',
+      schemaChunks: fixtures.schemaChunks,
+      dataSql: fixtures.dataSql,
+      forwardMigrations: fixtures.forwardMigrations,
+      proposalSql: fixtures.proposalSql,
+      expectedSevenCategoryCatalog: sourceReference.sevenCategoryCatalog,
+    });
+    assert.equal(positive.sevenCategoryParity?.parity_verified, true);
+    assert.equal(positive.sevenCategoryParity?.matched_categories, 7);
+
+    // Step 3: Authoritative Release-Enforcement & Failed Bypass Check
+    const releaseEnforcement = evaluateProductionReleaseEnforcement({
+      issue10ClosedVerified: false,
+      issue10Status: 'OPEN_RED_BLOCKED_HOLD_PRESERVED',
+      sevenCategoryParityVerified: false,
+      ownerAgeDecryptionReceiptVerified: false,
+      nonPgPlatformRecoveryVerified: false,
+      serverReleaseControl: 'AUTHORITATIVE_DB_ENFORCED',
+      ciExactShaGatePassed: true,
+      targetSha: positive.reconciliation.source_head_sha,
+      rollbackPlanVerified: true,
+      ownerAndControllerSignedOff: false,
+      clientLocalStorageOverride: true,
+      envForceGoBypass: true,
+    });
+    assert.equal(releaseEnforcement.allowed, false);
+    assert.equal(releaseEnforcement.verdict, 'RELEASE_BLOCKED_FAIL_CLOSED');
+    assert.equal(releaseEnforcement.productionStatus, 'NO_GO');
+    assert.equal(releaseEnforcement.issue10Status, 'OPEN_PRODUCTION_BLOCKER');
+    assert.equal(releaseEnforcement.bypassRejected, true);
+    assert.ok(releaseEnforcement.failedReasons.includes('CLIENT_OR_ENV_BYPASS_REJECTED'));
+    assert.ok(releaseEnforcement.failedReasons.includes('ISSUE_10_NOT_CLOSED'));
+
     if (positive.isRealPg17) {
       assert.equal(positive.gateEval.allowed, true);
       assert.equal(positive.gateEval.verdict, 'LOCAL_DISPOSABLE_CLONE_VERIFIED');
       console.log(
-        `[PASS] Pristine PG17 restore + ${fixtures.forwardMigrations.length} forward migrations + P0 hardening verified.`
+        `[PASS] Pristine PG17 restore + ${fixtures.forwardMigrations.length} forward migrations + P0 hardening + 7/7 catalog parity verified.`
       );
       console.log(
-        `[PASS] Verdict=${positive.gateEval.verdict} | Engine=${formatPgEngineLabel(engine.serverVersionNum)} | Tables=${positive.catalog.table_count} | Policies=${positive.catalog.policy_count} | Routines=${positive.catalog.routine_count} | RLS Disabled=${positive.rlsDisabledCount}`
+        `[PASS] Verdict=${positive.gateEval.verdict} | Engine=${formatPgEngineLabel(engine.serverVersionNum)} | Tables=${positive.catalog.table_count} | Policies=${positive.catalog.policy_count} | Routines=${positive.catalog.routine_count} | 7CatParity=${positive.sevenCategoryParity.matched_categories}/7 | RLS Disabled=${positive.rlsDisabledCount}`
       );
     } else {
       assert.equal(positive.gateEval.allowed, false);
       assert.notEqual(positive.gateEval.verdict, 'LOCAL_DISPOSABLE_CLONE_VERIFIED');
       console.log(
-        `[PASS] Pre-restore PGlite fallback restored identical pre-20260804 dumps + ${fixtures.forwardMigrations.length} forward migrations + P0 proposal cleanly (P0_CUTOVER_POSTCONDITIONS_VERIFIED).`
+        `[PASS] Pre-restore PGlite fallback restored identical pre-20260804 dumps + ${fixtures.forwardMigrations.length} forward migrations + P0 proposal cleanly (P0_CUTOVER_POSTCONDITIONS_VERIFIED, 7/7 catalog parity).`
       );
       console.log(
-        `[PASS] Honest PG17 Gate Enforcement: pg17PristineVerified=false -> Gate=${positive.gateEval.verdict} (cloning verdict not spoofed without native PG17) | Tables=${positive.catalog.table_count} | Policies=${positive.catalog.policy_count} | Routines=${positive.catalog.routine_count} | RLS Disabled=${positive.rlsDisabledCount}`
+        `[PASS] Honest PG17 Gate Enforcement: pg17PristineVerified=false -> Gate=${positive.gateEval.verdict} (cloning verdict not spoofed without native PG17) | Tables=${positive.catalog.table_count} | Policies=${positive.catalog.policy_count} | Routines=${positive.catalog.routine_count} | 7CatParity=${positive.sevenCategoryParity.matched_categories}/7 | RLS Disabled=${positive.rlsDisabledCount}`
       );
     }
     assert.equal(positive.gateEval.productionStatus, 'NO_GO');
     assert.equal(positive.gateEval.issue10Status, 'OPEN_PRODUCTION_BLOCKER');
-    console.log('[PASS] Negative Fail-Closed Checks: 5/5 PASS | Issue #10 = OPEN_PRODUCTION_BLOCKER | PRODUCTION = NO_GO | NO_REMOTE_DB_WRITE = TRUE');
+    console.log('[PASS] Negative Fail-Closed Checks: 6/6 PASS | 7-Category Catalog Parity: 7/7 PASS | Release Enforcement Bypass Rejected | Issue #10 = OPEN_PRODUCTION_BLOCKER | PRODUCTION = NO_GO | NO_REMOTE_DB_WRITE = TRUE');
   } finally {
     if (engine) {
       await engine.dispose();

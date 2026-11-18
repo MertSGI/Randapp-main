@@ -515,6 +515,489 @@ export async function queryCloneCatalog(client) {
   };
 }
 
+export const SEVEN_CATALOG_CATEGORIES = [
+  'schemas',
+  'tables',
+  'policies',
+  'routines',
+  'roles',
+  'role_memberships',
+  'extensions',
+];
+
+function md5Hex(input) {
+  return crypto.createHash('md5').update(input, 'utf8').digest('hex');
+}
+
+/**
+ * Computes the canonical 7-category PostgreSQL catalog fingerprint aligned with
+ * `scripts/backup/catalog-fingerprint.sql` (schemas, tables, policies, routines,
+ * roles, role_memberships, extensions).
+ */
+export async function querySevenCategoryCatalogFingerprint(client) {
+  const categoryQueries = {
+    schemas: `
+      SELECT format(
+        '%I|%I|%s',
+        n.nspname,
+        pg_get_userbyid(n.nspowner),
+        CASE
+          WHEN n.nspacl IS NULL THEN '<default>'
+          ELSE coalesce((
+            SELECT string_agg(
+              format(
+                '%s|%s|%s|%s',
+                pg_get_userbyid(a.grantor),
+                CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END,
+                a.privilege_type,
+                a.is_grantable
+              ),
+              ',' ORDER BY
+                pg_get_userbyid(a.grantor) COLLATE "C",
+                (CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END) COLLATE "C",
+                a.privilege_type COLLATE "C",
+                a.is_grantable
+            )
+            FROM pg_catalog.aclexplode(n.nspacl) AS a
+            WHERE NOT (
+              n.nspname IN ('graphql', 'graphql_public')
+              AND a.is_grantable = false
+              AND pg_get_userbyid(a.grantor) IN ('postgres', 'supabase_admin')
+              AND a.grantee <> 0::oid
+              AND (
+                (
+                  pg_get_userbyid(a.grantee) IN ('postgres', 'supabase_admin')
+                  AND a.privilege_type IN ('USAGE', 'CREATE')
+                )
+                OR (
+                  pg_get_userbyid(a.grantee) IN ('supabase_read_only_user', 'dashboard_user', 'cli_login_postgres')
+                  AND a.privilege_type = 'USAGE'
+                )
+              )
+            )
+          ), '<default>')
+        END
+      ) AS entry
+      FROM pg_namespace AS n
+      WHERE n.nspname <> 'information_schema'
+        AND n.nspname !~ '^pg_'
+      ORDER BY n.nspname COLLATE "C" ASC
+    `,
+    tables: `
+      SELECT format(
+        '%I.%I|%s|%s|%I|%s',
+        n.nspname,
+        c.relname,
+        c.relrowsecurity,
+        c.relforcerowsecurity,
+        pg_get_userbyid(c.relowner),
+        CASE
+          WHEN c.relacl IS NULL THEN '<default>'
+          ELSE coalesce((
+            SELECT string_agg(
+              format(
+                '%s|%s|%s|%s',
+                pg_get_userbyid(a.grantor),
+                CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END,
+                a.privilege_type,
+                a.is_grantable
+              ),
+              ',' ORDER BY
+                pg_get_userbyid(a.grantor) COLLATE "C",
+                (CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END) COLLATE "C",
+                a.privilege_type COLLATE "C",
+                a.is_grantable
+            )
+            FROM pg_catalog.aclexplode(c.relacl) AS a
+            WHERE NOT (
+              n.nspname = 'realtime' AND c.relname = 'schema_migrations'
+              AND a.is_grantable = false
+              AND pg_get_userbyid(a.grantor) IN ('postgres', 'supabase_admin', 'supabase_realtime_admin')
+              AND a.grantee <> 0::oid
+              AND (
+                (
+                  a.grantor = c.relowner
+                  AND a.grantee = c.relowner
+                  AND pg_get_userbyid(a.grantee) IN ('postgres', 'supabase_admin', 'supabase_realtime_admin')
+                )
+                OR (
+                  pg_get_userbyid(a.grantee) IN ('postgres', 'supabase_admin', 'supabase_realtime_admin')
+                  AND a.privilege_type IN ('SELECT', 'INSERT', 'UPDATE')
+                )
+                OR (
+                  pg_get_userbyid(a.grantee) IN ('supabase_read_only_user', 'dashboard_user', 'cli_login_postgres')
+                  AND a.privilege_type = 'SELECT'
+                )
+              )
+            )
+          ), '<default>')
+        END
+      ) AS entry
+      FROM pg_class AS c
+      JOIN pg_namespace AS n ON n.oid = c.relnamespace
+      WHERE c.relkind IN ('r', 'p')
+        AND n.nspname <> 'information_schema'
+        AND n.nspname !~ '^pg_'
+      ORDER BY n.nspname COLLATE "C" ASC, c.relname COLLATE "C" ASC
+    `,
+    policies: `
+      SELECT format(
+        '%I.%I|%I|%s|%s|%s|%s|%s',
+        n.nspname,
+        c.relname,
+        p.polname,
+        p.polcmd::text,
+        p.polpermissive,
+        ARRAY(
+          SELECT policy_role.role_name
+          FROM (
+            SELECT 'PUBLIC'::name AS role_name
+            WHERE 0::oid = ANY (p.polroles)
+            UNION ALL
+            SELECT r.rolname
+            FROM pg_roles AS r
+            WHERE r.oid = ANY (p.polroles)
+          ) AS policy_role
+          ORDER BY policy_role.role_name COLLATE "C"
+        )::text,
+        coalesce((
+          SELECT pg_catalog.string_agg(
+            CASE
+              WHEN m.tok[1] ~ '^=\\s*ANY\\s*\\(' THEN
+                pg_catalog.regexp_replace(
+                  pg_catalog.regexp_replace(
+                    m.tok[1],
+                    '\\(ARRAY\\[((?:''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)(?:,\\s*''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name))*))\\]\\)::text\\[\\]',
+                    'ARRAY[\\1]',
+                    'g'
+                  ),
+                  '\\((''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name))\\)::text',
+                  '\\1',
+                  'g'
+                )
+              ELSE m.tok[1]
+            END,
+            '' ORDER BY m.ord
+          )
+          FROM pg_catalog.regexp_matches(
+            coalesce(pg_get_expr(p.polqual, p.polrelid), ''),
+            '(=\\s*ANY\\s*\\(\\(ARRAY\\[(?:''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)(?:,\\s*''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name))*)\\]\\)::text\\[\\]\\)|=\\s*ANY\\s*\\(ARRAY\\[\\(''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)\\)::text(?:,\\s*\\(''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)\\)::text)*\\]\\)|''(?:[^'']|'''')*''|"(?:[^"]|"")*"|[^''"=]+|=|''|")',
+            'g'
+          ) WITH ORDINALITY AS m(tok, ord)
+        ), ''),
+        coalesce((
+          SELECT pg_catalog.string_agg(
+            CASE
+              WHEN m.tok[1] ~ '^=\\s*ANY\\s*\\(' THEN
+                pg_catalog.regexp_replace(
+                  pg_catalog.regexp_replace(
+                    m.tok[1],
+                    '\\(ARRAY\\[((?:''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)(?:,\\s*''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name))*))\\]\\)::text\\[\\]',
+                    'ARRAY[\\1]',
+                    'g'
+                  ),
+                  '\\((''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name))\\)::text',
+                  '\\1',
+                  'g'
+                )
+              ELSE m.tok[1]
+            END,
+            '' ORDER BY m.ord
+          )
+          FROM pg_catalog.regexp_matches(
+            coalesce(pg_get_expr(p.polwithcheck, p.polrelid), ''),
+            '(=\\s*ANY\\s*\\(\\(ARRAY\\[(?:''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)(?:,\\s*''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name))*)\\]\\)::text\\[\\]\\)|=\\s*ANY\\s*\\(ARRAY\\[\\(''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)\\)::text(?:,\\s*\\(''(?:[^'']|'''')*''::(?:character varying|varchar|bpchar|text|name)\\)::text)*\\]\\)|''(?:[^'']|'''')*''|"(?:[^"]|"")*"|[^''"=]+|=|''|")',
+            'g'
+          ) WITH ORDINALITY AS m(tok, ord)
+        ), '')
+      ) AS entry
+      FROM pg_policy AS p
+      JOIN pg_class AS c ON c.oid = p.polrelid
+      JOIN pg_namespace AS n ON n.oid = c.relnamespace
+      WHERE n.nspname <> 'information_schema'
+        AND n.nspname !~ '^pg_'
+      ORDER BY n.nspname COLLATE "C" ASC, c.relname COLLATE "C" ASC, p.polname COLLATE "C" ASC
+    `,
+    routines: `
+      WITH routines_base AS (
+        SELECT
+          p.oid AS proc_oid,
+          n.nspname AS schema_name,
+          p.proname AS proc_name,
+          pg_get_function_identity_arguments(p.oid) AS proc_args,
+          p.prosecdef AS proc_secdef,
+          p.proowner AS proc_owner_oid,
+          p.proacl AS proc_acl,
+          (
+            NOT p.prosecdef
+            AND n.nspname = 'extensions'
+            AND EXISTS (
+              SELECT 1
+              FROM pg_catalog.pg_depend AS d
+              JOIN pg_catalog.pg_extension AS e
+                ON e.oid = d.refobjid
+               AND d.refclassid = 'pg_catalog.pg_extension'::regclass
+              WHERE d.classid = 'pg_catalog.pg_proc'::regclass
+                AND d.objid = p.oid
+                AND d.deptype = 'e'
+                AND e.extname IN ('pgcrypto', 'pg_stat_statements', 'uuid-ossp')
+            )
+          ) AS is_normalized_ext_routine,
+          coalesce(pg_get_functiondef(p.oid), '') AS func_def
+        FROM pg_proc AS p
+        JOIN pg_namespace AS n ON n.oid = p.pronamespace
+        WHERE p.prokind IN ('f', 'p')
+          AND n.nspname <> 'information_schema'
+          AND n.nspname !~ '^pg_'
+      )
+      SELECT format(
+        '%I.%I(%s)|%s|%I|%s|%s',
+        rb.schema_name,
+        rb.proc_name,
+        rb.proc_args,
+        rb.proc_secdef,
+        CASE
+          WHEN rb.is_normalized_ext_routine AND pg_get_userbyid(rb.proc_owner_oid) IN ('postgres', 'supabase_admin')
+            THEN '<extension_installer>'
+          ELSE pg_get_userbyid(rb.proc_owner_oid)
+        END,
+        CASE
+          WHEN rb.proc_acl IS NULL THEN '<default>'
+          ELSE coalesce((
+            SELECT string_agg(
+              format(
+                '%s|%s|%s|%s',
+                norm.grantor_norm,
+                norm.grantee_norm,
+                norm.priv_type,
+                norm.effective_grantable
+              ),
+              ',' ORDER BY
+                norm.grantor_norm COLLATE "C",
+                norm.grantee_norm COLLATE "C",
+                norm.priv_type COLLATE "C",
+                norm.effective_grantable
+            )
+            FROM (
+              SELECT
+                CASE
+                  WHEN rb.is_normalized_ext_routine
+                   AND pg_get_userbyid(a.grantor) IN ('postgres', 'supabase_admin')
+                    THEN '<extension_installer>'
+                  ELSE pg_get_userbyid(a.grantor)
+                END AS grantor_norm,
+                CASE
+                  WHEN a.grantee = 0::oid THEN 'PUBLIC'
+                  WHEN rb.is_normalized_ext_routine
+                   AND a.privilege_type = 'EXECUTE'
+                   AND pg_get_userbyid(a.grantee) IN ('postgres', 'supabase_admin')
+                    THEN '<extension_installer>'
+                  ELSE pg_get_userbyid(a.grantee)
+                END AS grantee_norm,
+                a.privilege_type AS priv_type,
+                pg_catalog.bool_or(a.is_grantable) AS effective_grantable
+              FROM pg_catalog.aclexplode(rb.proc_acl) AS a
+              GROUP BY 1, 2, 3
+            ) AS norm
+          ), '')
+        END,
+        rb.func_def
+      ) AS entry
+      FROM routines_base AS rb
+      ORDER BY rb.schema_name COLLATE "C" ASC, rb.proc_name COLLATE "C" ASC, rb.proc_args COLLATE "C" ASC
+    `,
+    roles: `
+      SELECT format(
+        '%I|%s|%s|%s|%s|%s|%s|%s|%s',
+        rolname,
+        rolsuper,
+        rolinherit,
+        rolcreaterole,
+        rolcreatedb,
+        rolcanlogin,
+        rolreplication,
+        rolbypassrls,
+        rolconfig::text
+      ) AS entry
+      FROM pg_roles
+      WHERE rolname !~ '^pg_'
+      ORDER BY rolname COLLATE "C" ASC
+    `,
+    role_memberships: `
+      SELECT format(
+        '%I|%I|%I|%s|%s|%s',
+        role.rolname,
+        member.rolname,
+        grantor.rolname,
+        m.admin_option,
+        m.inherit_option,
+        m.set_option
+      ) AS entry
+      FROM pg_auth_members AS m
+      JOIN pg_roles AS role ON role.oid = m.roleid
+      JOIN pg_roles AS member ON member.oid = m.member
+      JOIN pg_roles AS grantor ON grantor.oid = m.grantor
+      ORDER BY role.rolname COLLATE "C" ASC, member.rolname COLLATE "C" ASC, grantor.rolname COLLATE "C" ASC
+    `,
+    extensions: `
+      SELECT format('%I|%s|%I', e.extname, e.extversion, n.nspname) AS entry
+      FROM pg_extension AS e
+      JOIN pg_namespace AS n ON n.oid = e.extnamespace
+      ORDER BY e.extname COLLATE "C" ASC
+    `,
+  };
+
+  const categories = {};
+  for (const cat of SEVEN_CATALOG_CATEGORIES) {
+    const res = await client.query(categoryQueries[cat]);
+    const entries = res.rows.map((r) => String(r.entry ?? ''));
+    const joined = entries.join('\n');
+    categories[cat] = {
+      object_count: entries.length,
+      fingerprint: md5Hex(joined),
+      sha256: sha256Hex(joined),
+      entries,
+    };
+  }
+
+  return categories;
+}
+
+/**
+ * Compares two 7-category catalog fingerprints fail-closed.
+ * Any missing category, count mismatch, or digest mismatch fails with CATALOG_PARITY_MISMATCH.
+ */
+export function compareSevenCategoryCatalogParity(sourceCatalog = {}, restoredCatalog = {}) {
+  const categoryResults = {};
+  const mismatchedCategories = [];
+
+  for (const cat of SEVEN_CATALOG_CATEGORIES) {
+    const src = sourceCatalog?.[cat] || null;
+    const rst = restoredCatalog?.[cat] || null;
+    const srcCount = Number.isInteger(src?.object_count) ? src.object_count : -1;
+    const rstCount = Number.isInteger(rst?.object_count) ? rst.object_count : -1;
+    const srcFp = typeof src?.fingerprint === 'string' ? src.fingerprint : '';
+    const rstFp = typeof rst?.fingerprint === 'string' ? rst.fingerprint : '';
+    const srcSha = typeof src?.sha256 === 'string' ? src.sha256 : '';
+    const rstSha = typeof rst?.sha256 === 'string' ? rst.sha256 : '';
+
+    const hasDigest = Boolean(srcFp) && Boolean(rstFp);
+    const shaConsistent = (!srcSha && !rstSha) || srcSha === rstSha;
+    const matched = hasDigest && srcCount >= 0 && srcCount === rstCount && srcFp === rstFp && shaConsistent;
+
+    categoryResults[cat] = {
+      match: matched,
+      source_count: srcCount,
+      restored_count: rstCount,
+      source_fingerprint: srcFp,
+      restored_fingerprint: rstFp,
+    };
+
+    if (!matched) {
+      mismatchedCategories.push({
+        category: cat,
+        reason: !hasDigest
+          ? 'MISSING_CATEGORY_FINGERPRINT'
+          : srcCount !== rstCount
+            ? 'OBJECT_COUNT_MISMATCH'
+            : 'FINGERPRINT_MISMATCH',
+        source_count: srcCount,
+        restored_count: rstCount,
+        source_fingerprint: srcFp,
+        restored_fingerprint: rstFp,
+      });
+    }
+  }
+
+  const matchedCount = SEVEN_CATALOG_CATEGORIES.length - mismatchedCategories.length;
+  return {
+    parity_verified: mismatchedCategories.length === 0,
+    verdict: mismatchedCategories.length === 0 ? 'SEVEN_CATEGORY_PARITY_VERIFIED' : 'CATALOG_PARITY_MISMATCH',
+    matched_categories: matchedCount,
+    total_categories: SEVEN_CATALOG_CATEGORIES.length,
+    categories: categoryResults,
+    mismatched_categories: mismatchedCategories,
+  };
+}
+
+/**
+ * Authoritative server/CI Production Release Enforcement gate (Issue #10 Item 7).
+ * Rejects any client-side/browser/env boolean bypasses or unverified quarantine promotions,
+ * and enforces full Issue #10 closure before permitting PRODUCTION = GO.
+ */
+export function evaluateProductionReleaseEnforcement(context = {}) {
+  const bypassAttempted =
+    context.clientLocalStorageOverride === true ||
+    context.envForceGoBypass === true;
+  const quarantinePromoted = context.unverifiedCapturePromoted === true;
+
+  const checks = [
+    {
+      key: 'noClientOrEnvBypass',
+      code: 'CLIENT_OR_ENV_BYPASS_REJECTED',
+      pass: !bypassAttempted,
+    },
+    {
+      key: 'noUnverifiedCapturePromotion',
+      code: 'UNVERIFIED_CAPTURE_PROMOTION_REJECTED',
+      pass: !quarantinePromoted,
+    },
+    {
+      key: 'issue10ClosedVerified',
+      code: 'ISSUE_10_NOT_CLOSED',
+      pass: context.issue10ClosedVerified === true && context.issue10Status === 'CLOSED_VERIFIED',
+    },
+    {
+      key: 'sevenCategoryParityVerified',
+      code: 'SEVEN_CATEGORY_PARITY_NOT_VERIFIED',
+      pass: context.sevenCategoryParityVerified === true,
+    },
+    {
+      key: 'ownerAgeDecryptionReceiptVerified',
+      code: 'OWNER_AGE_DECRYPTION_RECEIPT_MISSING',
+      pass: context.ownerAgeDecryptionReceiptVerified === true,
+    },
+    {
+      key: 'nonPgPlatformRecoveryVerified',
+      code: 'NON_PG_PLATFORM_RECOVERY_NOT_ATTESTED',
+      pass: context.nonPgPlatformRecoveryVerified === true,
+    },
+    {
+      key: 'serverReleaseAuthorityEnforced',
+      code: 'SERVER_RELEASE_AUTHORITY_NOT_ENFORCED',
+      pass: context.serverReleaseControl === 'AUTHORITATIVE_DB_ENFORCED',
+    },
+    {
+      key: 'ciExactShaGatePassed',
+      code: 'CI_EXACT_SHA_VERDICT_MISSING',
+      pass:
+        context.ciExactShaGatePassed === true &&
+        /^[0-9a-f]{40}$/.test(String(context.targetSha || '')),
+    },
+    {
+      key: 'rollbackPlanVerified',
+      code: 'ROLLBACK_PLAN_NOT_VERIFIED',
+      pass: context.rollbackPlanVerified === true,
+    },
+    {
+      key: 'ownerAndControllerSignedOff',
+      code: 'OWNER_AND_CONTROLLER_SIGNOFF_MISSING',
+      pass: context.ownerAndControllerSignedOff === true,
+    },
+  ];
+
+  const failedReasons = checks.filter((c) => !c.pass).map((c) => c.code);
+  const allowed = failedReasons.length === 0;
+  return {
+    allowed,
+    verdict: allowed ? 'PRODUCTION_RELEASE_AUTHORIZED' : 'RELEASE_BLOCKED_FAIL_CLOSED',
+    productionStatus: allowed ? 'GO' : 'NO_GO',
+    issue10Status: allowed ? 'CLOSED_VERIFIED' : 'OPEN_PRODUCTION_BLOCKER',
+    bypassRejected: bypassAttempted || quarantinePromoted,
+    failedReasons,
+  };
+}
+
 export function parseExpectedBaselineFingerprints(matrixContent) {
   if (!matrixContent || typeof matrixContent !== 'string') {
     return null;
@@ -1304,14 +1787,310 @@ async function runSelfTests() {
       assert.equal(cutoverNoUrl.live_status, 'LIVE_P0_NOT_APPLIED');
       assert.equal(cutoverNoUrl.issue_10_status, 'OPEN_PRODUCTION_BLOCKER');
     });
+
+    // -------------------------------------------------------------------------
+    // E. 7-Category Catalog Parity & Production Release-Enforcement Gate
+    // -------------------------------------------------------------------------
+    console.log('\n--- §5. 7-Category Catalog Parity & Production Release-Enforcement Gate ---');
+    const baselineSevenCat = await querySevenCategoryCatalogFingerprint(db);
+
+    check('querySevenCategoryCatalogFingerprint captures all 7 catalog categories and passes identical parity', () => {
+      assert.deepEqual(Object.keys(baselineSevenCat), SEVEN_CATALOG_CATEGORIES);
+      for (const cat of SEVEN_CATALOG_CATEGORIES) {
+        assert.match(baselineSevenCat[cat].fingerprint, /^[0-9a-f]{32}$/);
+        assert.match(baselineSevenCat[cat].sha256, /^[0-9a-f]{64}$/);
+      }
+      const parity = compareSevenCategoryCatalogParity(baselineSevenCat, baselineSevenCat);
+      assert.equal(parity.parity_verified, true);
+      assert.equal(parity.verdict, 'SEVEN_CATEGORY_PARITY_VERIFIED');
+      assert.equal(parity.matched_categories, 7);
+      assert.equal(parity.mismatched_categories.length, 0);
+    });
+
+    check('compareSevenCategoryCatalogParity fails closed on single-category divergence across all 7 categories', () => {
+      for (const cat of SEVEN_CATALOG_CATEGORIES) {
+        const drifted = structuredClone(baselineSevenCat);
+        drifted[cat].fingerprint = 'f'.repeat(32);
+        drifted[cat].sha256 = 'f'.repeat(64);
+        const res = compareSevenCategoryCatalogParity(baselineSevenCat, drifted);
+        assert.equal(res.parity_verified, false, `Drift in ${cat} must fail parity`);
+        assert.equal(res.verdict, 'CATALOG_PARITY_MISMATCH');
+        assert.equal(res.matched_categories, 6);
+        assert.equal(res.mismatched_categories.length, 1);
+        assert.equal(res.mismatched_categories[0].category, cat);
+      }
+    });
+
+    // Real-SQL fail-closed regressions against PGlite querySevenCategoryCatalogFingerprint
+    const makeTempCatalogDb = async (setupSql) => {
+      const tempDb = new PGlite({ extensions: { uuid_ossp, pgcrypto } });
+      await tempDb.waitReady;
+      await tempDb.exec(setupSql);
+      const fp = await querySevenCategoryCatalogFingerprint(tempDb);
+      await tempDb.close();
+      return fp;
+    };
+
+    const baseRegressionSql = `
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin') THEN CREATE ROLE supabase_admin SUPERUSER LOGIN; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_read_only_user') THEN CREATE ROLE supabase_read_only_user NOLOGIN; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF;
+      END $$;
+      CREATE SCHEMA graphql;
+      CREATE SCHEMA realtime;
+      CREATE SCHEMA extensions;
+      CREATE TABLE realtime.schema_migrations (version bigint primary key);
+      CREATE TABLE public.note_guard (
+        id int primary key,
+        note text,
+        "= ANY ((ARRAY['a'::character varying])::text[])" boolean NOT NULL DEFAULT false,
+        "= ANY (ARRAY[('a'::character varying)::text])" boolean NOT NULL DEFAULT true,
+        "esc""= ANY ((ARRAY['a'::character varying])::text[])" boolean NOT NULL DEFAULT false
+      );
+      ALTER TABLE public.note_guard ENABLE ROW LEVEL SECURITY;
+      CREATE POLICY lit_check ON public.note_guard FOR SELECT USING (note = '(ARRAY[alpha])::text[]');
+      CREATE POLICY ident_check ON public.note_guard FOR SELECT USING ("= ANY ((ARRAY['a'::character varying])::text[])");
+      CREATE FUNCTION extensions.secdef_probe() RETURNS int LANGUAGE sql SECURITY DEFINER AS $$ SELECT 1; $$;
+      ALTER FUNCTION extensions.secdef_probe() OWNER TO postgres;
+    `;
+
+    const fpRegBase = await makeTempCatalogDb(baseRegressionSql);
+    const fpRegLiteralDrift = await makeTempCatalogDb(
+      baseRegressionSql.replace("note = '(ARRAY[alpha])::text[]'", "note = 'ARRAY[alpha]'")
+    );
+    const fpRegQuotedIdentDrift = await makeTempCatalogDb(
+      baseRegressionSql.replace(
+        'CREATE POLICY ident_check ON public.note_guard FOR SELECT USING ("= ANY ((ARRAY[\'a\'::character varying])::text[])");',
+        'CREATE POLICY ident_check ON public.note_guard FOR SELECT USING ("= ANY (ARRAY[(\'a\'::character varying)::text])");'
+      )
+    );
+    const fpRegEscapedQuotedIdentDrift = await makeTempCatalogDb(
+      baseRegressionSql.replace(
+        'CREATE POLICY ident_check ON public.note_guard FOR SELECT USING ("= ANY ((ARRAY[\'a\'::character varying])::text[])");',
+        'CREATE POLICY ident_check ON public.note_guard FOR SELECT USING ("esc""= ANY ((ARRAY[\'a\'::character varying])::text[])");'
+      )
+    );
+    const fpRegGraphqlAnon = await makeTempCatalogDb(
+      `${baseRegressionSql}\nGRANT USAGE ON SCHEMA graphql TO anon;`
+    );
+    const fpRegGraphqlReadOnlyCreate = await makeTempCatalogDb(
+      `${baseRegressionSql}\nGRANT CREATE ON SCHEMA graphql TO supabase_read_only_user;`
+    );
+    const fpRegRealtimeAnon = await makeTempCatalogDb(
+      `${baseRegressionSql}\nGRANT SELECT ON TABLE realtime.schema_migrations TO anon;`
+    );
+    const fpRegRealtimeReadOnlyDelete = await makeTempCatalogDb(
+      `${baseRegressionSql}\nGRANT DELETE ON TABLE realtime.schema_migrations TO supabase_read_only_user;`
+    );
+    const fpRegSecdefOwnerDrift = await makeTempCatalogDb(
+      baseRegressionSql.replace('ALTER FUNCTION extensions.secdef_probe() OWNER TO postgres;', 'ALTER FUNCTION extensions.secdef_probe() OWNER TO supabase_admin;')
+    );
+    const fpRegPlatformReadOnlyAllowed = await makeTempCatalogDb(
+      `${baseRegressionSql}\nGRANT USAGE ON SCHEMA graphql TO supabase_read_only_user;\nGRANT SELECT ON TABLE realtime.schema_migrations TO supabase_read_only_user;`
+    );
+
+    check('Real-SQL regression: string literals and double-quoted identifiers with = ANY (...) diverge fail-closed in policies', () => {
+      const parityLit = compareSevenCategoryCatalogParity(fpRegBase, fpRegLiteralDrift);
+      assert.equal(parityLit.parity_verified, false);
+      assert.equal(parityLit.mismatched_categories.length, 1);
+      assert.equal(parityLit.mismatched_categories[0].category, 'policies');
+
+      const parityQuotedIdent = compareSevenCategoryCatalogParity(fpRegBase, fpRegQuotedIdentDrift);
+      assert.equal(parityQuotedIdent.parity_verified, false);
+      assert.equal(parityQuotedIdent.mismatched_categories.length, 1);
+      assert.equal(parityQuotedIdent.mismatched_categories[0].category, 'policies');
+
+      const parityEscapedQuotedIdent = compareSevenCategoryCatalogParity(fpRegBase, fpRegEscapedQuotedIdentDrift);
+      assert.equal(parityEscapedQuotedIdent.parity_verified, false);
+      assert.equal(parityEscapedQuotedIdent.mismatched_categories.length, 1);
+      assert.equal(parityEscapedQuotedIdent.mismatched_categories[0].category, 'policies');
+    });
+
+    check('Real-SQL regression: anon grants and read_only escalation (CREATE on graphql / DELETE on realtime.schema_migrations) fail closed while USAGE/SELECT match', () => {
+      const graphqlAnonParity = compareSevenCategoryCatalogParity(fpRegBase, fpRegGraphqlAnon);
+      assert.equal(graphqlAnonParity.parity_verified, false);
+      assert.ok(graphqlAnonParity.mismatched_categories.some((m) => m.category === 'schemas'));
+
+      const graphqlCreateParity = compareSevenCategoryCatalogParity(fpRegBase, fpRegGraphqlReadOnlyCreate);
+      assert.equal(graphqlCreateParity.parity_verified, false);
+      assert.ok(graphqlCreateParity.mismatched_categories.some((m) => m.category === 'schemas'));
+
+      const realtimeAnonParity = compareSevenCategoryCatalogParity(fpRegBase, fpRegRealtimeAnon);
+      assert.equal(realtimeAnonParity.parity_verified, false);
+      assert.ok(realtimeAnonParity.mismatched_categories.some((m) => m.category === 'tables'));
+
+      const realtimeDeleteParity = compareSevenCategoryCatalogParity(fpRegBase, fpRegRealtimeReadOnlyDelete);
+      assert.equal(realtimeDeleteParity.parity_verified, false);
+      assert.ok(realtimeDeleteParity.mismatched_categories.some((m) => m.category === 'tables'));
+
+      const allowedPlatformParity = compareSevenCategoryCatalogParity(fpRegBase, fpRegPlatformReadOnlyAllowed);
+      assert.equal(allowedPlatformParity.parity_verified, true);
+    });
+
+    check('Real-SQL regression: SECURITY DEFINER routine owner drift fails closed even in extensions schema', () => {
+      const secdefParity = compareSevenCategoryCatalogParity(fpRegBase, fpRegSecdefOwnerDrift);
+      assert.equal(secdefParity.parity_verified, false);
+      assert.ok(secdefParity.mismatched_categories.some((m) => m.category === 'routines'));
+    });
+
+    // Real-SQL regression for graphql/graphql_public authenticated + grant option & extension routine PUBLIC/anon/authenticated/grant option
+    const extRoutineRegBaseSql = `
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin') THEN CREATE ROLE supabase_admin SUPERUSER LOGIN; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dashboard_user') THEN CREATE ROLE dashboard_user NOLOGIN; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
+      END $$;
+      CREATE SCHEMA graphql;
+      CREATE SCHEMA graphql_public;
+      CREATE SCHEMA extensions;
+      CREATE EXTENSION pgcrypto WITH SCHEMA extensions;
+      REVOKE ALL ON FUNCTION extensions.armor(bytea) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION extensions.armor(bytea) TO PUBLIC, dashboard_user;
+      GRANT EXECUTE ON FUNCTION extensions.armor(bytea) TO postgres WITH GRANT OPTION;
+    `;
+    const fpExtBase = await makeTempCatalogDb(extRoutineRegBaseSql);
+    const fpExtAdminEquivalent = await makeTempCatalogDb(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin') THEN CREATE ROLE supabase_admin SUPERUSER LOGIN; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dashboard_user') THEN CREATE ROLE dashboard_user NOLOGIN; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
+      END $$;
+      CREATE SCHEMA graphql;
+      CREATE SCHEMA graphql_public;
+      CREATE SCHEMA extensions;
+      CREATE EXTENSION pgcrypto WITH SCHEMA extensions;
+      ALTER FUNCTION extensions.armor(bytea) OWNER TO supabase_admin;
+      SET LOCAL ROLE supabase_admin;
+      REVOKE ALL ON FUNCTION extensions.armor(bytea) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION extensions.armor(bytea) TO PUBLIC, dashboard_user, supabase_admin;
+      GRANT EXECUTE ON FUNCTION extensions.armor(bytea) TO postgres WITH GRANT OPTION;
+      RESET ROLE;
+    `);
+    const fpExtPublicRevoked = await makeTempCatalogDb(
+      `${extRoutineRegBaseSql}\nREVOKE EXECUTE ON FUNCTION extensions.armor(bytea) FROM PUBLIC;`
+    );
+    const fpExtAnonGranted = await makeTempCatalogDb(
+      `${extRoutineRegBaseSql}\nGRANT EXECUTE ON FUNCTION extensions.armor(bytea) TO anon;`
+    );
+    const fpExtAuthGranted = await makeTempCatalogDb(
+      `${extRoutineRegBaseSql}\nGRANT EXECUTE ON FUNCTION extensions.armor(bytea) TO authenticated;`
+    );
+    const fpExtDashboardGrantOpt = await makeTempCatalogDb(
+      `${extRoutineRegBaseSql}\nGRANT EXECUTE ON FUNCTION extensions.armor(bytea) TO dashboard_user WITH GRANT OPTION;`
+    );
+    const fpGraphqlAuthDrift = await makeTempCatalogDb(
+      `${extRoutineRegBaseSql}\nGRANT USAGE ON SCHEMA graphql TO authenticated;`
+    );
+    const fpGraphqlPublicGrantOpt = await makeTempCatalogDb(
+      `${extRoutineRegBaseSql}\nGRANT USAGE ON SCHEMA graphql_public TO dashboard_user WITH GRANT OPTION;`
+    );
+
+    check('Real-SQL regression: pgcrypto installer (postgres vs supabase_admin) normalizes while PUBLIC/anon/authenticated/grant option drift fails closed', () => {
+      assert.equal(compareSevenCategoryCatalogParity(fpExtBase, fpExtAdminEquivalent).parity_verified, true);
+
+      for (const [label, drifted] of [
+        ['PUBLIC revoke', fpExtPublicRevoked],
+        ['anon grant', fpExtAnonGranted],
+        ['authenticated grant', fpExtAuthGranted],
+        ['dashboard_user grant option', fpExtDashboardGrantOpt],
+      ]) {
+        const res = compareSevenCategoryCatalogParity(fpExtBase, drifted);
+        assert.equal(res.parity_verified, false, `Expected routines drift on ${label}`);
+        assert.ok(res.mismatched_categories.some((m) => m.category === 'routines'), `Missing routines mismatch on ${label}`);
+      }
+
+      for (const [label, drifted] of [
+        ['graphql authenticated grant', fpGraphqlAuthDrift],
+        ['graphql_public grant option', fpGraphqlPublicGrantOpt],
+      ]) {
+        const res = compareSevenCategoryCatalogParity(fpExtBase, drifted);
+        assert.equal(res.parity_verified, false, `Expected schemas drift on ${label}`);
+        assert.ok(res.mismatched_categories.some((m) => m.category === 'schemas'), `Missing schemas mismatch on ${label}`);
+      }
+    });
   } finally {
     await db.close();
   }
 
+  check('evaluateProductionReleaseEnforcement rejects client/env bypasses and incomplete Issue #10 gates fail-closed', () => {
+    const validSha = '9400477ca309fe0ce556e59ef0d2ed2016c74419';
+    const fullPassingContext = {
+      issue10ClosedVerified: true,
+      issue10Status: 'CLOSED_VERIFIED',
+      sevenCategoryParityVerified: true,
+      ownerAgeDecryptionReceiptVerified: true,
+      nonPgPlatformRecoveryVerified: true,
+      serverReleaseControl: 'AUTHORITATIVE_DB_ENFORCED',
+      ciExactShaGatePassed: true,
+      targetSha: validSha,
+      rollbackPlanVerified: true,
+      ownerAndControllerSignedOff: true,
+    };
+
+    const clientBypass = evaluateProductionReleaseEnforcement({
+      ...fullPassingContext,
+      clientLocalStorageOverride: true,
+    });
+    assert.equal(clientBypass.allowed, false);
+    assert.equal(clientBypass.productionStatus, 'NO_GO');
+    assert.equal(clientBypass.bypassRejected, true);
+    assert.ok(clientBypass.failedReasons.includes('CLIENT_OR_ENV_BYPASS_REJECTED'));
+
+    const envBypass = evaluateProductionReleaseEnforcement({
+      ...fullPassingContext,
+      envForceGoBypass: true,
+    });
+    assert.equal(envBypass.allowed, false);
+    assert.equal(envBypass.productionStatus, 'NO_GO');
+    assert.ok(envBypass.failedReasons.includes('CLIENT_OR_ENV_BYPASS_REJECTED'));
+
+    const quarantinePromote = evaluateProductionReleaseEnforcement({
+      ...fullPassingContext,
+      unverifiedCapturePromoted: true,
+    });
+    assert.equal(quarantinePromote.allowed, false);
+    assert.equal(quarantinePromote.productionStatus, 'NO_GO');
+    assert.ok(quarantinePromote.failedReasons.includes('UNVERIFIED_CAPTURE_PROMOTION_REJECTED'));
+
+    const openIssue10 = evaluateProductionReleaseEnforcement({
+      issue10ClosedVerified: false,
+      issue10Status: 'OPEN_RED_BLOCKED_HOLD_PRESERVED',
+      sevenCategoryParityVerified: false,
+      ownerAgeDecryptionReceiptVerified: false,
+      nonPgPlatformRecoveryVerified: false,
+      serverReleaseControl: 'AUTHORITATIVE_DB_ENFORCED',
+      ciExactShaGatePassed: true,
+      targetSha: validSha,
+      rollbackPlanVerified: true,
+      ownerAndControllerSignedOff: false,
+    });
+    assert.equal(openIssue10.allowed, false);
+    assert.equal(openIssue10.verdict, 'RELEASE_BLOCKED_FAIL_CLOSED');
+    assert.equal(openIssue10.productionStatus, 'NO_GO');
+    assert.equal(openIssue10.issue10Status, 'OPEN_PRODUCTION_BLOCKER');
+    assert.ok(openIssue10.failedReasons.includes('ISSUE_10_NOT_CLOSED'));
+    assert.ok(openIssue10.failedReasons.includes('OWNER_AGE_DECRYPTION_RECEIPT_MISSING'));
+
+    const authorized = evaluateProductionReleaseEnforcement(fullPassingContext);
+    assert.equal(authorized.allowed, true);
+    assert.equal(authorized.verdict, 'PRODUCTION_RELEASE_AUTHORIZED');
+    assert.equal(authorized.productionStatus, 'GO');
+  });
+
   console.log(`\n=== ALL ${passed} RECOVERY HARD-GATE & RESTORE-AWARE CHECKS PASSED (NO_REMOTE_DB_WRITE = TRUE, PRODUCTION = NO_GO) ===`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+const argv1Resolved = process.argv[1] ? path.resolve(process.argv[1]) : '';
+const isEntrypoint =
+  Boolean(argv1Resolved) &&
+  (process.platform === 'win32'
+    ? argv1Resolved.toLowerCase() === __filename.toLowerCase()
+    : argv1Resolved === __filename);
+
+if (isEntrypoint) {
   runSelfTests().catch((err) => {
     console.error('[FATAL] verify-lari-recovery-hard-gate failed:', err);
     process.exit(1);

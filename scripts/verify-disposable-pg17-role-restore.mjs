@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -657,6 +657,241 @@ try {
   );
 
   console.log('Test 6 PASS: Real supabase_vault extension creation and fail-closed unknown extension rejection verified on container PG 17.6\n');
+
+  // -------------------------------------------------------------------------
+  // Test 7: Fail-Closed FIFO Snapshot Bound Capture on Linux PostgreSQL 17.6
+  // -------------------------------------------------------------------------
+  if (process.platform === 'linux') {
+    console.log('--- Test 7: Fail-Closed FIFO Snapshot Export & Import on PG 17.6 ---');
+    const bashExec = findBash();
+    assert.ok(bashExec, 'Bash must be available for FIFO snapshot flow verification');
+
+    const snapNonce = `${uniqueId}-snap`;
+    const snapContainerName = `lari-pg17-snap-qa-${uniqueId}`;
+    const snapRoot = fs.mkdtempSync(path.join(os.tmpdir(), `lari-snap-flow-${uniqueId.slice(0, 8)}-`));
+    let snapContainerId = null;
+
+    const runSnapshotFlowCase = (port, overrides = {}) => {
+      const caseDir = fs.mkdtempSync(path.join(snapRoot, 'case-'));
+      const runnerTemp = path.join(caseDir, 'runner');
+      const workspace = path.join(caseDir, 'workspace');
+      const existingArtifactDir = path.join(workspace, 'backup-artifacts');
+      fs.mkdirSync(runnerTemp, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(existingArtifactDir, { recursive: true, mode: 0o700 });
+      const sentinelPath = path.join(existingArtifactDir, 'existing-backup.sentinel');
+      fs.writeFileSync(sentinelPath, 'keep-existing-backup', 'utf8');
+
+      const caseEnv = {
+        ...process.env,
+        RUNNER_TEMP: toBashPath(runnerTemp),
+        GITHUB_WORKSPACE: toBashPath(workspace),
+        LARI_OFFLINE_TEST_MODE: '1',
+        LARI_TEST_SOURCE_HOST: '127.0.0.1',
+        LARI_TEST_SOURCE_PORT: String(port),
+        LARI_TEST_SOURCE_DB: 'postgres',
+        LARI_TEST_SOURCE_USER: 'supabase_admin',
+        LARI_TEST_SOURCE_PASSWORD: disposablePassword,
+        ...overrides,
+      };
+      const startedAt = Date.now();
+      const res = spawnSync(
+        bashExec,
+        ['scripts/run-zero-cost-logical-backup.sh', '--test-source-snapshot-flow'],
+        { cwd: process.cwd(), env: caseEnv, encoding: 'utf8', timeout: 60000 }
+      );
+      return { res, artifactDir: existingArtifactDir, sentinelPath, elapsedMs: Date.now() - startedAt };
+    };
+
+    const assertPreservedBackupDir = (caseResult, label) => {
+      assert.ok(fs.existsSync(caseResult.sentinelPath), `${label}: existing backup sentinel must not be deleted`);
+      assert.equal(fs.readFileSync(caseResult.sentinelPath, 'utf8'), 'keep-existing-backup', `${label}: existing backup sentinel must be untouched`);
+      assert.deepEqual(fs.readdirSync(caseResult.artifactDir), ['existing-backup.sentinel'], `${label}: no test files or artifacts may be written into backup-artifacts`);
+    };
+
+    try {
+      const snapRunRes = dockerCmd([
+        'run',
+        '--detach',
+        '--rm',
+        '--name', snapContainerName,
+        '--label', `lari.qa.nonce=${snapNonce}`,
+        '-p', '127.0.0.1:0:5432',
+        '-e', 'POSTGRES_USER=supabase_admin',
+        '-e', 'POSTGRES_DB=postgres',
+        '-e', `POSTGRES_PASSWORD=${disposablePassword}`,
+        qualifiedImage,
+      ]);
+      assert.equal(snapRunRes.status, 0, `Snapshot test container launch failed: ${snapRunRes.stderr}`);
+      snapContainerId = snapRunRes.stdout.trim().split(/\r?\n/)[0];
+      assert.match(snapContainerId, /^[a-f0-9]{64}$/, 'Snapshot container must return 64-char ID');
+
+      const portRes = dockerCmd(['port', snapContainerId, '5432/tcp']);
+      assert.equal(portRes.status, 0, `Failed to inspect published loopback port: ${portRes.stderr}`);
+      const portMatch = portRes.stdout.trim().match(/127\.0\.0\.1:(\d+)/);
+      assert.ok(portMatch, `Snapshot container port must bind strictly to 127.0.0.1, got: ${portRes.stdout}`);
+      const snapPort = Number(portMatch[1]);
+
+      let ready = false;
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        const probe = dockerCmd([
+          'exec', '--user', 'postgres', snapContainerId,
+          'pg_isready', '-h', '127.0.0.1', '-p', '5432', '-U', 'supabase_admin', '-d', 'postgres',
+        ]);
+        if (probe.status === 0) {
+          ready = true;
+          break;
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+      }
+      assert.ok(ready, 'Snapshot PG 17.6 container failed to become ready');
+
+      const seedRes = dockerCmd([
+        'exec', '-i', '--user', 'postgres', snapContainerId,
+        'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-h', '/var/run/postgresql', '-U', 'supabase_admin', '-d', 'postgres',
+      ], {
+        input: 'CREATE TABLE IF NOT EXISTS public.lari_snapshot_probe (id integer PRIMARY KEY, note text);\nINSERT INTO public.lari_snapshot_probe (id, note) VALUES (1, \'ok\') ON CONFLICT DO NOTHING;\n',
+        timeout: 15000,
+      });
+      assert.equal(seedRes.status, 0, `Failed seeding snapshot probe table: ${seedRes.stderr}`);
+
+      // 7a. Positive: FIFO snapshot export + pg_dump --snapshot + catalog-fingerprint.sql
+      const pos = runSnapshotFlowCase(snapPort);
+      assert.equal(
+        pos.res.status,
+        0,
+        `Positive FIFO snapshot flow must succeed: stdout=${pos.res.stdout}\nstderr=${pos.res.stderr}`
+      );
+      assert.ok(pos.res.stdout.includes('Snapshot-bound source capture: PASS'), 'Must emit PASS marker');
+      const receiptLine = (pos.res.stdout || '').split(/\r?\n/).find((line) => line.startsWith('SNAPSHOT_TEST_RECEIPT='));
+      assert.ok(receiptLine, 'Positive test must emit SNAPSHOT_TEST_RECEIPT on stdout');
+      const receipt = JSON.parse(receiptLine.slice('SNAPSHOT_TEST_RECEIPT='.length));
+      assert.equal(receipt.snapshot_bound, true, 'Snapshot receipt must confirm SOURCE_SNAPSHOT_BOUND=true');
+      assert.ok(receipt.tables_count >= 1, `Expected >= 1 fingerprinted table, got ${receipt.tables_count}`);
+      assertPreservedBackupDir(pos, 'Test 7a positive');
+
+      // 7b. Negative: Fail-closed on pg_export_snapshot() failure -> zero artifacts
+      const negExport = runSnapshotFlowCase(snapPort, { LARI_TEST_SIMULATE_SNAPSHOT_EXPORT_FAIL: '1' });
+      assert.notEqual(negExport.res.status, 0, 'Snapshot export failure must exit non-zero');
+      assert.ok(
+        (negExport.res.stderr || '').includes('SNAPSHOT_EXPORT_FAILED'),
+        `Snapshot export failure must emit SNAPSHOT_EXPORT_FAILED telemetry, got: ${negExport.res.stderr}`
+      );
+      assertPreservedBackupDir(negExport, 'Test 7b export fail');
+
+      // 7c. Negative: Fail-closed on pg_dump --snapshot failure (invalid snapshot ID) -> zero artifacts, no fallback
+      const negImport = runSnapshotFlowCase(snapPort, { LARI_TEST_OVERRIDE_SNAPSHOT_ID: '00000000-00000000-1' });
+      assert.notEqual(negImport.res.status, 0, 'Invalid --snapshot import failure must exit non-zero');
+      assert.ok(
+        (negImport.res.stderr || '').includes('SNAPSHOT_IMPORT_FAILED'),
+        `Invalid --snapshot failure must emit SNAPSHOT_IMPORT_FAILED telemetry, got: ${negImport.res.stderr}`
+      );
+      assertPreservedBackupDir(negImport, 'Test 7c import fail');
+
+      // 7d. Negative: Bounded session timeout when FIFO peer never opens opposite end -> terminates and produces zero artifacts
+      const negFifoBlock = runSnapshotFlowCase(snapPort, {
+        LARI_TEST_SIMULATE_FIFO_UNOPENED_PEER: '1',
+        LARI_TEST_SNAPSHOT_SESSION_TIMEOUT_SECONDS: '2',
+      });
+      assert.notEqual(negFifoBlock.res.status, 0, 'Unopened FIFO peer timeout must exit non-zero');
+      assert.ok(
+        (negFifoBlock.res.stderr || '').includes('exceeded overall 2s timeout') &&
+        (negFifoBlock.res.stderr || '').includes('SNAPSHOT_EXPORT_FAILED'),
+        `Unopened FIFO peer must trigger bounded session timeout and SNAPSHOT_EXPORT_FAILED, got: ${negFifoBlock.res.stderr}`
+      );
+      assert.ok(negFifoBlock.elapsedMs < 15000, `Session timeout test took too long (${negFifoBlock.elapsedMs}ms)`);
+      assertPreservedBackupDir(negFifoBlock, 'Test 7d unopened FIFO peer');
+
+      // 7e. Negative: Live PG17 psql + pg_dump lock-wait hit by 2s session timeout -> clients and DB sessions close, backup dir preserved
+      const lockHolder = spawn(
+        dockerBin,
+        [
+          '-H', endpoint,
+          'exec', '-i', '--user', 'postgres', snapContainerId,
+          'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-h', '/var/run/postgresql', '-U', 'supabase_admin', '-d', 'postgres',
+        ],
+        { env: dockerEnv, stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      let lockHolderStdout = '';
+      lockHolder.stdout.on('data', (chunk) => {
+        lockHolderStdout += chunk.toString('utf8');
+      });
+      lockHolder.stdin.write(
+        "SET application_name = 'lari_qa_lock_holder';\nBEGIN;\nLOCK TABLE public.lari_snapshot_probe IN ACCESS EXCLUSIVE MODE;\nSELECT 'LOCK_ACQUIRED';\nSELECT pg_sleep(30);\nCOMMIT;\n"
+      );
+      lockHolder.stdin.end();
+
+      const lockDeadline = Date.now() + 10000;
+      while (!lockHolderStdout.includes('LOCK_ACQUIRED') && Date.now() < lockDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      assert.ok(lockHolderStdout.includes('LOCK_ACQUIRED'), 'Lock holder must acquire ACCESS EXCLUSIVE lock before timing out snapshot flow');
+
+      let negLiveTimeout;
+      try {
+        negLiveTimeout = runSnapshotFlowCase(snapPort, {
+          LARI_TEST_SNAPSHOT_SESSION_TIMEOUT_SECONDS: '2',
+        });
+      } finally {
+        dockerCmd([
+          'exec', '--user', 'postgres', snapContainerId,
+          'psql', '-X', '-qAt', '-h', '/var/run/postgresql', '-U', 'supabase_admin', '-d', 'postgres',
+          '-c', "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND application_name = 'lari_qa_lock_holder';",
+        ]);
+        try {
+          lockHolder.kill('SIGKILL');
+        } catch {
+          // already exited
+        }
+      }
+
+      assert.notEqual(negLiveTimeout.res.status, 0, 'Timed-out live snapshot session must exit non-zero');
+      assert.ok(
+        (negLiveTimeout.res.stderr || '').includes('exceeded overall 2s timeout') &&
+        (negLiveTimeout.res.stderr || '').includes('SNAPSHOT_IMPORT_FAILED'),
+        `Live client timeout must emit exceeded overall 2s timeout and SNAPSHOT_IMPORT_FAILED, got: ${negLiveTimeout.res.stderr}`
+      );
+      assert.ok(negLiveTimeout.elapsedMs < 15000, `Live client timeout took too long (${negLiveTimeout.elapsedMs}ms)`);
+      assertPreservedBackupDir(negLiveTimeout, 'Test 7e live client timeout');
+
+      let remainingSessions = -1;
+      for (let checkIdx = 0; checkIdx < 20; checkIdx += 1) {
+        const activityRes = dockerCmd([
+          'exec', '--user', 'postgres', snapContainerId,
+          'psql', '-X', '-qAt', '-h', '/var/run/postgresql', '-U', 'supabase_admin', '-d', 'postgres',
+          '-c', "SELECT count(*) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND usename = 'supabase_admin' AND datname = 'postgres' AND application_name IN ('psql', 'pg_dump', 'lari_qa_lock_holder');",
+        ]);
+        if (activityRes.status === 0) {
+          remainingSessions = Number.parseInt(activityRes.stdout.trim(), 10);
+          if (remainingSessions === 0) {
+            break;
+          }
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+      }
+      assert.equal(remainingSessions, 0, `All timed-out psql/pg_dump source DB sessions must be closed, remaining=${remainingSessions}`);
+
+      const psRes = spawnSync('ps', ['-eo', 'comm,args'], { encoding: 'utf8' });
+      if (psRes.status === 0) {
+        const orphanedClients = (psRes.stdout || '')
+          .split(/\r?\n/)
+          .filter((line) => /pg_dump\s.*--snapshot=/.test(line));
+        assert.equal(orphanedClients.length, 0, `No orphaned pg_dump client may remain running: ${orphanedClients.join('; ')}`);
+      }
+
+      console.log('Test 7 PASS: Real Linux PG 17.6 FIFO snapshot flow (positive + export/import/FIFO-timeout/live-client-timeout + closed DB sessions + preserved workspace) verified\n');
+    } finally {
+      fs.rmSync(snapRoot, { recursive: true, force: true });
+      if (snapContainerId && /^[a-f0-9]{64}$/.test(snapContainerId)) {
+        const inspectSnap = dockerCmd(['inspect', '--format', '{{json .Config.Labels}}', snapContainerId]);
+        if (inspectSnap.status === 0 && inspectSnap.stdout.trim()) {
+          const snapLabels = JSON.parse(inspectSnap.stdout.trim() || '{}');
+          if (snapLabels['lari.qa.nonce'] === snapNonce) {
+            dockerCmd(['rm', '-f', snapContainerId]);
+          }
+        }
+      }
+    }
+  }
 
   console.log('\n[QUALIFICATION REPORT]');
   console.log('STATUS: PASS');
