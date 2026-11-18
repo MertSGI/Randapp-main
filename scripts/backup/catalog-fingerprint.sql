@@ -385,6 +385,149 @@ WITH schemas_rows AS (
         )
         FROM routines_rows
       ), '{}'::jsonb)
+    ),
+    'acl_probe', pg_catalog.jsonb_build_object(
+      'schemas', coalesce((
+        SELECT pg_catalog.jsonb_object_agg(
+          n.nspname,
+          pg_catalog.jsonb_build_object(
+            'owner', pg_catalog.pg_get_userbyid(n.nspowner),
+            'raw_acl', CASE
+              WHEN n.nspacl IS NULL THEN '<default>'
+              ELSE coalesce((
+                SELECT pg_catalog.string_agg(
+                  pg_catalog.format(
+                    '%s|%s|%s|%s',
+                    pg_catalog.pg_get_userbyid(a.grantor),
+                    CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(a.grantee) END,
+                    a.privilege_type,
+                    a.is_grantable
+                  ),
+                  ',' ORDER BY
+                    pg_catalog.pg_get_userbyid(a.grantor) COLLATE "C",
+                    (CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(a.grantee) END) COLLATE "C",
+                    a.privilege_type COLLATE "C",
+                    a.is_grantable
+                )
+                FROM pg_catalog.aclexplode(n.nspacl) AS a
+              ), '<empty>')
+            END,
+            'init_privs', coalesce((
+              SELECT pg_catalog.string_agg(
+                ip.privtype::text || ':' || coalesce((
+                  SELECT pg_catalog.string_agg(
+                    pg_catalog.format(
+                      '%s|%s|%s|%s',
+                      pg_catalog.pg_get_userbyid(a.grantor),
+                      CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(a.grantee) END,
+                      a.privilege_type,
+                      a.is_grantable
+                    ),
+                    ',' ORDER BY
+                      pg_catalog.pg_get_userbyid(a.grantor) COLLATE "C",
+                      (CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(a.grantee) END) COLLATE "C",
+                      a.privilege_type COLLATE "C",
+                      a.is_grantable
+                  )
+                  FROM pg_catalog.aclexplode(ip.initprivs) AS a
+                ), '<empty>'),
+                ';' ORDER BY ip.privtype::text COLLATE "C"
+              )
+              FROM pg_catalog.pg_init_privs AS ip
+              WHERE ip.objoid = n.oid
+                AND ip.classoid = 'pg_catalog.pg_namespace'::regclass
+                AND ip.objsubid = 0
+            ), '<none>')
+          )
+        )
+        FROM pg_catalog.pg_namespace AS n
+        WHERE n.nspname IN ('graphql', 'graphql_public')
+      ), '{}'::jsonb),
+      'ext_routines', coalesce((
+        SELECT pg_catalog.jsonb_agg(
+          pg_catalog.jsonb_build_object(
+            'ext', ext_grp.ext_name,
+            'owner', ext_grp.owner_name,
+            'count', ext_grp.cnt,
+            'samples', ext_grp.samples,
+            'raw_acl', ext_grp.raw_acl,
+            'init_privs', ext_grp.init_privs_sig
+          )
+          ORDER BY ext_grp.ext_name COLLATE "C", ext_grp.cnt DESC
+        )
+        FROM (
+          SELECT
+            ext_sub.ext_name,
+            ext_sub.owner_name,
+            ext_sub.raw_acl,
+            ext_sub.init_privs_sig,
+            count(*) AS cnt,
+            (pg_catalog.array_agg(ext_sub.obj_key ORDER BY ext_sub.obj_key COLLATE "C"))[1:3] AS samples
+          FROM (
+            SELECT
+              e.extname AS ext_name,
+              rb.obj_key,
+              pg_catalog.pg_get_userbyid(rb.proc_owner_oid) AS owner_name,
+              CASE
+                WHEN rb.proc_acl IS NULL THEN '<default>'
+                ELSE coalesce((
+                  SELECT pg_catalog.string_agg(
+                    pg_catalog.format(
+                      '%s|%s|%s|%s',
+                      pg_catalog.pg_get_userbyid(a.grantor),
+                      CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(a.grantee) END,
+                      a.privilege_type,
+                      a.is_grantable
+                    ),
+                    ',' ORDER BY
+                      pg_catalog.pg_get_userbyid(a.grantor) COLLATE "C",
+                      (CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(a.grantee) END) COLLATE "C",
+                      a.privilege_type COLLATE "C",
+                      a.is_grantable
+                  )
+                  FROM pg_catalog.aclexplode(rb.proc_acl) AS a
+                ), '<empty>')
+              END AS raw_acl,
+              coalesce((
+                SELECT pg_catalog.string_agg(
+                  ip.privtype::text || ':' || coalesce((
+                    SELECT pg_catalog.string_agg(
+                      pg_catalog.format(
+                        '%s|%s|%s|%s',
+                        pg_catalog.pg_get_userbyid(a.grantor),
+                        CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(a.grantee) END,
+                        a.privilege_type,
+                        a.is_grantable
+                      ),
+                      ',' ORDER BY
+                        pg_catalog.pg_get_userbyid(a.grantor) COLLATE "C",
+                        (CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(a.grantee) END) COLLATE "C",
+                        a.privilege_type COLLATE "C",
+                        a.is_grantable
+                    )
+                    FROM pg_catalog.aclexplode(ip.initprivs) AS a
+                  ), '<empty>'),
+                  ';' ORDER BY ip.privtype::text COLLATE "C"
+                )
+                FROM pg_catalog.pg_init_privs AS ip
+                WHERE ip.objoid = rb.proc_oid
+                  AND ip.classoid = 'pg_catalog.pg_proc'::regclass
+                  AND ip.objsubid = 0
+              ), '<none>') AS init_privs_sig
+            FROM routines_base AS rb
+            JOIN pg_catalog.pg_depend AS d
+              ON d.classid = 'pg_catalog.pg_proc'::regclass
+             AND d.objid = rb.proc_oid
+             AND d.deptype = 'e'
+            JOIN pg_catalog.pg_extension AS e
+              ON e.oid = d.refobjid
+             AND d.refclassid = 'pg_catalog.pg_extension'::regclass
+            WHERE rb.schema_name = 'extensions'
+              AND e.extname IN ('pgcrypto', 'pg_stat_statements')
+          ) AS ext_sub
+          GROUP BY ext_sub.ext_name, ext_sub.owner_name, ext_sub.raw_acl, ext_sub.init_privs_sig
+        ) AS ext_grp
+      ), '[]'::jsonb)
     )
   ) AS payload
 )

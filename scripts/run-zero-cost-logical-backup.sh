@@ -169,9 +169,33 @@ try:
         print(f"  Object field diffs for {cat} (total={len(diffs)}, showing up to 25):")
         for k, fields, sh, rh in diffs[:25]:
             print(f"    [DIFF] {cat} {k}: fields={fields} src={sh} rst={rh}")
+    if 'schemas' in mismatched_cats or 'routines' in mismatched_cats:
+        src_probe = (src.get('diagnostic') or {}).get('acl_probe') or {}
+        rst_probe = (rst.get('diagnostic') or {}).get('acl_probe') or {}
+        if src_probe or rst_probe:
+            print("  [ACL_PROBE_SRC] " + json.dumps(src_probe, sort_keys=True))
+            print("  [ACL_PROBE_RST] " + json.dumps(rst_probe, sort_keys=True))
 except Exception as e:
     print(f"  Failed to parse catalog comparisons: {e}")
 PY
+        if [[ -f "$PRIVATE_DIR/archive.list" && -f "$PRIVATE_DIR/database.dump" ]]; then
+          local acl_toc_list="$PRIVATE_DIR/acl-probe.list"
+          grep -E '; (ACL|SCHEMA|EXTENSION) .* (graphql|graphql_public|pgcrypto|pg_stat_statements|armor|digest|encrypt|decrypt|gen_salt|gen_random_bytes|hmac|pgp_)' "$PRIVATE_DIR/archive.list" | head -n 40 >"$acl_toc_list" || true
+          if [[ -s "$acl_toc_list" ]]; then
+            printf '  [DUMP_ACL_TOC]\n' >&2
+            sed 's/^/    /' "$acl_toc_list" >&2 || true
+            local acl_only_toc="$PRIVATE_DIR/acl-only-probe.list"
+            grep '; ACL ' "$acl_toc_list" >"$acl_only_toc" || true
+            if [[ -s "$acl_only_toc" ]]; then
+              printf '  [DUMP_ACL_DDL]\n' >&2
+              pg_restore --use-list="$acl_only_toc" -f - "$PRIVATE_DIR/database.dump" 2>/dev/null | grep -E '^(GRANT|REVOKE|ALTER) ' | head -n 40 | sed 's/^/    /' >&2 || true
+            else
+              printf '  [DUMP_ACL_DDL] <none_in_matched_toc>\n' >&2
+            fi
+          else
+            printf '  [DUMP_ACL_TOC] <no_matching_graphql_or_ext_entries>\n' >&2
+          fi
+        fi
       fi
       ;;
     SNAPSHOT_EXPORT_FAILED)
