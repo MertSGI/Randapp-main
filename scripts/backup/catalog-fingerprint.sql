@@ -228,7 +228,7 @@ WITH schemas_rows AS (
         WHERE d.classid = 'pg_catalog.pg_proc'::regclass
           AND d.objid = p.oid
           AND d.deptype = 'e'
-          AND e.extname IN ('pgcrypto', 'pg_stat_statements')
+          AND e.extname IN ('pgcrypto', 'pg_stat_statements', 'uuid-ossp')
       )
     ) AS is_normalized_ext_routine,
     coalesce(pg_catalog.pg_get_functiondef(p.oid), '') AS func_def
@@ -255,30 +255,38 @@ WITH schemas_rows AS (
         SELECT pg_catalog.string_agg(
           pg_catalog.format(
             '%s|%s|%s|%s',
-            CASE
-              WHEN rb.is_normalized_ext_routine
-               AND a.is_grantable = false
-               AND pg_catalog.pg_get_userbyid(a.grantor) IN ('postgres', 'supabase_admin')
-                THEN '<extension_installer>'
-              ELSE pg_catalog.pg_get_userbyid(a.grantor)
-            END,
-            CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(a.grantee) END,
-            a.privilege_type,
-            a.is_grantable
+            norm.grantor_norm,
+            norm.grantee_norm,
+            norm.priv_type,
+            norm.effective_grantable
           ),
           ',' ORDER BY
-            (CASE
+            norm.grantor_norm COLLATE "C",
+            norm.grantee_norm COLLATE "C",
+            norm.priv_type COLLATE "C",
+            norm.effective_grantable
+        )
+        FROM (
+          SELECT
+            CASE
               WHEN rb.is_normalized_ext_routine
-               AND a.is_grantable = false
                AND pg_catalog.pg_get_userbyid(a.grantor) IN ('postgres', 'supabase_admin')
                 THEN '<extension_installer>'
               ELSE pg_catalog.pg_get_userbyid(a.grantor)
-            END) COLLATE "C",
-            (CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_catalog.pg_get_userbyid(a.grantee) END) COLLATE "C",
-            a.privilege_type COLLATE "C",
-            a.is_grantable
-        )
-        FROM pg_catalog.aclexplode(rb.proc_acl) AS a
+            END AS grantor_norm,
+            CASE
+              WHEN a.grantee = 0::oid THEN 'PUBLIC'
+              WHEN rb.is_normalized_ext_routine
+               AND a.privilege_type = 'EXECUTE'
+               AND pg_catalog.pg_get_userbyid(a.grantee) IN ('postgres', 'supabase_admin')
+                THEN '<extension_installer>'
+              ELSE pg_catalog.pg_get_userbyid(a.grantee)
+            END AS grantee_norm,
+            a.privilege_type AS priv_type,
+            pg_catalog.bool_or(a.is_grantable) AS effective_grantable
+          FROM pg_catalog.aclexplode(rb.proc_acl) AS a
+          GROUP BY 1, 2, 3
+        ) AS norm
       ), '')
     END AS acl_norm,
     rb.func_def
@@ -523,7 +531,7 @@ WITH schemas_rows AS (
               ON e.oid = d.refobjid
              AND d.refclassid = 'pg_catalog.pg_extension'::regclass
             WHERE rb.schema_name = 'extensions'
-              AND e.extname IN ('pgcrypto', 'pg_stat_statements')
+              AND e.extname IN ('pgcrypto', 'pg_stat_statements', 'uuid-ossp')
           ) AS ext_sub
           GROUP BY ext_sub.ext_name, ext_sub.owner_name, ext_sub.raw_acl, ext_sub.init_privs_sig
         ) AS ext_grp

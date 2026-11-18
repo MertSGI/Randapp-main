@@ -1635,10 +1635,94 @@ else
 fi
 set -e
 
+replay_source_platform_init_schema_acls() {
+  local src_fp_json="$PRIVATE_DIR/source-catalog-fingerprint.json"
+  local replay_sql="$PRIVATE_DIR/replay-platform-init-schema-acls.sql"
+  [[ -f "$src_fp_json" ]] || return 0
+
+  if ! "${LARI_SOURCE_VALIDATOR_PYTHON:-python3}" - "$src_fp_json" "$replay_sql" <<'PY'
+import json, re, sys
+
+src_path, out_path = sys.argv[1], sys.argv[2]
+with open(src_path, 'r', encoding='utf-8') as f:
+    src = json.load(f)
+
+schemas_probe = ((src.get('diagnostic') or {}).get('acl_probe') or {}).get('schemas') or {}
+ident_re = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+allowed_schemas = ('graphql', 'graphql_public')
+allowed_privs = {'USAGE', 'CREATE'}
+
+def q_ident(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+def q_lit(val: str) -> str:
+    return "'" + val.replace("'", "''") + "'"
+
+lines = []
+for schema_name in allowed_schemas:
+    entry = schemas_probe.get(schema_name)
+    if not isinstance(entry, dict):
+        continue
+    init_privs = entry.get('init_privs') or ''
+    if not init_privs or init_privs == '<none>':
+        continue
+    grants = []
+    for section in init_privs.split(';'):
+        if not section.startswith('e:'):
+            continue
+        body = section[2:]
+        if not body or body == '<empty>':
+            continue
+        for item in body.split(','):
+            parts = item.split('|')
+            if len(parts) != 4:
+                continue
+            grantor, grantee, priv, grantable = parts
+            if not ident_re.fullmatch(grantor):
+                raise ValueError(f'Invalid grantor in init_privs for {schema_name}: {grantor!r}')
+            if grantee != 'PUBLIC' and not ident_re.fullmatch(grantee):
+                raise ValueError(f'Invalid grantee in init_privs for {schema_name}: {grantee!r}')
+            if priv not in allowed_privs:
+                raise ValueError(f'Unsupported schema privilege in init_privs for {schema_name}: {priv!r}')
+            if grantable not in ('t', 'f', 'true', 'false'):
+                raise ValueError(f'Invalid is_grantable flag in init_privs for {schema_name}: {grantable!r}')
+            grants.append((grantor, grantee, priv, grantable in ('t', 'true')))
+    if not grants:
+        continue
+    lines.append('DO $$ BEGIN')
+    lines.append(
+        f'  IF EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = {q_lit(schema_name)} AND nspacl IS NULL) THEN'
+    )
+    for grantor, grantee, priv, is_grantable in grants:
+        target = 'PUBLIC' if grantee == 'PUBLIC' else q_ident(grantee)
+        opt = ' WITH GRANT OPTION' if is_grantable else ''
+        lines.append(f'    SET LOCAL ROLE {q_ident(grantor)};')
+        lines.append(f'    GRANT {priv} ON SCHEMA {q_ident(schema_name)} TO {target}{opt};')
+        lines.append('    RESET ROLE;')
+    lines.append('  END IF;')
+    lines.append('END $$;')
+
+with open(out_path, 'w', encoding='utf-8') as out:
+    out.write('\n'.join(lines) + ('\n' if lines else ''))
+PY
+  then
+    printf 'Failed to prepare platform init schema ACL replay SQL.\n' >>"$PRIVATE_DIR/restore-catalog-fingerprint.stderr"
+    return 1
+  fi
+
+  if [[ -s "$replay_sql" ]]; then
+    run_restore_target_postgres_command psql \
+      -X -qAt --set=ON_ERROR_STOP=1 \
+      --file="$replay_sql" \
+      >>"$PRIVATE_DIR/restore-catalog-fingerprint.stderr" 2>&1
+  fi
+}
+
 CATALOG_MATCH=false
 if [[ "$ROLES_RESTORE_STATUS" -eq 0 && "$PRISTINE_TARGET_STATUS" -eq 0 && "$DATABASE_RESTORE_STATUS" -eq 0 ]]; then
   VERIFIED_CATALOG_DB="$(run_restore_target_postgres_command psql -X -qAt --set=ON_ERROR_STOP=1 --command='SELECT current_database()' 2>>"$PRIVATE_DIR/restore-catalog-fingerprint.stderr")"
   if [[ "$VERIFIED_CATALOG_DB" == "$RESTORE_TARGET_DATABASE_NAME" && "$VERIFIED_CATALOG_DB" != "$RESTORE_DATABASE_NAME" ]]; then
+    replay_source_platform_init_schema_acls
     run_restore_target_postgres_command psql \
       -X -qAt --set=ON_ERROR_STOP=1 \
       --file=scripts/backup/catalog-fingerprint.sql \

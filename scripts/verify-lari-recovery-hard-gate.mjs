@@ -740,7 +740,7 @@ export async function querySevenCategoryCatalogFingerprint(client) {
               WHERE d.classid = 'pg_catalog.pg_proc'::regclass
                 AND d.objid = p.oid
                 AND d.deptype = 'e'
-                AND e.extname IN ('pgcrypto', 'pg_stat_statements')
+                AND e.extname IN ('pgcrypto', 'pg_stat_statements', 'uuid-ossp')
             )
           ) AS is_normalized_ext_routine,
           coalesce(pg_get_functiondef(p.oid), '') AS func_def
@@ -767,30 +767,38 @@ export async function querySevenCategoryCatalogFingerprint(client) {
             SELECT string_agg(
               format(
                 '%s|%s|%s|%s',
-                CASE
-                  WHEN rb.is_normalized_ext_routine
-                   AND a.is_grantable = false
-                   AND pg_get_userbyid(a.grantor) IN ('postgres', 'supabase_admin')
-                    THEN '<extension_installer>'
-                  ELSE pg_get_userbyid(a.grantor)
-                END,
-                CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END,
-                a.privilege_type,
-                a.is_grantable
+                norm.grantor_norm,
+                norm.grantee_norm,
+                norm.priv_type,
+                norm.effective_grantable
               ),
               ',' ORDER BY
-                (CASE
+                norm.grantor_norm COLLATE "C",
+                norm.grantee_norm COLLATE "C",
+                norm.priv_type COLLATE "C",
+                norm.effective_grantable
+            )
+            FROM (
+              SELECT
+                CASE
                   WHEN rb.is_normalized_ext_routine
-                   AND a.is_grantable = false
                    AND pg_get_userbyid(a.grantor) IN ('postgres', 'supabase_admin')
                     THEN '<extension_installer>'
                   ELSE pg_get_userbyid(a.grantor)
-                END) COLLATE "C",
-                (CASE WHEN a.grantee = 0::oid THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END) COLLATE "C",
-                a.privilege_type COLLATE "C",
-                a.is_grantable
-            )
-            FROM pg_catalog.aclexplode(rb.proc_acl) AS a
+                END AS grantor_norm,
+                CASE
+                  WHEN a.grantee = 0::oid THEN 'PUBLIC'
+                  WHEN rb.is_normalized_ext_routine
+                   AND a.privilege_type = 'EXECUTE'
+                   AND pg_get_userbyid(a.grantee) IN ('postgres', 'supabase_admin')
+                    THEN '<extension_installer>'
+                  ELSE pg_get_userbyid(a.grantee)
+                END AS grantee_norm,
+                a.privilege_type AS priv_type,
+                pg_catalog.bool_or(a.is_grantable) AS effective_grantable
+              FROM pg_catalog.aclexplode(rb.proc_acl) AS a
+              GROUP BY 1, 2, 3
+            ) AS norm
           ), '')
         END,
         rb.func_def
@@ -1852,6 +1860,84 @@ async function runSelfTests() {
       const secdefParity = compareSevenCategoryCatalogParity(fpRegBase, fpRegSecdefOwnerDrift);
       assert.equal(secdefParity.parity_verified, false);
       assert.ok(secdefParity.mismatched_categories.some((m) => m.category === 'routines'));
+    });
+
+    // Real-SQL regression for graphql/graphql_public authenticated + grant option & extension routine PUBLIC/anon/authenticated/grant option
+    const extRoutineRegBaseSql = `
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin') THEN CREATE ROLE supabase_admin SUPERUSER LOGIN; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dashboard_user') THEN CREATE ROLE dashboard_user NOLOGIN; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
+      END $$;
+      CREATE SCHEMA graphql;
+      CREATE SCHEMA graphql_public;
+      CREATE SCHEMA extensions;
+      CREATE EXTENSION pgcrypto WITH SCHEMA extensions;
+      REVOKE ALL ON FUNCTION extensions.armor(bytea) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION extensions.armor(bytea) TO PUBLIC, dashboard_user;
+      GRANT EXECUTE ON FUNCTION extensions.armor(bytea) TO postgres WITH GRANT OPTION;
+    `;
+    const fpExtBase = await makeTempCatalogDb(extRoutineRegBaseSql);
+    const fpExtAdminEquivalent = await makeTempCatalogDb(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin') THEN CREATE ROLE supabase_admin SUPERUSER LOGIN; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dashboard_user') THEN CREATE ROLE dashboard_user NOLOGIN; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
+      END $$;
+      CREATE SCHEMA graphql;
+      CREATE SCHEMA graphql_public;
+      CREATE SCHEMA extensions;
+      CREATE EXTENSION pgcrypto WITH SCHEMA extensions;
+      ALTER FUNCTION extensions.armor(bytea) OWNER TO supabase_admin;
+      SET LOCAL ROLE supabase_admin;
+      REVOKE ALL ON FUNCTION extensions.armor(bytea) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION extensions.armor(bytea) TO PUBLIC, dashboard_user, supabase_admin;
+      GRANT EXECUTE ON FUNCTION extensions.armor(bytea) TO postgres WITH GRANT OPTION;
+      RESET ROLE;
+    `);
+    const fpExtPublicRevoked = await makeTempCatalogDb(
+      `${extRoutineRegBaseSql}\nREVOKE EXECUTE ON FUNCTION extensions.armor(bytea) FROM PUBLIC;`
+    );
+    const fpExtAnonGranted = await makeTempCatalogDb(
+      `${extRoutineRegBaseSql}\nGRANT EXECUTE ON FUNCTION extensions.armor(bytea) TO anon;`
+    );
+    const fpExtAuthGranted = await makeTempCatalogDb(
+      `${extRoutineRegBaseSql}\nGRANT EXECUTE ON FUNCTION extensions.armor(bytea) TO authenticated;`
+    );
+    const fpExtDashboardGrantOpt = await makeTempCatalogDb(
+      `${extRoutineRegBaseSql}\nGRANT EXECUTE ON FUNCTION extensions.armor(bytea) TO dashboard_user WITH GRANT OPTION;`
+    );
+    const fpGraphqlAuthDrift = await makeTempCatalogDb(
+      `${extRoutineRegBaseSql}\nGRANT USAGE ON SCHEMA graphql TO authenticated;`
+    );
+    const fpGraphqlPublicGrantOpt = await makeTempCatalogDb(
+      `${extRoutineRegBaseSql}\nGRANT USAGE ON SCHEMA graphql_public TO dashboard_user WITH GRANT OPTION;`
+    );
+
+    check('Real-SQL regression: pgcrypto installer (postgres vs supabase_admin) normalizes while PUBLIC/anon/authenticated/grant option drift fails closed', () => {
+      assert.equal(compareSevenCategoryCatalogParity(fpExtBase, fpExtAdminEquivalent).parity_verified, true);
+
+      for (const [label, drifted] of [
+        ['PUBLIC revoke', fpExtPublicRevoked],
+        ['anon grant', fpExtAnonGranted],
+        ['authenticated grant', fpExtAuthGranted],
+        ['dashboard_user grant option', fpExtDashboardGrantOpt],
+      ]) {
+        const res = compareSevenCategoryCatalogParity(fpExtBase, drifted);
+        assert.equal(res.parity_verified, false, `Expected routines drift on ${label}`);
+        assert.ok(res.mismatched_categories.some((m) => m.category === 'routines'), `Missing routines mismatch on ${label}`);
+      }
+
+      for (const [label, drifted] of [
+        ['graphql authenticated grant', fpGraphqlAuthDrift],
+        ['graphql_public grant option', fpGraphqlPublicGrantOpt],
+      ]) {
+        const res = compareSevenCategoryCatalogParity(fpExtBase, drifted);
+        assert.equal(res.parity_verified, false, `Expected schemas drift on ${label}`);
+        assert.ok(res.mismatched_categories.some((m) => m.category === 'schemas'), `Missing schemas mismatch on ${label}`);
+      }
     });
   } finally {
     await db.close();
