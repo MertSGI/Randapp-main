@@ -976,6 +976,48 @@ mustContain(runner, '--file="$PRIVATE_DIR/restore-roles.sql"', 'Disposable resto
 mustContain(runner, 'emit_restore_failure_telemetry', 'Runner must emit safe failure telemetry');
 mustContain(runner, 'ROLE_PREPARATION_FAILED', 'Runner must identify role preparation failure stage');
 mustContain(runner, 'CATALOG_MISMATCH', 'Runner must identify catalog mismatch failure stage');
+mustContain(runner, 'TEST_SOURCE_SNAPSHOT_FLOW_ONLY="--test-source-snapshot-flow"', 'Runner must support snapshot flow test mode');
+mustContain(runner, 'SNAPSHOT_SESSION_TIMEOUT_SECONDS=', 'Runner must enforce a single overall timeout for the entire snapshot capture session');
+mustContain(runner, 'SNAPSHOT_FIFO_READ_TIMEOUT_SECONDS=', 'Runner must bound snapshot FIFO reads with an explicit timeout');
+mustContain(runner, 'SNAPSHOT_PSQL_WAIT_TIMEOUT_SECONDS=', 'Runner must bound background snapshot psql waiting with an explicit timeout');
+mustContain(runner, 'run_snapshot_capture_session', 'Runner must isolate FIFO/psql/pg_dump snapshot capture under a bounded session watchdog');
+mustContain(runner, 'LARI_INTERNAL_EXEC_SOURCE_CMD=1', 'Background snapshot clients must exec directly so recorded PIDs bind to actual PostgreSQL clients');
+mustContain(runner, 'exec env -i', 'Source runner must support direct exec handoff for background snapshot processes');
+mustContain(runner, 'close_snapshot_transaction_handles', 'Runner cleanup must close snapshot FIFO FDs and reap background psql');
+mustContain(runner, 'read_snapshot_fifo_into_file', 'Runner must read snapshot catalog JSON with a bounded timeout helper');
+mustContain(runner, 'wait_for_snapshot_psql', 'Runner must wait for background snapshot psql using bounded timeout loop');
+mustContain(runner, 'SNAPSHOT_EXPORT_FAILED', 'Snapshot export failure must map to fail-closed SNAPSHOT_EXPORT_FAILED telemetry');
+mustContain(runner, 'SNAPSHOT_IMPORT_FAILED', 'Snapshot import failure must map to fail-closed SNAPSHOT_IMPORT_FAILED telemetry');
+mustContain(runner, '--snapshot="$effective_snapshot_id"', 'pg_dump must bind strictly to the exported snapshot ID');
+mustContain(runner, 'SOURCE_SNAPSHOT_BOUND="true"', 'VERIFIED_LOGICAL_RESTORE must require SOURCE_SNAPSHOT_BOUND=true in live runs');
+assert.ok(!runner.includes('falling back to bounded pg_dump'), 'Snapshot export/import failures must fail closed without unsynchronized fallback');
+
+// Offline snapshot test mode must never touch or delete an existing workspace backup-artifacts directory
+const snapWorkspaceGuardRoot = fs.mkdtempSync(path.join(os.tmpdir(), `lari-snap-guard-${process.pid}-`));
+const snapGuardWorkspace = path.join(snapWorkspaceGuardRoot, 'workspace');
+const snapGuardBackupDir = path.join(snapGuardWorkspace, 'backup-artifacts');
+const snapGuardSentinel = path.join(snapGuardBackupDir, 'keep-backup.sentinel');
+fs.mkdirSync(snapGuardBackupDir, { recursive: true, mode: 0o700 });
+fs.writeFileSync(snapGuardSentinel, 'preserved', 'utf8');
+const snapGuardRes = spawnSync(
+  bashExecutable,
+  [runnerPath, '--test-source-snapshot-flow'],
+  {
+    cwd: process.cwd(),
+    env: sanitizedEnvironment({
+      GITHUB_WORKSPACE: toBashPath(snapGuardWorkspace),
+      RUNNER_TEMP: toBashPath(snapWorkspaceGuardRoot),
+      LARI_OFFLINE_TEST_MODE: '1',
+      LARI_TEST_SOURCE_HOST: 'aws-0-eu-central-1.pooler.supabase.com',
+      LARI_TEST_SOURCE_PASSWORD: 'offline-test-password',
+    }),
+    encoding: 'utf8',
+  }
+);
+assert.notEqual(snapGuardRes.status, 0, 'Non-loopback snapshot test host must fail closed');
+assert.ok(fs.existsSync(snapGuardSentinel), 'Snapshot test mode must never delete existing backup-artifacts');
+assert.equal(fs.readFileSync(snapGuardSentinel, 'utf8'), 'preserved', 'Existing backup-artifacts content must stay intact');
+fs.rmSync(snapWorkspaceGuardRoot, { recursive: true, force: true });
 
 const dumpIndex = runner.search(/pg_dump \\\n\s+--format=custom/);
 const restoreIndex = runner.search(/pg_restore \\\n\s+--exit-on-error/);

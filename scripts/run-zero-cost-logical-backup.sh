@@ -17,6 +17,7 @@ TEST_RESTORE_VERDICT_ONLY="--test-restore-verdict-handling"
 TEST_PG17_CLIENT_SELECTION_ONLY="--test-pg17-client-selection"
 TEST_DISPOSABLE_ROLE_RESTORE_ONLY="--test-disposable-role-restore"
 TEST_DISPOSABLE_PRISTINE_RESTORE_ONLY="--test-disposable-pristine-restore"
+TEST_SOURCE_SNAPSHOT_FLOW_ONLY="--test-source-snapshot-flow"
 
 SOURCE_DATABASE_PASSWORD_VALUE="${SOURCE_DATABASE_PASSWORD:-}"
 unset SOURCE_DATABASE_PASSWORD
@@ -24,6 +25,18 @@ unset SOURCE_DATABASE_PASSWORD
 PRIVATE_DIR=""
 SOURCE_PGPASSFILE=""
 RESTORE_PGPASSFILE=""
+OFFLINE_SNAPSHOT_TEST_MODE="0"
+
+SNAPSHOT_SESSION_TIMEOUT_SECONDS=600
+SNAPSHOT_FIFO_READ_TIMEOUT_SECONDS=60
+SNAPSHOT_EXPORT_TIMEOUT_SECONDS=20
+SNAPSHOT_PSQL_WAIT_TIMEOUT_SECONDS=60
+SNAPSHOT_SESSION_PID=""
+SNAP_PSQL_PID=""
+SNAP_DUMP_PID=""
+SNAP_IN_FD_OPEN=0
+SNAP_OUT_FD_OPEN=0
+SOURCE_SNAPSHOT_BOUND="false"
 
 RESTORE_STAGE="NOT_REACHED"
 TELEMETRY_EMITTED=0
@@ -108,7 +121,19 @@ try:
         src = json.load(f)
     with open(sys.argv[2], 'r', encoding='utf-8') as f:
         rst = json.load(f)
+
+    src_rt = (src.get('diagnostic') or {}).get('runtime') or {}
+    rst_rt = (rst.get('diagnostic') or {}).get('runtime') or {}
+    if src_rt or rst_rt:
+        print(
+            f"  runtime: source_pg={src_rt.get('server_version_num', 'unknown')} "
+            f"restore_pg={rst_rt.get('server_version_num', 'unknown')} "
+            f"source_search_path={src_rt.get('search_path', '')} "
+            f"restore_search_path={rst_rt.get('search_path', '')}"
+        )
+
     categories = ['schemas', 'tables', 'policies', 'routines', 'roles', 'role_memberships', 'extensions']
+    mismatched_cats = []
     for cat in categories:
         src_cat = src.get(cat, {})
         rst_cat = rst.get(cat, {})
@@ -118,10 +143,42 @@ try:
         rst_fp = rst_cat.get('fingerprint', '')
         matches = (src_fp == rst_fp and src_cnt == rst_cnt and bool(src_fp))
         print(f"  {cat}: match={str(matches).lower()}, source_count={src_cnt}, restore_count={rst_cnt}")
+        if not matches:
+            mismatched_cats.append(cat)
+
+    src_objs = (src.get('diagnostic') or {}).get('objects') or {}
+    rst_objs = (rst.get('diagnostic') or {}).get('objects') or {}
+    for cat in mismatched_cats:
+        if cat not in src_objs and cat not in rst_objs:
+            continue
+        s_map = src_objs.get(cat) or {}
+        r_map = rst_objs.get(cat) or {}
+        all_keys = sorted(set(s_map.keys()) | set(r_map.keys()))
+        diffs = []
+        for k in all_keys:
+            sv = s_map.get(k)
+            rv = r_map.get(k)
+            if sv != rv:
+                if sv is None:
+                    diffs.append((k, ['MISSING_ON_SOURCE'], {}, rv))
+                elif rv is None:
+                    diffs.append((k, ['MISSING_ON_RESTORE'], sv, {}))
+                else:
+                    changed = [fk for fk in sorted(set(sv.keys()) | set(rv.keys())) if sv.get(fk) != rv.get(fk)]
+                    diffs.append((k, changed, {fk: sv.get(fk) for fk in changed}, {fk: rv.get(fk) for fk in changed}))
+        print(f"  Object field diffs for {cat} (total={len(diffs)}, showing up to 25):")
+        for k, fields, sh, rh in diffs[:25]:
+            print(f"    [DIFF] {cat} {k}: fields={fields} src={sh} rst={rh}")
 except Exception as e:
     print(f"  Failed to parse catalog comparisons: {e}")
 PY
       fi
+      ;;
+    SNAPSHOT_EXPORT_FAILED)
+      printf 'Detail: Source snapshot export or synchronization failed before logical dump; zero backup artifacts permitted.\n' >&2
+      ;;
+    SNAPSHOT_IMPORT_FAILED)
+      printf 'Detail: Consistent snapshot pg_dump --snapshot or catalog capture failed; zero backup artifacts permitted.\n' >&2
       ;;
     VERIFIED_LOGICAL_RESTORE)
       printf 'Detail: All restore gates passed. Full catalog equivalence verified.\n' >&2
@@ -133,7 +190,57 @@ PY
   printf '%s\n\n' "------------------------------" >&2
 }
 
+terminate_pid_gracefully() {
+  local pid="$1"
+  [[ -n "$pid" ]] || return 0
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null || true
+    local reap_tick=0
+    while kill -0 "$pid" 2>/dev/null && [[ "$reap_tick" -lt 10 ]]; do
+      sleep 0.1
+      reap_tick=$((reap_tick + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+  fi
+  wait "$pid" 2>/dev/null || true
+}
+
+terminate_pid_file_process() {
+  local pid_file="$1"
+  [[ -n "$pid_file" && -f "$pid_file" ]] || return 0
+  local recorded_pid=""
+  IFS= read -r recorded_pid <"$pid_file" || recorded_pid=""
+  rm -f -- "$pid_file"
+  if [[ "$recorded_pid" =~ ^[0-9]+$ ]]; then
+    terminate_pid_gracefully "$recorded_pid"
+  fi
+}
+
+close_snapshot_transaction_handles() {
+  if [[ "${SNAP_IN_FD_OPEN:-0}" -eq 1 ]]; then
+    exec 3>&- || true
+    SNAP_IN_FD_OPEN=0
+  fi
+  if [[ "${SNAP_OUT_FD_OPEN:-0}" -eq 1 ]]; then
+    exec 4<&- || true
+    SNAP_OUT_FD_OPEN=0
+  fi
+  terminate_pid_gracefully "${SNAP_DUMP_PID:-}"
+  SNAP_DUMP_PID=""
+  terminate_pid_gracefully "${SNAP_PSQL_PID:-}"
+  SNAP_PSQL_PID=""
+  terminate_pid_gracefully "${SNAPSHOT_SESSION_PID:-}"
+  SNAPSHOT_SESSION_PID=""
+  if [[ -n "${PRIVATE_DIR:-}" && -d "$PRIVATE_DIR" ]]; then
+    terminate_pid_file_process "$PRIVATE_DIR/snap-dump.pid"
+    terminate_pid_file_process "$PRIVATE_DIR/snap-psql.pid"
+  fi
+}
+
 cleanup() {
+  close_snapshot_transaction_handles || true
   if [[ "${VERDICT:-}" != "VERIFIED_LOGICAL_RESTORE" ]]; then
     emit_restore_failure_telemetry || true
   fi
@@ -509,19 +616,307 @@ assert_private_source_credentials() {
 }
 
 run_source_postgres_command() {
-  env -i \
-    HOME="$PRIVATE_DIR" \
-    PATH="$PATH" \
-    LC_ALL=C.UTF-8 \
-    PGHOST="$SOURCE_POOLER_HOST" \
-    PGPORT="$SOURCE_DATABASE_PORT" \
-    PGDATABASE="$SOURCE_DATABASE_NAME" \
-    PGUSER="$SOURCE_DATABASE_USER" \
-    PGSSLMODE="$SOURCE_DATABASE_SSLMODE" \
-    PGSSLROOTCERT="$SOURCE_DATABASE_SSLROOTCERT" \
-    PGPASSFILE="$SOURCE_PGPASSFILE" \
-    PGCONNECT_TIMEOUT=15 \
-    "$@"
+  local -a env_args=(
+    HOME="$PRIVATE_DIR"
+    PATH="$PATH"
+    LC_ALL=C.UTF-8
+    PGHOST="$SOURCE_POOLER_HOST"
+    PGPORT="$SOURCE_DATABASE_PORT"
+    PGDATABASE="$SOURCE_DATABASE_NAME"
+    PGUSER="$SOURCE_DATABASE_USER"
+    PGPASSFILE="$SOURCE_PGPASSFILE"
+    PGCONNECT_TIMEOUT=15
+  )
+  if [[ "${OFFLINE_SNAPSHOT_TEST_MODE:-0}" == "1" && "${LARI_OFFLINE_TEST_MODE:-}" == "1" && "$SOURCE_POOLER_HOST" == "127.0.0.1" ]]; then
+    env_args+=(PGSSLMODE=disable)
+  else
+    env_args+=(PGSSLMODE="$SOURCE_DATABASE_SSLMODE" PGSSLROOTCERT="$SOURCE_DATABASE_SSLROOTCERT")
+  fi
+  if [[ "${LARI_INTERNAL_EXEC_SOURCE_CMD:-0}" == "1" ]]; then
+    exec env -i "${env_args[@]}" "$@"
+  fi
+  env -i "${env_args[@]}" "$@"
+}
+
+wait_for_snapshot_psql() {
+  local timeout_secs="${1:-$SNAPSHOT_PSQL_WAIT_TIMEOUT_SECONDS}"
+  local deadline=$((SECONDS + timeout_secs))
+  while kill -0 "$SNAP_PSQL_PID" 2>/dev/null; do
+    if (( SECONDS >= deadline )); then
+      printf 'Timed out waiting for background snapshot psql process after %ss.\n' "$timeout_secs" >&2
+      close_snapshot_transaction_handles
+      return 124
+    fi
+    sleep 0.1
+  done
+  local wait_rc=0
+  wait "$SNAP_PSQL_PID" || wait_rc=$?
+  SNAP_PSQL_PID=""
+  return "$wait_rc"
+}
+
+read_snapshot_fifo_into_file() {
+  local output_file="$1"
+  local timeout_secs="${2:-$SNAPSHOT_FIFO_READ_TIMEOUT_SECONDS}"
+  local deadline=$((SECONDS + timeout_secs))
+  local line=""
+  : >"$output_file"
+  while true; do
+    local remaining=$((deadline - SECONDS))
+    if (( remaining <= 0 )); then
+      printf 'Timed out reading catalog fingerprint from snapshot FIFO after %ss.\n' "$timeout_secs" >&2
+      return 124
+    fi
+    local read_rc=0
+    IFS= read -r -t "$remaining" line <&4 || read_rc=$?
+    if [[ "$read_rc" -eq 0 ]]; then
+      printf '%s\n' "$line" >>"$output_file"
+      continue
+    fi
+    if [[ -n "$line" ]]; then
+      printf '%s' "$line" >>"$output_file"
+      line=""
+    fi
+    if (( read_rc > 128 )); then
+      printf 'Timed out reading catalog fingerprint from snapshot FIFO after %ss.\n' "$timeout_secs" >&2
+      return 124
+    fi
+    break
+  done
+  return 0
+}
+
+fail_snapshot_capture() {
+  local stage="$1"
+  local message="$2"
+  RESTORE_STAGE="$stage"
+  SOURCE_SNAPSHOT_BOUND="false"
+  VERDICT="NOT_RESTORABLE_IN_DISPOSABLE_POSTGRES_17"
+  close_snapshot_transaction_handles
+  if [[ -n "${ARTIFACT_DIR:-}" && -d "$ARTIFACT_DIR" ]]; then
+    rm -rf -- "$ARTIFACT_DIR"
+  fi
+  printf '%s\n' "$message" >&2
+  return 1
+}
+
+run_snapshot_capture_session() {
+  local dump_file="$1"
+  local catalog_file="$2"
+  local stage_file="$3"
+  local session_deadline="$4"
+
+  trap 'close_snapshot_transaction_handles; exit 143' TERM INT HUP
+
+  local snap_in="$PRIVATE_DIR/source-snapshot.in"
+  local snap_out="$PRIVATE_DIR/source-snapshot.out"
+  local psql_pid_file="$PRIVATE_DIR/snap-psql.pid"
+  local dump_pid_file="$PRIVATE_DIR/snap-dump.pid"
+  rm -f -- "$snap_in" "$snap_out" "$psql_pid_file" "$dump_pid_file"
+  printf 'SNAPSHOT_EXPORT_FAILED\n' >"$stage_file"
+  mkfifo "$snap_in" "$snap_out"
+
+  if [[ "${LARI_OFFLINE_TEST_MODE:-}" == "1" && "${LARI_TEST_SIMULATE_FIFO_UNOPENED_PEER:-}" == "1" ]]; then
+    sleep "$((SNAPSHOT_SESSION_TIMEOUT_SECONDS + 30))" &
+    SNAP_PSQL_PID=$!
+  else
+    LARI_INTERNAL_EXEC_SOURCE_CMD=1 run_source_postgres_command psql \
+      -X -qAt --set=ON_ERROR_STOP=1 \
+      <"$snap_in" \
+      >"$snap_out" \
+      2>"$PRIVATE_DIR/source-catalog-fingerprint.stderr" &
+    SNAP_PSQL_PID=$!
+  fi
+  printf '%s\n' "$SNAP_PSQL_PID" >"$psql_pid_file"
+
+  exec 3>"$snap_in"
+  SNAP_IN_FD_OPEN=1
+  exec 4<"$snap_out"
+  SNAP_OUT_FD_OPEN=1
+
+  if [[ "${LARI_OFFLINE_TEST_MODE:-}" == "1" && "${LARI_TEST_SIMULATE_SNAPSHOT_EXPORT_FAIL:-}" == "1" ]]; then
+    printf 'SELECT 1/0;\n' >&3
+  else
+    printf 'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;\n' >&3
+    printf 'SELECT pg_catalog.pg_export_snapshot();\n' >&3
+  fi
+
+  local now_epoch remaining_session export_wait_secs
+  now_epoch="$(date +%s)"
+  remaining_session=$((session_deadline - now_epoch))
+  if (( remaining_session <= 0 )); then
+    printf 'Snapshot session deadline exceeded before snapshot ID read.\n' >&2
+    close_snapshot_transaction_handles
+    return 124
+  fi
+  export_wait_secs="$SNAPSHOT_EXPORT_TIMEOUT_SECONDS"
+  if (( remaining_session < export_wait_secs )); then
+    export_wait_secs="$remaining_session"
+  fi
+
+  local read_export_rc=0
+  SOURCE_SNAPSHOT_ID=""
+  IFS= read -r -t "$export_wait_secs" SOURCE_SNAPSHOT_ID <&4 || read_export_rc=$?
+  SOURCE_SNAPSHOT_ID="${SOURCE_SNAPSHOT_ID%$'\r'}"
+
+  if [[ "$read_export_rc" -ne 0 || -z "$SOURCE_SNAPSHOT_ID" || ! "$SOURCE_SNAPSHOT_ID" =~ ^[0-9A-Za-z_-]+$ ]]; then
+    printf 'Failed to export a valid consistent PostgreSQL source snapshot over FIFO (rc=%s); aborting fail-closed without running pg_dump.\n' "$read_export_rc" >&2
+    close_snapshot_transaction_handles
+    return 1
+  fi
+
+  printf 'SNAPSHOT_IMPORT_FAILED\n' >"$stage_file"
+
+  local effective_snapshot_id="$SOURCE_SNAPSHOT_ID"
+  if [[ "${LARI_OFFLINE_TEST_MODE:-}" == "1" && -n "${LARI_TEST_OVERRIDE_SNAPSHOT_ID:-}" ]]; then
+    effective_snapshot_id="$LARI_TEST_OVERRIDE_SNAPSHOT_ID"
+  fi
+
+  local dump_rc=0
+  set +e
+  LARI_INTERNAL_EXEC_SOURCE_CMD=1 run_source_postgres_command pg_dump \
+    --format=custom \
+    --compress=9 \
+    --lock-wait-timeout=30000 \
+    --snapshot="$effective_snapshot_id" \
+    --file="$dump_file" \
+    >"$PRIVATE_DIR/source-dump.stdout" \
+    2>"$PRIVATE_DIR/source-dump.stderr" &
+  SNAP_DUMP_PID=$!
+  printf '%s\n' "$SNAP_DUMP_PID" >"$dump_pid_file"
+  wait "$SNAP_DUMP_PID"
+  dump_rc=$?
+  SNAP_DUMP_PID=""
+  rm -f -- "$dump_pid_file"
+  set -e
+
+  if [[ "$dump_rc" -ne 0 ]]; then
+    printf 'Consistent pg_dump --snapshot failed (exit code %s); aborting fail-closed with zero backup artifacts.\n' "$dump_rc" >&2
+    close_snapshot_transaction_handles
+    return 1
+  fi
+
+  printf '\\i scripts/backup/catalog-fingerprint.sql\nCOMMIT;\n' >&3
+  exec 3>&-
+  SNAP_IN_FD_OPEN=0
+
+  now_epoch="$(date +%s)"
+  remaining_session=$((session_deadline - now_epoch))
+  if (( remaining_session <= 0 )); then
+    printf 'Snapshot session deadline exceeded before catalog FIFO read.\n' >&2
+    close_snapshot_transaction_handles
+    return 124
+  fi
+  local fifo_wait_secs="$SNAPSHOT_FIFO_READ_TIMEOUT_SECONDS"
+  if (( remaining_session < fifo_wait_secs )); then
+    fifo_wait_secs="$remaining_session"
+  fi
+
+  local fifo_read_rc=0
+  read_snapshot_fifo_into_file "$catalog_file" "$fifo_wait_secs" || fifo_read_rc=$?
+  exec 4<&-
+  SNAP_OUT_FD_OPEN=0
+  if [[ "$fifo_read_rc" -ne 0 ]]; then
+    printf 'Snapshot catalog fingerprint FIFO read failed or timed out (rc=%s); aborting fail-closed.\n' "$fifo_read_rc" >&2
+    close_snapshot_transaction_handles
+    return 1
+  fi
+
+  now_epoch="$(date +%s)"
+  remaining_session=$((session_deadline - now_epoch))
+  if (( remaining_session <= 0 )); then
+    printf 'Snapshot session deadline exceeded before background psql wait.\n' >&2
+    close_snapshot_transaction_handles
+    return 124
+  fi
+  local psql_wait_secs="$SNAPSHOT_PSQL_WAIT_TIMEOUT_SECONDS"
+  if (( remaining_session < psql_wait_secs )); then
+    psql_wait_secs="$remaining_session"
+  fi
+
+  local wait_rc=0
+  wait_for_snapshot_psql "$psql_wait_secs" || wait_rc=$?
+  rm -f -- "$psql_pid_file"
+  if [[ "$wait_rc" -ne 0 ]]; then
+    printf 'Background snapshot psql session failed or timed out (exit code %s); aborting fail-closed.\n' "$wait_rc" >&2
+    close_snapshot_transaction_handles
+    return 1
+  fi
+  return 0
+}
+
+capture_snapshot_bound_database_and_catalog() {
+  local dump_file="$1"
+  local catalog_file="$2"
+  SOURCE_SNAPSHOT_BOUND="false"
+
+  local session_timeout="$SNAPSHOT_SESSION_TIMEOUT_SECONDS"
+  if [[ "${LARI_OFFLINE_TEST_MODE:-}" == "1" && -n "${LARI_TEST_SNAPSHOT_SESSION_TIMEOUT_SECONDS:-}" ]]; then
+    if [[ ! "$LARI_TEST_SNAPSHOT_SESSION_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+      fail_snapshot_capture "SNAPSHOT_EXPORT_FAILED" \
+        "Invalid offline snapshot session timeout value; aborting fail-closed."
+      return 1
+    fi
+    session_timeout="$LARI_TEST_SNAPSHOT_SESSION_TIMEOUT_SECONDS"
+  fi
+
+  local stage_file="$PRIVATE_DIR/snapshot-session.stage"
+  printf 'SNAPSHOT_EXPORT_FAILED\n' >"$stage_file"
+  local session_deadline=$(( $(date +%s) + session_timeout ))
+
+  run_snapshot_capture_session "$dump_file" "$catalog_file" "$stage_file" "$session_deadline" &
+  SNAPSHOT_SESSION_PID=$!
+
+  local timed_out=0
+  while kill -0 "$SNAPSHOT_SESSION_PID" 2>/dev/null; do
+    if (( $(date +%s) >= session_deadline )); then
+      timed_out=1
+      break
+    fi
+    sleep 0.1
+  done
+
+  if [[ "$timed_out" -eq 1 ]]; then
+    local stage_on_timeout="SNAPSHOT_EXPORT_FAILED"
+    if [[ -f "$stage_file" ]]; then
+      IFS= read -r stage_on_timeout <"$stage_file" || stage_on_timeout="SNAPSHOT_EXPORT_FAILED"
+    fi
+    [[ "$stage_on_timeout" == "SNAPSHOT_IMPORT_FAILED" ]] || stage_on_timeout="SNAPSHOT_EXPORT_FAILED"
+    fail_snapshot_capture "$stage_on_timeout" \
+      "Snapshot capture session exceeded overall ${session_timeout}s timeout (stage=${stage_on_timeout}); aborting fail-closed."
+    return 1
+  fi
+
+  local session_rc=0
+  wait "$SNAPSHOT_SESSION_PID" || session_rc=$?
+  SNAPSHOT_SESSION_PID=""
+
+  if [[ "$session_rc" -ne 0 ]]; then
+    local recorded_stage="SNAPSHOT_EXPORT_FAILED"
+    if [[ -f "$stage_file" ]]; then
+      IFS= read -r recorded_stage <"$stage_file" || recorded_stage="SNAPSHOT_EXPORT_FAILED"
+    fi
+    [[ "$recorded_stage" == "SNAPSHOT_IMPORT_FAILED" ]] || recorded_stage="SNAPSHOT_EXPORT_FAILED"
+    fail_snapshot_capture "$recorded_stage" \
+      "Snapshot-bound source capture session failed (stage=${recorded_stage}, rc=${session_rc}); aborting fail-closed."
+    return 1
+  fi
+
+  [[ -s "$dump_file" && -s "$catalog_file" ]] || {
+    fail_snapshot_capture "SNAPSHOT_IMPORT_FAILED" \
+      "Snapshot-bound dump or catalog fingerprint output is empty; aborting fail-closed."
+    return 1
+  }
+
+  jq -e 'type == "object" and has("schemas") and has("tables") and has("policies") and has("routines") and has("roles") and has("role_memberships") and has("extensions")' \
+    "$catalog_file" >/dev/null 2>&1 || {
+    fail_snapshot_capture "SNAPSHOT_IMPORT_FAILED" \
+      "Snapshot-bound catalog fingerprint JSON is invalid or incomplete; aborting fail-closed."
+    return 1
+  }
+
+  SOURCE_SNAPSHOT_BOUND="true"
+  return 0
 }
 
 run_restore_postgres_command() {
@@ -934,6 +1329,74 @@ if [[ "${1:-}" == "$TEST_DISPOSABLE_ROLE_RESTORE_ONLY" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "$TEST_SOURCE_SNAPSHOT_FLOW_ONLY" ]]; then
+  [[ "$#" -eq 1 ]] || {
+    printf 'Source snapshot flow test mode accepts no additional arguments.\n' >&2
+    exit 1
+  }
+  [[ "${LARI_OFFLINE_TEST_MODE:-}" == "1" ]] || {
+    printf 'Offline test guard is not enabled.\n' >&2
+    exit 1
+  }
+
+  SOURCE_POOLER_HOST="${LARI_TEST_SOURCE_HOST:-127.0.0.1}"
+  [[ "$SOURCE_POOLER_HOST" == "127.0.0.1" ]] || {
+    printf 'HOLD: Snapshot flow test mode only permits loopback 127.0.0.1 endpoint.\n' >&2
+    exit 1
+  }
+  SOURCE_DATABASE_PORT="${LARI_TEST_SOURCE_PORT:-5432}"
+  [[ "$SOURCE_DATABASE_PORT" =~ ^[0-9]+$ ]] || {
+    printf 'HOLD: Invalid snapshot flow test port.\n' >&2
+    exit 1
+  }
+  SOURCE_DATABASE_NAME="${LARI_TEST_SOURCE_DB:-postgres}"
+  SOURCE_DATABASE_USER="${LARI_TEST_SOURCE_USER:-supabase_admin}"
+  local_test_password="${LARI_TEST_SOURCE_PASSWORD:-}"
+  [[ -n "$local_test_password" ]] || {
+    printf 'Required snapshot test password is unavailable.\n' >&2
+    exit 1
+  }
+
+  ARTIFACT_DIR=""
+  PRIVATE_DIR="$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP is required}/lari-snapshot-test.XXXXXX")"
+
+  configure_postgresql17_path
+  verify_postgres17_client_binaries
+
+  credentials_dir="$PRIVATE_DIR/database-credentials"
+  mkdir -m 0700 -- "$credentials_dir"
+  SOURCE_PGPASSFILE="$credentials_dir/source.pgpass"
+  write_pgpass_file \
+    "$SOURCE_PGPASSFILE" \
+    "$SOURCE_POOLER_HOST" \
+    "$SOURCE_DATABASE_PORT" \
+    "$SOURCE_DATABASE_NAME" \
+    "$SOURCE_DATABASE_USER" \
+    "$local_test_password"
+  unset local_test_password
+
+  OFFLINE_SNAPSHOT_TEST_MODE="1"
+  capture_snapshot_bound_database_and_catalog \
+    "$PRIVATE_DIR/database.dump" \
+    "$PRIVATE_DIR/source-catalog-fingerprint.json"
+
+  pg_restore --list "$PRIVATE_DIR/database.dump" >/dev/null
+  jq -c -n \
+    --arg snapshot_bound "$SOURCE_SNAPSHOT_BOUND" \
+    --slurpfile fp "$PRIVATE_DIR/source-catalog-fingerprint.json" \
+    '{
+      snapshot_bound: ($snapshot_bound == "true"),
+      tables_count: ($fp[0].tables.object_count // 0),
+      schemas_count: ($fp[0].schemas.object_count // 0)
+    }' >"$PRIVATE_DIR/snapshot-test-receipt.json"
+
+  VERDICT="VERIFIED_LOGICAL_RESTORE"
+  RESTORE_STAGE="VERIFIED_LOGICAL_RESTORE"
+  printf 'SNAPSHOT_TEST_RECEIPT=%s\n' "$(cat "$PRIVATE_DIR/snapshot-test-receipt.json")"
+  printf 'Snapshot-bound source capture: PASS\n'
+  exit 0
+fi
+
 OFFLINE_PRISTINE_FIXTURE_DIR=""
 if [[ "${1:-}" == "$TEST_DISPOSABLE_PRISTINE_RESTORE_ONLY" ]]; then
   [[ "$#" -eq 2 ]] || {
@@ -1054,19 +1517,9 @@ else
     >"$PRIVATE_DIR/roles.sql" \
     2>"$PRIVATE_DIR/source-roles.stderr"
 
-  run_source_postgres_command pg_dump \
-    --format=custom \
-    --compress=9 \
-    --lock-wait-timeout=30000 \
-    --file="$PRIVATE_DIR/database.dump" \
-    >"$PRIVATE_DIR/source-dump.stdout" \
-    2>"$PRIVATE_DIR/source-dump.stderr"
-
-  run_source_postgres_command psql \
-    -X -qAt --set=ON_ERROR_STOP=1 \
-    --file=scripts/backup/catalog-fingerprint.sql \
-    >"$PRIVATE_DIR/source-catalog-fingerprint.json" \
-    2>"$PRIVATE_DIR/source-catalog-fingerprint.stderr"
+  capture_snapshot_bound_database_and_catalog \
+    "$PRIVATE_DIR/database.dump" \
+    "$PRIVATE_DIR/source-catalog-fingerprint.json"
 
   run_source_postgres_command psql \
     -X -qAt --set=ON_ERROR_STOP=1 \
@@ -1167,7 +1620,24 @@ if [[ "$ROLES_RESTORE_STATUS" -eq 0 && "$PRISTINE_TARGET_STATUS" -eq 0 && "$DATA
       --file=scripts/backup/catalog-fingerprint.sql \
       >"$PRIVATE_DIR/restore-catalog-fingerprint.json" \
       2>>"$PRIVATE_DIR/restore-catalog-fingerprint.stderr"
-    if cmp -s "$PRIVATE_DIR/source-catalog-fingerprint.json" "$PRIVATE_DIR/restore-catalog-fingerprint.json"; then
+    if "${LARI_SOURCE_VALIDATOR_PYTHON:-python3}" - "$PRIVATE_DIR/source-catalog-fingerprint.json" "$PRIVATE_DIR/restore-catalog-fingerprint.json" <<'PY'
+import json, sys
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    src = json.load(f)
+with open(sys.argv[2], 'r', encoding='utf-8') as f:
+    rst = json.load(f)
+cats = ('schemas', 'tables', 'policies', 'routines', 'roles', 'role_memberships', 'extensions')
+ok = all(
+    isinstance(src.get(c), dict)
+    and isinstance(rst.get(c), dict)
+    and bool(src[c].get('fingerprint'))
+    and src[c].get('fingerprint') == rst[c].get('fingerprint')
+    and src[c].get('object_count') == rst[c].get('object_count')
+    for c in cats
+)
+raise SystemExit(0 if ok else 1)
+PY
+    then
       CATALOG_MATCH=true
     fi
   else
@@ -1185,8 +1655,15 @@ elif [[ "$CATALOG_MATCH" != "true" && "$DATABASE_RESTORE_STATUS" -eq 0 && "$ROLE
   RESTORE_STAGE="CATALOG_MISMATCH"
 fi
 
+SNAPSHOT_VERIFIED="false"
+if [[ -n "$OFFLINE_PRISTINE_FIXTURE_DIR" && "${LARI_OFFLINE_TEST_MODE:-}" == "1" ]]; then
+  SNAPSHOT_VERIFIED="true"
+elif [[ "${SOURCE_SNAPSHOT_BOUND:-false}" == "true" ]]; then
+  SNAPSHOT_VERIFIED="true"
+fi
+
 VERDICT="NOT_RESTORABLE_IN_DISPOSABLE_POSTGRES_17"
-if [[ "$PRISTINE_TARGET_STATUS" -eq 0 && "$ROLES_RESTORE_STATUS" -eq 0 && "$DATABASE_RESTORE_STATUS" -eq 0 && "$CATALOG_MATCH" == "true" && "$UNAVAILABLE_EXT_COUNT" -eq 0 ]]; then
+if [[ "$SNAPSHOT_VERIFIED" == "true" && "$PRISTINE_TARGET_STATUS" -eq 0 && "$ROLES_RESTORE_STATUS" -eq 0 && "$DATABASE_RESTORE_STATUS" -eq 0 && "$CATALOG_MATCH" == "true" && "$UNAVAILABLE_EXT_COUNT" -eq 0 ]]; then
   VERDICT="VERIFIED_LOGICAL_RESTORE"
   RESTORE_STAGE="VERIFIED_LOGICAL_RESTORE"
 fi
