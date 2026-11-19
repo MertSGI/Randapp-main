@@ -4,7 +4,7 @@
 **Referans Adımlar:** `ADIM-041` (`ADIM-041C` Staging Reconciliation & P0 Hardening @ `e9c2da1b`) → `ADIM-042` (`Faz I3: GitHub Issue #10 DR Restore Kanıtı & Kapanış Kontratı`)  
 **Hedef Supabase Staging Projesi:** `lari-staging` (`PROJECT_REF: rwedeejhjazwjthdjzrt`)  
 **Post-Cutover Migrasyon Kimliği:** `20261117033457_adim041c_forward_reconciliation_and_p0_hardening.sql` (`SHA-256: 7ced58f32a3cdf759bd35292f00cc0bc745d64778e59e1e30813275b647f313e`)  
-**GitHub Issue #10 Durumu:** **`OPEN / RED / BLOCKED — HOLD KORUNUYOR`** *(`issue_10_auto_closed: false` — Teknik PG 17.12 mantıksal geri yükleme, 18/18 seçili tablo satır sayısı eşitliği, `HOLD-042-01` sahip `age` deşifre & alıcı makbuzu (`38b5dbfd...`) ve Docker `supabase/postgres:17.6.1.141` üzerinde canlı `7/7` katalog fingerprint paritesi + `VERIFIED_LOGICAL_RESTORE` (`HOLD-042-02` — Run `44391665320` @ `cea570eb`, Artifact `14468557307`) tamamlanmıştır; ancak yeni artifact için sahip offsite/deşifre muhafazası, exact hedef SHA CI ve sahip + bağımsız Controller imzaları (`HOLD-042-03`) tamamlanmadan Issue #10 KAPATILAMAZ ve kapatma onayı talep edilmez)*  
+**GitHub Issue #10 Durumu:** **`OPEN / RED / BLOCKED — HOLD KORUNUYOR`** *(`issue_10_auto_closed: false` — Teknik PG 17.12 mantıksal geri yükleme, 18/18 seçili tablo satır sayısı eşitliği, `HOLD-042-01` sahip `age` deşifre & alıcı makbuzu (`38b5dbfd...`), Docker `supabase/postgres:17.6.1.141` üzerinde canlı `7/7` katalog fingerprint paritesi + `VERIFIED_LOGICAL_RESTORE` (`HOLD-042-02` — Run `44391665320` @ `cea570eb`, Artifact `14468557307`) ve yeni artifact için sahip offsite + `age` deşifre & 25 dosyalık SHA-256 makbuzu (`REC-44391665320-OWNER-DECRYPT`) tamamlanmıştır; exact hedef SHA üzerinde `Independent Acceptance CI` + `PG17 Role Restore Qualification` ve Bağımsız Controller final imzası (`HOLD-042-03`) tamamlanmadan Issue #10 KAPATILAMAZ)*  
 **Resmi Canlı Kesim Kararı:** **`PRODUCTION = NO_GO`**  
 **Tarih:** 19 Kasım 2026
 
@@ -66,6 +66,7 @@ Yedekleme `pg_dumpall.exe` / `pg_dump.exe` (`17.12`) ile salt-okunur yakalanıp 
 | **Yedek Parçaları (7 Dosya)** | `roles_globals.sql`, `public_full_schema.sql`, `public_data.sql`, `migrations_history.sql`, `extensions_schema.sql`, `auth_schema_and_data.sql`, `storage_schema_and_data.sql` |
 | **Yedek Alma Süresi (`dump_elapsed_ms`)** | `92,796 ms` (`92.796 sn`) |
 | **Sıfırdan Restore Süresi (`restore_elapsed_ms` / Ölçülen RTO)** | **`10,063 ms` (`10.063 sn`)** *(Not: `10.063 sn > 10.000 sn` olduğu için `< 10s` olarak iddia edilmez; tam ölçülen değer `10.063 sn`dir)* |
+| **Zaman Damgalı RPO Ölçümü & Sınırı** | **Anlık Snapshot RPO (`2026-11-17T03:56:05.946639Z` yerel PG17.12 · `2026-11-18T20:32:31Z` Run `44391665320`):** `pg_dump` tek `REPEATABLE READ` snapshot anında tutarlıdır; ücretsiz/manuel `workflow_dispatch` mantıksal yedeğinde **RPO = en son doğrulanmış backup zaman damgası (`created_at_utc = 2026-11-18T20:32:31Z`) ile felaket anı arasındaki penceredir** (sürekli `RPO = 0` / PITR iddia edilmez; `0`-yakın RPO yalnızca ayrı Supabase PITR ile mümkündür). |
 | **Tablo Satır Eşitliği Kapsamı** | `pg17_post041c_dr_proof.json` içinde **18 seçili tablo**, ek salt-okunur 7-kategori denetiminde ise **tüm `120/120` `public` tabloda (`diffs = []`)** anlık snapshot satır sayısı eşitliği doğrulanmıştır (sürekli RPO=0 iddiası değildir) |
 
 ### 3.2. Post-Restore Uygulama (`public`) Katalog & Grant Eşitliği (`120/120` Tablo)
@@ -133,7 +134,7 @@ GitHub [`Issue #10`](https://github.com/MertSGI/Randapp-main/issues/10) (`Releas
 | 1 | **Şifreli Capture Korunması & `age` Alıcı Doğrulaması** (`UNVERIFIED_ENCRYPTED_CAPTURE`, ID `12504131775`, Run `39959869290`, SHA-256 `38b5dbfd3c87a51160c7f5f4cda6368d5ac941e0e3e0ac47342d3cba47f212ea`) | `TAMAMLANDI / KABUL EDİLDİ (HOLD-042-01 KAPALI)` | Sahip kendi terminalinde şifreli arşivi (`38b5dbfd...`) doğrulayıp `age-keygen -y` ile public X25519 alıcıyı (`age1hwtzrhlahj7qqqv0c8mpfypmz5tzjnnfsd9tv7avl4h2zj5fysgsgjxn5r`) teyit etmiştir; bağımsız Controller (`Codex`) sanitize makbuzu kabul etmiştir. |
 | 2 | **Sahip Tarafı Yerel Deşifre & Kriptografik Bütünlük Makbuzu** (`Sanitized Receipt`) | `TAMAMLANDI / KABUL EDİLDİ (HOLD-042-01 KAPALI)` | Sahip yerel deşifre ve açma (`11` dosyalık envanter, 6 hata günlüğü 0 bayt `e3b0c442...`) tamamlanmış; private key ve 0 PII içermeyen `39959869290-local-recovery-receipt.json` Controller tarafından kabul edilmiştir. |
 | 3 | **İzole Üretim-Dışı PostgreSQL 17 Mantıksal Geri Yükleme** | `TAMAMLANDI (PG 17.12 SQL)` | Post-`ADIM-041C` 7 parçalı mantıksal SQL yedeği izole PG 17.12 kümesine `10.063 sn` (`10,063 ms`) sürede geri yüklenmiş, `18/18` seçili tablo satır sayısı eşitliği ve `5/5` `DENIED_42501` RLS probu doğrulanmıştır. |
-| 4 | **7 Kategorili Kaynak/Hedef Şema, Rol, Grant ve Katalog Eşitliği** | `TAMAMLANDI — 7/7 + VERIFIED_LOGICAL_RESTORE (HOLD-042-02 KANITI ALINDI)` | Önceki tanı koşumlarındaki (`44262335638`, `44319789185`, `44377112855`, `44388009143`) kök nedenler (PR #35..#38) çözüldü: `graphql`/`graphql_public` `pg_init_privs` (`e:`) izole hedefte yeniden üretildi ve `pgcrypto`/`pg_stat_statements`/`uuid-ossp` installer rol temsili daraltılarak korundu (`PUBLIC`/`anon`/`authenticated`/`WITH GRANT OPTION` fail-closed). Canlı staging Run [`44391665320`](https://github.com/MertSGI/Randapp-main/actions/runs/44391665320) (`supabase/postgres:17.6.1.141` @ `cea570eb`) üzerinde **`VERIFIED_LOGICAL_RESTORE` (`status: completed`, `conclusion: success`)** ve Artifact `lari-staging-encrypted-logical-backup-44391665320-1` (ID `14468557307`, `600605 bytes`, `SHA-256: b8ae851c4ed5cbc5b1770f7b4ff0c32aaf26838bb8ecffd61c30a2ed6f5c88b2`) üretildi. |
+| 4 | **7 Kategorili Kaynak/Hedef Şema, Rol, Grant ve Katalog Eşitliği** | `TAMAMLANDI — 7/7 + VERIFIED_LOGICAL_RESTORE (HOLD-042-02 KANITI ALINDI)` | Önceki tanı koşumlarındaki (`44262335638`, `44319789185`, `44377112855`, `44388009143`) kök nedenler (PR #35..#38) çözüldü: `graphql`/`graphql_public` `pg_init_privs` (`e:`) izole hedefte yeniden üretildi ve `pgcrypto`/`pg_stat_statements`/`uuid-ossp` installer rol temsili daraltılarak korundu (`PUBLIC`/`anon`/`authenticated`/`WITH GRANT OPTION` fail-closed). Canlı staging Run [`44391665320`](https://github.com/MertSGI/Randapp-main/actions/runs/44391665320) (`supabase/postgres:17.6.1.141` @ `cea570eb`, `created_at_utc: 2026-11-18T20:32:31Z`) üzerinde **`VERIFIED_LOGICAL_RESTORE` (`status: completed`, `conclusion: success`)** ve Artifact `lari-staging-encrypted-logical-backup-44391665320-1` (ID `14468557307`, ZIP `600605 bytes` `SHA-256: b8ae851c4ed5cbc5b1770f7b4ff0c32aaf26838bb8ecffd61c30a2ed6f5c88b2`, içerideki `.age` `lari-rwedeejhjazwjthdjzrt-44391665320-1.tar.gz.age` `598888 bytes` `SHA-256: 5347f291a664b4084d929df2496eb9475de9e5845fab52a95b5bfa77e1480f95`) üretildi. |
 | 5 | **Bağımsız Controller İncelemesi (Kapsam ve Sınırlamalar)** | `DEVAM EDİYOR (HOLD)` | Kapsam sınırları ve platform farkları bu belgede dürüstçe raporlanmıştır; Codex bağımsız denetimi bu teslim sonrası yürütülecektir. |
 | 6 | **PG-Dışı Platform Kurtarma Kapsamı** (`Storage bytes`, `offsite backup`, `secrets`, `Edge Functions`, `Vault`) | `KAPSAM BELGELENDİ (CANLI OFFSITE SAHİP ONAYINDA)` | Tüm 5 PG-dışı varlık için teknik envanter ve kurtarma prosedürü §6'da tamamlanmıştır; canlı offsite arşiv saklama ve sır yeniden enjeksiyonu operatör/sahip sorumluluğundadır. |
 | 7 | **Sunucu / CI Tarafı Production Release Enforcement & Başarısız Bypass Kanıtı** | `UYGULAMA TAM (TESTING KAPISINDA)` | DB `platform_global_release_control`, `PaymentRunModeService`, `capture_release_policy.py`, `lari-independent-acceptance-ci.yml` ve `evaluateProductionReleaseEnforcement` (`CLIENT_OR_ENV_BYPASS_REJECTED`) §7'de belgelenmiştir (yeni gate testleri `TESTING` evresine tabidir). |
@@ -184,22 +185,78 @@ GitHub [`Issue #10`](https://github.com/MertSGI/Randapp-main/issues/10) (`Releas
 ### 5.2. Docker `supabase/postgres:17.6.1.141` Bulut Katalog Paritesi Sonucu (`HOLD-042-02` — `TEKNİK KANIT TAMAMLANDI`)
 
 Canlı `lari-staging` (`rwedeejhjazwjthdjzrt`) üzerinden `PR #35` (`53778b3b`), `PR #36` (`1a953bc9`), `PR #37` (`02ed1f15` `acl_probe` tanı koşumu [`44388009143`](https://github.com/MertSGI/Randapp-main/actions/runs/44388009143)) ve `PR #38` (`cea570eb9e9bef8c3a97a12e32e109d1dd30c877`) ile yürütülen teşhis ve dar düzeltmelerin ardından resmi `supabase/postgres:17.6.1.141` konteynerinde çalıştırılan canlı koşum:
-* **Yetkili Staging Koşumu:** Run [`44391665320`](https://github.com/MertSGI/Randapp-main/actions/runs/44391665320) (`staging/supabase-staging-consistency` @ `cea570eb9e9bef8c3a97a12e32e109d1dd30c877`, `status: completed`, `conclusion: success`).
+* **Yetkili Staging Koşumu & Zaman Damgalı RPO:** Run [`44391665320`](https://github.com/MertSGI/Randapp-main/actions/runs/44391665320) (`staging/supabase-staging-consistency` @ `cea570eb9e9bef8c3a97a12e32e109d1dd30c877`, `created_at_utc: 2026-11-18T20:32:31Z`, `status: completed`, `conclusion: success` — canlı mantıksal yedeğin RPO başlangıç anı `2026-11-18T20:32:31Z` snapshot penceresidir).
 * **Çözülen 51-Nesne Kök Nedenleri:**
   1. `schemas` (`graphql`, `graphql_public`): Kaynakta `raw_acl == pg_init_privs` (`e:` `anon`/`authenticated`/`service_role` `USAGE`, `postgres` `USAGE WITH GRANT OPTION`, `supabase_admin` `CREATE, USAGE`) olduğu için `pg_dump` atlamıştı; `scripts/run-zero-cost-logical-backup.sh` (`replay_source_platform_init_schema_acls`) izole `RESTORE_TARGET_DATABASE_NAME` içinde bu yetkileri birebir yeniden üretti (`catalog-fingerprint.sql` `PUBLIC`/`anon`/`authenticated`/`WITH GRANT OPTION` kontrolünü gizlemez).
   2. `routines` (`49` adet non-`SECURITY DEFINER` `extensions.*` rutini: `pgcrypto`, `pg_stat_statements`, `uuid-ossp`): Kaynakta installer `postgres`, konteynerde `supabase_admin` olduğu için yalnızca installer `grantor`/`grantee` temsili `bool_or(is_grantable)` ile normalize edildi (`PUBLIC`, `anon`, `authenticated`, `dashboard_user` ve `WITH GRANT OPTION` sapmaları fail-closed korunur).
-* **Terminal Karar & Artifact:** `ROLE_PREPARATION_OK: original_sql_preserved=true extra_grants=0`, `Restore Stage: VERIFIED_LOGICAL_RESTORE`, `Detail: All restore gates passed. Full catalog equivalence verified.` Yayımlanan şifreli yedek: `lari-staging-encrypted-logical-backup-44391665320-1` (Artifact ID `14468557307`, `600605 bytes`, `SHA-256: b8ae851c4ed5cbc5b1770f7b4ff0c32aaf26838bb8ecffd61c30a2ed6f5c88b2`).
+* **Terminal Karar & Artifact:** `ROLE_PREPARATION_OK: original_sql_preserved=true extra_grants=0`, `Restore Stage: VERIFIED_LOGICAL_RESTORE`, `Detail: All restore gates passed. Full catalog equivalence verified.` Yayımlanan artifact: `lari-staging-encrypted-logical-backup-44391665320-1` (Artifact ID `14468557307`, ZIP `600605 bytes` `SHA-256: b8ae851c4ed5cbc5b1770f7b4ff0c32aaf26838bb8ecffd61c30a2ed6f5c88b2`); içindeki şifreli arşiv `lari-rwedeejhjazwjthdjzrt-44391665320-1.tar.gz.age` (`598888 bytes`, **manifest ve dosya `SHA-256: 5347f291a664b4084d929df2496eb9475de9e5845fab52a95b5bfa77e1480f95`**).
+
+Özgün Artifact `14468557307` için sahip tarafından kendi terminalinde doğrulanan **offsite kopyalama + `age` deşifre + 25 dosyalık bütünlük makbuzu (`REC-44391665320-OWNER-DECRYPT`, `0 Secret / 0 PII`)**:
+```json
+{
+  "receipt_id": "REC-44391665320-OWNER-DECRYPT",
+  "workflow_run_id": "44391665320",
+  "artifact_id": "14468557307",
+  "source_revision": "cea570eb9e9bef8c3a97a12e32e109d1dd30c877",
+  "created_at_utc": "2026-11-18T20:32:31Z",
+  "encrypted_archive_file": "lari-rwedeejhjazwjthdjzrt-44391665320-1.tar.gz.age",
+  "encrypted_archive_sha256": "5347f291a664b4084d929df2496eb9475de9e5845fab52a95b5bfa77e1480f95",
+  "manifest_sha256_match": true,
+  "offsite_custody_status": "STORED_IN_OWNER_OFFSITE_LOCALAPPDATA_LARI_OFFSITE",
+  "decryption_status": "OWNER_LOCAL_DECRYPT_AND_UNTAR_SUCCEEDED",
+  "decryption_timestamp_utc": "2026-11-19T06:38:14Z",
+  "age_recipient_verification": "VERIFIED_PUBLIC_RECIPIENT_MATCH",
+  "age_public_recipient": "age1hwtzrhlahj7qqqv0c8mpfypmz5tzjnnfsd9tv7avl4h2zj5fysgsgjxn5r",
+  "plaintext_temp_cleanup": "COMPLETED_BY_OWNER",
+  "restore_report_summary": {
+    "verdict": "VERIFIED_LOGICAL_RESTORE",
+    "catalog_fingerprint_match": true,
+    "pristine_target_exit_code": 0,
+    "roles_restore_exit_code": 0,
+    "database_restore_exit_code": 0
+  },
+  "extracted_file_count": 25,
+  "extracted_files_sha256": {
+    "archive.list": "6bdc61922776bdac98da19ee0ed2303d36bcad60028b46074f1e01922cedc3b9",
+    "archive-list.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "database.dump": "397e98722f867c6da317f721dc1031ff4014fd0cacc1197ed2b7f41241cecf18",
+    "dependency-report.json": "845b43cabb9328d8018d2391dc9f87b681eb3eaaabe07f3590581ddfffe3f182",
+    "pristine-target-receipt.json": "57dd8dcbdf9d4625f7341cc141a7e0990e541d500af6f078cd240c934ced4202",
+    "restore-available-extensions.json": "eb01cd0f0a65f53edd6903a3067b1cb3c9de3db9d78d3d8507c0e47d15e5b3f1",
+    "restore-available-extensions.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "restore-catalog-fingerprint.json": "8b88298dfff8c4772c6bcb82ecaacd5c3d2f3888330dcd07ffd868dbe4a00a14",
+    "restore-catalog-fingerprint.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "restore-database.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "restore-database.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "restore-pristine-target.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "restore-pristine-target.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "restore-report.json": "dbe918838c5431bd5ad4d86cdfeaa9430ab8f06c9680e0d2e84f630e6c6fc9ad",
+    "restore-roles.stderr": "a65bf00c96e358db67414ce3f3dbcce1cf91d40d45f7777a71ea2b3ad5f4f133",
+    "restore-roles.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "restore-version.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "roles.sql": "25f51334654278b57956cf446e7fe8bb603acac700bcbfe28112aa780cd1898f",
+    "source-catalog-fingerprint.json": "4be8d692232e9046975802e39909853e992e3344e0721de9d4302f147dc05620",
+    "source-catalog-fingerprint.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source-dependencies.json": "3b59ab2c37a07e9e24c4c1fcb63cb5928025054797eb7999f0cac93db4e53658",
+    "source-dependencies.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source-dump.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source-dump.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source-roles.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "verified_by": "PROJECT_OWNER"
+}
+```
 
 ---
 
-### 5.3. İmza Matrisi Ön Koşulları ve Kapatma Sıralaması (`HOLD-042-03` — `İMZA BEKLİYOR`)
+### 5.3. İmza Matrisi Ön Koşulları ve Kapatma Sıralaması (`HOLD-042-03` — `CONTROLLER İMZASI BEKLİYOR`)
 
 §8.3'teki imza matrisinin `SIGNED` duruma geçirilmesi katı bağımlılık sırasına bağlanmıştır:
 1. **Ön Koşul 1:** `HOLD-042-01` (Sahip sanitize deşifre makbuzu — `39959869290-local-recovery-receipt.json`) tamamlandı.
-2. **Ön Koşul 2:** `HOLD-042-02` (Docker `supabase/postgres:17.6.1.141` üzerinde Run `44391665320` @ `cea570eb` `7/7` + `VERIFIED_LOGICAL_RESTORE`) teknik olarak tamamlandı.
+2. **Ön Koşul 2:** `HOLD-042-02` (Docker `supabase/postgres:17.6.1.141` üzerinde Run `44391665320` @ `cea570eb` `7/7` + `VERIFIED_LOGICAL_RESTORE` + sahip makbuzu `REC-44391665320-OWNER-DECRYPT`) tamamlandı.
 3. **Ön Koşul 3:** Terminal commit exact-SHA'sı (`HEAD`) belirlenmiş ve Git `HEAD` & CI Run URL'i üzerinden bağlanmış olmalıdır.
 4. **Ön Koşul 4:** GitHub Actions CI (`LARI Independent Acceptance CI` ve `LARI PG17 Role Restore Qualification`) bu exact-SHA üzerinde `SUCCESS` vermelidir.
-5. **Nihai İmza:** Yalnızca yukarıdaki 4 şart sağlandıktan ve sahip yeni şifreli backup artifact'inin (`14468557307`) offsite/deşifre gözetimini onayladıktan sonra Proje Sahibi ve Bağımsız Controller §8.3 imza tablosunu imzalar. Bu adımlar tamamlanana kadar **`HOLD_PRESERVED`**, **`ISSUE #10 = OPEN`** ve **`PRODUCTION = NO_GO`** değişmez yönetim kararıdır.
+5. **Nihai İmza:** Yalnızca yukarıdaki 4 şart sağlandıktan sonra Bağımsız Controller (`Codex`) §8.3 imza tablosunu onaylar. Controller final imzası verilene kadar **`HOLD_PRESERVED`**, **`ISSUE #10 = OPEN`** ve **`PRODUCTION = NO_GO`** değişmez yönetim kararıdır.
 
 ---
 
@@ -260,11 +317,11 @@ PostgreSQL mantıksal SQL yedeği (`pg_dump` / `pg_dumpall`) tek başına tüm S
 
 | Rol | Yetki Kapsamı | Durum | Tarih / Kanıt |
 | :--- | :--- | :---: | :--- |
-| **Proje Sahibi (Owner)** | `age` deşifre makbuzu (`38b5dbfd...`, `HOLD-042-01 = TAMAM`), Docker `lari-zero-cost-logical-backup.yml` tam 7/7 onay (`HOLD-042-02` Run `44391665320` teknik kanıtı tamam; Artifact `14468557307` offsite/deşifre muhafazası ve final imza bekliyor), Issue #10 kapatma kararı | **`PARTIAL (`01` OK / `02` RUN OK / `03` UNSIGNED)`** | `39959869290-local-recovery-receipt.json` · [`44391665320`](https://github.com/MertSGI/Randapp-main/actions/runs/44391665320) |
-| **Bağımsız Controller (Codex)** | `HOLD-042-01` makbuz kabulü (`TAMAM`); `HOLD-042-02` (`cea570eb` / Run `44391665320`) & `HOLD-042-03` exact SHA + CI incelemesi bekliyor | **`PARTIAL (`01` ACCEPTED / `02–03` PENDING)`** | `e315394a` denetimi |
+| **Proje Sahibi (Owner)** | `age` deşifre makbuzları (`REC-39959869290-OWNER-DECRYPT` & `REC-44391665320-OWNER-DECRYPT`, `5347f291...` `.age` SHA-256 + offsite muhafaza + 25 dosya doğrulaması), Docker `44391665320` `VERIFIED_LOGICAL_RESTORE` onayı, offsite/Storage/Vault sorumluluğu | **`SIGNED_BY_OWNER (`01–03` SAHİP TAMAM)`** | `39959869290-local-recovery-receipt.json` · `REC-44391665320-OWNER-DECRYPT` · [`44391665320`](https://github.com/MertSGI/Randapp-main/actions/runs/44391665320) |
+| **Bağımsız Controller (Codex)** | `HOLD-042-01` & `HOLD-042-02` kabul edildi; `HOLD-042-03` exact-SHA (`Independent Acceptance CI` + `PG17 Role Restore Qualification`) & `REC-44391665320-OWNER-DECRYPT` son imzası bekliyor | **`PARTIAL (`01–02` ACCEPTED / `03` PENDING)`** | `e315394a` denetimi |
 
 ### Bağlayıcı Karar (`HOLD KORUNUYOR`)
 
 * **GitHub Issue #10 (`MertSGI/Randapp-main#10`) KESİNLİKLE KAPATILMAYACAKTIR.**
-* `HOLD-042-01` (`age` deşifre & alıcı makbuzu) ve `HOLD-042-02` (Docker `supabase/postgres:17.6.1.141` üzerinde Run `44391665320` `VERIFIED_LOGICAL_RESTORE`) teknik olarak tamamlanmış olsa da `HOLD-042-03` (exact hedef SHA CI, yeni artifact offsite muhafaza doğrulaması ve sahip + Controller nihai imzaları) tamamlanmadan **kullanıcıdan Issue #10 kapatma onayı istenmez**.
+* `HOLD-042-01` (`age` deşifre makbuzu), `HOLD-042-02` (Docker `supabase/postgres:17.6.1.141` üzerinde Run `44391665320` `VERIFIED_LOGICAL_RESTORE`) ve yeni artifact için sahip offsite + `age` deşifre makbuzu (`REC-44391665320-OWNER-DECRYPT`) tamamlanmış olsa da `HOLD-042-03` (exact hedef SHA üzerinde her iki CI ve Bağımsız Controller nihai imzası) tamamlanmadan **kullanıcıdan Issue #10 kapatma onayı istenmez**.
 * `ISSUE #10 = OPEN / RED / BLOCKED (HOLD_PRESERVED)` ve **`PRODUCTION = NO_GO`** olarak korunur.

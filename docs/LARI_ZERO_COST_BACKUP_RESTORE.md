@@ -115,10 +115,10 @@ On an operator-controlled machine with the private age identity:
 1. Verify the downloaded ciphertext SHA256 against `manifest.json`.
 2. Decrypt with `age --decrypt --identity lari-staging-backup.agekey`.
 3. Extract the tar bundle locally without printing its contents to shared logs.
-4. Read `restore-report.json`, `pristine-target-receipt.json`, and dependency diagnostics first.
+4. Read `restore-report.json`, `pristine-target-receipt.json`, `source-catalog-fingerprint.json`, and dependency diagnostics first.
 5. Provision the required Supabase-managed roles, extensions, platform schemas, and encryption keys in the authorized recovery target (or create a pristine database from `template0` when restoring into a full cluster).
-6. Restore `roles.sql`, then `database.dump`, stopping on any error.
-7. Re-run catalog, application, RLS, RPC, Auth, Storage, and tenant-isolation validation before accepting recovery.
+6. Restore `roles.sql` (prepared for disposable targets), then `database.dump` (`pg_restore --exit-on-error --single-transaction`), and finally replay `pg_init_privs` (`privtype = 'e'`) schema grants for `graphql` and `graphql_public` from `source-catalog-fingerprint.json` (`.diagnostic.acl_probe.schemas`, matching `replay_source_platform_init_schema_acls` in `scripts/run-zero-cost-logical-backup.sh` when `nspacl IS NULL`) so GraphQL schema effective privileges match the source cluster before catalog verification.
+7. Re-run 7-category catalog (`scripts/backup/catalog-fingerprint.sql`), application, RLS, RPC, Auth, Storage, and tenant-isolation validation before accepting recovery.
 
 Never restore into production or staging without separate authorization and a confirmed target. The workflow's restore URL is hard-coded to a loopback service and is rejected if it is not local.
 
